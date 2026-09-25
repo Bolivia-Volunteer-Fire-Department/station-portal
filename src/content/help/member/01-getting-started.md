@@ -40,6 +40,9 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
+**Version 1.0**
+* Initial public release.
+
 **Version 0.823**
 * Polished help guides to help Myles not break anything.
 * Added the **System Log** tab.
