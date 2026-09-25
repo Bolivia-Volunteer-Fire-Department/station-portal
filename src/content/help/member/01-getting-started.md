@@ -44,7 +44,9 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue with app state where loading messages couldn’t be edited (Administration > System Settings)
 * Hardened protections in Code.gs to reduce potential issues where writes conflict with each other.
 * Switched sequential enumerated ids to uuids, also to reduce write conflicts.
-* Fixed bizarre issue where admins are asked to verify their username and password after logging in.
+* Fixed bizarre issue where users are asked to verify their username and password after logging in.
+* Added a version number to the login screen.
+* Added administrative ability to force a user to change their password the next time they log in.
 
 **Version 1.03**
 * Fixed System Log timestamp sorting in the Google Apps Scripts.

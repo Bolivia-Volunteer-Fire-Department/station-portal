@@ -115,6 +115,18 @@ async function appScriptFetch(body, { retryOnNetworkError = false } = {}) {
 
   if (data && data.redirected) data = await postOnce();
 
+  // A refused session is worth naming, loudly.
+  //
+  // "Session expired. Please sign in again." cannot be told apart from a request that was refused for some other
+  // reason, and working it out from the outside is guesswork: the action that was refused and the token it was
+  // sent with are what make it answerable from a bug report. Logged here because this is the one place every
+  // request passes through, so no caller has to remember to do it.
+  if (data && data.code === 'UNAUTHORIZED') {
+    data.requestAction = body.action;
+    const sent = String(body.token || body.payload?.token || '');
+    console.warn(`[reauth] ${body.action} was refused (token …${sent.slice(-6) || 'none'})`);
+  }
+
   // One retry, and only for a refusal: the other writer needs the moment `retry_after` asks for, and a second
   // refusal is reported to the caller rather than retried again.
   if (data && data.code === 'BUSY') {
@@ -228,6 +240,12 @@ export const adminSaveUser = async (userData, token) =>
     // An administrator-managed attribute on the users sheet. Sent with the rest of the row so a
     // save is ONE request; the backend ignores it unless the caller has is_admin.
     runner_sound_profile: String(userData.runner_sound_profile ?? ''),
+    // The two per-member flags. Both are sent every time, because the backend normalizes each to TRUE/FALSE and
+    // writes only the ones it is given - so omitting one here would leave it silently unwritable. It was:
+    // "Exclude from scheduling" had a checkbox, a badge in the list and backend support, and this payload did
+    // not carry it, so ticking it changed nothing.
+    exclude_from_scheduling: userData.exclude_from_scheduling,
+    is_change_password_on_login: userData.is_change_password_on_login,
   });
 
 export const adminDeleteUser = async (userId, token) =>

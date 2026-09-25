@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Music } from 'lucide-react';
+import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Music, KeyRound } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 
-const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '' };
+const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
 
 export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
@@ -30,6 +30,9 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       exclude_from_scheduling:
         String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
       runner_sound_profile: user.runner_sound_profile || '',
+      // Normalized on the way in, so the checkbox is never in doubt about what the sheet holds.
+      is_change_password_on_login:
+        String(user.is_change_password_on_login ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
     });
   };
 
@@ -145,6 +148,25 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />
+              {/* Sits with the password rather than with the other flags: it only means anything when a
+                  password is being set, and it is about THIS password. */}
+              <label className="mt-2 flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={formData.is_change_password_on_login === 'TRUE'}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      is_change_password_on_login: e.target.checked ? 'TRUE' : 'FALSE',
+                    })
+                  }
+                  className="w-4 h-4 accent-red-600"
+                />
+                <span className="text-sm text-slate-700 dark:text-slate-200">Must change password at next login</span>
+              </label>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                They sign in with this password once, then cannot do anything else until they set their own.
+              </p>
             </div>
 
             <div>
@@ -274,15 +296,25 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 <td className="px-4 py-3">{roleLabel(user.role_id)}</td>
                 <td className="px-4 py-3">{rankLabel(user.rank_id)}</td>
                 <td className="px-4 py-3">
-                  {String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                      Excluded
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                      Schedulable
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                        Excluded
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                        Schedulable
+                      </span>
+                    )}
+                    {/* Worth seeing in the list: an account sitting on a temporary password is waiting for
+                        somebody, and until they sign in nothing else will show it. */}
+                    {String(user.is_change_password_on_login ?? '').trim().toUpperCase() === 'TRUE' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                        <KeyRound className="w-3 h-3" />
+                        Password change due
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">

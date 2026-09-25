@@ -163,7 +163,10 @@ const SESSION_CONSTS = [
 ].map(extractConst);
 check('every constant the session functions need was found', SESSION_CONSTS.length, 4);
 // The epoch reader, extracted once and included wherever createSession is.
-const epochSource = extract('sessionEpochFor');
+// The epoch reader, extracted once and included wherever the session functions are. Both halves, because
+// sessionEpochFor is now a thin wrapper over sessionEpochState (which distinguishes "no epoch" from "could not
+// read it"), and extracting only one of them leaves the other undefined at call time.
+const epochSource = `${extract('sessionEpochState')}\n${extract('sessionEpochFor')}`;
 // The prefix itself, so the fixtures below can assert against the real value rather than an assumed one.
 const sessionPrefix = /^const SESSION_PROPERTY_PREFIX = "([^"]+)";/m.exec(codeSource);
 check('the session property prefix was read', !!sessionPrefix, true);
@@ -236,7 +239,15 @@ check('it does not touch CacheService', /CacheService/.test(authSource), false);
 check('it reads the window from the session record instead', /parseSessionRecord\(/.test(authSource), true);
 check(
   'and refreshes with that window',
-  /sessionRecordValue\(userId, Date\.now\(\) \+ record\.ttlMs, record\.ttlMs\)/.test(authSource),
+  // Four arguments, and the fourth is the point: this assertion used to pin the three-argument call, which is
+  // precisely the bug - it dropped the session's epoch on every refresh, so the second request after a sign-in
+  // looked revoked and the session was deleted. A test can encode a defect as easily as catch one.
+  /sessionRecordValue\(userId, Date\.now\(\) \+ record\.ttlMs, record\.ttlMs, record\.epoch\)/.test(authSource),
+  true
+);
+check(
+  'and keeps the epoch it is refreshing',
+  /record\.epoch/.test(authSource),
   true
 );
 // One sheet read remains, and it is the pre-existing members lookup - not something this feature added.

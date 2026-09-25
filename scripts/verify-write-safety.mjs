@@ -717,6 +717,7 @@ const sessionHarness = () => {
     ${constSource('SESSION_PROPERTY_PREFIX')}
     ${constSource('SESSION_EPOCH_PREFIX')}
     ${constSource('DEFAULT_SESSION_TTL_MINUTES')}
+    ${extract('sessionEpochState')}
     ${extract('sessionEpochFor')}
     ${extract('bumpSessionEpoch')}
     ${extract('sessionRecordValue')}
@@ -776,17 +777,30 @@ check('and it is actually recorded', Object.keys(s1.store).some((k) => k.indexOf
 
 checkIs(
   'the request path compares the epoch',
-  /if \(record\.epoch !== sessionEpochFor\(userId\)\)/.test(codeSource)
+  /if \(epoch\.readable && record\.epoch !== epoch\.epoch\)/.test(codeSource)
+);
+// An unreadable epoch must not be treated as a revocation: the check is skipped, not failed.
+checkIs(
+  'and only acts on it when the epoch could be read',
+  /sessionEpochState\(userId\)/.test(codeSource) && !/record\.epoch !== sessionEpochFor\(userId\)/.test(codeSource),
+  'the old shape treats an unreadable epoch as "never revoked", which signs a valid session out'
 );
 checkIs(
   'and the sliding-expiry write happens AFTER that check',
-  codeSource.indexOf('record.epoch !== sessionEpochFor(userId)') < codeSource.indexOf('SLIDING') ||
-    codeSource.indexOf('record.epoch !== sessionEpochFor(userId)') <
-      codeSource.indexOf('props.setProperty(SESSION_PROPERTY_PREFIX + token, sessionRecordValue(userId, Date.now() + record.ttlMs'),
+  codeSource.indexOf('record.epoch !== epoch.epoch') <
+    codeSource.indexOf('sessionRecordValue(userId, Date.now() + record.ttlMs, record.ttlMs, record.epoch)'),
   'a session could be extended before it was checked'
 );
-checkIs('a session carries its epoch when created', /sessionEpochFor\(userId\)\)\s*\)/.test(codeSource));
+// The refresh must CARRY the epoch. Dropping it here was the bug that had members signing in again two seconds
+// later, because the second request compared "" against their real epoch.
+checkIs(
+  'and the refresh carries the epoch rather than dropping it',
+  /sessionRecordValue\(userId, Date\.now\(\) \+ record\.ttlMs, record\.ttlMs, record\.epoch\)/.test(codeSource),
+  'the sliding write drops the epoch, so every session dies on its second request'
+);
+checkIs('a session carries its epoch when created', /sessionRecordValue\(userId, Date\.now\(\) \+ ttlMs, ttlMs, sessionEpochFor\(userId\)\)/.test(codeSource));
 checkIs('and a retune preserves it', /sessionRecordValue\(record\.userId, lastSeen \+ ttlMs, ttlMs, record\.epoch\)/.test(codeSource));
+checkIs('and a revocation preserves the kept session epoch', /sessionRecordValue\(kept\.userId, kept\.expiry, kept\.ttlMs, epoch\)/.test(codeSource));
 
 // ---------------------------------------------------------------------------
 // 7. Row versions - two editors, one record

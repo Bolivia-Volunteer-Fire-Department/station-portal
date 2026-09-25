@@ -122,11 +122,14 @@ every verifier in the project.
 
 ## Backend Deployment (Google Apps Script)
 
-The backend (`src/services/Code.gs`) is intentionally excluded from version control.
-When the backend changes you must redeploy it from the Apps Script editor — the app
-keeps working as long as the URL in your env still points at your latest deployment.
-The schedule calendar endpoints (`GET_SCHEDULE`, `GET_ROSTER`) are part of that
-backend script, so redeploy the script after pulling this change.
+The backend (`src/services/Code.gs`) is tracked in this repository — it holds no
+credentials, and the front end and back end are versioned together (see the note in
+`.gitignore`). Committing it is not deploying it, though: when the backend changes you
+must paste it into the Apps Script editor, save, and redeploy, or the station keeps
+running the old script. The app keeps working as long as the URL in your env still
+points at your latest deployment. The schedule calendar endpoints (`GET_SCHEDULE`,
+`GET_ROSTER`) are part of that backend script, so redeploy the script after pulling
+this change.
 
 > **First-request redirect / CORS:** Apps Script answers the very first fetch to a
 > deployment with a 302 redirect that browsers follow as a GET (no POST body). The
@@ -518,7 +521,7 @@ The front end and the backend deploy separately, so **the app can be published w
 | `events` | `id, date_from, date_to, title, author_user_id, color, role_id, rank_id, user_id, is_recurring, recurring_start, recurring_end, recurring_amount, recurring_frequency, is_sunday…is_saturday, date_of_month, is_all_day` |
 | `announcements` | `id, effective_date, end_date, is_visible_on_login, is_visible_on_dashboard, is_visible_on_sidebar, role_id, rank_id, user_id, title, message, icon, context_variant, author_user_id, is_send_push_notification, is_dismissable` |
 | `training` / `training_signatures` | the training columns listed in *Administration → System → Help → Training*, and `id, training_id, user_id` |
-| `users` | `runner_sound_profile` (an administrator-managed attribute, so it lives here rather than in `user_settings`) |
+| `users` | `runner_sound_profile` and `is_change_password_on_login` (administrator-managed attributes, so they live here rather than in `user_settings`) |
 | `schedule_templates` | `nickname`, `effective_date`, `end_date` |
 | `assignments` | `color`, `icon`, `effective_date`, `end_date` |
 | `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_create_events`, `can_make_announcements`, `can_view_system_log`, the three training permissions, and the rest |

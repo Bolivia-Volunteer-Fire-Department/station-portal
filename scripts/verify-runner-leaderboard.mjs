@@ -237,7 +237,11 @@ check('saving a user requires can_edit_users', /hasRolePermission\(ss, authCtx\.
 check('the profile additionally requires is_admin', /isAdminUser\(ss, authCtx\.userId\)/.test(saveUserCase), true);
 check('and is only written inside that check', saveUserCase.indexOf('isAdminUser(ss, authCtx.userId)') < saveUserCase.indexOf('userFields.runner_sound_profile'), true);
 check('it validates the profile', /runnerSoundProfileIsValid\(soundProfile\)/.test(saveUserCase), true);
-check('and refuses an invalid one before writing', saveUserCase.indexOf('A sound profile can only contain') < saveUserCase.indexOf('upsertSheetRowById'), true);
+// Anchored on the CALL, not the bare name: the name is also mentioned in the comments above this block, and
+// indexOf would then be measuring a comment against the refusal it is supposed to precede.
+const writeCall = saveUserCase.indexOf('const savedUserId = upsertSheetRowById');
+check('the write call was found in the case', writeCall > -1, true);
+check('and refuses an invalid one before writing', saveUserCase.indexOf('A sound profile can only contain') < writeCall, true);
 // upsertSheetRowById does not grow the header row, so a missing column has to be reported.
 check('a missing column is reported, not swallowed', /has no runner_sound_profile column/.test(saveUserCase), true);
 check('the column check happens before the write', saveUserCase.indexOf('has no runner_sound_profile column') < saveUserCase.indexOf('upsertSheetRowById(usersSheetAdmin'), true);

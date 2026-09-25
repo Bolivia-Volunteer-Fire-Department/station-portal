@@ -7,11 +7,26 @@ import { ShieldAlert, AlertCircle, Loader2, LogOut } from 'lucide-react';
  * state starts fresh on every open. onReauth receives (username, password)
  * and resolves to { success, message }.
  */
-export default function ReauthModal({ username = '', onReauth, onSignOut }) {
+export default function ReauthModal({ username = '', reason = null, onReauth, onSignOut }) {
   const [formUsername, setFormUsername] = useState(username);
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // What was refused, in the terms of the person reading it: which request, how long the session had lasted, and
+  // which token the server turned down. Without this the prompt is indistinguishable from a session that was
+  // simply idle too long, and the difference matters - one is expected, the other is a bug.
+  const reasonText = reason
+    ? [
+        reason.action ? `The server refused "${reason.action}"` : 'The server refused a request',
+        reason.ageSeconds !== null && reason.ageSeconds !== undefined
+          ? `${reason.ageSeconds}s after you signed in`
+          : null,
+        reason.tokenTail ? `token …${reason.tokenTail}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -42,6 +57,9 @@ export default function ReauthModal({ username = '', onReauth, onSignOut }) {
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Your session has expired. Confirm your credentials to pick up right where you left off.
           </p>
+          {reasonText && (
+            <p className="mt-2 font-mono text-[11px] leading-snug text-slate-400 dark:text-slate-500">{reasonText}</p>
+          )}
         </div>
 
         {error && (

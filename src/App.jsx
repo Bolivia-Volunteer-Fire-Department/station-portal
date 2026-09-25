@@ -27,6 +27,8 @@ import {
 
 import LoginScreen from './components/LoginScreen';
 import ReauthModal from './components/ReauthModal';
+import PasswordChangeModal from './components/PasswordChangeModal';
+import { mustChangePassword, MUST_CHANGE_PASSWORD_COLUMN } from './utils/passwordPolicy';
 import ClockBlockedModal from './components/ClockBlockedModal';
 import Sidebar from './components/Sidebar';
 import ClockCard from './components/ClockCard';
@@ -124,6 +126,10 @@ export default function App() {
   // tick as a sign-in has to compare its UNAUTHORIZED replies against the token that is current NOW, not the one
   // the last render happened to hold. See sessionExpired and applyToken below.
   const tokenRef = useRef(null);
+  // When the current token was minted, so a refusal can say how long the session had lasted. See sessionExpired.
+  const sessionStartedAtRef = useRef(0);
+  // Why the prompt opened: which request was refused and which token it carried, for the modal to show.
+  const [reauthReason, setReauthReason] = useState(null);
   const [isClockedIn, setIsClockedIn] = useState(false);
 
   // A clock action refused for location, awaiting the member's acknowledgement. Held here rather
@@ -366,8 +372,25 @@ const getLoadingMessage = () => {
   // the token it was sent with - which is no longer ours. Prompting then asks a member who has just signed in to
   // sign in again. See utils/sessionTimeout.unauthorizedIsStale, and note that both halves of that comparison
   // come from the ref rather than state, because the ref is what is true right now.
-  const sessionExpired = (usedToken, retryAction = null) => {
+  const sessionExpired = (usedToken, retryAction = null, reply = null) => {
     if (unauthorizedIsStale(usedToken, tokenRef.current)) return false;
+
+    // Keep the reason, so the prompt can explain itself.
+    //
+    // A bare "Your session has expired" cannot be told apart from a session that was refused for another reason,
+    // and neither can it say whether the refused token was the one this page is holding. The action, the token's
+    // tail and how long the session had existed are what make it answerable - utils/sessionTimeout has the rule,
+    // services/api logs the same facts, and the modal shows this.
+    const token = String(tokenRef.current || '');
+    const ageSeconds = sessionStartedAtRef.current
+      ? Math.round((Date.now() - sessionStartedAtRef.current) / 1000)
+      : null;
+    setReauthReason({
+      action: (reply && reply.requestAction) || '',
+      tokenTail: token.slice(-6),
+      ageSeconds,
+    });
+
     queueReauth(retryAction);
     return true;
   };
@@ -379,6 +402,7 @@ const getLoadingMessage = () => {
   // superseded, which is exactly the case this whole guard exists for.
   const applyToken = (token) => {
     tokenRef.current = token;
+    sessionStartedAtRef.current = token ? Date.now() : 0;
     setAuthToken(token);
   };
 
@@ -769,6 +793,7 @@ const getLoadingMessage = () => {
   const handleLogout = () => {
     pendingActionRef.current = null;
     setNeedsReauth(false);
+    setReauthReason(null);
     setCurrentUser(null);
     applyToken(null);
     setIsSidebarOpen(false);
@@ -784,6 +809,7 @@ const getLoadingMessage = () => {
   const endSession = useCallback((message) => {
     pendingActionRef.current = null;
     setNeedsReauth(false);
+    setReauthReason(null);
     setCurrentUser(null);
     applyToken(null);
     setIsSidebarOpen(false);
@@ -893,6 +919,9 @@ const getLoadingMessage = () => {
       // queueReauth).
       if (!pendingActionRef.current) {
         setNeedsReauth(false);
+        // The reason described the prompt that has just closed; the next one brings its own.
+        setReauthReason(null);
+
       }
 
       return { success: true };
@@ -1069,10 +1098,9 @@ const getLoadingMessage = () => {
     try {
       const result = await updateUserPassword(currentUser.id, newPassword, authToken);
       if (result.success) {
-        setCurrentUser((prev) => ({ ...prev, password: newPassword }));
-        setUsers((prev) =>
-          prev.map((u) => (String(u.id) === String(currentUser.id) ? { ...u, password: newPassword } : u))
-        );
+        // The server clears the "must change it" flag as part of the save; clearing it here too is what closes
+        // the forced-change modal, so the member is not held at it by our own stale copy of their row.
+        setCurrentUser((prev) => ({ ...prev, [MUST_CHANGE_PASSWORD_COLUMN]: 'FALSE' }));
       }
       return result;
     } catch (err) {
@@ -1154,7 +1182,20 @@ const getLoadingMessage = () => {
       {currentUser && needsReauth && (
         <ReauthModal
           username={currentUser.user_name || ''}
+          reason={reauthReason}
           onReauth={handleReauth}
+          onSignOut={handleLogout}
+        />
+      )}
+
+      {/* The forced password change. Above the app, BELOW the re-authentication prompt above (z-55 vs z-60), so
+          that if the session expires while it is open the member verifies first - otherwise the change would be
+          attempted with a dead session and fail with something other than "your session expired".
+          It has no dismiss affordance: see PasswordChangeModal. */}
+      {currentUser && mustChangePassword(currentUser) && (
+        <PasswordChangeModal
+          username={currentUser.user_name || ''}
+          onPasswordChange={handlePasswordChange}
           onSignOut={handleLogout}
         />
       )}

@@ -1093,7 +1093,19 @@ function doPost(e) {
         if (targetUserRow !== -1) {
           // Stored as a PBKDF2 hash - see the password hashing section.
           usersSheet.getRange(targetUserRow, passIdx + 1).setValue(hashPasswordValue(newUserPassword));
-          responseData = { success: true };
+
+          // Setting your own password is what the "must change it at next sign-in" flag was waiting for, so it is
+          // cleared here - this action IS the change. Deliberately NOT cleared by ADMIN_SAVE_USER: there the
+          // administrator's own checkbox decides, which is what lets them hand somebody a temporary password and
+          // require it to be replaced.
+          const changeFlagIdx = userHeaders.indexOf("is_change_password_on_login");
+          const wasForced = changeFlagIdx !== -1 &&
+            String(userRows[targetUserRow - 1][changeFlagIdx] || "").trim().toUpperCase() === "TRUE";
+          if (changeFlagIdx !== -1) {
+            usersSheet.getRange(targetUserRow, changeFlagIdx + 1).setValue("FALSE");
+          }
+
+          responseData = { success: true, requiredChange: wasForced };
 
           // Invalidate all other sessions so a compromised/old token can't be reused
           revokeSessionsForUser(authPassword.userId, currentSessionToken);
@@ -1103,7 +1115,9 @@ function doPost(e) {
             ss, 
             targetPasswordUserId, 
             "PASSWORD_CHANGE", 
-            "User successfully updated their account password."
+            wasForced
+              ? "User changed the password they were required to change at sign-in."
+              : "User successfully updated their account password."
           );
         } else {
           responseData = { success: false, message: "User not found." };
@@ -1162,6 +1176,27 @@ function doPost(e) {
         // it as a PBKDF2 hash so no code path can write a plain-text password.
         const newPasswordAdmin = data.password || payload.password;
         if (newPasswordAdmin) userFields.password = hashPasswordValue(newPasswordAdmin);
+
+        // "Must change password at next sign-in": ticked by the administrator who set the password above, so the
+        // member cannot keep using a temporary one. Normalized to TRUE/FALSE text and only written when supplied,
+        // like the exclusion flag - but with the column check the sound profile has, because upsertSheetRowById
+        // writes by header name and does NOT grow the header row, so a missing column would swallow the value and
+        // the checkbox would look like it worked.
+        const rawMustChange = data.is_change_password_on_login !== undefined
+          ? data.is_change_password_on_login
+          : payload.is_change_password_on_login;
+        if (rawMustChange !== undefined) {
+          const userHeadersForFlag = usersSheetAdmin.getDataRange().getValues()[0] || [];
+          if (userHeadersForFlag.indexOf("is_change_password_on_login") === -1) {
+            responseData = {
+              success: false,
+              message: "The users sheet has no is_change_password_on_login column. Add one and save again."
+            };
+            break;
+          }
+          userFields.is_change_password_on_login =
+            String(rawMustChange).trim().toUpperCase() === "TRUE" ? "TRUE" : "FALSE";
+        }
 
         // The Firefighter Runner sound profile. It lives on the users sheet with the other
         // administrator-managed per-member attributes (status, role, rank, scheduling), and it is
@@ -3122,14 +3157,29 @@ const SESSION_EPOCH_PREFIX = "fc_epoch_";
 
 // The epoch a new session should carry: empty until something is revoked, so a deployment that adds this
 // changes nobody's session.
-function sessionEpochFor(userId) {
+// The member's revocation epoch, and whether it could be READ.
+//
+// The distinction is the whole point. `sessionEpochFor` returns "" both when nothing was ever revoked and when
+// the property store could not be read - and "" is a MEANINGFUL value, so treating an unreadable epoch as "never
+// revoked" turns a transient read failure into a refusal, and the refusal deletes the session. A revocation
+// check that cannot be performed must not sign anybody out: it is not evidence of anything.
+function sessionEpochState(userId) {
   const key = String(userId === undefined || userId === null ? "" : userId).trim();
-  if (!key) return "";
+  if (!key) return { readable: true, epoch: "" };
   try {
-    return String(PropertiesService.getScriptProperties().getProperty(SESSION_EPOCH_PREFIX + key) || "");
+    return {
+      readable: true,
+      epoch: String(PropertiesService.getScriptProperties().getProperty(SESSION_EPOCH_PREFIX + key) || "")
+    };
   } catch (err) {
-    return ""; // an unreadable epoch must not lock anybody out
+    Logger.log("AUTH_EPOCH_UNREADABLE user=" + key + ": " + err.toString());
+    return { readable: false, epoch: "" };
   }
+}
+
+function sessionEpochFor(userId) {
+  const state = sessionEpochState(userId);
+  return state.readable ? state.epoch : "";
 }
 
 // Invalidates every session that carries an older epoch, and returns the new one.
@@ -3219,7 +3269,12 @@ function getAuthContext(ss, data) {
   // A session that predates the member's last revocation is refused, however fresh its expiry looks. This is
   // what stops the sliding-expiry write below from resurrecting a session that was just revoked: the record
   // may exist, but it is no longer entitled to.
-  if (record.epoch !== sessionEpochFor(userId)) {
+  //
+  // Only when the epoch could actually be read - see sessionEpochState.
+  const epoch = sessionEpochState(userId);
+  if (epoch.readable && record.epoch !== epoch.epoch) {
+    Logger.log("AUTH_REFUSED reason=epoch_mismatch token=…" + token.slice(-6) + " user=" + userId +
+      " record=" + JSON.stringify(record.epoch) + " current=" + JSON.stringify(epoch.epoch));
     props.deleteProperty(SESSION_PROPERTY_PREFIX + token);
     return null;
   }
@@ -3228,10 +3283,22 @@ function getAuthContext(ss, data) {
   const user = users.find(function (u) {
     return String(u.id) === String(userId);
   });
-  if (!user) return null;
+  if (!user) {
+    Logger.log("AUTH_REFUSED reason=unknown_member token=…" + token.slice(-6) + " user=" + userId);
+    return null;
+  }
 
   // Sliding expiration: push the expiry out by the window this session already carries.
-  props.setProperty(SESSION_PROPERTY_PREFIX + token, sessionRecordValue(userId, Date.now() + record.ttlMs, record.ttlMs));
+  //
+  // The EPOCH is carried through, and forgetting it here was a real bug: the rewrite dropped the fourth field,
+  // so the first authenticated request after a sign-in erased the session's epoch, and the SECOND one compared
+  // "" against the member's real epoch, refused the session AND deleted it. Before the id migration every epoch
+  // was empty, so the loss was invisible; the migration's revocation gave every member a real epoch and the
+  // symptom appeared - a member signing in was asked to verify their credentials again two seconds later.
+  props.setProperty(
+    SESSION_PROPERTY_PREFIX + token,
+    sessionRecordValue(userId, Date.now() + record.ttlMs, record.ttlMs, record.epoch)
+  );
 
   return { userId: String(userId), user: user };
 }

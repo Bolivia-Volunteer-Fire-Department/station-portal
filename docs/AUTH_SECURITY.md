@@ -131,3 +131,32 @@ resistance, and fail-open behaviour — 84 checks.
   still holds every member's `fcm_token`, availability and schedule data.
 - **Add a password policy** (minimum length, no reuse) if members are choosing weak
   passwords; there is deliberately no complexity rule today.
+
+## Forcing a password change at sign-in
+
+An administrator can tick **Must change password at next login** on the users form
+(`is_change_password_on_login` on the sheet) when they set someone's password for
+them. The member signs in with that password once and is then held at a *Choose a
+new password* popup with no dismiss affordance until they set their own, or signs
+out. Saving a password through `UPDATE_USER_PASSWORD` clears the flag, which is
+what closes the popup; the administrator's checkbox is the only other thing that
+writes it.
+
+Two limits are deliberate and worth stating plainly:
+
+- **The block is a user-interface guard, not an authorisation boundary.** The
+  server holds no "must change password" state against a session, so any request
+  carrying a valid token is served as usual. What the feature buys is that the
+  temporary password stops being the member's real password — not that a member
+  who knows an API call could not skip the screen. Closing that would mean
+  refusing every action except the password change while the flag is set, which
+  would break the re-authentication path a session may still need.
+- **`UPDATE_USER_PASSWORD` does not ask for the current password** (unchanged by
+  this feature). It trusts the session, so the forced change proves the member
+  signed in with the temporary password and nothing more. That is also why the
+  form has no policy to enforce: see the recommendation above.
+
+`npm run verify:password-change` holds the two halves together — it lifts the real
+`ADMIN_SAVE_USER` and `UPDATE_USER_PASSWORD` cases out of `Code.gs` and runs them
+against a stand-in users sheet, including that a refused change leaves the flag
+set (otherwise an empty submit would clear it).

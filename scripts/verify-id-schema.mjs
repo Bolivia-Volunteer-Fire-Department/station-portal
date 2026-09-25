@@ -388,11 +388,31 @@ const guardUses = (appSource.match(/sessionExpired\(/g) || []).length;
 check('every UNAUTHORIZED reply goes through the guard', [unauthorizedSites, guardUses], [13, 13]);
 check('and nothing opens the prompt directly', /queueReauth\(null\)/.test(appSource), false);
 check('the guard compares against the token ref, not state', /unauthorizedIsStale\(usedToken, tokenRef\.current\)/.test(appSource), true);
+// Order matters, not adjacency - the session-start stamp sits between them. The ref has to be written first, or a
+// request started in the same tick as a sign-in would compare against the token it is replacing.
+const refWriteAt = appSource.indexOf('tokenRef.current = token;');
+const stateWriteAt = appSource.indexOf('setAuthToken(token);');
 checkIs(
   'the ref is written before the state, so a same-tick request sees the new token',
-  /tokenRef\.current = token;\s*\n\s*setAuthToken\(token\);/.test(appSource)
+  refWriteAt !== -1 && stateWriteAt !== -1 && refWriteAt < stateWriteAt,
+  `ref at ${refWriteAt}, state at ${stateWriteAt}`
 );
 check('and every token change goes through applyToken', (appSource.match(/setAuthToken\(/g) || []).length, 1);
+
+// The prompt has to explain itself: a bare "your session has expired" is indistinguishable from a session that
+// was refused for some other reason, which is what made this take three rounds to diagnose.
+checkIs(
+  'the refusal records which request was refused and which token',
+  /setReauthReason\(\{\s*\n\s*action: \(reply && reply\.requestAction\)/.test(appSource)
+);
+checkIs('and the api attaches the action to a refused reply', /data\.requestAction = body\.action;/.test(apiSource));
+checkIs('and logs it for the console', /\[reauth\] \$\{body\.action\} was refused/.test(apiSource));
+checkIs(
+  'the modal shows the reason',
+  /reason=\{reauthReason\}/.test(appSource) && /reasonText/.test(readFileSync('src/components/ReauthModal.jsx', 'utf8'))
+);
+checkIs('and the reason is cleared when the prompt closes', (appSource.match(/setReauthReason\(null\)/g) || []).length, 3);
+
 
 // ---------------------------------------------------------------------------
 // 4b. The legacy usernames in system_log
@@ -511,7 +531,135 @@ check('and its other columns are untouched', [cell(userSettings, 1, 'fcm_token')
 // The settings sheet has no id at all and must be left alone.
 check('a key/value sheet is untouched', applied.ss.sheets.system_settings.rows[1], ['department_name', 'Test Fire']);
 
-console.log('\n--- the sweep signs the old sessions out ---');
+// ---------------------------------------------------------------------------
+// 6. A session survives being used, over and over
+// ---------------------------------------------------------------------------
+// The round trip the client actually makes, which the first version of the epoch work broke: the FIRST
+// authenticated request rewrote the record for its sliding expiry and dropped the epoch, so the SECOND request
+// compared "" against the member's real epoch - refused, and deleted the session. Two requests, and a member is
+// asked to sign in again seconds after signing in.
+console.log('\n--- a session survives repeated use ---');
+const roundTrip = migrationHarness(stationFixture());
+const authHelpers = (() => {
+  const store = {};
+  const props = {
+    getScriptProperties: () => ({
+      getProperty: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+      setProperty: (k, v) => {
+        store[k] = String(v);
+      },
+      deleteProperty: (k) => {
+        delete store[k];
+      },
+      getKeys: () => Object.keys(store),
+    }),
+  };
+  const users = [{ id: 'user-1', user_name: 'mwills', role_id: 'role-1' }];
+  const ss = { getSheetByName: () => null };
+  const api = new Function('PropertiesService', 'Logger', 'getSheetData', 'Utilities', `
+    ${constSource('SESSION_PROPERTY_PREFIX')}
+    ${constSource('SESSION_EPOCH_PREFIX')}
+    ${constSource('DEFAULT_SESSION_TTL_MINUTES')}
+    ${extract('sessionEpochState')}
+    ${extract('sessionEpochFor')}
+    ${extract('bumpSessionEpoch')}
+    ${extract('sessionRecordValue')}
+    ${extract('parseSessionRecord')}
+    ${extract('createSession')}
+    ${extract('sessionTtlMs')}
+    ${extract('parseSessionTimeoutMinutes')}
+    ${extract('systemSettingsMap')}
+    ${extract('getAuthContext')}
+    return { createSession, getAuthContext, bumpSessionEpoch, SESSION_PROPERTY_PREFIX };
+  `)(
+    props,
+    { log: (text) => store.__logs ? store.__logs.push(text) : (store.__logs = [text]) },
+    () => users,
+    { getUuid: () => 'token-round-trip' }
+  );
+  return { api, store, users };
+})();
+
+// A member who has been revoked at some point - which, after the migration, is everybody.
+authHelpers.api.bumpSessionEpoch('user-1');
+const roundTripToken = authHelpers.api.createSession('user-1', {
+  getSheetByName: () => ({ getDataRange: () => ({ getValues: () => [['key', 'value']] }) }),
+});
+check('the session was created', typeof roundTripToken, 'string');
+const afterCreate = authHelpers.store[authHelpers.api.SESSION_PROPERTY_PREFIX + roundTripToken];
+check('and carries the member epoch', afterCreate.split('|')[3], authHelpers.store['fc_epoch_user-1']);
+
+const first = authHelpers.api.getAuthContext(authHelpers.ssPlaceholder || {}, { token: roundTripToken });
+check('the first request is accepted', !!first, true);
+const afterFirst = authHelpers.store[authHelpers.api.SESSION_PROPERTY_PREFIX + roundTripToken];
+check('and the epoch is still in the record', afterFirst.split('|')[3] !== '', true);
+
+const second = authHelpers.api.getAuthContext({}, { token: roundTripToken });
+check('the second request is accepted too', !!second, true);
+const third = authHelpers.api.getAuthContext({}, { token: roundTripToken });
+check('and so is the tenth', !!third, true);
+for (let i = 0; i < 7; i++) authHelpers.api.getAuthContext({}, { token: roundTripToken });
+check('after ten requests the session is still alive', authHelpers.store[authHelpers.api.SESSION_PROPERTY_PREFIX + roundTripToken] !== undefined, true);
+check('and still carries its epoch', authHelpers.store[authHelpers.api.SESSION_PROPERTY_PREFIX + roundTripToken].split('|')[3] === authHelpers.store['fc_epoch_user-1'], true);
+
+// A genuine revocation still refuses, and still deletes: the fix must not have disabled the check.
+// (The epoch is a millisecond timestamp, so this writes the new one directly rather than spinning until
+// Date.now() moves, which would be a race in a fast test.)
+const epochBefore = authHelpers.store['fc_epoch_user-1'];
+authHelpers.store['fc_epoch_user-1'] = 'revoked-later';
+check('the epoch moved on', authHelpers.store['fc_epoch_user-1'] !== epochBefore, true);
+check('a later revocation refuses the session', authHelpers.api.getAuthContext({}, { token: roundTripToken }), null);
+check('and the record is gone', authHelpers.store[authHelpers.api.SESSION_PROPERTY_PREFIX + roundTripToken], undefined);
+
+// An epoch that cannot be READ must not sign anybody out: a revocation check that cannot be performed is not
+// evidence of revocation, and the old code's "" made it look like one.
+const brokenStore = (() => {
+  const state = { props: {}, throwOnEpoch: true };
+  const props = {
+    getScriptProperties: () => ({
+      getProperty: (k) => {
+        if (state.throwOnEpoch && k.indexOf('fc_epoch_') === 0) throw new Error('properties unavailable');
+        return Object.prototype.hasOwnProperty.call(state.props, k) ? state.props[k] : null;
+      },
+      setProperty: (k, v) => {
+        state.props[k] = String(v);
+      },
+      deleteProperty: (k) => {
+        delete state.props[k];
+      },
+      getKeys: () => Object.keys(state.props),
+    }),
+  };
+  return { state, props };
+})();
+const unavailableEpoch = new Function('PropertiesService', 'Logger', 'getSheetData', 'Utilities', `
+  ${constSource('SESSION_PROPERTY_PREFIX')}
+  ${constSource('SESSION_EPOCH_PREFIX')}
+  ${constSource('DEFAULT_SESSION_TTL_MINUTES')}
+  ${extract('sessionEpochState')}
+  ${extract('sessionEpochFor')}
+  ${extract('bumpSessionEpoch')}
+  ${extract('sessionRecordValue')}
+  ${extract('parseSessionRecord')}
+  ${extract('sessionTtlMs')}
+  ${extract('parseSessionTimeoutMinutes')}
+  ${extract('systemSettingsMap')}
+  ${extract('getAuthContext')}
+  return { getAuthContext, SESSION_PROPERTY_PREFIX };
+`)(
+  brokenStore.props,
+  { log: () => {} },
+  () => [{ id: 'user-1', user_name: 'mwills' }],
+  { getUuid: () => 'token-x' }
+);
+brokenStore.state.props['fc_auth_token-x'] = 'user-1|' + (Date.now() + 60000) + '|60000|an-epoch';
+check(
+  'an unreadable revocation epoch does NOT sign the member out',
+  !!unavailableEpoch.getAuthContext({}, { token: 'token-x' }),
+  true
+);
+check('and the session is not deleted for it', brokenStore.state.props['fc_auth_token-x'] !== undefined, true);
+
 // A session written BEFORE the migration carries the member's OLD id and an empty epoch. Checking only the epoch
 // deleted nothing (empty equals empty), so those records lingered as properties and the report claimed a sweep
 // that had not happened. The member id is what identifies them.

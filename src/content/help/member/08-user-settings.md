@@ -31,6 +31,14 @@ Enter a new password twice. Two rules:
 - The password is **not trimmed**, so leading or trailing spaces are part of it. If you paste a password and the app says it is wrong, check for a stray space.
 - Changing your password **signs out your other sessions** on purpose, so a device you left signed in cannot keep using the old credentials. This device stays signed in.
 
+### If you are made to change it at sign-in
+
+When an administrator sets a password **for** you, they can require you to replace it. In that case the first thing you see after signing in is a *Choose a new password* box, and you cannot open anything else in the portal until you have saved a new password — there is no **Cancel**. Nothing else counts as using the app, so the popup simply waits until you have chosen one.
+
+- **The temporary password is only for that first sign-in.** It stops being a password the moment you save your own.
+- **You can sign out instead**, but signing back in brings the same popup until a new password has been saved.
+- **A forgotten password cannot be reset from here.** There is no reset link; ask an administrator to set one for you, and they can require the same change again.
+
 ## If something is wrong
 
 Misbehaving? Work through the checks in order:
