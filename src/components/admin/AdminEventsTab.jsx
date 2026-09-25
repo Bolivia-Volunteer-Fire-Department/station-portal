@@ -269,6 +269,8 @@ export default function AdminEventsTab({
     setFormOpen(true);
     setForm({
       id: event.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: event.row_version,
       title: event.title,
       date_from: toInputValue(event.startsAt, false),
       date_to: toInputValue(event.endsAt, false),

@@ -231,8 +231,15 @@ check('and covers the refresh wave', readOnlyActions.length >= 10, `${readOnlyAc
 
 check(
   'doPost gates the lock on the action',
-  /locked = READ_ONLY_ACTIONS\[String\(action\)\] === true \? false : lock\.tryLock\(10000\)/.test(gsSource),
-  'doPost still takes the lock unconditionally'
+  /const gate = acquireWriteLock\(lock, action\)/.test(gsSource),
+  'the lock decision no longer goes through acquireWriteLock'
+);
+// A gate whose answer is ignored is not a gate. This is the rule that was broken before: a timed-out tryLock
+// used to be discarded, so the write ran UNLOCKED and two of them could allocate the same id.
+check(
+  'and refuses a write it cannot serialise rather than running it unlocked',
+  /if \(!gate\.ok\)[\s\S]{0,300}busyResponseData/.test(gsSource),
+  'a failed lock acquisition is ignored again, so a write can run without the lock'
 );
 check(
   'and releases only what it took',
@@ -250,7 +257,7 @@ const actionBlock = (name) => {
 };
 
 const WRITE_CALLS =
-  /upsertSheetRowById|upsertUserSettingsColumns|bulkUpsertSheetRowsById|bulkDeleteSheetRowsById|appendRowByHeader|appendRow\(|deleteRow\(|deleteRows\(|insertSheet\(|setValue\(|setValues\(|logSystemEvent|createSession|revokeSessionsForUser|clearStaleFcmTokens|retuneSessions|saveRunnerScore/;
+  /upsertSheetRowById|upsertUserSettingsColumns|bulkUpsertSheetRowsById|bulkDeleteSheetRowsById|setSystemSettingsBatch|ensureRowVersionColumn|appendRowByHeader|appendRow\(|deleteRow\(|deleteRows\(|insertSheet\(|setValue\(|setValues\(|logSystemEvent|createSession|bumpSessionEpoch|revokeSessionsForUser|clearStaleFcmTokens|retuneSessions|saveRunnerScore/;
 
 const readOnlyOffenders = [];
 readOnlyActions.forEach((name) => {

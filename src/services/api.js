@@ -4,7 +4,13 @@ import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 
-// The notification opt-in fields, enumerated from the shared switch catalogue rather than listed
+// The row version a save was based on, when the caller has one.
+//
+// The backend refuses a single-record write built on a stale copy (see upsertSheetRowById in Code.gs) and
+// answers CONFLICT with the row as it now stands. A save that sends nothing is not checked at all, which is
+// what lets a page built before this keep working against a backend that has it.
+const rowVersionField = (record) => (record && record.row_version !== undefined ? record.row_version : undefined);
+
 // here by hand.
 //
 // This file used to keep its own copy of the keys, and that copy is what broke: a switch added to the
@@ -38,6 +44,27 @@ const timeoutMessage = () =>
 const isTimeoutAbort = (err) =>
   !!err && (err.name === 'AbortError' || /aborted/i.test(String(err.message || '')));
 
+// How long a refused write waits before its single retry, in ms, and its ceiling.
+//
+// The server refuses a write it could not serialise (code BUSY) and asks for a short wait; this caps how long
+// that wait can be so a hostile or mistaken `retry_after` cannot stall a save behind a long sleep.
+const BUSY_RETRY_DEFAULT_MS = 1000;
+const BUSY_RETRY_CAP_MS = 6000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A refused write is the ONE case where retrying a mutation is safe: the server answers BUSY only when it has
+// written nothing at all (no cell, no log row, no session), and says so in the reply. That is categorically
+// different from a network error, where the write may have landed and the answer been lost - which is why
+// mutations never retry on those, and why this path is only ever entered on an explicit BUSY code.
+//
+// Reads cannot receive BUSY (they take no lock), so this is effectively a write-only path.
+const busyRetryWaitMs = (data) => {
+  const seconds = Number(data && data.retry_after);
+  if (!Number.isFinite(seconds) || seconds <= 0) return BUSY_RETRY_DEFAULT_MS;
+  return Math.min(BUSY_RETRY_CAP_MS, Math.round(seconds * 1000));
+};
+
 // Executes a POST against the Google Apps Script backend, transparently
 // handling the platform's first-request redirect quirk.
 //
@@ -55,7 +82,7 @@ const isTimeoutAbort = (err) =>
 // warmed URL. Read-only calls additionally retry once on a raw network/CORS
 // failure, so the app still boots even before the backend is redeployed with
 // doGet. Mutations never retry on network errors (only on the safe redirect
-// marker), so a write can never be applied twice.
+// marker, and on an explicit BUSY refusal), so a write can never be applied twice.
 async function appScriptFetch(body, { retryOnNetworkError = false } = {}) {
   // Every request is bounded. Apps Script serialises requests behind a script lock in doPost, so a
   // long queue was previously able to leave a caller waiting indefinitely - and because callers
@@ -86,7 +113,19 @@ async function appScriptFetch(body, { retryOnNetworkError = false } = {}) {
     return postOnce();
   }
 
-  if (data && data.redirected) return postOnce();
+  if (data && data.redirected) data = await postOnce();
+
+  // One retry, and only for a refusal: the other writer needs the moment `retry_after` asks for, and a second
+  // refusal is reported to the caller rather than retried again.
+  if (data && data.code === 'BUSY') {
+    await sleep(busyRetryWaitMs(data));
+    data = await postOnce();
+  }
+
+  // A write refused because the record moved on since the form was filled in. Reported as a normal failure
+  // whose MESSAGE is the server's explanation ("...your change was NOT saved. Reload it and apply your change
+  // again.") - every admin tab already surfaces `result.message`, so this needs no special case in the UI.
+  // `current` rides along for a caller that wants to show or reload the newer row.
   return data;
 }
 
@@ -178,6 +217,8 @@ export const adminSaveUser = async (userData, token) =>
     action: 'ADMIN_SAVE_USER',
     token,
     id: userData.id || '',
+    // Refuses the write if the row moved on since this form was filled in.
+    row_version: rowVersionField(userData),
     user_name: userData.user_name,
     name: userData.name,
     password: userData.password || '',
@@ -199,6 +240,7 @@ export const adminSaveRole = async (roleData, token) =>
     action: 'ADMIN_SAVE_ROLE',
     token,
     id: roleData.id || '',
+    row_version: rowVersionField(roleData),
     description: roleData.description,
     // Every permission column travels together, resolved through the shared rules
     // (the is_admin master switch and the per-permission dependencies the editor
@@ -217,6 +259,7 @@ export const adminSaveRank = async (rankData, token) =>
     action: 'ADMIN_SAVE_RANK',
     token,
     id: rankData.id || '',
+    row_version: rowVersionField(rankData),
     description: rankData.description,
     color: rankData.color,
     icon: rankData.icon,
@@ -232,6 +275,7 @@ export const adminSaveShift = async (shiftData, token) =>
     action: 'ADMIN_SAVE_SHIFT',
     token,
     id: shiftData.id || '',
+    row_version: rowVersionField(shiftData),
     description: shiftData.description,
     start_time: shiftData.start_time,
     end_time: shiftData.end_time,
@@ -256,6 +300,7 @@ export const adminSaveScheduleTemplate = async (templateData, token) =>
     action: 'ADMIN_SAVE_SCHEDULE_TEMPLATE',
     token,
     id: templateData.id || '',
+    row_version: rowVersionField(templateData),
     day_of_week: templateData.day_of_week,
     start_time: templateData.start_time,
     end_time: templateData.end_time,
@@ -345,6 +390,7 @@ export const adminSaveAnnouncement = async (announcementData, token) =>
     // A blank id creates; otherwise it updates in place. author_user_id is deliberately not sent:
     // the backend stamps it from the session on create and never lets it change.
     id: announcementData.id || '',
+    row_version: rowVersionField(announcementData),
     title: announcementData.title || '',
     message: announcementData.message || '',
     effective_date: announcementData.effective_date || '',
@@ -392,6 +438,7 @@ export const adminSaveEvent = async (eventData, token) =>
     // A blank id creates; otherwise it updates in place. author_user_id is deliberately not sent: the
     // backend stamps it from the session on create and never lets it change.
     id: eventData.id || '',
+    row_version: rowVersionField(eventData),
     title: eventData.title,
     date_from: eventData.date_from,
     date_to: eventData.date_to,
@@ -417,6 +464,7 @@ export const adminSaveAssignment = async (assignmentData, token) =>
     action: 'ADMIN_SAVE_ASSIGNMENT',
     token,
     id: assignmentData.id || '',
+    row_version: rowVersionField(assignmentData),
     description: assignmentData.description,
     // Both of these were being dropped here: the form collected a minimum rank
     // and the backend accepted one, but the value never left the browser. Sent
@@ -529,6 +577,18 @@ export const adminSetAvailability = async (userId, { adds = [], removes = [] } =
 
 export const adminSaveSystemSetting = async (key, value, token) =>
   appScriptFetch({ action: 'ADMIN_SAVE_SYSTEM_SETTING', token, key, value });
+
+// Saves many settings in ONE request, all-or-nothing.
+//
+// The Loading Messages card used to call the single-key action once per message, so ten messages were ten
+// requests - and a failure part-way left some saved and some not, which reads as the app lying about what it
+// stored. The backend validates every pair before writing any of them.
+export const adminSaveSystemSettings = async (settings, token) =>
+  appScriptFetch({ action: 'ADMIN_SAVE_SYSTEM_SETTINGS', token, settings });
+
+// True when the deployment serving us predates an action, which is how a page newer than its backend detects
+// that it has to fall back rather than fail. See the UNKNOWN_ACTION reply in Code.gs.
+export const isUnknownAction = (result) => !!result && result.code === 'UNKNOWN_ACTION';
 
 export const adminDeleteSystemSetting = async (key, token) =>
   appScriptFetch({ action: 'ADMIN_DELETE_SYSTEM_SETTING', token, key });

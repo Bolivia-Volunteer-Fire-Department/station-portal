@@ -42,6 +42,8 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
 
   const buildFormFromShift = (shift) => ({
     id: shift.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: shift.row_version,
     description: shift.description || '',
     start_time: toTimeInputValue(shift.start_time),
     end_time: toTimeInputValue(shift.end_time),

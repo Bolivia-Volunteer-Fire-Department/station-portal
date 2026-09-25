@@ -12,7 +12,7 @@ If your role is one that has access to clock in and out, you will see options to
 2. Allow the location prompt if your browser asks. Your position is recorded with the entry.
 3. The card updates to show your new status.
 
-Both buttons are in the same card, but only one is shown at a time — **Clock In** while you are off duty, **Clock Out** while you are on — so there is nothing to get wrong.
+Both buttons are in the same card, but only one is shown at a time — **Clock In** while you are off duty, **Clock Out** while you are on — so there is nothing to get wrong. That is enforced on the server too: if a second clock-in arrives while you already have an entry open (a slow connection, or the app open in two tabs), it is refused with "You are already clocked in" rather than opening a duplicate entry that an administrator would have to clean up by hand.
 
 If your browser asks you to confirm your password before the action completes, that is the session re-check described in **Getting started**. Confirm it and the clock action runs automatically; you do not need to press the button again.
 

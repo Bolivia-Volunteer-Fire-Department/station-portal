@@ -528,13 +528,22 @@ The front end and the backend deploy separately, so **the app can be published w
 
 `push_devices` needs nothing from you either — it is created on first use, because a device registering into a sheet that does not exist would fail silently, which is the failure mode that feature has already produced once.
 
-**3. Tick the permissions** on the roles that should have them — *Administration → System → Help → Roles* explains what each one unlocks. A permission column that reads blank is treated as false, so an unticked box hides the tab.
+**3. Run the id migration, once.** Deploying the version of `Code.gs` that allocates UUIDs leaves the *existing* rows on their old sequential ids, so run the migration once from the Apps Script editor:
 
-**4. Add the repository secret and enable Pages** (steps 2 and 3 above).
+```
+migrateIdsToUuids()                    // dry run: reports what it would change, writes nothing
+migrateIdsToUuids({ dryRun: false })   // apply it
+```
 
-**5. Restrict the Firebase web API key** to your Pages URL once you know it. The key is public by design, but restricting it by HTTP referrer stops anyone else using your project's quota — Google Cloud Console → APIs & Services → Credentials. **Allow the whole host, not just the app's path** (`https://<host>/*`): Firebase's Installations request arrives with the bare origin as the referer, so a path-scoped pattern blocks it and notifications cannot be enabled at all (see the troubleshooting note in `docs/FCM_SETUP.md`).
+It needs a free script lock, so ask everyone to close the portal first. It rewrites every record id **and every reference to one** (`user_id`, `role_id`, `schedule_id`, `approved_by`, …), records the old→new mapping in an `id_migration` sheet so it can be checked or resumed, and signs everybody out at the end — their sessions carried the ids that just changed. Menus, timers and settings keys are unaffected. Read the dry run's "PROBLEMS" list before applying: a duplicate id or a reference it cannot resolve stops it, by design. Background: [`docs/WRITE_SAFETY.md`](docs/WRITE_SAFETY.md).
 
-**6. Smoke-test the deployed site**: sign in, clock in/out, load My Schedule, open Administration, and check one admin tab per permission you granted. The guide at [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md) has the push-notification end-to-end test.
+**4. Tick the permissions** on the roles that should have them — *Administration → System → Help → Roles* explains what each one unlocks. A permission column that reads blank is treated as false, so an unticked box hides the tab.
+
+**5. Add the repository secret and enable Pages** (steps 2 and 3 above).
+
+**6. Restrict the Firebase web API key** to your Pages URL once you know it. The key is public by design, but restricting it by HTTP referrer stops anyone else using your project's quota — Google Cloud Console → APIs & Services → Credentials. **Allow the whole host, not just the app's path** (`https://<host>/*`): Firebase's Installations request arrives with the bare origin as the referer, so a path-scoped pattern blocks it and notifications cannot be enabled at all (see the troubleshooting note in `docs/FCM_SETUP.md`).
+
+**7. Smoke-test the deployed site**: sign in, clock in/out, load My Schedule, open Administration, and check one admin tab per permission you granted. The guide at [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md) has the push-notification end-to-end test.
 
 ### Notifications and installing as an app
 
@@ -598,12 +607,24 @@ The front end and the backend deploy separately, so **the app can be published w
   path-scoped pattern is refused with `403 PERMISSION_DENIED` and push cannot be
   enabled on any device.
 - **`.env` and credentials stay out of git.** `.gitignore` covers `.env`,
-  `.env.*`, `Code.gs`, and the service-account JSON.
+  `.env.*` and the service-account JSON. `Code.gs` is deliberately **tracked** —
+  it holds no credentials, and `scripts/check-secrets.py` (run in CI, in
+  `verify:all` and by the pre-commit hook) fails the build if a key ever lands in
+  it.
 - **Passwords are stored as PBKDF2-HMAC-SHA256 hashes** with a unique 16-byte
   salt per member (`pbkdf2-sha256$iterations$salt$digest`). Legacy plain-text
   rows are upgraded on the member's next successful sign-in, and
   `migrateLegacyPasswords()` hashes the whole sheet at once. See
   [docs/AUTH_SECURITY.md](docs/AUTH_SECURITY.md).
+- **Record ids are UUIDs**, so an id can never be reused after a delete: a `schedule_offers.schedule_id` could
+  otherwise be handed to a different shift and an approval would fill the wrong slot. Existing data is migrated
+  once with `migrateIdsToUuids()` — see [docs/WRITE_SAFETY.md](docs/WRITE_SAFETY.md).
+- **Concurrent saves cannot corrupt or silently double-write.** Writes are serialised
+  by a script lock, and a write that cannot take it is **refused** (never run
+  unlocked); a save built on a stale record is refused with the row as it now stands
+  (`row_version`); a refused write is retried once by the client, because the server
+  guarantees it wrote nothing. See
+  [docs/WRITE_SAFETY.md](docs/WRITE_SAFETY.md).
 - **Sign-in is throttled.** Five failed attempts locks a username out for 60 s,
   doubling to a 15-minute cap; a global cap of 200 failures per 15 minutes
   refuses every sign-in regardless of username. Counters live in `CacheService`,

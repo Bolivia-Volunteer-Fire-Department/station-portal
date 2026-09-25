@@ -60,6 +60,8 @@ export default function AdminAssignmentsTab({
     setError(null);
     setFormData({
       id: assignment.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: assignment.row_version,
       description: assignment.description || '',
       rank_order_required:
         assignment.rank_order_required === undefined || assignment.rank_order_required === null

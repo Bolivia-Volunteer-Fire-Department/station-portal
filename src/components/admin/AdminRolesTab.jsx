@@ -30,6 +30,8 @@ const buildEmptyForm = () => {
 const formFromRole = (role) => {
   const form = {
     id: role.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: role.row_version,
     description: role.description || '',
     [MASTER_PERMISSION_KEY]: permissionGranted(role, MASTER_PERMISSION_KEY),
   };

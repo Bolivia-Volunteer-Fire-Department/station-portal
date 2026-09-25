@@ -1,71 +1,34 @@
 import React, { useEffect, useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff } from 'lucide-react';
-import { adminSaveSystemSetting, adminDeleteSystemSetting } from '../../services/api';
+import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
 import { getCurrentCoordinates } from '../../utils/geolocation';
+import {
+  getSettingValue,
+  getLoadingMessages,
+  loadingMessageSavePlan,
+  updateLoadingMessages,
+  LOADING_MESSAGE_KEYS,
+} from '../../utils/systemSettings';
 import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
 
-// Keys surfaced in their own curated category card rather than the generic list below
-const KNOWN_KEYS = ['department_name', 'time_format', 'is_dark_mode',
+// Keys surfaced in their own curated category card rather than the generic list below. The loading messages
+// are curated too - ten of them, named rather than repeated here (see utils/systemSettings).
+const KNOWN_KEYS = [
+  'department_name',
+  'time_format',
+  'is_dark_mode',
   'required_clock_latitude',
   'required_clock_longitude',
   'gps_margin_of_error',
   'session_timeout',
-  'loading_message0',
-  'loading_message1',
-  'loading_message2',
-  'loading_message3',
-  'loading_message4',
-  'loading_message5',
-  'loading_message6',
-  'loading_message7',
-  'loading_message8',
-  'loading_message9',
+  ...LOADING_MESSAGE_KEYS,
 ];
-
-function getSettingValue(systemSettings, key, fallback = '') {
-  const setting = systemSettings.find((s) => String(s.key) === key);
-  return setting?.value ?? fallback;
-}
 
 function isTruthySetting(value) {
   return value === true || String(value).trim().toUpperCase() === 'TRUE';
-}
-
-const LOADING_MESSAGE_KEYS = [
-  'loading_message0',
-  'loading_message1',
-  'loading_message2',
-  'loading_message3',
-  'loading_message4',
-  'loading_message5',
-  'loading_message6',
-  'loading_message7',
-  'loading_message8',
-  'loading_message9',
-];
-
-function getLoadingMessages(systemSettings) {
-  return LOADING_MESSAGE_KEYS.map((key, index) => ({
-    id: `message_${index}`,
-    key,
-    value: getSettingValue(systemSettings, key, '') || '',
-  }));
-}
-
-function setLoadingValues(formData, systemSettings) {
-  formData.forEach((item, index) => {
-    const messageKey = LOADING_MESSAGE_KEYS[index];
-    if (messageKey && item.value !== undefined) {
-      // Find and update by directly setting the property on the found object
-      const settingIndex = systemSettings.findIndex(s => String(s.key) === messageKey);
-      if (settingIndex !== -1) {
-        systemSettings[settingIndex].value = item.value;
-      }
-    }
-  });
 }
 
 export default function AdminSystemSettingsTab({ token, systemSettings, onDataChanged }) {
@@ -787,27 +750,42 @@ function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!error) {
-      try {
-        setLoadingValues(loadingMessages, systemSettings);
-        const saveResult = await adminSaveSystemSetting('loading_message0', loadingMessages[0]?.value || '', token);
-        if (!saveResult?.success) throw new Error(saveResult?.message || 'Failed to save loading messages.');
+    // No gate on a previous error: an earlier version only saved `if (!error)`, so once a save had failed the
+    // button did nothing at all until the tab was remounted - the retry was silently discarded.
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      // All ten in ONE request, so a failure cannot leave some saved and some not. The backend validates every
+      // pair before writing any of them - see loadingMessageSavePlan and setSystemSettingsBatch.
+      const plan = loadingMessageSavePlan(loadingMessages);
+      const result = await adminSaveSystemSettings(
+        plan.map(({ key, value }) => ({ key, value })),
+        token
+      );
 
-        for (let i = 1; i < loadingMessages.length; i++) {
-          const result = await adminSaveSystemSetting(`loading_message${i}`, loadingMessages[i]?.value || '', token);
-          if (!result?.success) {
-            throw new Error(result?.message || `Failed to save message ${i}.`);
-          }
+      // The deployment in front of us may predate this action - the page and the backend are deployed
+      // separately. UNKNOWN_ACTION is exactly that case, so fall back to the per-key save rather than
+      // reporting a failure for an action the server has never heard of.
+      if (isUnknownAction(result)) {
+        console.warn('This deployment has no batch settings action; saving each setting on its own.');
+        for (const { key, value, label } of plan) {
+          const one = await adminSaveSystemSetting(key, value, token);
+          if (!one?.success) throw new Error(one?.message || `Failed to save ${label}.`);
         }
-
         void onDataChanged();
         setSaved(true);
-        setError(null);
-      } catch (err) {
-        setError(err.message || 'Failed to save loading messages.');
-      } finally {
-        setSaving(false);
+        return;
       }
+
+      if (!result?.success) throw new Error(result?.message || 'Failed to save loading messages.');
+
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save loading messages.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -843,9 +821,12 @@ function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
             <div className="flex items-center gap-3 min-w-[240px]">
               <input
                 type="text"
-                placeholder={`Message ${msg.key.split('_')[1]}...`}
+                placeholder={`${msg.label}...`}
                 value={msg.value}
-                onChange={(e) => setLoadingMessages([...loadingMessages.map((m, i) => (i === msg.id.split('_')[1] ? { ...m, value: e.target.value } : m))])}
+                // Matched by the message's own id, never by position: the previous version compared the map
+                // index (a number) against the tail of the id (a string), which is never true, so the field
+                // could be focused and typed into but the value never changed.
+                onChange={(e) => setLoadingMessages((current) => updateLoadingMessages(current, msg.id, e.target.value))}
                 className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />
             </div>

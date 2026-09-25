@@ -55,7 +55,7 @@ const HARNESS = `
   ${constSource('PUSH_DEVICE_SHEET')}
   ${constSource('PUSH_DEVICE_HEADERS')}
   ${extract('getSheetData')}
-  ${extract('getNextId')}
+  ${extract('newRowId')}
   ${extract('userSettingsIndex')}
   ${extract('pushDeviceSheet')}
   ${extract('pushDeviceRows')}
@@ -140,8 +140,18 @@ const makeBackend = ({ devices = [], settings = [] } = {}) => {
     'Logger',
     'getEasternTimestamp',
     'upsertUserSettingsColumns',
+    // A new device row is identified by a UUID (see newRowId in Code.gs), so the harness supplies one.
+    'Utilities',
     HARNESS
-  )(Logger, getEasternTimestamp, upsertUserSettingsColumns);
+  )(Logger, getEasternTimestamp, upsertUserSettingsColumns, {
+    getUuid: (() => {
+      let issued = 0;
+      return () => {
+        issued++;
+        return `00000000-0000-4000-8000-${String(issued).padStart(12, '0')}`;
+      };
+    })(),
+  });
 
   return { backend, ss, sheets };
 };

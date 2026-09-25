@@ -131,6 +131,8 @@ export default function AdminAnnouncementsTab({
     const window = announcementDateWindow(announcement);
     setFormData({
       id: announcement.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: announcement.row_version,
       title: String(announcement.title ?? ''),
       message: String(announcement.message ?? ''),
       effective_date: window.from,

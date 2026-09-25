@@ -55,6 +55,55 @@ var READ_ONLY_ACTIONS = {
   ADMIN_GET_PUSH_STATUS: true,
 };
 
+// How long a WRITE waits for the script lock before giving up.
+//
+// It used to wait 10 seconds and then run the write ANYWAY, unlocked: `locked` was only consulted to decide
+// whether to release it, so a timed-out wait silently downgraded a serialised write to a racing one. Two
+// writers that overlap can lose one of the two updates, so failing to take the lock is now a refusal the
+// caller can retry rather than a silent risk.
+//
+// Longer than any single save holds it, including a bulk schedule write. scripts/verify-write-safety.mjs
+// drives both halves of this: a refused write must leave the sheet completely untouched.
+const WRITE_LOCK_WAIT_MS = 20000;
+
+// Actions allowed to run WITHOUT the lock when it cannot be taken.
+//
+// Empty on purpose: a lost update is never free, and every caller already reports a failed action as an error.
+// The seam exists so a genuinely harmless exception - a personal best on the runner leaderboard, say - can be
+// named here rather than reopening the general rule.
+var LOCK_OPTIONAL_ACTIONS = {};
+
+// Does this action need the script lock? Reads never do, which is what lets a save's ten-request refresh wave
+// run concurrently instead of queueing behind the next write.
+function actionNeedsWriteLock(action) {
+  if (READ_ONLY_ACTIONS[String(action)] === true) return false;
+  return LOCK_OPTIONAL_ACTIONS[String(action)] !== true;
+}
+
+// Takes the lock for a write, or says how long to wait before trying again.
+//
+// The caller MUST refuse the action when this comes back not-ok, without touching the sheet. The refusal is
+// only honest if it writes nothing at all - no cell, no log row, no session property - because writing is
+// precisely what could not be serialised.
+function acquireWriteLock(lock, action) {
+  if (!actionNeedsWriteLock(action)) return { ok: true, took: false };
+  if (lock.tryLock(WRITE_LOCK_WAIT_MS)) return { ok: true, took: true };
+  return { ok: false, retryAfterSeconds: Math.max(1, Math.round(WRITE_LOCK_WAIT_MS / 2000)) };
+}
+
+// The reply a refused write gets. `code` is the vocabulary the client already reads (RATE_LIMITED,
+// UNAUTHORIZED, UNKNOWN_ACTION) and `retry_after` is in seconds, as it is on the rate-limited login reply.
+function busyResponseData(retryAfterSeconds) {
+  return {
+    success: false,
+    code: "BUSY",
+    retry_after: retryAfterSeconds,
+    message:
+      "The station portal is busy saving something else, so your change was NOT saved. " +
+      "Please try again in a moment."
+  };
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   let locked = false;
@@ -75,7 +124,18 @@ function doPost(e) {
     // The safety of this rests on one rule, enforced by scripts/verify-refresh-wiring.mjs: an action listed
     // in READ_ONLY_ACTIONS must contain NO write call. Anything that appends a log row, mints a session,
     // prunes a token or touches a cell belongs on the other side of this line.
-    locked = READ_ONLY_ACTIONS[String(action)] === true ? false : lock.tryLock(10000);
+    //
+    // A write that cannot take the lock is REFUSED, not run unlocked - see acquireWriteLock and
+    // scripts/verify-write-safety.mjs, which asserts that the refusal writes nothing.
+    const gate = acquireWriteLock(lock, action);
+    locked = gate.ok && gate.took;
+    if (!gate.ok) {
+      // Returns inside the try, so the finally below still runs - with `locked` false, so nothing is released
+      // that was never taken.
+      return ContentService
+        .createTextOutput(JSON.stringify(busyResponseData(gate.retryAfterSeconds)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
 
     let responseData = { success: false, message: "Invalid action" };
 
@@ -733,19 +793,42 @@ function doPost(e) {
         }
 
         const timeclockSheetIn = ss.getSheetByName("timeclock");
-        const nextInId = getNextId(timeclockSheetIn);
-        // Use Eastern Time instead of UTC ISO string
         const timeInStamp = getEasternTimestamp();
 
-        timeclockSheetIn.appendRow([
-          nextInId,
-          timeInStamp,
-          "",
-          clockInUserId,
-          clockInGpsLon,
-          clockInGpsLat,
-          clockInIsManual
-        ]);
+        // A member with an open entry cannot open a second one. The UI disables the button, but two tabs - or a
+        // tap on a slow connection - are not coordinated by the UI, and a double entry needs an administrator to
+        // spot and delete it. Checked here as well as after the geofence, so a rejected action writes nothing.
+        if (findOpenClockRow(timeclockSheetIn, clockInUserId)) {
+          responseData = {
+            success: false,
+            code: "ALREADY_CLOCKED_IN",
+            message: "You are already clocked in. Clock out first."
+          };
+          break;
+        }
+
+        const nextInId = String(newRowId());
+
+        // Built through the sheet's OWN headers rather than as a positional array: every other sheet in this app
+        // is written that way, and a positional append quietly misfiles a clock-in the first time somebody
+        // reorders a column (see rowValuesForHeaders).
+        //
+        // Trailing blanks are trimmed before the append. The row is mapped over EVERY header, so columns this
+        // action has no value for come back as "" - and writing an explicit "" into a column the app does not
+        // own (the clock-in `calc_address`, which the sheet fills itself) is a change in behaviour for no gain.
+        // Trimming keeps the old write identical for today's layout while still being correct by name.
+        const timeclockHeadersIn = timeclockSheetIn.getRange(1, 1, 1, Math.max(timeclockSheetIn.getLastColumn(), 1)).getValues()[0];
+        const clockInRow = rowValuesForHeaders(timeclockHeadersIn, {
+          id: nextInId,
+          time_in: timeInStamp,
+          time_out: "",
+          user_id: clockInUserId,
+          gps_lon: clockInGpsLon,
+          gps_lat: clockInGpsLat,
+          is_manual: clockInIsManual
+        });
+        while (clockInRow.length && clockInRow[clockInRow.length - 1] === "") clockInRow.pop();
+        timeclockSheetIn.appendRow(clockInRow);
 
         responseData = { success: true, id: nextInId, time_in: timeInStamp };
 
@@ -788,40 +871,35 @@ function doPost(e) {
         const rows = timeclockSheetOut.getDataRange().getValues();
         const headers = rows[0];
         
-        const userIdCol = headers.indexOf("user_id");
         const timeOutCol = headers.indexOf("time_out");
         const gpsLonOutCol = headers.indexOf("gps_lon_out");
         const gpsLatOutCol = headers.indexOf("gps_lat_out");
         const calcAddressOutCol = headers.indexOf("calc_address_out");
 
         const timeOutStamp = getEasternTimestamp();
-        let updatedRowIndex = -1;
+        // The open entry, found by the same helper clock-in uses to refuse a second one, so "which row is open"
+        // has one definition rather than two loops that can drift apart.
+        const openRow = findOpenClockRow(timeclockSheetOut, clockOutUserId, rows);
 
-        // Find active open shift for user (starting from most recent)
-        for (let i = rows.length - 1; i >= 1; i--) {
-          if (rows[i][userIdCol] == clockOutUserId && !rows[i][timeOutCol]) {
-            updatedRowIndex = i + 1;
-            break;
-          }
-        }
+        if (openRow) {
+          // The address is looked up BEFORE anything is written, and the whole row goes in with ONE call.
+          //
+          // This used to be up to four separate setValue calls with the reverse geocode between them, which had
+          // two costs: a failure inside that network call left the row stamped out with no address, and the
+          // script lock stayed held for the length of a Google Maps round trip - so every other writer waited
+          // behind a lookup that has nothing to do with the sheet.
+          const outAddress = (calcAddressOutCol !== -1 && clockOutGpsLat && clockOutGpsLon)
+            ? GOOGLEMAPS_REVERSEGEOCODE(clockOutGpsLat, clockOutGpsLon)
+            : "";
 
-        if (updatedRowIndex !== -1) {
-          // Write Time Out
-          timeclockSheetOut.getRange(updatedRowIndex, timeOutCol + 1).setValue(timeOutStamp);
+          const updatedRow = rows[openRow.sheetRow - 1].slice();
+          while (updatedRow.length < headers.length) updatedRow.push("");
+          updatedRow[timeOutCol] = timeOutStamp;
+          if (gpsLonOutCol !== -1 && clockOutGpsLon) updatedRow[gpsLonOutCol] = clockOutGpsLon;
+          if (gpsLatOutCol !== -1 && clockOutGpsLat) updatedRow[gpsLatOutCol] = clockOutGpsLat;
+          if (calcAddressOutCol !== -1 && outAddress) updatedRow[calcAddressOutCol] = outAddress;
 
-          // Write Clock-Out GPS data
-          if (gpsLonOutCol !== -1 && clockOutGpsLon) {
-            timeclockSheetOut.getRange(updatedRowIndex, gpsLonOutCol + 1).setValue(clockOutGpsLon);
-          }
-          if (gpsLatOutCol !== -1 && clockOutGpsLat) {
-            timeclockSheetOut.getRange(updatedRowIndex, gpsLatOutCol + 1).setValue(clockOutGpsLat);
-          }
-
-          // Generate reverse geocode address if coordinates are present
-          if (calcAddressOutCol !== -1 && clockOutGpsLat && clockOutGpsLon) {
-            const outAddress = GOOGLEMAPS_REVERSEGEOCODE(clockOutGpsLat, clockOutGpsLon);
-            timeclockSheetOut.getRange(updatedRowIndex, calcAddressOutCol + 1).setValue(outAddress);
-          }
+          timeclockSheetOut.getRange(openRow.sheetRow, 1, 1, updatedRow.length).setValues([updatedRow]);
 
           responseData = { success: true, time_out: timeOutStamp };
 
@@ -1771,6 +1849,52 @@ function doPost(e) {
         break;
       }
 
+      case "ADMIN_SAVE_SYSTEM_SETTINGS": {
+        const authBatch = getAuthContext(ss, data);
+        if (!authBatch) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        // The SAME permission split as the single-key action, applied to the whole batch before anything is
+        // written: a notifications-only role stays confined to notify_* keys, and cannot smuggle an unrelated
+        // key in beside the ones it may edit. All-or-nothing is deliberate - a partly applied batch is the
+        // exact outcome this action exists to remove.
+        const canEditAllBatch = hasRolePermission(ss, authBatch.userId, "can_edit_system_settings");
+        const canEditNotifyBatch =
+          !canEditAllBatch && hasRolePermission(ss, authBatch.userId, "can_edit_notification_settings");
+        if (!canEditAllBatch && !canEditNotifyBatch) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const batchRefusal = settingBatchRefusal(data.settings || payload.settings, {
+          canEditAll: canEditAllBatch,
+          canEditNotificationsOnly: canEditNotifyBatch
+        });
+        if (batchRefusal) {
+          responseData = { success: false, message: batchRefusal };
+          break;
+        }
+
+        const batchPairs = settingPairsFrom(data.settings || payload.settings);
+        const writtenKeys = setSystemSettingsBatch(ss, batchPairs);
+        responseData = { success: true, keys: writtenKeys };
+
+        // Only once, however many keys the batch carried - and only when one of them is the idle timeout,
+        // which is the one setting that lives in live sessions as well as the sheet.
+        if (writtenKeys.indexOf("session_timeout") !== -1) {
+          responseData.sessionsRetuned = retuneSessions(ss);
+        }
+        logSystemEvent(
+          ss,
+          authBatch.userId,
+          "ADMIN_SAVE_SYSTEM_SETTINGS",
+          "Admin set " + writtenKeys.join(", ")
+        );
+        break;
+      }
+
       case "ADMIN_DELETE_SYSTEM_SETTING": {
         const authCtx = getAuthContext(ss, data);
         if (!authCtx || !hasRolePermission(ss, authCtx.userId, "can_edit_system_settings")) {
@@ -2286,6 +2410,20 @@ function doPost(e) {
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
+    // An optimistic-concurrency refusal is a NORMAL outcome, not a server fault: the caller tried to write a
+    // version of the record that is no longer current. It carries the row as it stands, so the page can show
+    // what changed instead of pretending the save failed for an unknown reason.
+    if (err && err.conflict) {
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          success: false,
+          code: "CONFLICT",
+          message: err.message,
+          current: err.conflict.current
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     // Return explicit error output instead of leaving request hanging
     return ContentService
       .createTextOutput(JSON.stringify({ success: false, message: err.toString() }))
@@ -2890,7 +3028,25 @@ function getShiftsData(ss) {
   return results;
 }
 
-function getNextId(sheet) {
+// The id a new record gets.
+//
+// A UUID rather than "the last row's id plus one", which is what this used to be. Sequential ids were REUSED
+// after a delete: deleting the highest-id schedule row freed its id, and the next shift created inherited it -
+// so a `schedule_offers.schedule_id` still on file silently pointed at a DIFFERENT shift, and an approval could
+// fill the wrong slot. The bulk delete on the schedule board and the single-row deletes both opened that door.
+//
+// A UUID also removes the allocation READ, which was the last reason a create had to hold the script lock, and
+// makes ids opaque: they can no longer be enumerated to watch the station's growth.
+function newRowId() {
+  return Utilities.getUuid();
+}
+
+// The ONE exception to that rule: a `system_log` row keeps a compact numeric id.
+//
+// Nothing references a log row - the sheet is appended to and read, never joined, edited or deleted by id - so
+// the reuse problem does not apply to it, and a bare number keeps the log readable for a human scanning the
+// sheet. Named for what it is, so it cannot be mistaken for the allocator the record sheets use.
+function nextLogRowId(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return 1;
   const lastId = sheet.getRange(lastRow, 1).getValue();
@@ -2921,22 +3077,23 @@ function sessionTtlMs(ss) {
   return ttlMs;
 }
 
-// A session record: "userId|expiry|ttlMs".
+// A session record: "userId|expiry|ttlMs|epoch".
 //
-// The WINDOW IS CARRIED IN THE RECORD rather than looked up per request.
+// The WINDOW IS CARRIED IN THE RECORD rather than looked up per request: that is the whole performance design
+// of this feature. Reading the setting on every authenticated request would cost a sheet read (or a cache
+// round trip that can evict), and refreshing a session then becomes a property write and a couple of parseInt
+// calls - no sheet read, no cache, no eviction tail. The trade is that a change only reaches an OPEN session
+// through retuneSessions, which the settings save calls.
 //
-// That is the whole performance design of this feature. The obvious implementation reads the
-// setting on every authenticated request - through CacheService to soften it - but every request
-// then costs a cache round trip, and a cache eviction costs a full `system_settings` sheet read on
-// the auth path of somebody's save. Carrying the window here means refreshing a session is a
-// property write and a couple of parseInt calls: no sheet read, no cache, no eviction tail.
+// The EPOCH is what makes a revocation stick. Sliding expiry rewrites a session on every authenticated
+// request, including the read-only ones that hold no lock - so a "sign out everyone" that deleted the token
+// could have it written straight back by a request that had already validated it, and the session survived
+// until it idled out. The epoch is the authority instead: bumping it invalidates every record that carries an
+// older one, however many times the record itself is rewritten.
 //
-// The trade is that a change only reaches an OPEN session through retuneSessions, which the
-// settings save calls. Editing the cell directly in the sheet applies to the next sign-in.
-//
-// Field 2 is still an absolute expiry and field 3 is new, so a record written by an earlier
-// deploy (two fields) still works: it falls back to the default window instead of logging
-// everybody out on release.
+// Field 2 is still an absolute expiry, field 3 is the window, and field 4 is new, so a record written by an
+// earlier deploy (two or three fields) still works: it has no epoch, and the epoch it is compared against
+// starts empty too, so nobody is signed out merely by deploying this.
 function parseSessionRecord(stored) {
   const parts = String(stored || "").split("|");
   const ttlMs = parseInt(parts[2], 10);
@@ -2944,6 +3101,7 @@ function parseSessionRecord(stored) {
     userId: parts[0],
     expiry: parseInt(parts[1], 10),
     ttlMs: ttlMs && ttlMs > 0 ? ttlMs : DEFAULT_SESSION_TTL_MINUTES * 60 * 1000,
+    epoch: String(parts[3] === undefined || parts[3] === null ? "" : parts[3]),
   };
 }
 
@@ -2956,8 +3114,35 @@ function parseSessionRecord(stored) {
 // and orphan the existing records, which would then never be swept. It is invisible to members, so it stays.
 const SESSION_PROPERTY_PREFIX = "fc_auth_";
 
-function sessionRecordValue(userId, expiry, ttlMs) {
-  return String(userId) + "|" + expiry + "|" + ttlMs;
+// The per-user session epoch, bumped when every session for that member is revoked.
+//
+// Deliberately NOT under SESSION_PROPERTY_PREFIX: every loop that walks sessions filters on that prefix, and a
+// second key space hiding inside it would be read as a session record and deleted as one.
+const SESSION_EPOCH_PREFIX = "fc_epoch_";
+
+// The epoch a new session should carry: empty until something is revoked, so a deployment that adds this
+// changes nobody's session.
+function sessionEpochFor(userId) {
+  const key = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!key) return "";
+  try {
+    return String(PropertiesService.getScriptProperties().getProperty(SESSION_EPOCH_PREFIX + key) || "");
+  } catch (err) {
+    return ""; // an unreadable epoch must not lock anybody out
+  }
+}
+
+// Invalidates every session that carries an older epoch, and returns the new one.
+function bumpSessionEpoch(userId) {
+  const key = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!key) return "";
+  const next = String(Date.now());
+  PropertiesService.getScriptProperties().setProperty(SESSION_EPOCH_PREFIX + key, next);
+  return next;
+}
+
+function sessionRecordValue(userId, expiry, ttlMs, epoch) {
+  return String(userId) + "|" + expiry + "|" + ttlMs + "|" + String(epoch === undefined || epoch === null ? "" : epoch);
 }
 
 function createSession(userId, ss) {
@@ -2965,7 +3150,7 @@ function createSession(userId, ss) {
   const ttlMs = sessionTtlMs(ss);
   PropertiesService.getScriptProperties().setProperty(
     SESSION_PROPERTY_PREFIX + token,
-    sessionRecordValue(userId, Date.now() + ttlMs, ttlMs)
+    sessionRecordValue(userId, Date.now() + ttlMs, ttlMs, sessionEpochFor(userId))
   );
   return token;
 }
@@ -2991,7 +3176,9 @@ function retuneSessions(ss) {
 
     // When the session was last used: its expiry minus the window it was created with.
     const lastSeen = record.expiry - record.ttlMs;
-    props.setProperty(key, sessionRecordValue(record.userId, lastSeen + ttlMs, ttlMs));
+    // The epoch rides along: dropping it here would turn a retuned session into a legacy one, and every member
+    // who has ever been revoked would be signed out by the next timeout change.
+    props.setProperty(key, sessionRecordValue(record.userId, lastSeen + ttlMs, ttlMs, record.epoch));
     updated++;
   });
 
@@ -3029,6 +3216,14 @@ function getAuthContext(ss, data) {
     return null;
   }
 
+  // A session that predates the member's last revocation is refused, however fresh its expiry looks. This is
+  // what stops the sliding-expiry write below from resurrecting a session that was just revoked: the record
+  // may exist, but it is no longer entitled to.
+  if (record.epoch !== sessionEpochFor(userId)) {
+    props.deleteProperty(SESSION_PROPERTY_PREFIX + token);
+    return null;
+  }
+
   const users = getSheetData(ss, "users");
   const user = users.find(function (u) {
     return String(u.id) === String(userId);
@@ -3043,12 +3238,26 @@ function getAuthContext(ss, data) {
 
 // Deletes all sessions for a user, optionally keeping the supplied one (used
 // after a password change so the current user isn't logged out).
+//
+// Revocation is enforced by the EPOCH, not by the deletion alone: deleting the records is still worth doing
+// (it frees the properties and is instant for everyone who is not mid-request), but a session that a
+// concurrent request had already validated could be written straight back. With the epoch bumped, that
+// resurrected record carries a stale one and is refused on its next use.
+//
+// The kept session is re-stamped with the new epoch, or the member who just changed their own password would
+// be signed out of the device they are using.
 function revokeSessionsForUser(userId, exceptToken) {
   const props = PropertiesService.getScriptProperties();
   const keep = String(exceptToken || "");
+  const epoch = bumpSessionEpoch(userId);
+
   props.getKeys().forEach(function (k) {
     if (k.indexOf(SESSION_PROPERTY_PREFIX) !== 0) return;
-    if (keep && k === SESSION_PROPERTY_PREFIX + keep) return;
+    if (keep && k === SESSION_PROPERTY_PREFIX + keep) {
+      const kept = parseSessionRecord(props.getProperty(k));
+      if (kept.userId) props.setProperty(k, sessionRecordValue(kept.userId, kept.expiry, kept.ttlMs, epoch));
+      return;
+    }
     const val = props.getProperty(k) || "";
     if (val.split("|")[0] === String(userId)) props.deleteProperty(k);
   });
@@ -3142,10 +3351,69 @@ function hasAnyRolePermission(ss, userId, permissionKeys) {
 }
 
 // Inserts or updates a row in an "id"-keyed sheet based on fields.id; returns the row's id
+// Optimistic concurrency for single-record saves.
+//
+// Every admin form that edits ONE record reads the row, shows it, and later writes back a handful of fields.
+// Two administrators with the same form open therefore end with the last save winning and the first one's
+// change silently gone. Rather than a lock (which cannot be held across a form) the row carries a version:
+// the caller sends back the version it loaded, and a mismatch is refused with the row as it now stands.
+//
+// ABSENT VERSION MEANS NO CHECK. That is deliberate and it is the compatibility lever: the page and the
+// backend are deployed separately, so a client built before this must keep saving. It is also what keeps the
+// bulk writers (a month of schedule rows at once) out of the scheme - they do not send a version, so they are
+// never refused and never invalidate anyone.
+const ROW_VERSION_COLUMN = "row_version";
+const ROW_VERSION_FIRST = 1;
+
+// Adds the version column to a sheet that does not have one yet, and starts every existing row at 1.
+//
+// Idempotent, so it can run on the write path instead of needing a migration step - after the first save of a
+// given sheet it costs one header read. Appended at the END, so an admin's own columns keep their positions.
+function ensureRowVersionColumn(sheet) {
+  if (!sheet) return -1;
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  if (lastRow < 1) return -1;
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const existing = headers.indexOf(ROW_VERSION_COLUMN);
+  if (existing !== -1) return existing;
+
+  const col = lastCol + 1;
+  sheet.getRange(1, col).setValue(ROW_VERSION_COLUMN);
+  if (lastRow > 1) {
+    const versions = [];
+    for (let i = 0; i < lastRow - 1; i++) versions.push([ROW_VERSION_FIRST]);
+    sheet.getRange(2, col, lastRow - 1, 1).setValues(versions);
+  }
+  return col - 1;
+}
+
+// The refusal thrown when a caller is writing a version of the row that is no longer current. doPost turns it
+// into a CONFLICT reply carrying the row as it stands, which is what the caller needs to reload and reapply.
+function rowVersionConflict_(id, currentRow, headers) {
+  const current = {};
+  headers.forEach(function (header, index) {
+    const key = String(header === undefined || header === null ? "" : header).trim();
+    if (key) current[key] = currentRow[index];
+  });
+
+  const err = new Error(
+    "Someone else changed this record while you were editing it, so your change was NOT saved. " +
+      "Reload it and apply your change again."
+  );
+  err.conflict = { id: String(id), current: current };
+  return err;
+}
+
 function upsertSheetRowById(sheet, fields) {
+  ensureRowVersionColumn(sheet);
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const idCol = headers.indexOf("id");
+  const versionCol = headers.indexOf(ROW_VERSION_COLUMN);
 
   let targetId = fields.id ? String(fields.id) : null;
   let rowIndex = -1;
@@ -3161,23 +3429,38 @@ function upsertSheetRowById(sheet, fields) {
 
   if (rowIndex === -1) {
     // No existing row matched, so this is a new record
-    if (!targetId) targetId = String(getNextId(sheet));
+    if (!targetId) targetId = String(newRowId());
     const newRow = headers.map(function (h) {
       if (h === "id") return targetId;
+      if (h === ROW_VERSION_COLUMN) return ROW_VERSION_FIRST;
       return fields[h] !== undefined ? fields[h] : "";
     });
     sheet.appendRow(newRow);
   } else {
+    const currentRow = data[rowIndex - 1];
+
+    // The check, before any write: a caller that sent the version it loaded is telling us which state it
+    // edited, and a different one means somebody got there first.
+    const supplied = fields[ROW_VERSION_COLUMN];
+    if (versionCol !== -1 && supplied !== undefined && supplied !== null && String(supplied).trim() !== "") {
+      const stored = String(currentRow[versionCol] === undefined || currentRow[versionCol] === null ? "" : currentRow[versionCol]).trim();
+      if (stored !== String(supplied).trim()) throw rowVersionConflict_(targetId, currentRow, headers);
+    }
+
+    const nextVersion = versionCol === -1 ? 0 : (parseInt(currentRow[versionCol], 10) || 0) + 1;
+
     // One setValues call for the whole row is dramatically faster than one
     // setValue per column (each SpreadsheetApp write has real overhead).
     // Unsupplied fields keep their current values, exactly as before.
-    const currentRow = data[rowIndex - 1];
     const width = Math.max(currentRow.length, headers.length);
     const nextRow = [];
     for (let c = 0; c < width; c++) {
       const h = headers[c];
       if (h === "id") {
         nextRow.push(currentRow[c]);
+      } else if (h === ROW_VERSION_COLUMN) {
+        // Never client-supplied: the version is ours to advance, and a caller must not be able to set it.
+        nextRow.push(nextVersion);
       } else if (h !== undefined && fields[h] !== undefined) {
         nextRow.push(fields[h]);
       } else {
@@ -3192,8 +3475,13 @@ function upsertSheetRowById(sheet, fields) {
 
 // Bulk upsert for save-everything flows: reads the sheet ONCE, writes each
 // updated row with a single setValues, appends every new row in one setValues
-// block, and assigns sequential ids after the current max. Returns the id
-// assigned to each entry, in the same order as the entries array.
+// block. Returns the id assigned to each entry, in the same order as the
+// entries array.
+//
+// New rows get a UUID each (see newRowId), so a bulk save no longer has to
+// allocate ids from the sheet it is about to write - the "sequential ids after
+// the current max" this used to do was the last place a create depended on
+// reading the sheet first.
 function bulkUpsertSheetRowsById(sheet, entries) {
   const list = Array.isArray(entries) ? entries : [];
   if (!list.length) return [];
@@ -3219,7 +3507,6 @@ function bulkUpsertSheetRowsById(sheet, entries) {
     }
   }
 
-  let nextId = getNextId(sheet);
   const updates = [];
   const appends = [];
   const ids = [];
@@ -3245,7 +3532,7 @@ function bulkUpsertSheetRowsById(sheet, entries) {
       updates.push({ row: existing[requestedId].sheetRow, values: nextRow });
       ids.push(requestedId);
     } else {
-      const assignedId = requestedId || String(nextId++);
+      const assignedId = requestedId || String(newRowId());
       const rowValues = headers.map((h) => {
         if (h === "id") return assignedId;
         return fields[h] !== undefined ? fields[h] : "";
@@ -3328,17 +3615,29 @@ function removeRowsWhere(sheet, colName, value) {
   return removed;
 }
 
-// Next id based on the highest existing id in the sheet (delete-safe, unlike
-// getNextId which trusts row order)
-function nextIdAfterMax(sheet) {
-  if (!sheet) return 1;
-  const data = sheet.getDataRange().getValues();
-  let max = 0;
-  for (let i = 1; i < data.length; i++) {
-    const n = parseInt(data[i][0], 10);
-    if (Number.isFinite(n) && n > max) max = n;
+// The member's OPEN timeclock entry, or null. An entry is open while time_out is blank.
+//
+// One definition, used by BOTH halves of the timeclock: clock-out stamps the row this returns, and clock-in
+// refuses to open a second one while a member has an entry. Two hand-written searches is how the two halves
+// drift apart - and a duplicate open entry is not self-correcting: it needs an administrator to spot it.
+//
+// Scans from the BOTTOM, so the most recent entry wins if a legacy duplicate ever exists.
+function findOpenClockRow(sheet, userId, cachedRows) {
+  if (!sheet || !userId) return null;
+  const rows = cachedRows || sheet.getDataRange().getValues();
+  if (!rows.length) return null;
+
+  const headers = rows[0];
+  const userIdCol = headers.indexOf("user_id");
+  const timeOutCol = headers.indexOf("time_out");
+  if (userIdCol === -1 || timeOutCol === -1) return null;
+
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][userIdCol]) == String(userId) && !rows[i][timeOutCol]) {
+      return { sheetRow: i + 1, row: rows[i] }; // sheetRow is 1-based, as Sheets counts
+    }
   }
-  return max + 1;
+  return null;
 }
 
 // Builds a sheet row from a field map using the sheet's OWN header order.
@@ -3435,8 +3734,6 @@ function setAvailabilityRows(ss, userId, rawAdds, rawRemoves) {
   const written = {};
   const newRows = [];
   let skipped = 0;
-  // Read after the deletions, so ids never collide with rows that are still present.
-  let nextId = nextIdAfterMax(sheet);
 
   for (let i = 0; i < addSlots.length; i++) {
     const slot = addSlots[i];
@@ -3452,7 +3749,8 @@ function setAvailabilityRows(ss, userId, rawAdds, rawRemoves) {
 
     newRows.push(
       rowValuesForHeaders(headers, {
-        id: nextId++,
+        // A UUID, so the additions no longer depend on running AFTER the deletions to pick a free number.
+        id: String(newRowId()),
         schedule_template_id: slot.templateId,
         date_from: slot.dateFrom,
         date_to: slot.dateTo,
@@ -3500,6 +3798,115 @@ function deleteKeyValueRow(sheet, keyCol, keyName) {
     }
   }
   return false;
+}
+
+// How many settings one batch may carry, and how long a key may be. Both are guard rails against a request
+// that would otherwise write an unbounded number of rows: the app's largest batch is the ten loading messages.
+const SETTINGS_BATCH_LIMIT = 50;
+const SETTING_KEY_MAX_LENGTH = 64;
+
+// The pairs a batch save was asked for: [{ key, value }], values coerced to strings, duplicates collapsed to
+// the LAST occurrence (so a caller that sends the same key twice gets what it meant, not a double write).
+//
+// Tolerant by design: `settings` arrives over the wire from a page that may be older than this deployment.
+function settingPairsFrom(rawSettings) {
+  const pairs = [];
+  const indexByKey = {};
+
+  (Array.isArray(rawSettings) ? rawSettings : []).forEach(function (entry) {
+    if (!entry) return;
+    const key = String(entry.key === undefined || entry.key === null ? "" : entry.key).trim();
+    if (!key) return;
+    const value = entry.value === undefined || entry.value === null ? "" : String(entry.value);
+
+    if (Object.prototype.hasOwnProperty.call(indexByKey, key)) {
+      pairs[indexByKey[key]].value = value;
+      return;
+    }
+    indexByKey[key] = pairs.length;
+    pairs.push({ key: key, value: value });
+  });
+
+  return pairs.slice(0, SETTINGS_BATCH_LIMIT);
+}
+
+// Why a batch should be refused, or "" when it is usable.
+//
+// Checked as a WHOLE before the first write, which is what makes the batch atomic: a batch that is half
+// applied is exactly the outcome this action exists to remove (the Loading Messages card used to issue ten
+// separate requests, so a failure part-way left the messages half updated).
+function settingBatchRefusal(rawSettings, options) {
+  const opts = options || {};
+  const pairs = settingPairsFrom(rawSettings);
+
+  if (!pairs.length) return "No settings were supplied.";
+  if ((Array.isArray(rawSettings) ? rawSettings : []).length > SETTINGS_BATCH_LIMIT) {
+    return "That is too many settings to save at once (limit " + SETTINGS_BATCH_LIMIT + ").";
+  }
+
+  for (let i = 0; i < pairs.length; i++) {
+    if (pairs[i].key.length > SETTING_KEY_MAX_LENGTH) {
+      return "That setting key is too long (limit " + SETTING_KEY_MAX_LENGTH + " characters).";
+    }
+    // A notifications-only role may edit the notify_* keys and nothing else - the same rule the single-key
+    // action applies, checked here for every pair so none can ride along on a permitted one.
+    if (opts.canEditNotificationsOnly && !opts.canEditAll && pairs[i].key.indexOf("notify_") !== 0) {
+      return "Changing system settings requires the 'Manage system settings' permission.";
+    }
+  }
+
+  return "";
+}
+
+// Writes many settings in ONE request and ONE pass over the sheet: a single read to find the existing rows, one
+// cell write per row that exists (they need not be adjacent, so they cannot share a range), and one setValues
+// for every row that has to be created. Returns the keys written, in order.
+//
+// The single-pair upsertKeyValueRow re-reads the whole sheet per key, so ten loading messages cost ten requests
+// and ten full reads inside the lock. This is what makes the batch worth having: the ten messages are one
+// request, and a failure anywhere in it leaves the sheet as it was.
+function setSystemSettingsBatch(ss, pairs) {
+  const list = Array.isArray(pairs) ? pairs : [];
+  if (!list.length) return [];
+
+  let sheet = ss.getSheetByName("system_settings");
+  if (!sheet) {
+    sheet = ss.insertSheet("system_settings");
+    sheet.appendRow(["key", "value"]);
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const keyCol = headers.indexOf("key");
+  const valueCol = headers.indexOf("value");
+  if (keyCol === -1 || valueCol === -1) return [];
+
+  const rowByKey = {};
+  if (lastRow > 1) {
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const key = String(data[i][keyCol] == null ? "" : data[i][keyCol]).trim();
+      if (key && !Object.prototype.hasOwnProperty.call(rowByKey, key)) rowByKey[key] = i + 2;
+    }
+  }
+
+  const appends = [];
+  const written = [];
+
+  list.forEach(function (pair) {
+    const existing = rowByKey[pair.key];
+    // One cell each, so no read-modify-write of the row is needed: only the value column changes.
+    if (existing) sheet.getRange(existing, valueCol + 1).setValue(pair.value);
+    else appends.push(rowValuesForHeaders(headers, { key: pair.key, value: pair.value }));
+    written.push(pair.key);
+  });
+
+  if (appends.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, appends.length, headers.length).setValues(appends);
+  }
+
+  return written;
 }
 
 // Utility: Log events to system_log sheet
@@ -4582,7 +4989,7 @@ function registerPushDevice(ss, userId, token, label) {
   }
 
   const newRow = headers.map(function (header) {
-    if (header === "id") return String(getNextId(sheet));
+    if (header === "id") return String(newRowId());
     if (header === "user_id") return targetUserId;
     if (header === "token") return targetToken;
     if (header === "device_label") return deviceLabel;
@@ -5044,6 +5451,393 @@ function storePasswordHash(ss, userId, plainPassword) {
   return false;
 }
 
+// ============================================================================
+// ID MIGRATION: sequential ids -> UUIDs
+// ============================================================================
+//
+// Run ONCE, from the Apps Script editor, after deploying the version of Code.gs that allocates ids with
+// newRowId(). Two calls, in this order:
+//
+//     migrateIdsToUuids()                    // dry run: reports what it WOULD do, writes nothing
+//     migrateIdsToUuids({ dryRun: false })   // the real thing
+//
+// Why it exists: ids used to be "the last row's id plus one", so deleting the highest-id row freed that id and
+// the next created row inherited it. A `schedule_offers.schedule_id` still on file would then point at a
+// DIFFERENT shift. See newRowId for the full note.
+//
+// It is deliberately a script rather than a manual pass. A mistyped id in `schedule.user_id` does not error -
+// it silently puts somebody else on a shift - and the id columns are only half the job: every `*_id` column,
+// plus `approved_by`, `declined_by` and `author_user_id`, references an id somewhere else too. This walks them
+// all, refuses to guess, and records the old->new mapping so the move can be audited, resumed or reversed.
+
+// Where the mapping is recorded. Also what makes a re-run safe: a half-finished migration is completed from the
+// ids already handed out, rather than the remaining rows getting fresh ones and orphaning the references.
+const ID_MIGRATION_SHEET = "id_migration";
+
+// The sheets whose `id` column is a record id, and therefore gets a UUID.
+//
+// `system_log` is deliberately absent: nothing references a log row (it is appended to and read, never joined,
+// edited or deleted by id), so it keeps compact numeric ids a human can scan. Add a sheet here when a new one is
+// added - the function reports any sheet in this list with no `id` column, and any reference column it cannot
+// resolve, rather than skipping them silently.
+const ID_RECORD_SHEETS = [
+  "users",
+  "roles",
+  "ranks",
+  "shifts",
+  "assignments",
+  "apparatus",
+  "schedule_templates",
+  "schedule",
+  "schedule_offers",
+  "availability",
+  "announcements",
+  "events",
+  "training",
+  "training_signatures",
+  "timeclock",
+  "push_devices"
+];
+
+// Which sheet a reference column points at.
+//
+// Written out rather than derived by pluralising the prefix: "schedule_id" -> "schedule" and
+// "apparatus_id" -> "apparatus" are not plurals, and a guess that resolved to the wrong sheet would rewrite a
+// column with another sheet's ids - the one failure this migration must not have.
+const ID_REFERENCE_TARGETS = {
+  user_id: "users",
+  role_id: "roles",
+  rank_id: "ranks",
+  assignment_id: "assignments",
+  apparatus_id: "apparatus",
+  schedule_template_id: "schedule_templates",
+  schedule_id: "schedule",
+  training_id: "training",
+  // Columns that reference a member without saying "_id".
+  approved_by: "users",
+  declined_by: "users",
+  author_user_id: "users"
+};
+
+// Every sheet scanned for REFERENCE columns: the record sheets, plus the two that hold a member reference
+// without being records themselves.
+//
+// This distinction is the first thing the verifier caught: `system_log` and `user_settings` were being skipped
+// entirely because their own `id` is not migrated, which left their `user_id` pointing at ids that no longer
+// existed. A sheet can be a reference SOURCE without being a record.
+const ID_REFERENCE_SHEETS = ID_RECORD_SHEETS.concat(["system_log", "user_settings"]);
+
+// A UUID, as Utilities.getUuid() formats one. Used to recognise a row that has already been migrated, which is
+// what makes this function safe to run twice.
+function isUuidValue(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
+// The recorded old->new map, as { sheetName: { oldId: newId } }.
+function readIdMigrationMap(ss) {
+  const map = {};
+  const sheet = ss.getSheetByName(ID_MIGRATION_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return map;
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(function (h) { return String(h || "").trim(); });
+  const sheetCol = headers.indexOf("sheet_name");
+  const oldCol = headers.indexOf("old_id");
+  const newCol = headers.indexOf("new_id");
+  if (sheetCol === -1 || oldCol === -1 || newCol === -1) return map;
+
+  for (let i = 1; i < values.length; i++) {
+    const name = String(values[i][sheetCol] || "").trim();
+    const oldId = String(values[i][oldCol] || "").trim();
+    const newId = String(values[i][newCol] || "").trim();
+    if (!name || !oldId || !newId) continue;
+    if (!map[name]) map[name] = {};
+    if (!map[name][oldId]) map[name][oldId] = newId;
+  }
+  return map;
+}
+
+// What the migration WOULD do, deciding everything without writing anything.
+//
+// A row that is already a UUID keeps its id and maps to itself (so references to it still resolve), a row with
+// no id is left alone, and a reference that cannot be resolved is REPORTED rather than blanked - a dangling
+// reference is a fact to look at, not something to erase.
+function planIdMigration(ss) {
+  const recorded = readIdMigrationMap(ss);
+  // `newPairs` is what this RUN decided, as opposed to every pair it knows about. Only these are recorded:
+  // writing the whole map would re-append every pair on a second run and make "nothing to do" look like work.
+  const plan = { sheets: [], map: {}, references: [], problems: [], newPairs: [] };
+
+  ID_RECORD_SHEETS.forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return; // a sheet this deployment does not have
+
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) return;
+
+    const headers = values[0].map(function (h) { return String(h || "").trim(); });
+    const idCol = headers.indexOf("id");
+    if (idCol === -1) {
+      // Listed as a record sheet but without an id column: a real problem, because the next write would put a
+      // UUID in whatever column happens to come first.
+      plan.problems.push(name + ": listed as a record sheet but has no id column");
+      return;
+    }
+
+    const map = Object.assign({}, recorded[name] || {});
+    const changes = [];
+    const seen = {};
+
+    for (let i = 1; i < values.length; i++) {
+      const id = String(values[i][idCol] === undefined || values[i][idCol] === null ? "" : values[i][idCol]).trim();
+      if (!id) {
+        plan.problems.push(name + " row " + (i + 1) + ": no id");
+        continue;
+      }
+      // Two rows sharing an id make the mapping ambiguous: whatever the references say, half of them would end
+      // up pointing at the wrong row. Refused rather than guessed.
+      if (seen[id]) plan.problems.push(name + ": id " + id + " appears more than once");
+      seen[id] = true;
+
+      if (isUuidValue(id)) {
+        if (!map[id]) map[id] = id;
+        continue;
+      }
+      if (!map[id]) {
+        map[id] = String(newRowId());
+        plan.newPairs.push({ sheet: name, oldId: id, newId: map[id] });
+      }
+      changes.push({ rowIndex: i + 1, oldId: id, newId: map[id] });
+    }
+
+    plan.map[name] = map;
+    if (changes.length) {
+      plan.sheets.push({ name: name, sheet: sheet, headers: headers, idCol: idCol, changes: changes });
+    }
+  });
+
+  // References, resolved against the maps worked out above. Walked over the REFERENCE sheets (which include the
+  // two that only hold references) rather than the record sheets.
+  ID_REFERENCE_SHEETS.forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) return;
+    const headers = values[0].map(function (h) { return String(h || "").trim(); });
+
+    headers.forEach(function (header, col) {
+      const target = ID_REFERENCE_TARGETS[header];
+      if (!target) return;
+      const targetMap = plan.map[target] || recorded[target] || {};
+
+      const changes = [];
+      for (let i = 1; i < values.length; i++) {
+        const value = String(values[i][col] === undefined || values[i][col] === null ? "" : values[i][col]).trim();
+        if (!value) continue;
+        const mapped = targetMap[value];
+        if (!mapped) {
+          plan.problems.push(name + "." + header + " row " + (i + 1) + ': "' + value + '" is not in ' + target);
+          continue;
+        }
+        if (mapped !== value) changes.push({ rowIndex: i + 1, col: col + 1, from: value, to: mapped });
+      }
+      if (changes.length) {
+        plan.references.push({ name: name, sheet: sheet, header: header, changes: changes });
+      }
+    });
+  });
+
+  return plan;
+}
+// Writes a new id into each changed row.
+//
+// NOT one setValues over the whole span: the rows needing an id need not be adjacent - a partially migrated
+// sheet has UUIDs and sequential ids side by side, and a new row created by the current code can sit between
+// two old ones. Writing a block from the first change would stamp every row in between with the wrong id, so
+// consecutive rows are grouped into runs and each run gets its own write.
+function writeIdColumn(sheet, idCol, changes) {
+  let runStart = 0;
+  for (let i = 1; i <= changes.length; i++) {
+    const contiguous = i < changes.length && changes[i].rowIndex === changes[i - 1].rowIndex + 1;
+    if (contiguous) continue;
+
+    const run = changes.slice(runStart, i);
+    const values = run.map(function (change) { return [change.newId]; });
+    sheet.getRange(run[0].rowIndex, idCol + 1, values.length, 1).setValues(values);
+    runStart = i;
+  }
+  return changes.length;
+}
+
+// Records the old->new pairs. Only pairs that CHANGED are written, so a re-run appends nothing - which is what
+// makes this sheet a durable record of the migration rather than a log of attempts.
+function writeIdMigrationMap(ss, plan) {
+  // Only the pairs THIS run decided. Writing the whole map (which includes everything recorded on earlier runs)
+  // would append every pair again on a second run, so a no-op would look like work and the sheet would grow
+  // without bound across repeated runs.
+  const stamp = getEasternTimestamp();
+  const rows = (plan.newPairs || []).map(function (pair) {
+    return [pair.sheet, pair.oldId, pair.newId, stamp];
+  });
+  if (!rows.length) return 0;
+
+  let sheet = ss.getSheetByName(ID_MIGRATION_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(ID_MIGRATION_SHEET);
+    sheet.appendRow(["sheet_name", "old_id", "new_id", "migrated_at"]);
+  } else if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["sheet_name", "old_id", "new_id", "migrated_at"]);
+  }
+
+  const width = Math.max(sheet.getLastColumn(), 4);
+  const padded = rows.map(function (row) {
+    const line = row.slice();
+    while (line.length < width) line.push("");
+    return line;
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, padded.length, width).setValues(padded);
+  return padded.length;
+}
+
+// Signs everybody out.
+//
+// Session records carry the member's id (`fc_auth_*`) and so do the revocation epochs (`fc_epoch_*`), and those
+// ids are being replaced. Bumping each epoch makes every live record stale, and the sweep then deletes them, so
+// the next request signs in against the new ids instead of half-working with the old ones.
+function resetSessionsForIdMigration(ss) {
+  const props = PropertiesService.getScriptProperties();
+  const users = getSheetData(ss, "users");
+
+  users.forEach(function (user) {
+    const id = String(user && user.id !== undefined && user.id !== null ? user.id : "").trim();
+    if (id) bumpSessionEpoch(id);
+  });
+// The migration itself. See the section note above for what it does and why.
+//
+// `dryRun` defaults to TRUE: a call with no arguments reports what it would do and writes NOTHING, so a typo
+// cannot rewrite the station's data.
+function migrateIdsToUuids(options) {
+  const opts = options || {};
+  const dryRun = opts.dryRun !== false;
+
+  const lock = LockService.getScriptLock();
+  const gate = acquireWriteLock(lock, "MIGRATE_IDS");
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const plan = planIdMigration(ss);
+
+    const summary = {
+      ok: plan.problems.length === 0,
+      dryRun: dryRun,
+      sheets: plan.sheets.map(function (entry) {
+        return { sheet: entry.name, idsToChange: entry.changes.length };
+      }),
+      references: plan.references.map(function (entry) {
+        return { sheet: entry.name, column: entry.header, valuesToChange: entry.changes.length };
+      }),
+      problems: plan.problems.slice(0, 50),
+      problemCount: plan.problems.length
+    };
+
+    // Refuses to write while anything is ambiguous: a duplicate id or a reference that cannot be resolved is
+    // exactly how this move could put the wrong member on a shift.
+    if (plan.problems.length) {
+      summary.message = "Nothing was changed. Resolve the " + plan.problems.length + " problem(s) listed first.";
+      reportIdMigration(summary);
+      return summary;
+    }
+
+    if (dryRun) {
+      summary.message = "Dry run: nothing was written. Call migrateIdsToUuids({ dryRun: false }) to apply it.";
+      reportIdMigration(summary);
+      return summary;
+    }
+
+    // The lock is only needed for the real thing; a dry run writes nothing, so it cannot race a save.
+    if (!gate.ok) {
+      summary.ok = false;
+      summary.message = "The station portal is busy saving something else. Run the migration again in a moment.";
+      reportIdMigration(summary);
+      return summary;
+    }
+
+    // 1. The mapping FIRST, so a run interrupted part-way can be COMPLETED by re-running: the recorded pairs are
+    //    reused instead of fresh UUIDs being handed out for rows that were already migrated.
+    summary.mappingRowsWritten = writeIdMigrationMap(ss, plan);
+
+    // 2. The ids, grouped into consecutive runs so a partially migrated sheet cannot be mangled.
+    plan.sheets.forEach(function (entry) {
+      writeIdColumn(entry.sheet, entry.idCol, entry.changes);
+    });
+
+    // 3. Every reference, cell by cell (they are scattered across columns and rows).
+    plan.references.forEach(function (entry) {
+      entry.changes.forEach(function (change) {
+        entry.sheet.getRange(change.rowIndex, change.col).setValue(change.to);
+      });
+    });
+
+    // 4. Signs everybody out: their sessions carry the ids that just changed.
+    summary.sessions = resetSessionsForIdMigration(ss);
+    summary.message = "Migration applied. Everyone has been signed out and will sign in again on their next action.";
+    reportIdMigration(summary);
+    return summary;
+  } finally {
+    if (gate.ok && gate.took) lock.releaseLock();
+  }
+}
+
+// The report, in the Apps Script editor's log. Also returned, so a caller can inspect the summary object.
+function reportIdMigration(summary) {
+  const total = function (rows, key) {
+    return rows.reduce(function (sum, entry) { return sum + entry[key]; }, 0);
+  };
+  const lines = [];
+  lines.push("ID migration " + (summary.dryRun ? "(DRY RUN - nothing written)" : "(APPLIED)"));
+  lines.push("  ids to change: " + total(summary.sheets, "idsToChange") + " across " + summary.sheets.length + " sheet(s)");
+  summary.sheets.forEach(function (entry) { lines.push("    " + entry.sheet + ": " + entry.idsToChange); });
+  lines.push("  reference values to change: " + total(summary.references, "valuesToChange") +
+    " across " + summary.references.length + " column(s)");
+  summary.references.forEach(function (entry) {
+    lines.push("    " + entry.sheet + "." + entry.column + ": " + entry.valuesToChange);
+  });
+  if (summary.problemCount) {
+    lines.push("  PROBLEMS (" + summary.problemCount + ", first 50):");
+    summary.problems.forEach(function (problem) { lines.push("    " + problem); });
+  }
+  if (summary.mappingRowsWritten !== undefined) lines.push("  mapping rows written: " + summary.mappingRowsWritten);
+  if (summary.sessions) {
+    lines.push("  sessions cleared: " + summary.sessions.sessionsCleared +
+      " (members re-signed-out: " + summary.sessions.usersBumped + ")");
+  }
+  if (summary.message) lines.push("  " + summary.message);
+
+  const text = lines.join("\n");
+  Logger.log(text);
+  console.log(text);
+  return text;
+}
+
+
+
+  let cleared = 0;
+  props.getKeys().forEach(function (key) {
+    if (key.indexOf(SESSION_PROPERTY_PREFIX) !== 0) return;
+    const record = parseSessionRecord(props.getProperty(key));
+    if (String(record.epoch || "") !== sessionEpochFor(record.userId)) {
+      props.deleteProperty(key);
+      cleared++;
+    }
+  });
+
+  return { usersBumped: users.length, sessionsCleared: cleared };
+}
+
+
+
+
+
 // Auth security tooling - run these from the Apps Script editor, not the web app
 // ============================================================================
 
@@ -5342,7 +6136,7 @@ function logSystemEvent(ss, userId, action, details) {
     const logSheet = ss.getSheetByName("system_log");
     if (!logSheet) return;
 
-    const nextId = getNextId(logSheet);
+    const nextId = nextLogRowId(logSheet);
     const timestamp = getEasternTimestamp();
 
     logSheet.appendRow([

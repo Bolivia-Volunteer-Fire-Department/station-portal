@@ -2,8 +2,9 @@
 
 How member passwords are stored, how sign-in attempts are throttled, and how to
 verify both. All of this lives in the Apps Script backend (`src/services/Code.gs`),
-which is gitignored — paste the current version into your project and redeploy
-after updating it.
+which is tracked in this repository (it holds no credentials — see
+`scripts/check-secrets.py`) but still has to be pasted into your Apps Script
+project and redeployed after updating it.
 
 ## What changed, and why
 

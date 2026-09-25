@@ -18,6 +18,8 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
     setError(null);
     setFormData({
       id: rank.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: rank.row_version,
       description: rank.description || '',
       color: rank.color || '#ef4444',
       icon: rank.icon || '',

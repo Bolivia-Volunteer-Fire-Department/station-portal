@@ -34,10 +34,10 @@ function extract(startMarker, endMarker) {
 
 const dateHelpers = extract('function pad2(value) {', 'function todayDateKey() {');
 const batchHelpers = extract(
-  'function nextIdAfterMax(sheet) {',
+  'function newRowId() {',
   '// Inserts or updates a row in a key/value sheet'
 );
-for (const symbol of ['rowValuesForHeaders', 'setAvailabilityRows', 'nextIdAfterMax']) {
+for (const symbol of ['rowValuesForHeaders', 'setAvailabilityRows', 'newRowId']) {
   if (!batchHelpers.includes(`function ${symbol}`)) {
     throw new Error(`Extracted block is missing ${symbol}`);
   }
@@ -58,7 +58,17 @@ const formatYmd = (date) => {
   const get = (type) => parts.find((p) => p.type === type)?.value;
   return `${get('year')}-${get('month')}-${get('day')}`;
 };
-const Utilities = { formatDate: (value) => formatYmd(value instanceof Date ? value : new Date(value)) };
+const Utilities = {
+  formatDate: (value) => formatYmd(value instanceof Date ? value : new Date(value)),
+  // Deterministic, hex-shaped and 36 characters, so the code's own UUID check recognises it.
+  getUuid: (() => {
+    let issued = 0;
+    return () => {
+      issued++;
+      return `00000000-0000-4000-8000-${String(issued).padStart(12, '0')}`;
+    };
+  })(),
+};
 
 // A sheet that behaves like a real one for the calls this code makes, and counts writes.
 function makeSheet(headers, rows = []) {
@@ -92,6 +102,9 @@ function makeSheet(headers, rows = []) {
     },
   };
 }
+
+// An independent UUID check, so these assertions are not reading the same regex the code under test uses.
+const uuidShaped = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value));
 
 const HEADERS = [
   'id',
@@ -152,7 +165,10 @@ console.log('--- adding marks rows by header name ---');
   check('the template id is in its own column', rows[2][1], 't1');
   check('the assignment came from the template', rows[2][5], 'a1');
   check('date_to defaults to the start date', rows[2][3], '2026-09-07');
-  check('the id continues from the highest existing', rows[2][0], 8);
+  // A UUID, not a number following the row above: sequential ids were reused after a delete, so a reference to
+  // the freed id silently pointed at a different row (see utils/../../src/services/Code.gs, newRowId).
+  check('the new row gets a UUID', uuidShaped(rows[2][0]), true);
+  check('which is not the existing row id', rows[2][0] !== rows[1][0], true);
   check('one write for the batch', sheet.stats.setValuesCalls, 1);
   check("another member's row is untouched", rows[1], EXISTING);
 }
@@ -171,7 +187,9 @@ console.log('\n--- a whole batch costs one write ---');
   check('still a single setValues call', sheet.stats.setValuesCalls, 1);
   check('three rows written', sheet.stats.writtenRows, 3);
   // rows() includes the header, so the data rows start at index 1.
-  check('ids are sequential from an empty sheet', sheet.rows().slice(1).map((r) => r[0]), [1, 2, 3]);
+  const batchIds = sheet.rows().slice(1).map((r) => r[0]);
+  check('every new row gets its own UUID', batchIds.every((id) => uuidShaped(id)), true);
+  check('and no two are alike', new Set(batchIds).size, 3);
   check('the second template keeps its own assignment', sheet.rows()[3][5], 'a2');
   check('and its apparatus link', sheet.rows()[3][4], 'E1');
 }
@@ -187,9 +205,10 @@ console.log('\n--- the same slot twice is still one row ---');
   const second = api.setAvailabilityRows(ss, 'u1', [slot('t1', '2026-09-07')], []);
   check('re-adding is idempotent', second.added, 1);
   check('so the row count is unchanged', sheet.rows().length - 1, 1);
-  // The id is a row id and nothing references it, so reusing the freed one is fine - what
-  // matters is that the row still has a usable id and was not duplicated.
-  check('and the row still carries an id', Number.isFinite(sheet.rows()[1][0]), true);
+  // The row is deleted and re-added, so it carries a NEW id rather than the freed one - which is the point:
+  // nothing can be holding a reference to the old id and silently get this row instead.
+  check('and the row carries a fresh UUID', uuidShaped(sheet.rows()[1][0]), true);
+  check('not the id the deleted row had', sheet.rows()[1][0] === EXISTING[0], false);
   check('after clearing the old row first', second.cleared, 1);
 }
 
@@ -292,7 +311,7 @@ console.log('\n--- header order is respected (the reason for mapping by name) --
   check('user_id still lands under user_id', row[0], 'u1');
   check('date_from under date_from', row[1], '2026-09-07');
   check('assignment under assignment_id', row[2], 'a1');
-  check('id under id', row[3], 1);
+  check('id under id', uuidShaped(row[3]), true);
   check('template under schedule_template_id', row[4], 't1');
   check('date_to under date_to', row[5], '2026-09-07');
 }

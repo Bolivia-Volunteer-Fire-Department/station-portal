@@ -74,6 +74,8 @@ Both are **defaults, not overrides**: each member can set their own in User Sett
 
 The rotating messages shown on the loading screen while the app fetches data. Ten of them, and you can edit any or all. Short works best — they are read in passing during a wait of a few seconds.
 
+All ten fields are always there, whether or not a message has been set, so the first one can be added from this screen rather than by inserting a row in the sheet. Saving writes all ten: clearing a field removes that message, and an empty field stays empty.
+
 ## Custom Settings
 
 Any other `key`/`value` pairs on the `system_settings` sheet, listed here so you can see and edit them without opening the spreadsheet. The three clock-location keys and everything in the cards above are managed by their own cards and are deliberately not duplicated here.

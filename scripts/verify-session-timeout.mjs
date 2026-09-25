@@ -157,8 +157,13 @@ const SESSION_CONSTS = [
   'DEFAULT_SESSION_TTL_MINUTES',
   'MIN_SESSION_TTL_MINUTES',
   'SESSION_PROPERTY_PREFIX',
+  // The epoch key space, and the reader createSession stamps a new session with. Both are needed or the
+  // extracted createSession below throws - the session record now carries a revocation epoch.
+  'SESSION_EPOCH_PREFIX',
 ].map(extractConst);
-check('every constant the session functions need was found', SESSION_CONSTS.length, 3);
+check('every constant the session functions need was found', SESSION_CONSTS.length, 4);
+// The epoch reader, extracted once and included wherever createSession is.
+const epochSource = extract('sessionEpochFor');
 // The prefix itself, so the fixtures below can assert against the real value rather than an assumed one.
 const sessionPrefix = /^const SESSION_PROPERTY_PREFIX = "([^"]+)";/m.exec(codeSource);
 check('the session property prefix was read', !!sessionPrefix, true);
@@ -267,7 +272,13 @@ const threeField = parseSessionRecord(sessionRecordValue('u1', NOW + 30 * MINUTE
 check('a new-style record parses', threeField.userId, 'u1');
 check('with its expiry', threeField.expiry, NOW + 30 * MINUTE);
 check('and its window', threeField.ttlMs, 30 * MINUTE);
-check('the value is pipe-delimited', sessionRecordValue('u1', 123, 456), 'u1|123|456');
+check('the value is pipe-delimited', sessionRecordValue('u1', 123, 456), 'u1|123|456|');
+check('and carries the epoch as its fourth field', sessionRecordValue('u1', 123, 456, 'epoch-9'), 'u1|123|456|epoch-9');
+// A record written before the epoch existed has three fields and no epoch: it must stay valid, or deploying
+// the revocation fix would sign everybody out.
+const preEpoch = parseSessionRecord(sessionRecordValue('u3', NOW + MINUTE, MINUTE));
+check('a pre-epoch record parses', preEpoch.userId, 'u3');
+check('with no epoch', preEpoch.epoch, '');
 
 // A session created by the deploy BEFORE this change has two fields. It must keep working, or
 // releasing would sign everybody out mid-shift.
@@ -373,13 +384,14 @@ check(
 const noExpiry = runRetune({ 'fc_auth_bad': 'u1' }, '30');
 check('a malformed record is skipped', noExpiry.updated, 0);
 
-// createSession must write the three-field form, with the configured window.
+// createSession must write the four-field form (userId|expiry|window|epoch), with the configured window.
 const created = (() => {
   const props = makeProps({});
   const body = `
     ${SESSION_CONSTS.join('\n')}
     ${SHEET_SOURCES}
     ${recordSource}${recordValueSource}${ttlSource}
+    ${epochSource}
     ${extract('parseSessionTimeoutMinutes')}
     ${createSource}
     return createSession;
@@ -400,7 +412,10 @@ const created = (() => {
 const createdRecord = parseSessionRecord(created);
 check('a new session carries its window', createdRecord.ttlMs, 30 * MINUTE);
 check('and a matching expiry', createdRecord.expiry - Date.now() - 30 * MINUTE < 5000, true);
-check('the record has three fields', created.split('|').length, 3);
+check('the record has four fields, the last being the epoch', created.split('|').length, 4);
+// No revocation has happened for this member, so the epoch is empty - and a session created before anything
+// was ever revoked must be valid, which is what makes deploying the epoch a no-op for everybody.
+check('and the epoch is empty until something is revoked', created.split('|')[3], '');
 
 // The client tick runs once a second for a whole session, so it has to be negligible.
 console.log('\n--- the client tick is cheap ---');

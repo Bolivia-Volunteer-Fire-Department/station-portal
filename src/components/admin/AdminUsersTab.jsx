@@ -19,6 +19,8 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
     setError(null);
     setFormData({
       id: user.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: user.row_version,
       user_name: user.user_name || '',
       name: user.name || '',
       password: '',

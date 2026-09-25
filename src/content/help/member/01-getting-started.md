@@ -40,6 +40,11 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
+**Version 1.04**
+* Fixed an issue with app state where loading messages couldn’t be edited (Administration > System Settings)
+* Hardened protections in Code.gs to reduce potential issues where writes conflict with each other.
+* Switched sequential enumerated ids to uuids, also to reduce write conflicts.
+
 **Version 1.03**
 * Fixed System Log timestamp sorting in the Google Apps Scripts.
 * Introduced "bar labels", which are how page titles will stick to the header on mobile so users know where they are after they scroll on the page.

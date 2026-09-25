@@ -96,6 +96,8 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     setError(null);
     setFormData({
       id: template.id,
+      // Carried through the form so the backend can refuse a save built on a stale copy.
+      row_version: template.row_version,
       day_of_week: String(template.day_of_week ?? '').trim().toLowerCase(),
       start_time: toTimeInputValue(template.start_time),
       end_time: toTimeInputValue(template.end_time),
@@ -228,6 +230,8 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
       const result = await adminSaveScheduleTemplate(
         {
           id: template.id,
+          // A drag is a save like any other, so it carries the version the card was drawn from.
+          row_version: template.row_version,
           day_of_week: dayValue,
           start_time: formatMinutes(newStartMin),
           end_time: formatMinutes(newEndMin),
