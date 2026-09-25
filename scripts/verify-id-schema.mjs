@@ -154,6 +154,8 @@ const migrationHarness = (initialSheets, { lockAvailable = true } = {}) => {
     ${extract('bumpSessionEpoch')}
     ${extract('parseSessionRecord')}
     ${extract('readIdMigrationMap')}
+    ${extract('userNameToIdIndex')}
+    ${extract('planIdReferences')}
     ${extract('planIdMigration')}
     ${extract('writeIdColumn')}
     ${extract('writeIdMigrationMap')}
@@ -325,8 +327,9 @@ check(
 );
 check('a reference to a blank cell is not one of them', plan.references.some((entry) => entry.name === 'availability'), false);
 
-console.log('\n--- what it refuses ---');
+console.log('\n--- what it refuses, and what it leaves alone ---');
 // Two rows with one id: half the references would end up on the wrong row, whichever way it resolved them.
+// This is AMBIGUITY, and it is the thing the run refuses.
 const duplicate = migrationHarness({
   users: [['id', 'name'], [10, 'Matt'], [10, 'Impostor']],
 });
@@ -334,16 +337,18 @@ const duplicatePlan = duplicate.helpers.planIdMigration(duplicate.ss);
 check('a duplicate id is reported', duplicatePlan.problems.some((p) => /appears more than once/.test(p)), true);
 check('and nothing is written', duplicate.ss.sheets.users.writes, 0);
 
-// A reference to a row that does not exist: reported, NOT blanked.
+// A reference that names nothing. This is NOT a refusal: it is history the migration cannot reconstruct - a
+// deleted member, a legacy free-text value - so the run proceeds and leaves it exactly as it was.
 const dangling = migrationHarness({
   users: [['id', 'name'], [10, 'Matt']],
   schedule: [['id', 'user_id'], [500, 999]],
 });
 const danglingPlan = dangling.helpers.planIdMigration(dangling.ss);
-check('a dangling reference is reported', danglingPlan.problems.some((p) => /is not in users/.test(p)), true);
-check('and the value is left alone, not erased', dangling.ss.sheets.schedule.rows[1][1], 999);
-check('so the run refuses to apply', dangling.helpers.migrateIdsToUuids({ dryRun: false }).ok, false);
-check('and the ids are untouched', dangling.ss.sheets.schedule.rows[1][0], 500);
+check('a reference that names nothing is not a blocking problem', danglingPlan.problems, []);
+check('it is reported as left alone', danglingPlan.legacyValues.some((entry) => /row 2/.test(entry)), true);
+check('the run still applies', dangling.helpers.migrateIdsToUuids({ dryRun: false }).ok, true);
+check('and the value is left exactly as it was, not erased', dangling.ss.sheets.schedule.rows[1][1], 999);
+check('while the id itself migrated', dangling.helpers.isUuidValue(dangling.ss.sheets.schedule.rows[1][0]), true);
 
 const missingId = migrationHarness({ users: [['id', 'name'], ['', 'Nobody']] });
 check(
@@ -360,6 +365,49 @@ check(
   noIdColumn.helpers.planIdMigration(noIdColumn.ss).problems.some((p) => /has no id column/.test(p)),
   true
 );
+
+// ---------------------------------------------------------------------------
+// 4b. The legacy usernames in system_log
+// ---------------------------------------------------------------------------
+console.log('\n--- a username where an id should be ---');
+// These are rows from an earlier version of the app that recorded the member's user_name in `user_id`. They
+// name a real member, so they resolve to that member and carry through to their new id.
+const legacyNames = migrationHarness({
+  users: [['id', 'name', 'user_name'], [10, 'Matt Wills', 'mwills'], [11, 'Ana', 'ana']],
+  system_log: [
+    ['id', 'timestamp', 'user_id', 'action'],
+    [1, '2026-01-01 08:00:00', 'mwills', 'CLOCK_IN'],
+    [2, '2026-01-01 09:00:00', 'MWILLS', 'CLOCK_IN'],
+    [3, '2026-01-01 10:00:00', 'Unknown', 'CLOCK_IN'],
+    [4, '2026-01-01 11:00:00', 'crave', 'CLOCK_IN'],
+    [5, '2026-01-01 12:00:00', 'ana', 'CLOCK_IN'],
+  ],
+  system_settings: [['key', 'value'], ['department_name', 'Test Fire']],
+});
+const legacyPlan = legacyNames.helpers.planIdMigration(legacyNames.ss);
+check('a username is not a blocking problem', legacyPlan.problems, []);
+check('it is resolved to the member', legacyPlan.resolvedNames.map((entry) => entry.replace(/^.*-> /, '')), [
+  'Matt Wills',
+  'Matt Wills',
+  'Ana',
+]);
+// Matched case-insensitively: a legacy log holds both spellings of the same name.
+check('including the upper-case spelling', legacyPlan.resolvedNames.filter((entry) => /"MWILLS"/.test(entry)).length, 1);
+check('and a name nobody has any more is left alone', legacyPlan.legacyValues.map((entry) => /"([^"]+)"$/.exec(entry)[1]), [
+  'Unknown',
+  'crave',
+]);
+
+const legacyRun = legacyNames.helpers.migrateIdsToUuids({ dryRun: false });
+check('the run applies', legacyRun.ok, true);
+const legacyLog = legacyNames.ss.sheets.system_log;
+const legacyMattId = cell(legacyNames.ss.sheets.users, 1, 'id');
+const legacyAnaId = cell(legacyNames.ss.sheets.users, 2, 'id');
+check('the log now names the member by id', [cell(legacyLog, 1, 'user_id'), cell(legacyLog, 2, 'user_id')], [legacyMattId, legacyMattId]);
+check('and the other member too', cell(legacyLog, 5, 'user_id'), legacyAnaId);
+check('a value that names nobody is untouched', [cell(legacyLog, 3, 'user_id'), cell(legacyLog, 4, 'user_id')], ['Unknown', 'crave']);
+check('the log ids stay numeric', [cell(legacyLog, 1, 'id'), cell(legacyLog, 5, 'id')], [1, 5]);
+check('and the run reports both kinds', [legacyRun.resolvedNameCount, legacyRun.legacyValueCount], [3, 2]);
 
 // ---------------------------------------------------------------------------
 // 4. A dry run writes nothing
@@ -539,6 +587,88 @@ checkIs(
   'and is what the migration uses',
   /writeIdColumn\(entry\.sheet, entry\.idCol, entry\.changes\)/.test(codeSource)
 );
+
+// ---------------------------------------------------------------------------
+// 8. The editor entry points
+// ---------------------------------------------------------------------------
+console.log('\n--- the two things you can actually run ---');
+// The Apps Script toolbar passes no arguments, so both halves have to be zero-argument functions or the
+// instructions amount to "run it from the editor" with no way to run the applying half.
+checkIs('a dry-run runner exists', /function checkIdMigration\(\) \{\s*return migrateIdsToUuids\(\{ dryRun: true \}\);\s*\}/.test(codeSource));
+checkIs('an applying runner exists', /function applyIdMigration\(\) \{\s*return migrateIdsToUuids\(\{ dryRun: false \}\);\s*\}/.test(codeSource));
+// ...and they have to be TOP-LEVEL, or the dropdown will not list them however plainly they appear in the
+// pasted file. That is not hypothetical: the first version of this put them inside another function, and the
+// only symptom was "I don't see either in the function dropdown". Brace depth, ignoring comments and strings.
+const declarationDepth = (name) => {
+  const lines = codeSource.split('\n');
+  let depth = 0;
+  let quote = null;
+  let inLine = false;
+  let inBlock = false;
+  let found = null;
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (new RegExp(`^function\\s+${name}\\s*\\(`).test(line.trim()) && found === null) found = depth;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      const next = line[i + 1];
+      if (inLine) break;
+      if (inBlock) {
+        if (ch === '*' && next === '/') {
+          inBlock = false;
+          i++;
+        }
+        continue;
+      }
+      if (quote) {
+        if (ch === '\\') i++;
+        else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '/' && next === '/') {
+        inLine = true;
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        inBlock = true;
+        i++;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') {
+        quote = ch;
+        continue;
+      }
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+    }
+    inLine = false;
+  }
+
+  return found;
+};
+
+['checkIdMigration', 'applyIdMigration', 'migrateIdsToUuids'].forEach((name) => {
+  check(`${name} is declared at the top level (so the dropdown lists it)`, declarationDepth(name), 0);
+});
+check(
+  'and the applying runner is the only thing that returns dryRun: false',
+  // Counted as a statement, not as text: the dry run's message quotes the same call to tell the operator what to
+  // do next, and that mention is not a second entry point.
+  (codeSource.match(/return migrateIdsToUuids\(\{ dryRun: false \}\);/g) || []).length,
+  1
+);
+// The runners are callable: run them against the fake station, as the editor would.
+const runnerStation = migrationHarness(stationFixture());
+const runnerCode = new Function('migrateIdsToUuids', `
+  ${extract('checkIdMigration')}
+  ${extract('applyIdMigration')}
+  return { checkIdMigration, applyIdMigration };
+`)(runnerStation.helpers.migrateIdsToUuids);
+check('the dry runner reports and writes nothing', [runnerCode.checkIdMigration().dryRun, runnerStation.ss.sheets.users.writes], [true, 0]);
+check('and the applying runner applies', runnerCode.applyIdMigration().ok, true);
+check('with the ids actually changed', runnerStation.ss.sheets.users.rows[1][0] !== 10, true);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

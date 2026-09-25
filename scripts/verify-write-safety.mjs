@@ -57,6 +57,89 @@ const backendParses = () => {
   }
 };
 check('the backend parses as a script', backendParses(), '');
+
+// ---------------------------------------------------------------------------
+// 0b. Every function is TOP-LEVEL
+// ---------------------------------------------------------------------------
+// Apps Script only offers top-level functions in the editor's function dropdown, and only top-level ones are
+// globals. A nested declaration is therefore invisible: it cannot be selected to run, and that is exactly how
+// `checkIdMigration` and `applyIdMigration` went missing from the dropdown while being plainly visible in the
+// pasted code. Caught here, once, instead of by whoever goes looking for the function.
+//
+// Depth is counted with comments and string literals skipped, so a brace inside a comment cannot throw it off.
+const declarationDepths = (source) => {
+  // Depth at the START of each line: line 1 starts at 0, and each newline pushes the depth the next line begins
+  // with. Getting this off by one line makes every declaration look nested - which is what this check asserts
+  // against, so it has to be right itself.
+  const lineDepth = [0];
+  let depth = 0;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let quote = null;
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (ch === '\n') {
+      inLineComment = false;
+      lineDepth.push(depth);
+      continue;
+    }
+    if (inLineComment) continue;
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (quote) {
+      // A backslash escape inside a quoted string, and the closing quote.
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+  }
+
+  return source
+    .split('\n')
+    .map((text, index) => ({ line: index + 1, text: text.trim(), depth: lineDepth[index] || 0 }))
+    .filter((entry) => /^function\s+[A-Za-z0-9_]+\s*\(/.test(entry.text));
+};
+
+const declarations = declarationDepths(codeSource);
+const nested = declarations.filter((entry) => entry.depth !== 0);
+check('every function declaration is at the top level', nested.length, 0);
+checkIs(
+  'and there are plenty of them (the scan is really reading the file)',
+  declarations.length > 100,
+  `${declarations.length} declarations found`
+);
+// The ones a human runs by hand, by name, from the editor's dropdown.
+['doGet', 'doPost', 'migrateLegacyPasswords', 'diagnoseFcmSetup', 'checkIdMigration', 'applyIdMigration'].forEach(
+  (name) => {
+    const found = declarations.find((entry) => new RegExp(`^function ${name}\\(`).test(entry.text));
+    checkIs(`${name} is runnable from the editor`, !!found && found.depth === 0);
+  }
+);
 check('and the API client parses', (() => {
   try {
     new Function(apiSource.replace(/^import .*$/gm, '').replace(/^export /gm, ''));

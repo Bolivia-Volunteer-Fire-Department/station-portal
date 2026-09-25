@@ -59,24 +59,32 @@ resolve that reference by id, so an approval could fill the wrong slot. A UUID a
 (a create no longer depends on reading the sheet first), and stops ids being enumerated to watch the station's
 growth.
 
-Existing data was migrated once with `migrateIdsToUuids()` — see [Migrating ids](#migrating-ids) below, or the
+Existing data was migrated once with the `checkIdMigration` / `applyIdMigration` pair in the Apps Script editor
+— see [Migrating ids](#migrating-ids) below, or the
 section note above it in `Code.gs`. Ids are strings everywhere, so every comparison coerces them
 (`String(a) === String(b)`), which is what the code already did.
 
 ## Migrating ids
 
-Run from the Apps Script editor, once, after deploying the version of `Code.gs` that allocates UUIDs:
+Run from the Apps Script editor, once, after deploying the version of `Code.gs` that allocates UUIDs. The
+editor's **Run** button cannot pass arguments, so both halves are zero-argument functions: pick one in the
+toolbar's function dropdown and press Run.
 
-    migrateIdsToUuids()                    // dry run: reports what it would do, writes NOTHING
-    migrateIdsToUuids({ dryRun: false })   // the real thing
+    checkIdMigration      step 1 - reports what it WOULD do, writes nothing
+    applyIdMigration      step 2 - applies it
 
 What it does, and why it is a script rather than a manual pass:
 
 - it walks **every** reference column — `*_id` columns plus `approved_by`, `declined_by` and `author_user_id` —
   not just the id columns, because a mistyped id in `schedule.user_id` does not error, it silently puts somebody
   else on a shift;
-- it **refuses** to write if a sheet has a duplicate id, a row with no id, or a reference it cannot resolve — and
-  reports a dangling reference rather than blanking it;
+- it **refuses** to write while anything is *ambiguous*: a sheet with a duplicate id, a row with no id, or a
+  listed record sheet with no `id` column at all. Each of those would put a reference on the wrong row;
+- a reference that names **nothing** does not block it. That is history the migration cannot reconstruct — a
+  deleted member, a hand-typed value, `Unknown` — and it is listed as *left exactly as it is*, never blanked;
+- a **username** in a user reference is resolved to that member and carried through to their new id
+  (case-insensitively, and trim-tolerant): `system_log` holds rows from an earlier version of the app that
+  recorded `user_name` in `user_id`;
 - it records every old→new pair in an `id_migration` sheet, so a run that dies part-way can be **completed by
   running it again** (the recorded pairs are reused, rather than fresh UUIDs orphaning the references);
 - it is idempotent: a second run changes nothing and appends nothing;

@@ -528,14 +528,14 @@ The front end and the backend deploy separately, so **the app can be published w
 
 `push_devices` needs nothing from you either — it is created on first use, because a device registering into a sheet that does not exist would fail silently, which is the failure mode that feature has already produced once.
 
-**3. Run the id migration, once.** Deploying the version of `Code.gs` that allocates UUIDs leaves the *existing* rows on their old sequential ids, so run the migration once from the Apps Script editor:
+**3. Run the id migration, once.** Deploying the version of `Code.gs` that allocates UUIDs leaves the *existing* rows on their old sequential ids, so run the migration once from the Apps Script editor. The editor's **Run** button cannot pass arguments, so it is two functions — pick each in the toolbar's function dropdown and press Run:
 
 ```
-migrateIdsToUuids()                    // dry run: reports what it would change, writes nothing
-migrateIdsToUuids({ dryRun: false })   // apply it
+checkIdMigration      step 1 - reports what it WOULD change, writes nothing
+applyIdMigration      step 2 - applies it
 ```
 
-It needs a free script lock, so ask everyone to close the portal first. It rewrites every record id **and every reference to one** (`user_id`, `role_id`, `schedule_id`, `approved_by`, …), records the old→new mapping in an `id_migration` sheet so it can be checked or resumed, and signs everybody out at the end — their sessions carried the ids that just changed. Menus, timers and settings keys are unaffected. Read the dry run's "PROBLEMS" list before applying: a duplicate id or a reference it cannot resolve stops it, by design. Background: [`docs/WRITE_SAFETY.md`](docs/WRITE_SAFETY.md).
+It needs a free script lock, so ask everyone to close the portal first. It rewrites every record id **and every reference to one** (`user_id`, `role_id`, `schedule_id`, `approved_by`, …), resolves a legacy *username* in a user reference to that member, records the old→new mapping in an `id_migration` sheet so it can be checked or resumed, and signs everybody out at the end — their sessions carried the ids that just changed. Menus, timers and settings keys are unaffected. Read the report before applying: a **duplicate id** or a row **with no id** stops it, by design; a reference that names *nothing* (a deleted member, `Unknown`, a hand-typed value) is listed as left exactly as it is and does not stop anything. Background: [`docs/WRITE_SAFETY.md`](docs/WRITE_SAFETY.md).
 
 **4. Tick the permissions** on the roles that should have them — *Administration → System → Help → Roles* explains what each one unlocks. A permission column that reads blank is treated as false, so an unticked box hides the tab.
 
@@ -618,7 +618,7 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   [docs/AUTH_SECURITY.md](docs/AUTH_SECURITY.md).
 - **Record ids are UUIDs**, so an id can never be reused after a delete: a `schedule_offers.schedule_id` could
   otherwise be handed to a different shift and an approval would fill the wrong slot. Existing data is migrated
-  once with `migrateIdsToUuids()` — see [docs/WRITE_SAFETY.md](docs/WRITE_SAFETY.md).
+  once with the `checkIdMigration` / `applyIdMigration` pair — see [docs/WRITE_SAFETY.md](docs/WRITE_SAFETY.md).
 - **Concurrent saves cannot corrupt or silently double-write.** Writes are serialised
   by a script lock, and a write that cannot take it is **refused** (never run
   unlocked); a save built on a stale record is refused with the row as it now stands

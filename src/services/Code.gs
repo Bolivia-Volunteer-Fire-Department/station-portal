@@ -5455,11 +5455,12 @@ function storePasswordHash(ss, userId, plainPassword) {
 // ID MIGRATION: sequential ids -> UUIDs
 // ============================================================================
 //
-// Run ONCE, from the Apps Script editor, after deploying the version of Code.gs that allocates ids with
-// newRowId(). Two calls, in this order:
+// Run once from the Apps Script editor, after deploying the version of Code.gs that allocates ids with
+// newRowId(). The editor's Run button cannot pass arguments, so the two halves are two functions: pick one
+// in the toolbar's function dropdown and press Run. In this order.
 //
-//     migrateIdsToUuids()                    // dry run: reports what it WOULD do, writes nothing
-//     migrateIdsToUuids({ dryRun: false })   // the real thing
+//     checkIdMigration      the dry run: reports what it WOULD do, writes nothing
+//     applyIdMigration      the real thing
 //
 // Why it exists: ids used to be "the last row's id plus one", so deleting the highest-id row freed that id and
 // the next created row inherited it. A `schedule_offers.schedule_id` still on file would then point at a
@@ -5566,7 +5567,11 @@ function planIdMigration(ss) {
   const recorded = readIdMigrationMap(ss);
   // `newPairs` is what this RUN decided, as opposed to every pair it knows about. Only these are recorded:
   // writing the whole map would re-append every pair on a second run and make "nothing to do" look like work.
-  const plan = { sheets: [], map: {}, references: [], problems: [], newPairs: [] };
+  //
+  // `legacyValues` are references that resolve to NOTHING - a deleted member, a free-text entry, `Unknown`.
+  // They do not block the run (see planIdReferences); they are listed so the operator knows what was left.
+  // `resolvedNames` are references that were a username rather than an id and were matched to a member.
+  const plan = { sheets: [], map: {}, references: [], problems: [], newPairs: [], legacyValues: [], resolvedNames: [] };
 
   ID_RECORD_SHEETS.forEach(function (name) {
     const sheet = ss.getSheetByName(name);
@@ -5616,9 +5621,36 @@ function planIdMigration(ss) {
     }
   });
 
-  // References, resolved against the maps worked out above. Walked over the REFERENCE sheets (which include the
-  // two that only hold references) rather than the record sheets.
+  return planIdReferences(ss, plan, recorded);
+}
+
+// Resolves a reference that is not an id at all but a USERNAME.
+//
+// Why this exists: the `system_log` sheet holds rows from an earlier version of the app that recorded the
+// member's user_name in `user_id`. They are not dangling ids - they name a member - so the right answer is to
+// resolve them to that member and carry them through, not to refuse the whole migration over history that
+// cannot be rewritten by guessing. `Unknown`, and names of members who have since been deleted, resolve to
+// nothing and are reported as values left as they are.
+function userNameToIdIndex(ss) {
+  const index = {};
+  getSheetData(ss, "users").forEach(function (user) {
+    // Trimmed and case-folded, because a legacy log holds both "Crave" and "crave" for the same person.
+    const name = String(user && user.user_name !== undefined && user.user_name !== null ? user.user_name : "").trim().toLowerCase();
+    const id = String(user && user.id !== undefined && user.id !== null ? user.id : "").trim();
+    if (!name || !id || index[name]) return;
+    // The display name rides along so the report can say WHO a legacy value was, not which id it was.
+    index[name] = { id: id, label: String(user.name || "").trim() || name };
+  });
+  return index;
+}
+
+// References, resolved against the maps worked out above. Walked over the REFERENCE sheets (which include the
+// two that only hold references) rather than the record sheets.
+function planIdReferences(ss, plan, recorded) {
+  const userNameIndex = userNameToIdIndex(ss);
+
   ID_REFERENCE_SHEETS.forEach(function (name) {
+    
     const sheet = ss.getSheetByName(name);
     if (!sheet) return;
     const values = sheet.getDataRange().getValues();
@@ -5634,10 +5666,30 @@ function planIdMigration(ss) {
       for (let i = 1; i < values.length; i++) {
         const value = String(values[i][col] === undefined || values[i][col] === null ? "" : values[i][col]).trim();
         if (!value) continue;
-        const mapped = targetMap[value];
+
+        let mapped = targetMap[value];
+        let resolvedFrom = "";
+
+        // A username in a user reference: resolve it to the member, then to their new id.
+        if (!mapped && target === "users") {
+          const match = userNameIndex[value.toLowerCase()];
+          if (match && targetMap[match.id]) {
+            mapped = targetMap[match.id];
+            resolvedFrom = match.label;
+          }
+        }
+
         if (!mapped) {
-          plan.problems.push(name + "." + header + " row " + (i + 1) + ': "' + value + '" is not in ' + target);
+          // NOT a refusal. A reference that resolves to nothing is a fact about the station's data - a deleted
+          // member, a legacy free-text value, a hand-typed entry - and the migration cannot invent the row it
+          // meant. It is left exactly as it is and listed in the report, so a correct migration is not blocked
+          // by history nobody can reconstruct. What IS refused is AMBIGUITY: a duplicate id, or a row with no id.
+          plan.legacyValues.push(name + "." + header + " row " + (i + 1) + ': "' + value + '"');
           continue;
+        }
+
+        if (resolvedFrom) {
+          plan.resolvedNames.push(name + "." + header + " row " + (i + 1) + ': "' + value + '" -> ' + resolvedFrom);
         }
         if (mapped !== value) changes.push({ rowIndex: i + 1, col: col + 1, from: value, to: mapped });
       }
@@ -5712,10 +5764,26 @@ function resetSessionsForIdMigration(ss) {
     const id = String(user && user.id !== undefined && user.id !== null ? user.id : "").trim();
     if (id) bumpSessionEpoch(id);
   });
+
+  let cleared = 0;
+  props.getKeys().forEach(function (key) {
+    if (key.indexOf(SESSION_PROPERTY_PREFIX) !== 0) return;
+    const record = parseSessionRecord(props.getProperty(key));
+    if (String(record.epoch || "") !== sessionEpochFor(record.userId)) {
+      props.deleteProperty(key);
+      cleared++;
+    }
+  });
+
+  return { usersBumped: users.length, sessionsCleared: cleared };
+}
+
+
 // The migration itself. See the section note above for what it does and why.
 //
 // `dryRun` defaults to TRUE: a call with no arguments reports what it would do and writes NOTHING, so a typo
-// cannot rewrite the station's data.
+// cannot rewrite the station's data. The two zero-argument runners at the bottom of this section are what the
+// Apps Script editor's function dropdown actually calls - it cannot pass arguments.
 function migrateIdsToUuids(options) {
   const opts = options || {};
   const dryRun = opts.dryRun !== false;
@@ -5737,11 +5805,19 @@ function migrateIdsToUuids(options) {
         return { sheet: entry.name, column: entry.header, valuesToChange: entry.changes.length };
       }),
       problems: plan.problems.slice(0, 50),
-      problemCount: plan.problems.length
+      problemCount: plan.problems.length,
+      // References that were a username and were matched to a member, and those that matched nothing at all.
+      resolvedNames: plan.resolvedNames.slice(0, 20),
+      resolvedNameCount: plan.resolvedNames.length,
+      legacyValues: plan.legacyValues.slice(0, 20),
+      legacyValueCount: plan.legacyValues.length
     };
 
-    // Refuses to write while anything is ambiguous: a duplicate id or a reference that cannot be resolved is
-    // exactly how this move could put the wrong member on a shift.
+    // Refuses to write while anything is AMBIGUOUS: a duplicate id, a row with no id, or a record sheet without
+    // an id column - each of which would put a reference on the wrong row. A reference that resolves to nothing
+    // is NOT in this list: it is history the migration cannot reconstruct (a deleted member, a legacy free-text
+    // value), it is reported as left exactly as it is, and blocking on it would stop a correct migration for a
+    // reason nobody can act on.
     if (plan.problems.length) {
       summary.message = "Nothing was changed. Resolve the " + plan.problems.length + " problem(s) listed first.";
       reportIdMigration(summary);
@@ -5788,6 +5864,24 @@ function migrateIdsToUuids(options) {
   }
 }
 
+// The two things you actually select in the Apps Script editor.
+//
+// The Run button passes no arguments, so a single function with an options object is not runnable from the
+// toolbar - which is how this section read before somebody pointed out that "run it from the editor" left no
+// way to run the applying half. Two zero-argument runners, in the order they should be used, matching the
+// convention of migrateLegacyPasswords() and diagnoseAuthSecurity() below.
+
+// Step 1. Reports what the migration would change and writes nothing.
+function checkIdMigration() {
+  return migrateIdsToUuids({ dryRun: true });
+}
+
+// Step 2. Applies it. Asks for a free script lock, rewrites the ids and every reference to them, records the
+// mapping, and signs everybody out.
+function applyIdMigration() {
+  return migrateIdsToUuids({ dryRun: false });
+}
+
 // The report, in the Apps Script editor's log. Also returned, so a caller can inspect the summary object.
 function reportIdMigration(summary) {
   const total = function (rows, key) {
@@ -5803,8 +5897,18 @@ function reportIdMigration(summary) {
     lines.push("    " + entry.sheet + "." + entry.column + ": " + entry.valuesToChange);
   });
   if (summary.problemCount) {
-    lines.push("  PROBLEMS (" + summary.problemCount + ", first 50):");
+    lines.push("  PROBLEMS (" + summary.problemCount + ", first 50) - these MUST be resolved, nothing was written:");
     summary.problems.forEach(function (problem) { lines.push("    " + problem); });
+  }
+  if (summary.resolvedNameCount) {
+    // A username in an id column, matched to the member it names and carried through to their new id.
+    lines.push("  " + summary.resolvedNameCount + " reference(s) held a USERNAME rather than an id (first 20):");
+    summary.resolvedNames.forEach(function (entry) { lines.push("    " + entry); });
+  }
+  if (summary.legacyValueCount) {
+    lines.push("  " + summary.legacyValueCount + " reference(s) name nothing and are LEFT AS THEY ARE (first 20):");
+    summary.legacyValues.forEach(function (entry) { lines.push("    " + entry); });
+    lines.push("    (a deleted member, or a value that was never an id - the migration cannot invent the row)");
   }
   if (summary.mappingRowsWritten !== undefined) lines.push("  mapping rows written: " + summary.mappingRowsWritten);
   if (summary.sessions) {
@@ -5821,18 +5925,6 @@ function reportIdMigration(summary) {
 
 
 
-  let cleared = 0;
-  props.getKeys().forEach(function (key) {
-    if (key.indexOf(SESSION_PROPERTY_PREFIX) !== 0) return;
-    const record = parseSessionRecord(props.getProperty(key));
-    if (String(record.epoch || "") !== sessionEpochFor(record.userId)) {
-      props.deleteProperty(key);
-      cleared++;
-    }
-  });
-
-  return { usersBumped: users.length, sessionsCleared: cleared };
-}
 
 
 
