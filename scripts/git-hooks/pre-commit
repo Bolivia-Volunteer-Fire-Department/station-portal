@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit guard: refuse to commit a credential.
+#
+# Enabled per clone with:  git config core.hooksPath scripts/git-hooks
+#
+# The same script runs in CI, so a hook that is not installed cannot let a secret through unnoticed - the
+# build would still fail. This is the fast, local half.
+python3 scripts/check-secrets.py --staged || {
+  echo ""
+  echo "Commit refused: see the finding above. Use 'git commit --no-verify' only if you are certain."
+  exit 1
+}

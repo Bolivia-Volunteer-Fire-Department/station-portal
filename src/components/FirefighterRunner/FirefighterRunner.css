@@ -1,0 +1,308 @@
+.ffr {
+  --ffr-ink: #24282d;
+  --ffr-red: #d92d20;
+  --ffr-yellow: #ffd23f;
+  --ffr-paper: #f8f7f2;
+  --ffr-sky: #eaf6ff;
+
+  box-sizing: border-box;
+  width: min(100%, var(--ffr-width));
+  margin: 0 auto;
+  color: var(--ffr-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  user-select: none;
+  outline: none;
+}
+
+.ffr:focus-visible {
+  outline: 3px solid var(--ffr-yellow);
+  outline-offset: 5px;
+}
+
+.ffr__hud {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  margin: 0 4px 7px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.ffr__sky {
+  position: relative;
+  width: 100%;
+  height: var(--ffr-height);
+  overflow: hidden;
+  background:
+    linear-gradient(to bottom, rgba(255,255,255,.55), transparent 40%),
+    var(--ffr-sky);
+  border: 2px solid var(--ffr-ink);
+  border-radius: 8px;
+  box-shadow: 6px 6px 0 rgba(36, 40, 45, .12);
+}
+
+.ffr__ground {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42px;
+  background: var(--ffr-paper);
+  border-top: 2px solid var(--ffr-ink);
+}
+
+.ffr__ground-lines {
+  position: absolute;
+  inset: 15px 0 auto;
+  height: 3px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      var(--ffr-ink) 0 24px,
+      transparent 24px 42px
+    );
+  opacity: .45;
+  animation: ffr-ground .6s linear infinite;
+}
+
+.ffr__player,
+.ffr__obstacle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.ffr__player {
+  width: 64px;
+  height: 64px;
+  z-index: 4;
+}
+
+.ffr__sprite {
+  width: 64px;
+  height: 64px;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.ffr__obstacle {
+  z-index: 3;
+}
+
+.ffr__obstacle--hydrant {
+  width: 34px;
+  height: 44px;
+  color: var(--ffr-red);
+}
+
+.ffr__obstacle--truck {
+  width: 72px;
+  height: 38px;
+  color: var(--ffr-red);
+  animation: ffr-siren .35s steps(2, end) infinite;
+}
+
+.ffr__obstacle-sprite {
+  display: block;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+
+.ffr__cloud {
+  position: absolute;
+  width: 70px;
+  height: 18px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.72);
+  opacity: .8;
+}
+
+.ffr__cloud::before,
+.ffr__cloud::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.ffr__cloud::before {
+  width: 26px;
+  height: 26px;
+  left: 14px;
+  bottom: 4px;
+}
+
+.ffr__cloud::after {
+  width: 34px;
+  height: 34px;
+  left: 31px;
+  bottom: 2px;
+}
+
+.ffr__cloud--one {
+  top: 45px;
+  left: 22%;
+}
+
+.ffr__cloud--two {
+  top: 92px;
+  left: 67%;
+  transform: scale(.7);
+}
+
+.ffr__dust {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #89939c;
+  z-index: 2;
+}
+
+.ffr__overlay {
+  position: absolute;
+  inset: 0 0 42px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+  background: rgba(234,246,255,.68);
+  z-index: 10;
+}
+
+.ffr__title {
+  font-size: clamp(18px, 3vw, 26px);
+  font-weight: 900;
+  letter-spacing: .04em;
+}
+
+.ffr__message,
+.ffr__hint {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+
+.ffr__hint {
+  opacity: .65;
+}
+
+.ffr__footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+  padding: 0 4px;
+  color: #69727b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+/* Station leaderboard, below the game. Same paper/ink treatment as the play area so it
+   reads as part of the game rather than a panel bolted on. */
+.ffr__board {
+  margin-top: 16px;
+  padding: 10px 12px 12px;
+  background: var(--ffr-paper);
+  border: 2px solid var(--ffr-ink);
+  border-radius: 8px;
+  box-shadow: 6px 6px 0 rgba(36, 40, 45, .12);
+}
+
+.ffr__board-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 7px;
+  border-bottom: 2px dashed rgba(36, 40, 45, .25);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.ffr__board-list {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ffr__board-row {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ffr__board-row--me {
+  background: var(--ffr-yellow);
+  border-radius: 5px;
+}
+
+.ffr__board-rank {
+  opacity: .55;
+}
+
+.ffr__board-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ffr__board-score {
+  font-variant-numeric: tabular-nums;
+}
+
+.ffr__board-note {
+  margin: 9px 0 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  opacity: .7;
+}
+
+.ffr__board-note--ok {
+  color: #1d7a3c;
+  opacity: 1;
+}
+
+.ffr__board-note--warn {
+  color: var(--ffr-red);
+  opacity: 1;
+}
+
+@keyframes ffr-ground {
+  from { transform: translateX(0); }
+  to { transform: translateX(-42px); }
+}
+
+@keyframes ffr-siren {
+  0%, 49% { filter: none; }
+  50%, 100% { filter: brightness(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ffr__ground-lines,
+  .ffr__obstacle--truck {
+    animation: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .ffr__footer {
+    flex-direction: column;
+    gap: 4px;
+  }
+}

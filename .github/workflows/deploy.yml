@@ -1,0 +1,77 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify Apps Script URL secret
+        env:
+          APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
+        run: |
+          if [ -z "$APPS_SCRIPT_URL" ]; then
+            echo "::error::The VITE_APPS_SCRIPT_URL repository secret is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "VITE_APPS_SCRIPT_URL secret is set."
+
+      - name: Install dependencies
+        run: npm ci
+
+      # A credential in the tree is the one mistake that cannot be undone by a later commit: the commit stays
+      # reachable by SHA and every clone keeps its copy. This fails the build before it can be published.
+      - name: Guard against committed credentials
+        run: python3 scripts/check-secrets.py
+
+      # Lint before building. It is fast and deterministic, and it catches the class of mistake a build
+      # cannot: an undefined identifier in an expression (a missing destructured prop) compiles fine and
+      # throws at runtime. The behavioural suite is run locally - see "Before you publish" in the README -
+      # because several of its assertions depend on the current date.
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        env:
+          VITE_APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          echo "Building with base path /${REPO_NAME}/"
+          BASE_PATH="/${REPO_NAME}/" npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

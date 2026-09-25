@@ -1,0 +1,1 @@
+The **Help** module is this documentation. Every guide in the list on the left covers one part of the app, and the set of guides shown here is the **member** one — the administrator screens have their own separate set.

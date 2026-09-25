@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+tmp-test-out
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables (keep the Apps Script URL out of version control)
+.env
+.env.*
+!.env.example
+
+# Service files
+#
+# Code.gs is deliberately TRACKED. It holds no credentials - the FCM service-account key, web config and VAPID
+# keys live in the system_settings sheet and Script Properties, and the file refers to them only by key name -
+# and it uses getActiveSpreadsheet(), so no spreadsheet ID appears in it either. Keeping it here means the front
+# end and back end are versioned together and reviewed in one place.
+#
+# The service-account JSON is a real credential and must never be committed. scripts/check-secrets.py (CI +
+# the pre-commit hook) fails on either file if it ever is.
+fire-clock-76723.json
+*.pxd

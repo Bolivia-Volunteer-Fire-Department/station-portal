@@ -1,0 +1,53 @@
+/* ---------------------------------------------------------------------------
+   Printed schedules
+
+   The sheet is rendered by PrintableSchedule, which mounts it into <body> through
+   a portal and then calls window.print(). It is hidden on screen and the app is
+   hidden on paper, so a print shows the sheet and nothing else.
+
+   Hiding is done from <body> rather than from #root so the portal is a sibling of
+   the app: `body > *:not(.print-sheet)` covers the app, any other portal (the
+   toast host, the modals) and leaves the sheet alone.
+   --------------------------------------------------------------------------- */
+.print-sheet {
+  display: none;
+}
+
+@media print {
+  /* Letter, portrait, with the margin the header rule relies on. */
+  @page {
+    size: letter portrait;
+    margin: 12mm;
+  }
+
+  body > *:not(.print-sheet) {
+    display: none !important;
+  }
+
+  .print-sheet {
+    display: block !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Assignment colours are information, so keep them: browsers drop backgrounds by
+     default to save ink. */
+  .print-sheet * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* A week must not be split across two pages - a half-week is unreadable. */
+  .print-week {
+    break-inside: avoid;
+  }
+
+  /* Keep a table row whole for the same reason. */
+  .print-day-row {
+    break-inside: avoid;
+  }
+}
