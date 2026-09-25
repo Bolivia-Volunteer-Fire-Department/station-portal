@@ -86,18 +86,6 @@ export default function UserSettings({
 
   return (
     <div className="space-y-6">
-      {/* Header Card */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-6 shadow-xl flex items-center gap-4">
-        <div className="p-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
-          <User className="w-6 h-6" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">User Preferences</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Customize display preferences for {currentUser?.name || currentUser?.id || 'your account'}
-          </p>
-        </div>
-      </div>
 
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">

@@ -926,7 +926,10 @@ check('a blank colour falls back to the default grey', greyPill.color, EVENT_DEF
 check('and still washes', greyPill.backgroundColor, `${EVENT_DEFAULT_COLOR}33`);
 // A solid pill would mean white text on a saturated fill - the shift treatment, which events must not take.
 check('the pill never writes white', /text-white/.test(pillCode), false);
-check('the pill is a div, never a button', /<div/.test(pillCode) && !/<button/.test(pillCode), true);
+check('the pill is a div when nothing happens on a tap', /if \(!onClick\) return <div/.test(pillCode), true);
+// My Schedule DOES want a tap, and a tap target should be a button for a keyboard and a screen reader - so
+// the pill becomes one only when it is handed a handler.
+check('and a button when it is', /<button[\s\S]{0,120}?onClick=\{onClick\}/.test(pillCode), true);
 // It takes its colour from the shared helper rather than hard-coding a fill, which is what keeps the wash
 // translucent on both themes and identical across the three calendars.
 check('and takes the shared treatment', /eventPillStyle\(segment\.color\)/.test(pillCode), true);
@@ -969,10 +972,10 @@ const availabilityEventBlock = availabilitySource.slice(
   availabilitySource.indexOf('daySlots.map((slot)')
 );
 check('the availability event block was found', availabilityEventBlock.length > 50, true);
-// An event must not become something a member can tick: the slots are buttons, the events are not. The pill
-// is a plain <div> inside the shared EventPill component, so this checks the block AND the component.
+// An event must not become something a member can tick: the slots are buttons, the events are not. Here the
+// shared pill is handed no handler, so it stays the <div> it is by default - no tap, no button.
 check('the availability event block renders the shared pill', /<EventPill/.test(availabilityEventBlock), true);
-check('the shared pill is a div, never a button', /<div/.test(pillCode) && !/<button/.test(pillCode), true);
+check('and never hands it a handler', /onClick/.test(availabilityEventBlock), false);
 // One shared pill for every calendar: none of them hand-rolls its own event markup, which is exactly how the
 // treatment would otherwise drift apart.
 [['ScheduleCalendar', calendarSource], ['AvailabilityCalendar', availabilitySource], ['the board', boardSource]].forEach(

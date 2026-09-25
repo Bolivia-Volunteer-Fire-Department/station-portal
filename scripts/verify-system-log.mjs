@@ -220,9 +220,37 @@ const LOG_CONSTS = [
   'SYSTEM_LOG_API_VERSION',
 ].map(extractConst);
 const logFunctions = [
-  'logCellText', 'normalizeLogEntry', 'logEntryMatches', 'compareLogText', 'compareLogTimestamp',
-  'sortLogEntries', 'paginateLogEntries', 'logFacets', 'systemLogPage',
+  'logCellText', 'logTimestampText', 'logSortKey', 'normalizeLogEntry', 'logEntryMatches',
+  'compareLogText', 'compareLogTimestamp', 'sortLogEntries', 'paginateLogEntries', 'logFacets',
+  'systemLogPage',
 ].map(extract);
+
+// A minimal `Utilities.formatDate` for the sandbox. Intl does the zone maths, so a known instant
+// formats exactly as Apps Script would for America/New_York - which is what makes the Date-cell case
+// below assertable rather than merely shape-checked.
+const utilitiesStub = {
+  formatDate: (date, timeZone, format) => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+    const part = (type) => (parts.find((p) => p.type === type) || {}).value || '00';
+    const hour = part('hour') === '24' ? '00' : part('hour');
+    return format
+      .replace('yyyy', part('year'))
+      .replace('MM', part('month'))
+      .replace('dd', part('day'))
+      .replace('HH', hour)
+      .replace('mm', part('minute'))
+      .replace('ss', part('second'));
+  },
+};
 
 const buildServer = (sheetRows) => {
   const body = `
@@ -232,8 +260,8 @@ const buildServer = (sheetRows) => {
   `;
   // The sheet is closed over rather than read from the ss argument, so a test can call
   // systemLogPage({}, request) and get the fixture.
-  const fn = new Function('getSheetData', body);
-  return fn(() => sheetRows);
+  const fn = new Function('getSheetData', 'Utilities', body);
+  return fn(() => sheetRows, utilitiesStub);
 };
 const probes = buildServer([]);
 check('every log function was extracted', logFunctions.every((fn) => fn.length > 40), true);
@@ -284,6 +312,63 @@ check(
   'and an undated row is not counted as dated',
   sortedDesc.find((r) => r.id === '90').date_key,
   ''
+);
+
+console.log('\n--- a date-formatted column still sorts chronologically ---');
+// The bug: when the timestamp column is formatted as a date, Sheets stores the written string as a
+// date value and getValues() returns a Date. String(date) starts with the WEEKDAY, so the date key
+// failed to parse, every row was treated as undated, and the alphabetical fallback grouped all the
+// Wednesdays together. Normalizing on the server fixes the sort and the display together.
+const wednesday = new Date('2026-09-23T20:00:00Z'); // 16:00 in Eastern (EDT)
+const dateEntry = server.normalizeLogEntry({ id: '1', timestamp: wednesday, action: 'USER_LOGIN' });
+check('a Date cell becomes station-time text', dateEntry.timestamp, '2026-09-23 16:00:00');
+check('so its date key parses', dateEntry.date_key, '2026-09-23');
+check('and it carries a sortable instant', dateEntry.sort_key, '2026-09-23 16:00:00');
+// The tell-tale weekday prefix must be gone, since that is what the alphabetical sort grouped on.
+check('the weekday prefix is gone', /^[A-Z][a-z]{2} /.test(dateEntry.timestamp), false);
+
+// Wednesday, Thursday and Monday: alphabetical order groups them by weekday NAME (Mon, Thu, Wed),
+// whereas chronological order is Wed < Thu < Mon by date.
+const weekServer = buildServer([
+  { id: 'wed', timestamp: new Date('2026-09-23T20:00:00Z'), action: 'A', user_id: 'u1', details: '' },
+  { id: 'thu', timestamp: new Date('2026-09-24T20:00:00Z'), action: 'A', user_id: 'u1', details: '' },
+  { id: 'mon', timestamp: new Date('2026-09-28T20:00:00Z'), action: 'A', user_id: 'u1', details: '' },
+]);
+check(
+  'oldest first is chronological, not grouped by weekday',
+  weekServer.systemLogPage({}, { sort: 'timestamp_asc' }).rows.map((r) => r.id),
+  ['wed', 'thu', 'mon']
+);
+check(
+  'newest first reverses it',
+  weekServer.systemLogPage({}, { sort: 'timestamp_desc' }).rows.map((r) => r.id),
+  ['mon', 'thu', 'wed']
+);
+
+// A column holding mixed shapes - the canonical text, a Date, and an ISO string with a zone - must
+// still order by the instant each one represents (09:00, 14:00 and 17:00 in station time).
+const mixedServer = buildServer([
+  { id: 'text', timestamp: '2026-09-24 09:00:00', action: 'A', user_id: 'u1', details: '' },
+  { id: 'date', timestamp: new Date('2026-09-24T18:00:00Z'), action: 'A', user_id: 'u1', details: '' },
+  { id: 'iso', timestamp: '2026-09-24T21:00:00.000Z', action: 'A', user_id: 'u1', details: '' },
+]);
+check(
+  'mixed cell shapes sort by instant',
+  mixedServer.systemLogPage({}, { sort: 'timestamp_asc' }).rows.map((r) => r.id),
+  ['text', 'date', 'iso']
+);
+
+// The client half has to survive the un-normalized form too, or a deployment that predates this fix
+// renders raw JavaScript date strings in the table.
+check(
+  'the client reads a Date-shaped string',
+  logTimestampParts('Wed Sep 23 2026 22:15:00 GMT-0400 (Eastern Daylight Time)'),
+  { dateKey: '2026-09-23', timeText: '22:15' }
+);
+check(
+  'and renders it as a formatted timestamp',
+  formatLogTimestamp('Wed Sep 23 2026 22:15:00 GMT-0400 (Eastern Daylight Time)', '12'),
+  'Wed, Sep 23 2026 · 10:15 PM'
 );
 
 console.log('\n--- paging ---');

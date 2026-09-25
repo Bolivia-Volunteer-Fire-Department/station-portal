@@ -15,6 +15,8 @@ import { compareCrewOrder } from '../utils/crewOrder';
 import { submitShiftOffer } from '../services/api';
 import ViewToggle from './ViewToggle';
 import ShiftOfferModal from './ShiftOfferModal';
+import ScheduleItemModal from './ScheduleItemModal';
+import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
 import PrintableSchedule from './PrintableSchedule';
 
 // Identity used for an unfilled shift wherever a member's name would go.
@@ -30,6 +32,9 @@ export default function ScheduleCalendar({
   scheduleTemplates = [],
   ranks = [],
   users = [],
+  // Reference rows for the event detail modal's audience line ("...role", "...rank and above"). Only names
+  // are read from them; a caller that omits them gets ids instead, which is why they are optional.
+  roles = [],
   offers = [],
   token,
   // Role permissions. Least privilege by default: a caller that forgets to pass
@@ -58,6 +63,10 @@ export default function ScheduleCalendar({
   const [showEveryone, setShowEveryone] = useState(false);
   // Open pill the member clicked, held while the confirmation modal is up.
   const [offerTarget, setOfferTarget] = useState(null);
+  // The item whose details are open, as { kind: 'shift' | 'event', item }. Shift pills that are already
+  // filled and event pills open this; open pills keep going straight to the offer modal, which is the same
+  // layout plus the one action that pill has.
+  const [detailTarget, setDetailTarget] = useState(null);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -271,6 +280,11 @@ export default function ScheduleCalendar({
     if (slotOffers.some((o) => o.status === 'declined')) return 'declined';
     return '';
   };
+
+  // The event row behind a tapped pill. A segment carries one day's slice of an event (the times, the colour)
+  // and its id, but the popup also has to answer "does this repeat?" - which only the row knows.
+  const eventFor = (segment) =>
+    normalizedEvents.find((event) => String(event.id) === String(segment?.eventId)) || null;
 
   // Opens the confirmation modal (only open/declined pills are clickable, and only
   // for a role that may offer at all).
@@ -549,6 +563,7 @@ export default function ScheduleCalendar({
                       segment={segment}
                       timeFormat={timeFormat}
                       className="mx-0.5 mt-0.5"
+                      onClick={() => setDetailTarget({ kind: 'event', item: segment, event: eventFor(segment) })}
                     />
                   ))}
                   {dayAssignments.map((a) => {
@@ -590,17 +605,21 @@ export default function ScheduleCalendar({
                       'mt-0.5 w-full overflow-hidden px-1.5 py-0.5 rounded-md text-[10px] leading-tight font-semibold';
 
                     if (!a.isOpen) {
+                      // A filled shift has no action, but it still has facts the tooltip cannot hold - so it
+                      // opens the same detail modal as an event.
                       return (
-                        <span
+                        <button
                           key={a.key}
-                          className={`${baseClass} text-white ${
+                          type="button"
+                          onClick={() => setDetailTarget({ kind: 'shift', item: a })}
+                          className={`${baseClass} block text-left text-white transition hover:brightness-110 ${
                             showEveryone && a.isMine ? 'ring-1 ring-white/70 dark:ring-red-300' : ''
                           }`}
                           style={{ backgroundColor: a.color }}
-                          title={describe(a)}
+                          title={`${describe(a)} — click for details`}
                         >
                           {lines}
-                        </span>
+                        </button>
                       );
                     }
 
@@ -654,15 +673,20 @@ export default function ScheduleCalendar({
         ) : (
           <div className="space-y-3">
             {visibleAssignments.map((a) => (
-              <div
+              // Tappable like the pill above, and for the same reason: the tooltip cannot hold everything.
+              <button
                 key={String(a.row.id ?? '') + a.from + a.to}
-                className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50"
+                type="button"
+                onClick={() => setDetailTarget({ kind: 'shift', item: a })}
+                title={`${describe(a)} — click for details`}
+                className="w-full text-left flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 transition"
               >
-                <div className="p-2 bg-red-600/10 border border-red-500/20 rounded-xl text-red-500 shrink-0">
+                {/* Spans, not divs/paragraphs: a button may only contain phrasing content. */}
+                <span className="p-2 bg-red-600/10 border border-red-500/20 rounded-xl text-red-500 shrink-0">
                   <CalendarRange className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 flex-1 overflow-hidden">
-                  <p className="flex items-center gap-1.5 font-semibold text-sm text-slate-900 dark:text-white">
+                </span>
+                <span className="min-w-0 flex-1 overflow-hidden">
+                  <span className="flex items-center gap-1.5 font-semibold text-sm text-slate-900 dark:text-white">
                     {a.icon && (
                       <RankIcon
                         name={a.icon}
@@ -671,21 +695,21 @@ export default function ScheduleCalendar({
                       />
                     )}
                     <span className="truncate">{a.label || 'Scheduled shift'}</span>
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{formatRange(a)}</p>
+                  </span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">{formatRange(a)}</span>
                   {a.timeRange && (
-                    <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-300 truncate">
+                    <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-slate-300 truncate">
                       <Clock className="w-3.5 h-3.5 text-red-500 shrink-0" />
                       {a.timeRange}
-                    </p>
+                    </span>
                   )}
-                </div>
+                </span>
                 {a.row.assignment_id !== undefined && a.row.assignment_id !== '' && (
                   <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
                     #{a.row.assignment_id}
                   </span>
                 )}
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -704,6 +728,21 @@ export default function ScheduleCalendar({
           assignment={assignmentById(offerTarget.assignmentId)}
           onClose={() => setOfferTarget(null)}
           onConfirm={submitOffer}
+        />
+      )}
+
+      {/* Details for a filled shift or an event. The rows come from utils/scheduleItemDetails, so what the
+          modal says is tested rather than the markup that says it. `crewMember` follows the Show everyone
+          toggle: in the personal view the reader is the member, so naming them would be noise. */}
+      {detailTarget && (
+        <ScheduleItemModal
+          details={
+            detailTarget.kind === 'event'
+              ? eventItemDetails(detailTarget.event, detailTarget.item, { timeFormat, roles, ranks, users })
+              : shiftItemDetails(detailTarget.item, { timeFormat, crewMember: showEveryone && !detailTarget.item.isMine })
+          }
+          icon={detailTarget.kind}
+          onClose={() => setDetailTarget(null)}
         />
       )}
 

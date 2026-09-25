@@ -40,6 +40,13 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
+**Version 1.03**
+* Fixed System Log timestamp sorting in the Google Apps Scripts.
+* Introduced "bar labels", which are how page titles will stick to the header on mobile so users know where they are after they scroll on the page.
+* Removed an extra and unnecessary heading from User Settings.
+* Added informational modals to the My Schedule module that appear when you tap on a calendar item, or list item.
+* Swapped out the icon for the Content dropdown in the Administration module.
+
 **Version 1.02**
 * Fixed HTTP REFERRER blocks for push notifications
 * Fixed sticky header (again lol)

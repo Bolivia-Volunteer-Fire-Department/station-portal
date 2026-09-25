@@ -5388,18 +5388,54 @@ function logCellText(value) {
   return String(value === undefined || value === null ? "" : value).trim();
 }
 
+// A log cell is not always text.
+//
+// logSystemEvent writes "yyyy-MM-dd HH:mm:ss", but when the timestamp COLUMN is formatted as a date,
+// Sheets stores that string as a date value and getValues() hands back a Date. String(Date) is
+// "Wed Sep 24 2026 22:15:00 GMT-0400 (Eastern Daylight Time)", which starts with the WEEKDAY: the
+// date key below then fails to parse, every row is treated as undated, and the alphabetical fallback
+// groups every Wednesday together. Normalizing to the canonical station-time text fixes the sort and
+// the display in one place.
+function logTimestampText(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, "America/New_York", "yyyy-MM-dd HH:mm:ss");
+  }
+
+  const raw = String(value).trim();
+  // Already the text logSystemEvent writes (allowing the "T" an ISO string carries).
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(raw)) return raw.replace("T", " ");
+
+  // Anything else a Date can read - including an ISO string with a zone - is converted to station
+  // time, so two rows are compared as instants rather than as whatever text a sheet happened to hold.
+  const parsed = new Date(raw);
+  if (!isNaN(parsed.getTime())) {
+    return Utilities.formatDate(parsed, "America/New_York", "yyyy-MM-dd HH:mm:ss");
+  }
+  return raw;
+}
+
+// The sortable form: "yyyy-MM-dd HH:mm:ss", or "" when the value is not a date at all. Sorting on this
+// rather than on the raw text is what makes a column holding mixed shapes behave.
+function logSortKey(timestampText) {
+  const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?::(\d{2}))?/.exec(String(timestampText || ""));
+  if (!match) return "";
+  return match[1] + " " + match[2] + ":" + (match[3] || "00");
+}
+
 function normalizeLogEntry(row) {
   const source = row || {};
-  const timestamp = logCellText(source.timestamp);
-  // The first ten characters of "yyyy-MM-dd HH:mm:ss" are a sortable date key, but ONLY if they
-  // really are a date: a hand-edited cell holding "nonsense" would otherwise yield a ten-character
-  // key that sorts as if it were a very late date. Validating the shape means an unreadable
-  // timestamp is treated as undated, which sorts last and cannot satisfy a date range.
-  const candidateKey = timestamp.slice(0, 10);
+  const timestamp = logTimestampText(source.timestamp);
+  const sortKey = logSortKey(timestamp);
   return {
     id: logCellText(source.id),
     timestamp: timestamp,
-    date_key: /^\d{4}-\d{2}-\d{2}$/.test(candidateKey) ? candidateKey : "",
+    // The date half of the sort key, and validated: a hand-edited cell holding "nonsense" must not
+    // yield a ten-character key that sorts as if it were a very late date. An unreadable timestamp is
+    // treated as undated, which sorts last and cannot satisfy a date range.
+    date_key: sortKey ? sortKey.slice(0, 10) : "",
+    // The full instant, so ordering does not depend on the shape of the cell it came from.
+    sort_key: sortKey,
     user_id: logCellText(source.user_id),
     action: logCellText(source.action),
     details: logCellText(source.details),
@@ -5436,18 +5472,20 @@ function compareLogText(aValue, bValue, direction) {
   return (a < b ? -1 : 1) * direction;
 }
 
-// Timestamp order, which needs its own rule: an entry with an UNREADABLE timestamp must sort last in
-// both directions. Comparing the raw text alone would put "nonsense" at the top of a newest-first
-// list, because "n" sorts after any digit - an unparseable date presented as the most recent entry.
-// So the validated date key decides the day, and the full text only breaks ties within it.
+// Timestamp order.
+//
+// Compares the normalized sort key, so a cell holding a Date, an ISO string and the canonical text all
+// land in the right order. An entry with no readable timestamp sorts LAST in both directions - an
+// unparseable date must never be presented as the most recent entry - and the raw text only breaks a
+// tie between two unreadable values, so the order stays stable rather than depending on sheet order.
 function compareLogTimestamp(a, b, direction) {
-  const aKey = String(a.date_key || "");
-  const bKey = String(b.date_key || "");
+  const aKey = String(a.sort_key || a.date_key || "");
+  const bKey = String(b.sort_key || b.date_key || "");
   if (!aKey && !bKey) return compareLogText(a.timestamp, b.timestamp, direction);
   if (!aKey) return 1;
   if (!bKey) return -1;
   if (aKey !== bKey) return (aKey < bKey ? -1 : 1) * direction;
-  return compareLogText(a.timestamp, b.timestamp, direction);
+  return 0;
 }
 
 function sortLogEntries(entries, sort) {

@@ -10,6 +10,7 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import { renderToString } from 'react-dom/server';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from '../src/utils/contentWidth.js';
+import { ADMIN_BAR_LABELS, PAGE_BAR_LABELS, adminBarLabel, pageBarLabel } from '../src/utils/pageLabels.js';
 import CenteredContent from '../src/components/CenteredContent.jsx';
 import AdminPanel, { ADMIN_NAV_CATEGORIES } from '../src/components/admin/AdminPanel.jsx';
 import Sidebar from '../src/components/Sidebar.jsx';
@@ -1086,7 +1087,9 @@ check('the tab forwards ranks to the roster', /<AdminAvailabilityRoster[\s\S]{0,
 console.log('\n--- the app bar pins on mobile ---');
 
 const shellSource = readFileSync('src/App.jsx', 'utf8');
-const mobileHeader = /<header className="([^"]*md:hidden[^"]*)"/.exec(shellSource);
+const adminPanelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
+// Attributes before className are allowed: the bar carries a ref for the scroll observer.
+const mobileHeader = /<header[^>]*className="([^"]*md:hidden[^"]*)"/.exec(shellSource);
 check('the mobile app bar was found', !!mobileHeader, true);
 
 const headerClass = mobileHeader ? mobileHeader[1] : '';
@@ -1099,7 +1102,7 @@ check('and spans the width above the content', /justify-between/.test(headerClas
 // way as you read. Pinned here so it does not creep back in.
 check(
   'the page title scrolls with the page',
-  /<div className="mb-8">/.test(shellSource) && !/<div className="sticky/.test(shellSource),
+  /<div[^>]*className="mb-8">/.test(shellSource) && !/<div className="sticky/.test(shellSource),
   true
 );
 
@@ -1121,6 +1124,92 @@ check(
   `bar z-${headerZ ? headerZ[1] : 'none'}, backdrop z-${backdropZ ? backdropZ[1] : 'none'}, drawer z-${drawerZ ? drawerZ[1] : 'none'}`
 );
 check('while still sitting above the page content', Number(headerZ && headerZ[1]) > 0, true);
+
+
+// The sub-menu inside Administration must sit UNDER the app bar too: it was `z-20` against the bar's
+// `z-10`, so the tab strip and its overflow menus painted on top of the sticky header as you scrolled.
+const subMenuClass = /<div ref=\{barRef\} className="([^"]*)"/.exec(adminPanelSource);
+check('the admin sub-menu bar was found', !!subMenuClass, true);
+const subMenuZ = /z-\[(\d+)\]/.exec(subMenuClass ? subMenuClass[1] : '');
+check('it uses a bracket z-index (below the numbered scale)', !!subMenuZ, true);
+check(
+  'and sits below the sticky app bar',
+  Boolean(subMenuZ && headerZ) && Number(subMenuZ[1]) < Number(headerZ[1]),
+  `sub-menu z-${subMenuZ ? subMenuZ[1] : 'none'} vs bar z-${headerZ ? headerZ[1] : 'none'}`
+);
+check('while still floating above the page content', Number(subMenuZ && subMenuZ[1]) > 0, true);
+
+// --- the page name appended to the app bar ------------------------------------------------------
+console.log('\n--- the app bar names the page once its heading scrolls away ---');
+
+check('the bar reads the label from one place', /pageBarLabel\(activeTab, adminSubTab\)/.test(shellSource), true);
+check(
+  'and only once the heading has gone',
+  /showPageLabel && pageBarLabel\(activeTab, adminSubTab\)/.test(shellSource),
+  true
+);
+// The Administration sub-tab has to reach the bar, or it would always read the bare page name.
+check('the open sub-tab is reported upward', /onActiveSubTabChange=\{setAdminSubTab\}/.test(shellSource), true);
+check(
+  'and AdminPanel reports it as it changes',
+  /onActiveSubTabChange\(activeSubTab \|\| ''\)/.test(adminPanelSource),
+  true
+);
+
+// The trigger is a measured bar height rather than a magic number: if the two drift, the label appears
+// while the heading is still on screen (or long after it has gone).
+check('an IntersectionObserver drives it', /new IntersectionObserver\(/.test(shellSource), true);
+check(
+  'with the root margin measured from the bar',
+  /topBarRef\.current\.offsetHeight/.test(shellSource) && /rootMargin: `-\$\{barHeight\}px/.test(shellSource),
+  true
+);
+check('observing the page heading', /pageHeadingRef\.current/.test(shellSource) && /ref=\{pageHeadingRef\}/.test(shellSource), true);
+// A long label must not push the menu button off the screen.
+check('the label truncates and the row can shrink', /truncate text-sm/.test(shellSource) && /flex min-w-0 items-center gap-2/.test(shellSource), true);
+
+// Every page that has a heading must have a bar label, or the bar would gain an empty dash.
+//
+// This file's `check` takes a CONDITION, not an expected value: `check(label, someArray, [])` passes for
+// any truthy value, empty array included, so an unchecked list of offenders would assert nothing.
+const headingBlockStart = shellSource.indexOf('ref={pageHeadingRef}');
+const headingBlockEnd = shellSource.indexOf("{activeTab === 'dashboard' && (", headingBlockStart);
+const headingBlock = shellSource.slice(headingBlockStart, headingBlockEnd);
+const headingTabs = [...new Set([...headingBlock.matchAll(/activeTab === '([a-z-]+)'/g)].map((m) => m[1]))];
+const tabsMissingLabel = headingTabs.filter((tab) => !pageBarLabel(tab));
+check('the heading block was found', headingTabs.length >= 8, `found ${headingTabs.length}`);
+check('every page heading has a bar label', tabsMissingLabel.length === 0, `missing: ${tabsMissingLabel.join(', ')}`);
+check('and the example from the request reads correctly', pageBarLabel('admin') === 'Administration', `got ${JSON.stringify(pageBarLabel('admin'))}`);
+check(
+  'and with a sub-tab it names it',
+  pageBarLabel('admin', 'schedule') === 'Admin: Schedule Mgt',
+  `got ${JSON.stringify(pageBarLabel('admin', 'schedule'))}`
+);
+check(
+  'an unknown sub-tab falls back to the page name',
+  pageBarLabel('admin', 'nope') === 'Administration',
+  `got ${JSON.stringify(pageBarLabel('admin', 'nope'))}`
+);
+check('an unknown tab has no label', pageBarLabel('runner') === '', `got ${JSON.stringify(pageBarLabel('runner'))}`);
+
+// Every sub-tab in the real navigation must have a bar label, derived from ADMIN_NAV_CATEGORIES itself
+// rather than from a regex: these ids are hyphenated (`system-log`), which a naive pattern misses - and
+// that is exactly how the first version of the map came to key on `log` and show nothing.
+const navTabIds = ADMIN_NAV_CATEGORIES.flatMap((category) => category.items.map((item) => item.id));
+const missingSubLabels = navTabIds.filter((id) => !adminBarLabel(id));
+check('every admin sub-tab has a bar label', missingSubLabels.length === 0, `missing: ${missingSubLabels.join(', ')}`);
+check('and the navigation was read', navTabIds.length >= 15, `found ${navTabIds.length}`);
+
+// Short on purpose: these sit beside the app name on a phone. The two sets have different budgets -
+// a page label stands alone, while a sub-tab label is always prefixed with "Admin: ".
+const longPageLabels = Object.entries(PAGE_BAR_LABELS).filter(([, label]) => label.length > 20);
+check('page labels stay short', longPageLabels.length === 0, `too long: ${longPageLabels.map(([key]) => key).join(', ')}`);
+const longSubLabels = Object.entries(ADMIN_BAR_LABELS).filter(([, label]) => label.length > 13);
+check(
+  'and sub-tab labels leave room for the prefix',
+  longSubLabels.length === 0,
+  `too long: ${longSubLabels.map(([key]) => key).join(', ')}`
+);
 
 
 // --- content width ----------------------------------------------------------------------------

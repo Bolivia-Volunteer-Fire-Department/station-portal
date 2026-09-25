@@ -42,6 +42,7 @@ import {
 import ScheduleCalendar from './components/ScheduleCalendar';
 import MyAvailability from './components/MyAvailability';
 import HelpGuides from './components/HelpGuides';
+import { pageBarLabel } from './utils/pageLabels';
 import TrainingModule from './components/TrainingModule';
 import DigitalClock from './components/DigitalClock';
 import AdminPanel from './components/admin/AdminPanel';
@@ -222,6 +223,34 @@ export default function App() {
 
   // Whether this screen's content is capped and centred (see CENTERED_CONTENT_TABS).
   const centeredContent = CENTERED_CONTENT_TABS.includes(activeTab);
+
+  // The mobile app bar gains the page name once the page's own heading has scrolled out of sight, so a
+  // reader partway down a long table still knows where they are. Only that bar shows it - from md up it
+  // is hidden and the heading is always on screen anyway.
+  //
+  // An IntersectionObserver rather than a scroll listener: no handler runs per frame, and the trigger is
+  // "the heading has gone behind the bar", which is exactly what the negative root margin expresses. The
+  // margin is measured from the bar rather than hardcoded, so the two cannot drift apart.
+  const topBarRef = useRef(null);
+  const pageHeadingRef = useRef(null);
+  const [showPageLabel, setShowPageLabel] = useState(false);
+  // The open Administration sub-tab, reported up by AdminPanel so the bar can say "Admin: Schedule Mgt".
+  const [adminSubTab, setAdminSubTab] = useState('');
+
+  useEffect(() => {
+    const heading = pageHeadingRef.current;
+    if (!heading || typeof IntersectionObserver === 'undefined') return undefined;
+
+    const barHeight = topBarRef.current ? topBarRef.current.offsetHeight : 0;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowPageLabel(!entry.isIntersecting),
+      { rootMargin: `-${barHeight}px 0px 0px 0px`, threshold: 0 }
+    );
+    observer.observe(heading);
+    return () => observer.disconnect();
+    // Re-observing on a tab change reports the new heading's position immediately, without waiting for
+    // the reader to scroll.
+  }, [activeTab, currentUser]);
 
   const departmentName = systemSettings.find((s) => String(s.key) === 'department_name')?.value || '';
 
@@ -1114,8 +1143,8 @@ const getLoadingMessage = () => {
           {/* Sticky on mobile so the app name and the menu button are always reachable; the page title
               below scrolls with the content, as it should. `z-10` keeps it BELOW the sidebar's z-20
               backdrop and z-30 drawer, so opening the menu dims the whole page including this bar. */}
-          <header className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4">
-            <div className="flex items-center gap-2">
+          <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex min-w-0 items-center gap-2">
               <a href="#" onClick={(e) => {
                 e.preventDefault();
                 handleEasterEgg();
@@ -1123,7 +1152,17 @@ const getLoadingMessage = () => {
                 <img src={stationLogoUrl()} alt="Bolivia Fire Department Logo" className="w-8 h-8" />
                 {/* <Shield className="w-7 h-7 text-red-500" /> */}
               </a>
-              <span className="font-bold text-lg text-slate-900 dark:text-white">Station Portal</span>
+              <span className="font-bold text-lg text-slate-900 dark:text-white shrink-0">Station Portal</span>
+              {/* The current page, once its own heading has scrolled away. `truncate` matters here: a
+                  long label must not push the menu button off the screen. */}
+              {showPageLabel && pageBarLabel(activeTab, adminSubTab) && (
+                <>
+                  <span className="shrink-0 text-slate-300 dark:text-slate-600" aria-hidden="true">—</span>
+                  <span className="truncate text-sm font-medium text-slate-500 dark:text-slate-400">
+                    {pageBarLabel(activeTab, adminSubTab)}
+                  </span>
+                </>
+              )}
             </div>
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -1158,8 +1197,8 @@ const getLoadingMessage = () => {
             }`}
           >
             {/* The page title scrolls with the content: only the app bar above is pinned, so the heading
-                moves out of the way as you read. */}
-            <div className="mb-8">
+                moves out of the way as you read. Once it has, the app bar says which page this is. */}
+            <div ref={pageHeadingRef} className="mb-8">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
                 {activeTab === 'clock-history' && 'My Clock History'}
@@ -1231,6 +1270,8 @@ const getLoadingMessage = () => {
                 // Non-shift entries, already audience-filtered by the server.
                 events={events}
                 eventAudience={announcementAudience}
+                // Names the audience line in an event's detail popup (a role description rather than "#id").
+                roles={roles}
                 timeFormat={activeTimeFormat}
                 // Used only on the printed sheet's header.
                 departmentName={departmentName}
@@ -1288,6 +1329,8 @@ const getLoadingMessage = () => {
               <AdminPanel
                 // Used only on the printed schedule sheet's header.
                 departmentName={departmentName}
+                // Lets the app bar name the open Administration tab ("Admin: Schedule Mgt").
+                onActiveSubTabChange={setAdminSubTab}
                 currentRole={currentUserRole}
                 isAdmin={isAdmin}
                 users={users}

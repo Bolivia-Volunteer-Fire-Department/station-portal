@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, GraduationCap, ScrollText, Megaphone } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, GraduationCap, ScrollText, Megaphone, Book } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -69,7 +69,7 @@ export const ADMIN_NAV_CATEGORIES = [
     // Renamed from Training to Content when Announcements arrived alongside the Training report.
     id: 'catContent',
     label: 'Content',
-    icon: GraduationCap,
+    icon: Book,
     items: [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
       { id: 'training', label: 'Training', icon: GraduationCap },
@@ -112,6 +112,9 @@ export default function AdminPanel({
   onAvailabilityChanged,
   onLogsChanged,
   onAdminDataChanged,
+  // Reports the open sub-tab upward, so the app bar can say "Admin: Schedule Mgt" once the page
+  // heading has scrolled away. Optional: the panel works without it.
+  onActiveSubTabChange,
   offers = [],
   onOffersChanged,
   // Training record and signatures. An administrator receives every signature; a member
@@ -185,6 +188,15 @@ export default function AdminPanel({
     };
   }, []);
 
+  // Report the open sub-tab so the app bar can name it.
+  //
+  // An effect rather than a call inside selectItem, because the tab also changes on its own: a role edit
+  // falls back to the first permitted tab, and a new shift offer auto-focuses approvals. The parent
+  // passes a state setter, so this is a stable prop and setting the same value is a no-op.
+  useEffect(() => {
+    if (onActiveSubTabChange) onActiveSubTabChange(activeSubTab || '');
+  }, [activeSubTab, onActiveSubTabChange]);
+
   const categoryHasActive = (items) => items.some((item) => item.id === activeSubTab);
   const selectItem = (itemId) => {
     setRequestedSubTab(itemId);
@@ -198,7 +210,12 @@ export default function AdminPanel({
           Your role does not include access to any Administration tabs.
         </p>
       )}
-      <div ref={barRef} className="relative z-20 flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700 pb-2">
+      {/* `z-[5]` keeps the tab bar and its dropdown UNDER the sticky app bar (z-10) on a phone, while
+          still floating above the page content below it. It was `z-20`, which put the sub-menu - and the
+          overflow menus hanging off it - on top of the sticky header as the page scrolled. The dropdown
+          inside it keeps its own z-30; that is scoped to this element's stacking context, so it still
+          clears the content it opens over. */}
+      <div ref={barRef} className="relative z-[5] flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700 pb-2">
         {visibleCategories.map(({ id, label, icon: CatIcon, items }) => {
           const isOpen = openCategory === id;
           const isActive = categoryHasActive(items);

@@ -10,9 +10,9 @@ Each shift is drawn as a colored pill. The color comes from the **assignment**, 
 | **Dashed** | The shift is **Open**: nobody is assigned to it yet |
 | **Amber** | You have offered to fill it and an administrator has not decided yet |
 
-A pill shows the assignment plus either the shift's **nickname** (such as "Day Shift") or its times. Hover over it to see the full window, including the times when a nickname is shown.
+A pill shows the assignment plus either the shift's **nickname** (such as "Day Shift") or its times. Click one and a popup opens with everything the pill has no room for — see **Reading the details of an item** below.
 
-Below the calendar, **Schedule Details** lists the shifts in the month with their exact times.
+Below the calendar, **Schedule Details** lists the shifts in the month with their exact times. Clicking a line there opens the same popup.
 
 ## Events on the calendar
 
@@ -23,6 +23,20 @@ An event is drawn *outlined* rather than filled, so it never reads as a shift: a
 An event that covers several days is drawn on every day it covers, with `…` where it continues from one day to the next, and an arrow (`5:30 PM →`) where it runs past midnight. Hover one to see its full range.
 
 If you would rather see the month without them, click the button above the calendar that reads **Hide events** — while they are hidden it reads **Show events**. It is a temporary view choice, so it resets when you reload the page, and it only appears when there is at least one event to show.
+
+## Reading the details of an item
+
+Click a shift or an event — or tap it on a touch screen — and a popup opens with everything the pill has no room for. It never changes anything: it reports, and the only buttons close it.
+
+| You clicked | The popup shows |
+|---|---|
+| **A solid shift** | The date or date range, the exact window, the assignment, and whether it is yours |
+| **An event** | The day you clicked, the whole span when it covers several days, whether it repeats and when it next lands, and who can see it |
+| **A dashed (Open) shift** | The same details inside the offer dialog, next to the **Offer to fill** button |
+
+A shift pill shows a nickname when its template has one, so the popup is where you find the real window: a pill reading "Day Shift" tells you there that it runs 8:00 AM – 6:00 PM.
+
+With the crew view on, a colleague's pill names them in the popup. In your own view the popup is about the shift instead, because you already know whose it is.
 
 ## Moving between months
 
