@@ -1,19 +1,16 @@
 This tab is the administrator documentation: this set of guides. It is deliberately open to anyone who can reach Administration, and needs **no permission of its own** — documentation is not a privilege, and gating it would hide it from the people most likely to need it.
 
-
 ## Reading a guide
 
 Pick a guide from the list. Each one covers a single tab, so you can jump straight to the screen you are on rather than reading the whole set.
 
 Guides are **bundled with the app**, so they work offline, need no server round trip, and behave the same on GitHub Pages as they do locally.
 
-
 ## Members have their own set
 
 Members see a separate **Help** module in the sidebar, covering their own modules — clocking in, their schedule, availability and preferences. Those guides live in a different folder, and the two sets never mix: a member opening Help cannot see the administrator guides, and this tab never lists the member ones.
 
 If a member asks something about a screen you can see and they cannot, the answer is usually in their set already — point them at **Help** in their sidebar before writing anything new.
-
 
 ## Looking after these guides
 

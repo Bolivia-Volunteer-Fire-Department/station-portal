@@ -901,6 +901,82 @@ function doPost(e) {
         break;
       }
 
+      // Push registration is per DEVICE: a member's phone and computer each register their own
+      // token, so enabling one cannot take delivery away from the other. Identity comes from the
+      // session, so a member can only ever register a device against themselves.
+      case "REGISTER_PUSH_DEVICE": {
+        const authDevice = getAuthContext(ss, data);
+        if (!authDevice) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+
+        // The device token travels as `device_token`, NOT `token`: `token` is the session in the RPC
+        // envelope, and reading it here would register the session as a push device. (The same
+        // collision produced a broken System Log request earlier, so the name is deliberate.)
+        const deviceToken = String(data.device_token || payload.device_token || "").trim();
+        const deviceLabel = String(data.device_label || payload.device_label || "").trim();
+
+        if (!deviceToken) {
+          responseData = { success: false, message: "No device token was supplied." };
+          break;
+        }
+
+        const registered = registerPushDevice(ss, authDevice.userId, deviceToken, deviceLabel);
+        responseData = registered
+          ? { success: true, devices: pushTokensForUser(ss, authDevice.userId).length }
+          : { success: false, message: "Could not register this device." };
+        break;
+      }
+
+      // Removes ONE device. Deliberately token-scoped: turning notifications off on a phone must
+      // leave the member's computer registered, which is the bug this pair of actions exists to fix.
+      case "UNREGISTER_PUSH_DEVICE": {
+        const authUnregister = getAuthContext(ss, data);
+        if (!authUnregister) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+
+        // `device_token`, not `token` - see the note on REGISTER_PUSH_DEVICE above.
+        const removeToken = String(data.device_token || payload.device_token || "").trim();
+        if (!removeToken) {
+          responseData = { success: false, message: "No device token was supplied." };
+          break;
+        }
+
+        responseData = { success: true, removed: deletePushTokens(ss, [removeToken], authUnregister.userId) };
+        break;
+      }
+
+      // The signed-in member's own devices, WITHOUT tokens.
+      //
+      // A label and a last-seen stamp are what the settings card needs to say "also on 2 other
+      // devices", and a token is a credential-shaped value that has no business travelling to a
+      // browser that does not already hold it.
+      case "MY_PUSH_DEVICES": {
+        const authMyDevices = getAuthContext(ss, data);
+        if (!authMyDevices) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+
+        const myDeviceUserId = String(authMyDevices.userId).trim();
+        responseData = {
+          success: true,
+          devices: pushDeviceRows(ss).filter(function (row) {
+            return String(row.user_id || "").trim() === myDeviceUserId;
+          }).map(function (row) {
+            return {
+              id: String(row.id === undefined || row.id === null ? "" : row.id),
+              device_label: String(row.device_label || "").trim(),
+              updated_at: String(row.updated_at || "").trim()
+            };
+          })
+        };
+        break;
+      }
+
       case "UPDATE_USER_PASSWORD": {
         const authPassword = getAuthContext(ss, data);
         if (!authPassword) {
@@ -1750,6 +1826,9 @@ function doPost(e) {
 
         const settingsIndex = userSettingsIndex(ss);
         const config = fcmConfig(ss);
+        // Counted per DEVICE now, so an administrator can see who has a phone as well as a computer
+        // - and so "no device" is distinguishable from "one device".
+        const deviceCounts = pushDeviceCountByUser(ss);
 
         responseData = {
           success: true,
@@ -1758,10 +1837,12 @@ function doPost(e) {
           // screen renders those as "Default".
           users: getSheetData(ss, "users").map(function (user) {
             const row = settingsIndex[String(user.id).trim()];
+            const deviceCount = deviceCounts[String(user.id).trim()] || 0;
             return {
               id: String(user.id),
               name: user.name || user.user_name || String(user.id),
-              device_registered: !!(row && String(row.fcm_token || "").trim() !== ""),
+              device_registered: deviceCount > 0,
+              device_count: deviceCount,
               notify_new_offer: row ? row.notify_new_offer : "",
               notify_offer_approved: row ? row.notify_offer_approved : "",
               notify_offer_declined: row ? row.notify_offer_declined : ""
@@ -1788,48 +1869,79 @@ function doPost(e) {
           break;
         }
 
-        const targetRow = userSettingsIndex(ss)[targetUserId];
-        const targetToken = targetRow ? String(targetRow.fcm_token || "").trim() : "";
+        // Every device this member has registered, so a test actually proves delivery on each.
+        const targetTokens = pushTokensForUser(ss, targetUserId);
 
-        if (!targetToken) {
+        if (!targetTokens.length) {
           responseData = { success: false, message: "That member has no registered device." };
           break;
         }
 
-        const testResult = sendFcmMessage(
-          testConfig,
-          targetToken,
-          "Station Portal test",
-          "Test notification sent from the admin Notifications tab.",
-          { event: "TEST", sent_by: String(authCtx.userId) }
-        );
+        const testTitle = "Station Portal test";
+        const testBody = "Test notification sent from the admin Notifications tab.";
+        const deadTokens = [];
+        let deliveredCount = 0;
+        let lastFailure = null;
 
-        if (testResult.ok) {
-          logSystemEvent(ss, authCtx.userId, "ADMIN_SEND_TEST_PUSH", "Test push sent to user " + targetUserId);
-          responseData = { success: true, message: "Test notification sent." };
-        } else {
+        targetTokens.forEach(function (token) {
+          const testResult = sendFcmMessage(testConfig, token, testTitle, testBody, {
+            event: "TEST",
+            sent_by: String(authCtx.userId)
+          });
+
+          if (testResult.ok) {
+            deliveredCount++;
+            return;
+          }
+
+          lastFailure = testResult;
           const reason = testResult.reason || classifyFcmFailure(testResult.detail);
 
-          // Only forget a token when FCM itself answered and said the token is
-          // dead. An auth/config failure says nothing about the token.
-          const isDeadToken = reason === "rejected" && (
+          // Only forget a token when FCM itself answered and said the token is dead. An
+          // auth/config failure says nothing about the token.
+          if (reason === "rejected" && (
             testResult.code === 404 ||
             /UNREGISTERED|NOT_FOUND|INVALID_ARGUMENT/i.test(String(testResult.detail))
-          );
-          if (isDeadToken) clearStaleFcmTokens(ss, [targetUserId]);
+          )) {
+            deadTokens.push(token);
+          }
+        });
 
-          // Only a genuine FCM answer gets the "rejected" wording; anything else
-          // says what actually went wrong and how to fix it.
+        if (deadTokens.length) deletePushTokens(ss, deadTokens, targetUserId);
+
+        if (deliveredCount) {
+          logSystemEvent(
+            ss,
+            authCtx.userId,
+            "ADMIN_SEND_TEST_PUSH",
+            "Test push sent to user " + targetUserId + " (" + deliveredCount + " device(s))"
+          );
           responseData = {
-            success: false,
-            reason: reason,
-            message: reason === "rejected"
-              ? "FCM rejected the test message (" + testResult.code + ")."
-              : "Could not send the test message.",
-            advice: fcmFailureAdvice(reason),
-            detail: String(testResult.detail).slice(0, 300)
+            success: true,
+            devices: deliveredCount,
+            message: deliveredCount === 1
+              ? "Test notification sent to 1 device."
+              : "Test notification sent to " + deliveredCount + " devices."
           };
+          break;
         }
+
+        const reason = lastFailure
+          ? lastFailure.reason || classifyFcmFailure(lastFailure.detail)
+          : "network";
+        const detail = lastFailure ? String(lastFailure.detail) : "No device answered.";
+
+        // Only a genuine FCM answer gets the "rejected" wording; anything else says what actually
+        // went wrong and how to fix it.
+        responseData = {
+          success: false,
+          reason: reason,
+          message: reason === "rejected"
+            ? "FCM rejected the test message" + (lastFailure && lastFailure.code ? " (" + lastFailure.code + ")" : "") + "."
+            : "Could not send the test message.",
+          advice: fcmFailureAdvice(reason),
+          detail: detail.slice(0, 300)
+        };
         break;
       }
 
@@ -2605,10 +2717,11 @@ function sendAnnouncementPush(ss, fields) {
   if (!config.ready) return { sent: 0, skipped: 0, reason: "not-configured" };
 
   const index = userSettingsIndex(ss);
+  const tokensByUser = pushTokenIndex(ss);
   const members = getSheetData(ss, "users");
-  let sent = 0;
-  let skipped = 0;
-  let muted = 0;
+  let sent = 0; // messages delivered, one per DEVICE - a member can have several
+  let skipped = 0; // members with no registered device
+  let muted = 0; // members who have turned announcement pushes off
   const staleTokens = [];
 
   members.forEach(function (member) {
@@ -2620,26 +2733,30 @@ function sendAnnouncementPush(ss, fields) {
       return;
     }
 
-    const token = userRow ? String(userRow.fcm_token || "").trim() : "";
-    if (!token) {
+    const devices = tokensByUser[String(member.id)] || [];
+    if (!devices.length) {
       skipped++;
       return;
     }
 
-    const result = sendFcmMessage(config, token, fields.title, fields.message, {
-      event: "ANNOUNCEMENT",
-      announcement_id: String(fields.id || "")
-    });
+    // Every device they have, so nobody has to nominate one.
+    devices.forEach(function (token) {
+      const result = sendFcmMessage(config, token, fields.title, fields.message, {
+        event: "ANNOUNCEMENT",
+        announcement_id: String(fields.id || "")
+      });
 
-    if (result.ok) {
-      sent++;
-    } else if (result.reason === "rejected") {
-      // FCM says the token is dead, so clear it rather than retrying forever.
-      staleTokens.push(String(member.id));
-    }
+      if (result.ok) {
+        sent++;
+      } else if (result.reason === "rejected") {
+        // FCM says this registration is dead, so forget it rather than retrying forever. The TOKEN,
+        // not the member: their other devices must keep working.
+        staleTokens.push(token);
+      }
+    });
   });
 
-  if (staleTokens.length) clearStaleFcmTokens(ss, staleTokens);
+  if (staleTokens.length) deletePushTokens(ss, staleTokens);
   return { sent: sent, skipped: skipped, muted: muted, reason: "" };
 }
 
@@ -4261,6 +4378,7 @@ function sendShiftOfferPush(ss, event, payload) {
   if (!copy) return;
 
   const index = userSettingsIndex(ss);
+  const tokensByUser = pushTokenIndex(ss);
   const recipients = Array.isArray(payload.recipient_user_ids) ? payload.recipient_user_ids : [];
   const staleTokens = [];
   let delivered = 0;
@@ -4271,35 +4389,38 @@ function sendShiftOfferPush(ss, event, payload) {
 
     if (!notificationEnabled(config.settings, userRow, copy.prefKey)) return;
 
-    const token = userRow ? String(userRow.fcm_token || "").trim() : "";
-    if (!token) return; // member has no registered device
+    const devices = tokensByUser[key] || [];
+    if (!devices.length) return; // member has no registered device
 
-    const result = sendFcmMessage(config, token, copy.title, copy.body, {
-      event: payload.event,
-      offer_id: payload.offer_id || "",
-      schedule_id: payload.schedule_id || "",
-      date_from: payload.date_from || "",
-      date_to: payload.date_to || payload.date_from || ""
+    // Every device the member has registered, not just the most recent one.
+    devices.forEach(function (token) {
+      const result = sendFcmMessage(config, token, copy.title, copy.body, {
+        event: payload.event,
+        offer_id: payload.offer_id || "",
+        schedule_id: payload.schedule_id || "",
+        date_from: payload.date_from || "",
+        date_to: payload.date_to || payload.date_from || ""
+      });
+
+      if (result.ok) {
+        delivered++;
+        return;
+      }
+
+      Logger.log("FCM send failed for user " + key + " (" + result.code + "): " + result.detail);
+
+      // FCM reports dead registrations; drop them so we stop retrying forever.
+      // Auth/config failures say nothing about the token, so they never clear it.
+      const failureReason = result.reason || classifyFcmFailure(result.detail);
+      if (failureReason === "rejected" && (result.code === 404 || /UNREGISTERED|NOT_FOUND|INVALID_ARGUMENT/i.test(String(result.detail)))) {
+        staleTokens.push(token);
+      }
     });
-
-    if (result.ok) {
-      delivered++;
-      return;
-    }
-
-    Logger.log("FCM send failed for user " + key + " (" + result.code + "): " + result.detail);
-
-    // FCM reports dead registrations; drop them so we stop retrying forever.
-    // Auth/config failures say nothing about the token, so they never clear it.
-    const failureReason = result.reason || classifyFcmFailure(result.detail);
-    if (failureReason === "rejected" && (result.code === 404 || /UNREGISTERED|NOT_FOUND|INVALID_ARGUMENT/i.test(String(result.detail)))) {
-      staleTokens.push(key);
-    }
   });
 
-  if (staleTokens.length) clearStaleFcmTokens(ss, staleTokens);
+  if (staleTokens.length) deletePushTokens(ss, staleTokens);
 
-  Logger.log("PUSH_SHIFT_OFFER_" + event + ": delivered " + delivered + " of " + recipients.length);
+  Logger.log("PUSH_SHIFT_OFFER_" + event + ": delivered " + delivered + " device(s) for " + recipients.length + " recipient(s)");
 }
 
 // Writes the supplied columns onto a member's `user_settings` row, appending a
@@ -4357,16 +4478,185 @@ function upsertUserSettingsColumns(ss, userId, values) {
   return true;
 }
 
-// FCM reported these tokens as dead, so forget them instead of retrying.
-function clearStaleFcmTokens(ss, userIds) {
-  userIds.forEach(function (userId) {
-    try {
-      upsertUserSettingsColumns(ss, userId, { fcm_token: "" });
-    } catch (err) {
-      Logger.log("Could not clear stale FCM token for " + userId + ": " + err.toString());
-    }
+// ============================================================================
+// Push devices
+//
+// One row per DEVICE, because a member with a phone and a computer should get notifications on both.
+//
+// The original design kept a single `user_settings.fcm_token`, which can only ever hold one. Two
+// bugs followed from that, and both looked like the app lying:
+//
+//   * enabling a second device OVERWROTE the first device's token, so the first silently stopped
+//     receiving anything;
+//   * "turn off" on the second device cleared the member's token - the FIRST device's - so the
+//     device that had never been enabled reported success while breaking the one that worked.
+//
+// Columns: id, user_id, token, device_label, updated_at
+//
+// The legacy `user_settings.fcm_token` column is still READ so a device that registered before this
+// sheet existed keeps working without anyone re-enabling it, but nothing writes it any more.
+// ============================================================================
+
+const PUSH_DEVICE_SHEET = "push_devices";
+const PUSH_DEVICE_HEADERS = ["id", "user_id", "token", "device_label", "updated_at"];
+
+// Created on first use rather than requiring a manual step: a missing sheet would mean registrations
+// vanish silently, which is the failure mode this whole feature keeps producing.
+function pushDeviceSheet(ss) {
+  let sheet = ss.getSheetByName(PUSH_DEVICE_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(PUSH_DEVICE_SHEET);
+    sheet.appendRow(PUSH_DEVICE_HEADERS.slice());
+  }
+  return sheet;
+}
+
+function pushDeviceRows(ss) {
+  return getSheetData(ss, PUSH_DEVICE_SHEET).filter(function (row) {
+    return String(row.token || "").trim() !== "";
   });
 }
+
+// userId -> [token], legacy column included.
+//
+// Built once per send rather than looked up per recipient: the shift-offer fan-out touches every
+// approver, and a sheet read per member would be the slowest thing in the request.
+function pushTokenIndex(ss) {
+  const index = {};
+
+  const add = function (userId, token) {
+    const key = String(userId || "").trim();
+    const value = String(token || "").trim();
+    if (!key || !value) return;
+    if (!index[key]) index[key] = [];
+    if (index[key].indexOf(value) === -1) index[key].push(value);
+  };
+
+  pushDeviceRows(ss).forEach(function (row) {
+    add(row.user_id, row.token);
+  });
+
+  const settings = userSettingsIndex(ss);
+  Object.keys(settings).forEach(function (userId) {
+    add(userId, (settings[userId] || {}).fcm_token);
+  });
+
+  return index;
+}
+
+function pushTokensForUser(ss, userId) {
+  return pushTokenIndex(ss)[String(userId === undefined || userId === null ? "" : userId).trim()] || [];
+}
+
+// Registers or refreshes one device.
+//
+// Idempotent by token, so opening the settings card repeatedly cannot accumulate rows. A row that
+// already exists is re-pointed at the current member - a shared station tablet can change hands -
+// and its label and timestamp are refreshed so the admin list can show what is stale.
+function registerPushDevice(ss, userId, token, label) {
+  const targetUserId = String(userId === undefined || userId === null ? "" : userId).trim();
+  const targetToken = String(token === undefined || token === null ? "" : token).trim();
+  if (!targetUserId || !targetToken) return false;
+
+  const sheet = pushDeviceSheet(ss);
+  const data = sheet.getDataRange().getValues();
+  if (!data.length) return false;
+
+  const headers = data[0].map(String);
+  const userCol = headers.indexOf("user_id");
+  const tokenCol = headers.indexOf("token");
+  const labelCol = headers.indexOf("device_label");
+  const stampCol = headers.indexOf("updated_at");
+  if (tokenCol === -1 || userCol === -1) return false;
+
+  const stamp = getEasternTimestamp();
+  const deviceLabel = String(label || "").trim().slice(0, 80);
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][tokenCol]).trim() !== targetToken) continue;
+
+    sheet.getRange(i + 1, userCol + 1).setValue(targetUserId);
+    if (labelCol !== -1) sheet.getRange(i + 1, labelCol + 1).setValue(deviceLabel);
+    if (stampCol !== -1) sheet.getRange(i + 1, stampCol + 1).setValue(stamp);
+    return true;
+  }
+
+  const newRow = headers.map(function (header) {
+    if (header === "id") return String(getNextId(sheet));
+    if (header === "user_id") return targetUserId;
+    if (header === "token") return targetToken;
+    if (header === "device_label") return deviceLabel;
+    if (header === "updated_at") return stamp;
+    return "";
+  });
+  sheet.appendRow(newRow);
+  return true;
+}
+
+// Forgets the given tokens, everywhere they are stored.
+//
+// `userId` bounds the deletion to one member, which is what stops a dead-token report for one
+// account removing a row belonging to another - it cannot happen with real tokens, but the blast
+// radius of deleting on a token match is worth bounding.
+function deletePushTokens(ss, tokens, userId) {
+  const wanted = (Array.isArray(tokens) ? tokens : [tokens])
+    .map(function (value) {
+      return String(value === undefined || value === null ? "" : value).trim();
+    })
+    .filter(function (value) {
+      return value !== "";
+    });
+  if (!wanted.length) return 0;
+
+  const wantUser = String(userId === undefined || userId === null ? "" : userId).trim();
+  let removed = 0;
+  const sheet = ss.getSheetByName(PUSH_DEVICE_SHEET);
+
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    if (data.length) {
+      const headers = data[0].map(String);
+      const tokenCol = headers.indexOf("token");
+      const userCol = headers.indexOf("user_id");
+
+      if (tokenCol !== -1) {
+        // Bottom-up, so deleting a row cannot shift the ones still to be examined.
+        for (let i = data.length - 1; i >= 1; i--) {
+          if (wanted.indexOf(String(data[i][tokenCol]).trim()) === -1) continue;
+          if (wantUser && userCol !== -1 && String(data[i][userCol]).trim() !== wantUser) continue;
+          sheet.deleteRow(i + 1);
+          removed++;
+        }
+      }
+    }
+  }
+
+  // A device registered before this sheet existed lives in the legacy column instead.
+  const settings = userSettingsIndex(ss);
+  Object.keys(settings).forEach(function (key) {
+    if (wantUser && wantUser !== String(key).trim()) return;
+    const legacy = String((settings[key] || {}).fcm_token || "").trim();
+    if (!legacy || wanted.indexOf(legacy) === -1) return;
+    try {
+      upsertUserSettingsColumns(ss, key, { fcm_token: "" });
+    } catch (err) {
+      Logger.log("Could not clear the legacy FCM token for " + key + ": " + err.toString());
+    }
+  });
+
+  return removed;
+}
+
+// How many devices each member has, for the admin status list.
+function pushDeviceCountByUser(ss) {
+  const index = pushTokenIndex(ss);
+  const counts = {};
+  Object.keys(index).forEach(function (userId) {
+    counts[userId] = index[userId].length;
+  });
+  return counts;
+}
+
 
 // ============================================================================
 // Password hashing (PBKDF2-HMAC-SHA256)

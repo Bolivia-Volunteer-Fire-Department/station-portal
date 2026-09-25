@@ -10,6 +10,8 @@ import {
   vapidKeyFrom,
   enablePushNotifications,
   disablePushNotifications,
+  currentDeviceToken,
+  deviceLabelFromUserAgent,
 } from '../utils/pushNotifications';
 
 function isTruthySetting(value) {
@@ -25,6 +27,7 @@ export default function UserSettings({
   canApproveShifts = false,
   onSaveSettings,
   onPasswordChange,
+  pushDeviceApi,
 }) {
   // Find current user's existing settings record
   const existingUserSetting = userSettings.find(
@@ -229,6 +232,7 @@ export default function UserSettings({
         systemSettings={systemSettings}
         canApproveShifts={canApproveShifts}
         onSaveSettings={onSaveSettings}
+        pushDeviceApi={pushDeviceApi}
       />
 
       <PasswordChangeCard onPasswordChange={onPasswordChange} />
@@ -361,6 +365,7 @@ function NotificationsCard({
   systemSettings = {},
   canApproveShifts = false,
   onSaveSettings,
+  pushDeviceApi,
 }) {
   const existingUserSetting = userSettings.find(
     (s) => String(s.id ?? s.user_id) === String(currentUser?.id)
@@ -370,19 +375,61 @@ function NotificationsCard({
   const vapidKey = vapidKeyFrom(systemSettings);
   const fcmConfigured = !!webConfig && !!vapidKey;
 
-  // The raw FCM token is stripped from the public initial payload, so the
-  // registration state comes from the boolean the backend substitutes; a token
-  // minted by this session's own enable flow flips the flag locally.
-  const [deviceRegistered, setDeviceRegistered] = useState(!!existingUserSetting?.fcm_registered);
+  // Whether THIS device is enabled, and on how many devices the member is enabled in total.
+  //
+  // The question the card has to answer is local - a push subscription either exists in this browser
+  // or it does not - so it is answered locally. Deriving it from the member's stored token was the
+  // bug: a phone that had never been enabled showed "Registered" (and offered "Turn off", which then
+  // cleared the computer's token) because the member's computer was registered.
+  const [thisDevice, setThisDevice] = useState({ known: false, enabled: false, token: '' });
+  const [deviceTotal, setDeviceTotal] = useState(0);
   const [permission, setPermission] = useState(notificationPermission());
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
-  // Keep in sync when the sheet is refetched.
+  const supported = pushSupported();
+
+  // Read this device's real state, and make sure the server agrees with it.
+  //
+  // The re-registration is the self-healing half: if this browser holds a subscription but the
+  // server has no row for it (a deploy added the sheet after the device was enabled, or an admin
+  // pruned a dead-looking token), the device would otherwise be silent with the card claiming it
+  // was on. Both calls are cheap - the token comes from the SDK's own cache, and no permission
+  // prompt is involved once a subscription exists.
   useEffect(() => {
-    setDeviceRegistered(!!existingUserSetting?.fcm_registered);
-    setPermission(notificationPermission());
-  }, [existingUserSetting]);
+    let cancelled = false;
+
+    const readDevice = async () => {
+      if (!supported) {
+        if (!cancelled) setThisDevice({ known: true, enabled: false, token: '' });
+        return;
+      }
+
+      const token = fcmConfigured ? await currentDeviceToken(webConfig, vapidKey) : null;
+      if (cancelled) return;
+
+      setThisDevice({ known: true, enabled: !!token, token: token || '' });
+      setPermission(notificationPermission());
+
+      if (!token || !pushDeviceApi) return;
+
+      try {
+        await pushDeviceApi.register(token, deviceLabelFromUserAgent(navigator.userAgent));
+        const result = await pushDeviceApi.list();
+        if (!cancelled && result?.success) setDeviceTotal((result.devices || []).length);
+      } catch (err) {
+        // Not fatal: the device is still subscribed, it just may not be listed. Enabling again from
+        // the button below re-registers it.
+        console.warn('[push] could not sync this device with the server:', err.message);
+      }
+    };
+
+    readDevice();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supported, fcmConfigured, currentUser?.id]);
 
   const stationDefault = (key) => {
     const value = systemSettings?.[key];
@@ -420,9 +467,13 @@ function NotificationsCard({
       // Must run from this click so the browser ties the permission prompt to
       // a user gesture.
       const token = await enablePushNotifications(webConfig, vapidKey);
-      await onSaveSettings({ id: currentUser.id, fcm_token: token });
-      setDeviceRegistered(true);
+      // It is the DEVICE that gets registered, not the member: enabling this phone must not touch a
+      // computer that is already receiving notifications.
+      await pushDeviceApi?.register(token, deviceLabelFromUserAgent(navigator.userAgent));
+      setThisDevice({ known: true, enabled: true, token });
       setPermission(notificationPermission());
+      const listed = await pushDeviceApi?.list();
+      if (listed?.success) setDeviceTotal((listed.devices || []).length);
       setStatusMessage({ type: 'success', text: 'This device will now receive Station Portal notifications.' });
     } catch (err) {
       console.error('Failed to enable notifications:', err);
@@ -436,11 +487,18 @@ function NotificationsCard({
     setBusy(true);
     setStatusMessage(null);
     try {
-      await disablePushNotifications();
-      await onSaveSettings({ id: currentUser.id, fcm_token: '' });
-      setDeviceRegistered(false);
+      // Releases this browser's push subscription and reports which token it held, so exactly one
+      // device is removed from the list rather than every device the member has.
+      const releasedToken = await disablePushNotifications(webConfig);
+      if (releasedToken) await pushDeviceApi?.unregister(releasedToken);
+      setThisDevice({ known: true, enabled: false, token: '' });
       setPermission(notificationPermission());
-      setStatusMessage({ type: 'success', text: 'Notifications turned off for this device.' });
+      const listed = await pushDeviceApi?.list();
+      if (listed?.success) setDeviceTotal((listed.devices || []).length);
+      setStatusMessage({
+        type: 'success',
+        text: 'Notifications turned off for this device. Any other device you have enabled is unaffected.',
+      });
     } catch (err) {
       console.error('Failed to disable notifications:', err);
       setStatusMessage({ type: 'error', text: 'Could not turn off notifications for this device.' });
@@ -449,7 +507,11 @@ function NotificationsCard({
     }
   };
 
-  const supported = pushSupported();
+  // How many other devices the member has, so a second device makes sense of what it is looking at:
+  // this one may be off while the account is set up elsewhere.
+  const otherDeviceCount = thisDevice.enabled
+    ? Math.max(0, deviceTotal - 1)
+    : deviceTotal;
 
   // Surfaced so it is obvious whether the browser grant exists. A member who
   // has already allowed notifications is never prompted again by Chrome, which
@@ -499,10 +561,20 @@ function NotificationsCard({
             <div className="flex-1">
               <p className="text-sm font-medium text-slate-900 dark:text-white">This device</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {deviceRegistered
-                  ? 'Registered for push notifications.'
-                  : "Not registered yet - notifications won't reach this device until you enable them."}
+                {!thisDevice.known
+                  ? 'Checking this device…'
+                  : thisDevice.enabled
+                    ? 'Notifications are on for this device.'
+                    : "Notifications are not on for this device yet."}
               </p>
+              {thisDevice.known && otherDeviceCount > 0 && (
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {otherDeviceCount === 1
+                    ? 'You have 1 other device enabled.'
+                    : `You have ${otherDeviceCount} other devices enabled.`}{' '}
+                  Each device is set up separately.
+                </p>
+              )}
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 Browser permission: <span className={permissionClass}>{permissionLabel}</span>
               </p>
@@ -511,7 +583,7 @@ function NotificationsCard({
                   Notifications are blocked for this site in your browser settings.
                 </p>
               )}
-              {permission === 'granted' && deviceRegistered && (
+              {permission === 'granted' && thisDevice.enabled && (
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                   Nothing showing up? Your operating system also has to allow alerts for this
                   browser - on macOS enable &ldquo;Google Chrome Helper&rdquo; under
@@ -530,7 +602,7 @@ function NotificationsCard({
               )}
             </div>
             <div className="shrink-0">
-              {deviceRegistered ? (
+              {thisDevice.enabled ? (
                 <button
                   type="button"
                   onClick={handleDisableDevice}

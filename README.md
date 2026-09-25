@@ -148,12 +148,20 @@ their request is approved or declined.
   **Administration → System → Notifications**. Full walkthrough:
   [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md).
 - **Per device:** each member presses **Enable** under
-  **User Settings → Notifications**. Their switches default to the station defaults and
+  **User Settings → Notifications**, once per device. Their switches default to the station defaults and
   can be overridden individually; leaving a setting blank inherits the station default.
   Turning a push off never hides the in-app announcement or notice — that separation is
   deliberate, and asserted. The member-facing detail is in the guides
   (*Help → User Settings*, and *Administration → System → Help → Notifications* for the
   station defaults).
+- **Tokens are per device, in a `push_devices` sheet** (one row: id, user_id, token, device_label,
+  updated_at), so a member's phone and computer both receive. The single `user_settings.fcm_token`
+  column this replaced could only hold one token, which meant enabling a second device stopped the
+  first from receiving — and "turn off" on a device that had never been enabled cleared the *other*
+  device's token. The legacy column is still **read** (a device registered before this keeps working
+  with no re-enable) and is cleared when its token is removed. The sheet is created on first use, so
+  there is nothing to add by hand. `npm run verify:push-devices` covers the rules, including that
+  turning one device off cannot disturb another.
 - **Who receives a shift-offer push is decided by `can_approve_shifts`**, resolved
   server-side by `shiftApproverUserIds()`, so the switch a member sees and the delivery
   they get cannot disagree. The visibility rule for that switch lives in
@@ -517,6 +525,8 @@ The front end and the backend deploy separately, so **the app can be published w
 | `system_settings` | `session_timeout`, `required_clock_latitude`, `required_clock_longitude`, `gps_margin_of_error`, and the FCM keys |
 
 `user_settings` is the exception: it **grows its own header row**, so `notify_announcements` and the other preference columns appear by themselves. All it needs is the identity column (`user_id`).
+
+`push_devices` needs nothing from you either — it is created on first use, because a device registering into a sheet that does not exist would fail silently, which is the failure mode that feature has already produced once.
 
 **3. Tick the permissions** on the roles that should have them — *Administration → System → Help → Roles* explains what each one unlocks. A permission column that reads blank is treated as false, so an unticked box hides the tab.
 

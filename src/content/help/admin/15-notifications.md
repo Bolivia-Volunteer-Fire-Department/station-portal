@@ -3,7 +3,6 @@
 > [!IMPORTANT]
 > Maintaining notifications and notification settings requires the **Manage notification settings**.
 
-
 ## Firebase Cloud Messaging
 
 > [!IMPORTANT]
@@ -17,7 +16,6 @@ This card holds the credentials that let the station's server send notifications
 - **Project ID**, **Client email** and **Private key** come from a Firebase service account, and the web configuration keys come from the Firebase web app registration. The repository's `docs/FCM_SETUP.md` walks through creating them, and is worth reading in full before starting — the private key in particular is easy to paste incorrectly.
 - **The private key is write-only.** Once stored it is never sent back to a browser, not even to an administrator: the card reports only whether a key is present. Leaving the field **blank on save means "keep the existing key"**, not "clear it", so you can change another field without re-pasting it.
 - **Test** is per member, and lives in the **Device Status** table below — see that section. A test that fails is reported with the actual reason: an authorization problem on the server is not the same as a message FCM refused, and the message says which you have. If the report mentions an external-request permission, the Apps Script project needs re-authorizing; the setup guide in `docs/FCM_SETUP.md` covers that.
-
 
 ## Station Defaults
 
@@ -35,7 +33,9 @@ A per-member table showing, for each person:
 | Column | Meaning |
 |---|---|
 | **Member** | Who the row is about |
-| **Device** | Whether they have a registered device |
+| **Device** | How many devices they have registered — a member with a phone and a computer counts twice |
+| **New requests** / **Approved** / **Declined** | Their own notification switches, or *Default* when they have not overridden the station setting |
+| **Test** | Sends a test notification to **every** device they have registered |
 | **New requests** / **Approved** / **Declined** | Whether that notification would actually reach them, after their own settings and the station defaults are combined |
 | **Test** | Sends one test notification to that member's devices |
 
@@ -46,7 +46,6 @@ The three notification columns matter because they show the **effective** answer
 An amber banner appears when the Firebase configuration is incomplete, because testing before then can only fail.
 
 Each **device** is registered separately, so one member with a phone and a desktop counts twice. Members register themselves in *User Settings → Notifications*; a member who has never done that receives nothing regardless of the defaults.
-
 
 ## Why nobody is getting notifications
 

@@ -1,4 +1,4 @@
-A read-only record of what has happened in the portal: who signed in (and who failed to), what was changed and by whom, and which notifications were sent. 
+A read-only record of what has happened in the portal: who signed in (and who failed to), what was changed and by whom, and which notifications were sent.
 
 > [!IMPORTANT]
 > Access to this area requires the **View the system log** role permission.
@@ -13,7 +13,6 @@ The tab is fetched **only when you open it**. If your role has the permission bu
 | **Action** | A short code such as `USER_LOGIN`, `LOGIN_FAILED`, `PASSWORD_CHANGE` |
 | **Details** | Free text from whatever wrote the entry |
 
-
 ## Reading it
 
 Entries are **newest first** by default, twenty to a page. The badge colour on an action is a rough hint rather than a severity rating:
@@ -23,7 +22,6 @@ Entries are **newest first** by default, twenty to a page. The badge colour on a
 - **Grey** — everything else.
 
 Actions are matched on whole words, so `CLOCK_IN` shows as a normal event — it contains "LOCK", but nobody is going to mistake a clock-in for a lockout.
-
 
 ## Filtering and sorting
 
@@ -41,7 +39,6 @@ Changing any of these makes **one request** and returns to page one, because the
 > [!NOTE]
 > **Millions of rows would still list twenty at a time here, but the server does read the whole log to filter it.** So filtering is the same cost however you narrow it, and reading a *page* is cheap because only that page crosses the network.
 
-
 ## What this is for
 
 - **"Who changed this?"** — filter by action, or by member, and read the details.
@@ -50,7 +47,6 @@ Changing any of these makes **one request** and returns to page one, because the
 
 > [!NOTE]
 > The log is **read-only here**. Nothing in the app writes to it directly, and nothing in it can be edited or deleted from the app.
-
 
 ## If it is slow
 

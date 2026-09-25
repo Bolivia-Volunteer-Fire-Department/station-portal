@@ -1,10 +1,7 @@
 *Training → Training Report* is the department's training record with the signatures attached: what was held, and who has signed that they attended.
 
 > [!IMPORTANT]
-> Managing trainings and training signatures requires the **Administer trainings** role permission. That permission is deliberately the *strongest* of the three training permissions, because this tab is the only place that can do all of the following:
-> - see **every member's** signatures (everywhere else in the app a member only ever sees their own),
-> - **change or delete** any training, and
-> - **remove** a signature.
+> Managing trainings and training signatures requires the **Administer trainings** role permission. That permission is deliberately the *strongest* of the three training permissions, because this tab is the only place that can do all of the following: - see **every member's** signatures (everywhere else in the app a member only ever sees their own), - **change or delete** any training, and - **remove** a signature.
 
 ## The report
 

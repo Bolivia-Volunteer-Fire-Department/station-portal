@@ -1082,9 +1082,62 @@ check('and no rank colour is applied', !/color:#/.test(String(noRanks)), true);
 const tabSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
 check('the tab forwards ranks to the roster', /<AdminAvailabilityRoster[\s\S]{0,300}?ranks=\{ranks\}/.test(tabSource), true);
 
+// --- sticky page furniture ---------------------------------------------------------------------
+console.log('\n--- the header and page title pin on mobile ---');
+
+const shellSource = readFileSync('src/App.jsx', 'utf8');
+const mobileHeader = /<header className="([^"]*md:hidden[^"]*)"/.exec(shellSource);
+const titleBlock = /<div className="(sticky [^"]*)"/.exec(shellSource);
+
+check('the mobile app bar was found', !!mobileHeader, true);
+check('the sticky page title was found', !!titleBlock, true);
+
+const headerClass = mobileHeader ? mobileHeader[1] : '';
+const titleClass = titleBlock ? titleBlock[1] : '';
+
+check('the app bar sticks to the top', /sticky/.test(headerClass) && /top-0/.test(headerClass), true);
+check('and the page title sticks under it', /top-16/.test(titleClass), true);
+
+// The two values are coupled: the title's offset IS the bar's height. If the bar's height changes
+// without the offset following, the title slides underneath the bar and covers it.
+//
+// Note this file's `check` takes a CONDITION, not an expected value - a bare `check(label, '14', '16')`
+// would pass, because a non-empty string is truthy. Hence the explicit comparisons.
+const headerHeight = /(?:^|\s)h-(\d+)(?:\s|$)/.exec(headerClass);
+const titleOffset = /(?:^|\s)top-(\d+)(?:\s|$)/.exec(titleClass);
+check(
+  'the bar has a fixed height to offset against',
+  (headerHeight ? headerHeight[1] : null) === '16',
+  `found h-${headerHeight ? headerHeight[1] : 'none'}`
+);
+check(
+  'and the title offset matches it exactly',
+  Boolean(titleOffset && headerHeight) && titleOffset[1] === headerHeight[1],
+  `title top-${titleOffset ? titleOffset[1] : 'none'} vs bar h-${headerHeight ? headerHeight[1] : 'none'}`
+);
+
+// A pinned strip must span the container, or the page scrolls past in the gaps either side of it.
+check('the pinned strip cancels the container padding', /-mx-4/.test(titleClass) && /sm:-mx-6/.test(titleClass) && /lg:-mx-8/.test(titleClass), true);
+// And it must be opaque, or the text scrolls through it.
+check('it is painted in the page colour', /bg-slate-100/.test(titleClass) && /dark:bg-slate-900/.test(titleClass), true);
+// From md up the mobile bar is hidden, so the title is the topmost thing in the scroll container.
+check('on larger screens it pins to the top of the scroll area', /md:top-0/.test(titleClass), true);
+
+// The stacking order: both pinned elements must sit UNDER the sidebar's backdrop (z-20) and drawer
+// (z-30), so opening the menu on a phone dims the whole page rather than leaving a bright strip of
+// header above the shade.
+const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const backdropZ = /fixed inset-0 bg-black\/60 z-(\d+)/.exec(sidebarSource);
+const headerZ = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(headerClass);
+const titleZ = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(titleClass);
+check('the sidebar backdrop z-index was found', (backdropZ ? backdropZ[1] : null) === '20', true);
+check('the app bar sits below it', Number(headerZ && headerZ[1]) < Number(backdropZ && backdropZ[1]), true);
+check('and so does the page title', Number(titleZ && titleZ[1]) < Number(backdropZ && backdropZ[1]), true);
+check('while still sitting above the page content', Number(titleZ && titleZ[1]) > 0, true);
+
+
 // --- content width ----------------------------------------------------------------------------
 console.log('\n--- content width ---');
-//
 // Content pages fill the viewport, except the two form/status screens listed in CENTERED_CONTENT_TABS,
 // whose content is capped and centred. The cap lives on <main> itself so the heading is centred with the
 // content rather than sitting off to one side.

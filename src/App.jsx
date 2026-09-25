@@ -19,7 +19,10 @@ import {
   loginUser,
   pingSession,
   adminFetchUsers,
-  adminFetchScheduleTemplates
+  adminFetchScheduleTemplates,
+  registerPushDevice,
+  unregisterPushDevice,
+  fetchMyPushDevices
 } from './services/api';
 
 import LoginScreen from './components/LoginScreen';
@@ -905,6 +908,20 @@ const getLoadingMessage = () => {
     }
   };
 
+  // Push-device registration, handed to the settings card as ONE object rather than three callbacks,
+  // so the card has a single prop to thread through two component layers.
+  //
+  // Registration is per device: these calls must never touch another device's row, which is why
+  // unregister takes the token the browser released rather than the member's id.
+  const pushDeviceApi = useMemo(
+    () => ({
+      register: (deviceToken, deviceLabel) => registerPushDevice(deviceToken, deviceLabel, authToken),
+      unregister: (deviceToken) => unregisterPushDevice(deviceToken, authToken),
+      list: () => fetchMyPushDevices(authToken),
+    }),
+    [authToken]
+  );
+
   const handleSaveUserSettings = async (updatedSettings) => {
     try {
       // Call API service wrapper instead of raw fetch
@@ -1094,7 +1111,12 @@ const getLoadingMessage = () => {
         <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} announcements={loginAnnouncements} />
       ) : (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-screen md:overflow-hidden">
-          <header className="md:hidden flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4">
+          {/* Sticky on mobile so the app name and the menu button are always reachable. `h-16` is not
+              decoration: the page title below sticks at `top-16` to clear this bar, so the height has to
+              be deterministic rather than whatever the padding happens to add up to.
+              `z-10` keeps it BELOW the sidebar's z-20 backdrop and z-30 drawer, so opening the menu dims
+              the whole page including this bar. */}
+          <header className="md:hidden sticky top-0 z-10 flex h-16 items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4">
             <div className="flex items-center gap-2">
               <a href="#" onClick={(e) => {
                 e.preventDefault();
@@ -1137,7 +1159,14 @@ const getLoadingMessage = () => {
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
             }`}
           >
-            <div className="mb-8">
+            {/* The page title, pinned. On mobile it clears the sticky app bar (`top-16`, matching the
+                header's `h-16`); from md up that bar is hidden and this is the top of the scroll container.
+                The negative margins cancel <main>'s padding so the pinned strip spans the full width - without
+                them, page content would scroll past in the gaps on either side - and the matching padding keeps
+                the heading aligned with the content beneath it. The background is the page colour because a
+                sticky element with a transparent background shows the text scrolling underneath it.
+                `z-10`, like the app bar, keeps it under the sidebar's backdrop and drawer. */}
+            <div className="sticky top-16 z-10 -mx-4 -mt-4 mb-5 bg-slate-100 px-4 pb-3 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6 lg:-mx-8 lg:-mt-8 lg:px-8 lg:pt-8 dark:bg-slate-900 md:top-0">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
                 {activeTab === 'clock-history' && 'My Clock History'}
@@ -1257,6 +1286,7 @@ const getLoadingMessage = () => {
                 currentRole={currentUserRole}
                 canApproveShifts={canApproveShifts}
                 onSaveSettings={handleSaveUserSettings}
+                pushDeviceApi={pushDeviceApi}
                 onPasswordChange={handlePasswordChange}
               />
             )}

@@ -127,6 +127,23 @@ export const submitClockAction = async (action, userId, coords = {}, token) =>
     token,
   });
 
+// Push devices. Registration is per DEVICE (see the Push devices section of Code.gs): a member's
+// phone and computer each hold their own row, so enabling one never disturbs the other.
+
+export const registerPushDevice = async (deviceToken, deviceLabel, token) =>
+  appScriptFetch({
+    action: 'REGISTER_PUSH_DEVICE',
+    token, // the session
+    // The device token travels as `device_token`, because `token` is the session in the envelope.
+    device_token: String(deviceToken || ''),
+    device_label: String(deviceLabel || ''),
+  });
+
+export const unregisterPushDevice = async (deviceToken, token) =>
+  appScriptFetch({ action: 'UNREGISTER_PUSH_DEVICE', token, device_token: String(deviceToken || '') });
+
+export const fetchMyPushDevices = async (token) => appScriptFetch({ action: 'MY_PUSH_DEVICES', token });
+
 export const saveUserSettings = async (updatedSettings, token) =>
   appScriptFetch({
     action: 'UPDATE_USER_SETTINGS',

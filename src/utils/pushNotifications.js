@@ -87,6 +87,70 @@ function firebaseAppFor(appModule, webConfig) {
   return appModule.initializeApp(webConfig, FIREBASE_APP_NAME);
 }
 
+// Whether THIS browser already has a push subscription.
+//
+// This is the authoritative answer for "is this device enabled", and it is deliberately local: a
+// push subscription either exists in this browser or it does not. The server cannot answer it,
+// which is exactly what went wrong before - the settings card read the member's stored token, so a
+// phone that had never been enabled claimed to be registered because the member's computer was.
+export async function hasPushSubscription() {
+  if (!pushSupported()) return false;
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    return !!subscription;
+  } catch (err) {
+    console.warn('[push] could not read this device\u2019s push subscription:', err.message);
+    return false;
+  }
+}
+
+// The FCM token for this device, or null when this device is not enabled.
+//
+// Only ever called once a subscription exists, so it reads the SDK's cached token rather than
+// creating a new registration (and never prompts: permission is already granted by then).
+export async function currentDeviceToken(webConfig, vapidKey) {
+  if (!pushSupported() || notificationPermission() !== 'granted') return null;
+  if (!(await hasPushSubscription())) return null;
+
+  try {
+    const [appModule, messagingModule] = await loadFirebase();
+    const registration = await navigator.serviceWorker.getRegistration();
+    const messaging = messagingModule.getMessaging(firebaseAppFor(appModule, webConfig));
+    const token = await messagingModule.getToken(messaging, {
+      vapidKey: vapidKey || undefined,
+      serviceWorkerRegistration: registration || undefined,
+    });
+    return token || null;
+  } catch (err) {
+    console.warn('[push] could not read this device\u2019s token:', err.message);
+    return null;
+  }
+}
+
+// A human label for the device list, from the user agent. Pure, so it can be verified: the admin
+// device list and the "other devices" line are otherwise a list of nothing.
+export function deviceLabelFromUserAgent(userAgent) {
+  const ua = String(userAgent || '');
+  const browser =
+    /Edg\//.test(ua) ? 'Edge'
+      : /OPR\//.test(ua) ? 'Opera'
+        : /Firefox\//.test(ua) ? 'Firefox'
+          : /CriOS\//.test(ua) ? 'Chrome'
+            : /Chrome\//.test(ua) ? 'Chrome'
+              : /Safari\//.test(ua) ? 'Safari'
+                : 'Browser';
+  const platform =
+    /iPhone/.test(ua) ? 'iPhone'
+      : /iPad/.test(ua) ? 'iPad'
+        : /Android/.test(ua) ? 'Android'
+          : /Macintosh|Mac OS X/.test(ua) ? 'Mac'
+            : /Windows/.test(ua) ? 'Windows'
+              : /Linux/.test(ua) ? 'Linux'
+                : 'device';
+  return `${browser} on ${platform}`;
+}
+
 // Requests permission (must be called from a user gesture), registers the
 // worker and returns the FCM registration token for this device.
 export async function enablePushNotifications(webConfig, vapidKey) {
@@ -127,26 +191,35 @@ export async function enablePushNotifications(webConfig, vapidKey) {
   return token;
 }
 
-// Turns this device off: releases the browser's push subscription, which is
-// what actually stops delivery.
+// Turns this device off, and reports which token it released.
 //
-// The FCM SDK's deleteToken() is deliberately not called. Unlike getToken() it
-// takes no serviceWorkerRegistration option, so it insists on finding a
-// firebase-messaging-sw.js at the site root - a file this app does not ship
-// (public/sw.js is registered instead). It therefore throws
+// Releasing the browser's push subscription is what actually stops delivery. The token is read
+// BEFORE unsubscribing because the SDK caches tokens by push endpoint: once the subscription is
+// gone, this device's token is no longer retrievable here - and the caller needs it to remove the
+// right row from the device list (removing the member's row would take their other devices with it).
+//
+// The FCM SDK's deleteToken() is deliberately not called. Unlike getToken() it takes no
+// serviceWorkerRegistration option, so it insists on finding a firebase-messaging-sw.js at the site
+// root - a file this app does not ship (public/sw.js is registered instead). It therefore throws
 // "unsupported MIME type" before making any server call, which is pure noise.
 //
-// Re-enabling still produces a fresh token without any cleanup here: the SDK
-// caches tokens in IndexedDB and isTokenValid() compares the stored push
-// endpoint with the current one, so a new subscription invalidates the cache.
-export async function disablePushNotifications() {
+// Re-enabling still produces a fresh token without any cleanup here: the SDK caches tokens in
+// IndexedDB and isTokenValid() compares the stored push endpoint with the current one, so a new
+// subscription invalidates the cache.
+export async function disablePushNotifications(webConfig) {
+  let releasedToken = null;
+
   try {
     const registration = await navigator.serviceWorker?.getRegistration();
     const subscription = await registration?.pushManager?.getSubscription();
-    if (subscription) await subscription.unsubscribe();
+
+    if (subscription) {
+      if (webConfig) releasedToken = await currentDeviceToken(webConfig);
+      await subscription.unsubscribe();
+    }
   } catch (err) {
     console.warn('[push] unsubscribe failed:', err.message);
   }
 
-  return true;
+  return releasedToken;
 }

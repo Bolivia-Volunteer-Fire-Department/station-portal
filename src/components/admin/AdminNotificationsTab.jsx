@@ -453,6 +453,10 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
 
   const users = Array.isArray(status?.users) ? status.users : [];
   const registeredCount = users.filter((u) => u.device_registered).length;
+  // Devices are counted, not members: one member with a phone and a computer is worth two, and the
+  // difference is what tells you whether a silent device is a configuration problem or simply a
+  // device nobody has set up yet.
+  const deviceTotal = users.reduce((sum, user) => sum + (Number(user.device_count) || 0), 0);
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -465,7 +469,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Device Status</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               {status
-                ? `${registeredCount} of ${users.length} members have notifications enabled on a device.`
+                ? `${registeredCount} of ${users.length} members have notifications enabled, on ${deviceTotal} device${deviceTotal === 1 ? '' : 's'} in total.`
                 : 'Which members can receive push notifications right now.'}
             </p>
           </div>
@@ -548,7 +552,11 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
                     <span className={user.device_registered
                       ? 'text-emerald-600 dark:text-emerald-400'
                       : 'text-slate-400 dark:text-slate-500'}>
-                      {user.device_registered ? 'Registered' : '—'}
+                      {/* A count, not a tick: a member with a phone and a computer has two, and knowing
+                          how many is how you tell "one device is silent" from "no device at all". */}
+                      {user.device_registered
+                        ? `${Number(user.device_count) || 1} device${(Number(user.device_count) || 1) === 1 ? '' : 's'}`
+                        : '—'}
                     </span>
                   </td>
                   <td className="px-4 py-3">{prefLabel(user.notify_new_offer)}</td>

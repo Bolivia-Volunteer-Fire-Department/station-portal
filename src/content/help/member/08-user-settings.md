@@ -13,16 +13,16 @@ This card controls push notifications to your devices. There are up to four swit
 
 **Announcements are different from the other three.** Turning that switch off stops the *push* and nothing else — announcements still appear in the app, on the dashboard, in the sidebar and on the login screen. The switch is about being interrupted while you are away from the app, not about being told; there is no way to opt out of seeing an announcement.
 
-**Registering this device.** Toggle the device on to subscribe it. Your browser may ask for permission to show notifications — allow it, or nothing can be delivered. The card reports the browser's permission state, so if it says *blocked* you have previously declined and must re-allow it in your browser's site settings rather than in here.
+**Turning on this device.** The card shows whether **this** device is on, and press **Enable** to subscribe it. Your browser may ask for permission to show notifications — allow it, or nothing can be delivered. The card reports the browser's permission state, so if it says *blocked* you have previously declined and must re-allow it in your browser's site settings rather than in here.
 
 > [!WARNING]
-> Each device is registered separately. Enabling notifications on a phone does not enable them on a desktop, and each can be turned off independently.
+> Each device is registered separately. Enabling notifications on a phone does not enable them on a desktop, and **Turn off** releases only the device you are using — the card tells you how many others you have, and none of them are affected.
 
 **When notifications arrive.** Push notifications are delivered by your device, so they arrive whether or not the app is open, and **whether or not you are signed in** — signing out does not unregister the device; it only stops the app showing them *in-app*. If you tap one to open the app you may be asked to sign in again first.
 
 On an iPhone or iPad the app must be **added to the Home Screen** and opened from that icon before notifications can be enabled at all — a plain Safari tab cannot receive them.
 
-**Signing out deliberately.** Use *Sign out* on the notifications card if you want a device to stop receiving them, or turn its switch off. Although unlikely to cause an issue, we recommend not enabling notifications on a shared device used by other members.
+**Stopping notifications.** Press **Turn off** on the device you want to stop. *Sign out* is a separate thing and does **not** unregister a device — signing out on your phone leaves it receiving pushes (see above), so use **Turn off** when you actually want a device silenced. Although unlikely to cause an issue, we recommend not enabling notifications on a shared device used by other members.
 
 ## Change Password
 

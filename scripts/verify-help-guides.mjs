@@ -157,6 +157,27 @@ for (const scope of HELP_SCOPES) {
     numbers,
     Array.from({ length: guides.length }, (_, i) => String(i + 1).padStart(2, '0'))
   );
+
+  // No two guides in a scope may share a title.
+  //
+  // The numbering check above only catches a duplicate PREFIX. A stale copy left behind under a free
+  // number - which is exactly what a rename that copies instead of moving produces - passes it while
+  // giving the reader two entries with the same name in the Help list. This is the invariant that
+  // covers any number: the list is a list of titles.
+  const titles = guides.map((g) => g.title.trim().toLowerCase());
+  const duplicateTitles = titles.filter((title, index) => titles.indexOf(title) !== index);
+  check(`${scope}: no two guides share a title`, duplicateTitles, []);
+
+  // And no two guides may have identical content. This is the blunt version of the same rule, and it
+  // is what actually catches a stale copy: renaming by copying leaves the original behind, and the
+  // duplicate is byte-identical however it is named. Titles and numbering can both miss that.
+  const bodies = guides
+    .filter((guide) => hasGuideContent(guide))
+    .map((guide) => [guide.slug, guide.markdown.replace(/\s+/g, ' ').trim()]);
+  const duplicateBodies = bodies
+    .filter(([, body], index) => bodies.findIndex(([, other]) => other === body) !== index)
+    .map(([slug]) => slug);
+  check(`${scope}: no two guides have identical content`, duplicateBodies, []);
 }
 
 const memberPaths = helpGuides('member').map((g) => g.path);
