@@ -5760,22 +5760,45 @@ function resetSessionsForIdMigration(ss) {
   const props = PropertiesService.getScriptProperties();
   const users = getSheetData(ss, "users");
 
+  // The member ids as they are NOW, each with a fresh epoch.
+  const currentIds = {};
   users.forEach(function (user) {
     const id = String(user && user.id !== undefined && user.id !== null ? user.id : "").trim();
-    if (id) bumpSessionEpoch(id);
+    if (!id) return;
+    currentIds[id] = true;
+    bumpSessionEpoch(id);
   });
 
   let cleared = 0;
   props.getKeys().forEach(function (key) {
     if (key.indexOf(SESSION_PROPERTY_PREFIX) !== 0) return;
     const record = parseSessionRecord(props.getProperty(key));
-    if (String(record.epoch || "") !== sessionEpochFor(record.userId)) {
+
+    // Two kinds of stale, and both must go:
+    //   * the member id in the record is no longer a member id at all - every session that was live when the
+    //     ids were rewritten, which is the whole point of this function;
+    //   * the record's epoch is not the member's epoch - a revocation has happened since it was written.
+    // Checking only the epoch (the first version of this) deleted nothing, because a session written before the
+    // migration carried an empty epoch for an id that no longer exists, and an empty epoch compares equal to an
+    // empty epoch. The sessions were dead - getAuthContext cannot resolve their member - but they lingered as
+    // properties until they expired, and the report claimed a sweep that had not happened.
+    const memberId = String(record.userId || "").trim();
+    const stale = !currentIds[memberId] || String(record.epoch || "") !== sessionEpochFor(memberId);
+    if (stale) {
       props.deleteProperty(key);
       cleared++;
     }
   });
 
-  return { usersBumped: users.length, sessionsCleared: cleared };
+  // Housekeeping: an epoch belonging to a member id that no longer exists can never be matched again, so it goes
+  // too. Without this the key space grows a little with every re-run of the migration.
+  props.getKeys().forEach(function (key) {
+    if (key.indexOf(SESSION_EPOCH_PREFIX) !== 0) return;
+    const memberId = key.slice(SESSION_EPOCH_PREFIX.length);
+    if (!currentIds[memberId]) props.deleteProperty(key);
+  });
+
+  return { usersBumped: Object.keys(currentIds).length, sessionsCleared: cleared };
 }
 
 

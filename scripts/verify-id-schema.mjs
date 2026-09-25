@@ -14,6 +14,8 @@
  * Run with: npm run verify:id-schema
  */
 import { readFileSync } from 'node:fs';
+// The real rule the app applies to an UNAUTHORIZED reply, imported rather than re-implemented.
+import { unauthorizedIsStale } from '../src/utils/sessionTimeout.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -367,6 +369,32 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// 4c. A reply from a superseded session
+// ---------------------------------------------------------------------------
+console.log('\n--- a reply for a session we are not holding ---');
+// Every background refresh opens the "verify your username and password" prompt when its reply says
+// UNAUTHORIZED. A reply that belongs to a DIFFERENT token than the one the app holds is obsolete - which is how a
+// freshly signed-in member was asked to sign in again after the id migration invalidated every live session.
+check('a reply for the token we hold is NOT stale', unauthorizedIsStale('token-a', 'token-a'), false);
+check('a reply for an older token IS stale', unauthorizedIsStale('token-old', 'token-new'), true);
+check('a reply for a token we no longer have at all is stale', unauthorizedIsStale('token-old', null), true);
+check('a reply with no token is stale once we hold one', unauthorizedIsStale('', 'token-a'), true);
+check('and a token is compared as a string, not by identity', unauthorizedIsStale('t', 't'), false);
+// The guard is the ONLY way the prompt opens, at every one of the reply sites. (The definition reads
+// `const sessionExpired = (...) => {`, so it is not counted here - every match is a call.)
+const appSource = readFileSync('src/App.jsx', 'utf8');
+const unauthorizedSites = (appSource.match(/code === 'UNAUTHORIZED'/g) || []).length;
+const guardUses = (appSource.match(/sessionExpired\(/g) || []).length;
+check('every UNAUTHORIZED reply goes through the guard', [unauthorizedSites, guardUses], [13, 13]);
+check('and nothing opens the prompt directly', /queueReauth\(null\)/.test(appSource), false);
+check('the guard compares against the token ref, not state', /unauthorizedIsStale\(usedToken, tokenRef\.current\)/.test(appSource), true);
+checkIs(
+  'the ref is written before the state, so a same-tick request sees the new token',
+  /tokenRef\.current = token;\s*\n\s*setAuthToken\(token\);/.test(appSource)
+);
+check('and every token change goes through applyToken', (appSource.match(/setAuthToken\(/g) || []).length, 1);
+
+// ---------------------------------------------------------------------------
 // 4b. The legacy usernames in system_log
 // ---------------------------------------------------------------------------
 console.log('\n--- a username where an id should be ---');
@@ -483,7 +511,45 @@ check('and its other columns are untouched', [cell(userSettings, 1, 'fcm_token')
 // The settings sheet has no id at all and must be left alone.
 check('a key/value sheet is untouched', applied.ss.sheets.system_settings.rows[1], ['department_name', 'Test Fire']);
 
-console.log('\n--- the mapping, and the sessions ---');
+console.log('\n--- the sweep signs the old sessions out ---');
+// A session written BEFORE the migration carries the member's OLD id and an empty epoch. Checking only the epoch
+// deleted nothing (empty equals empty), so those records lingered as properties and the report claimed a sweep
+// that had not happened. The member id is what identifies them.
+const legacyRun2 = migrationHarness(stationFixture());
+legacyRun2.store['fc_auth_old1'] = '10|9999999999999|1000|';
+legacyRun2.store['fc_auth_old2'] = '11|9999999999999|1000|';
+legacyRun2.store['fc_epoch_10'] = '';
+const sweepResult = (() => {
+  const props = {
+    getScriptProperties: () => ({
+      getProperty: (k) => (Object.prototype.hasOwnProperty.call(legacyRun2.store, k) ? legacyRun2.store[k] : null),
+      setProperty: (k, v) => {
+        legacyRun2.store[k] = String(v);
+      },
+      deleteProperty: (k) => {
+        delete legacyRun2.store[k];
+      },
+      getKeys: () => Object.keys(legacyRun2.store),
+    }),
+  };
+  const run = new Function('PropertiesService', 'getSheetData', `
+    ${constSource('SESSION_PROPERTY_PREFIX')}
+    ${constSource('SESSION_EPOCH_PREFIX')}
+    ${extract('sessionEpochFor')}
+    ${extract('bumpSessionEpoch')}
+    ${extract('parseSessionRecord')}
+    ${extract('resetSessionsForIdMigration')}
+    return resetSessionsForIdMigration;
+  `)(props, () => [{ id: 'new-uuid-1' }, { id: 'new-uuid-2' }]);
+  return run(legacyRun2.ss);
+})();
+check('it reports the sessions it cleared', sweepResult.sessionsCleared, 2);
+check('a session for an id that no longer exists is gone', ['fc_auth_old1', 'fc_auth_old2'].filter((k) => k in legacyRun2.store), []);
+check('and the members are re-signed-out', sweepResult.usersBumped, 2);
+check('with a fresh epoch recorded for each', Object.keys(legacyRun2.store).filter((k) => k.indexOf('fc_epoch_') === 0).length, 2);
+// An epoch for a member id that no longer exists can never be matched again, so it is cleaned up too.
+check('and the old id leaves no epoch behind', 'fc_epoch_10' in legacyRun2.store, false);
+
 check('a mapping row was written for every changed id', appliedResult.mappingRowsWritten > 0, true);
 const mapSheet = applied.ss.sheets[applied.helpers.ID_MIGRATION_SHEET];
 check('the mapping sheet exists', !!mapSheet, true);

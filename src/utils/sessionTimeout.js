@@ -130,3 +130,19 @@ export const idleLogoutMessage = (minutes) => {
     : 'a period';
   return `You were signed out after ${label} of inactivity. Sign in again to continue.`;
 };
+
+// Is an UNAUTHORIZED reply ABOUT the session we are holding?
+//
+// No, when the request that got it used a different token: that answer belongs to a superseded session and is
+// obsolete. This matters more than it looks. Every background refresh opens the "verify your username and
+// password" prompt when its reply says UNAUTHORIZED, so a refresh that was already in flight when somebody
+// signed in again - or when every session was invalidated at once, which is what the id migration does - would
+// otherwise ask a freshly signed-in member to sign in again, over a token the app no longer holds.
+//
+// A reply for the CURRENT token is genuine: the session really has expired, and the prompt is right.
+export const unauthorizedIsStale = (usedToken, currentToken) => {
+  const used = String(usedToken === undefined || usedToken === null ? '' : usedToken);
+  const current = String(currentToken === undefined || currentToken === null ? '' : currentToken);
+  return used !== current;
+};
+

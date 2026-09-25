@@ -58,6 +58,7 @@ import {
   idleSecondsRemaining,
   idleState,
   sessionTimeoutConfig,
+  unauthorizedIsStale,
 } from './utils/sessionTimeout';
 import { stationLogoUrl } from './utils/assets';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
@@ -119,6 +120,10 @@ export default function App() {
   // Optional callback (receives the fresh token) replayed once reauthentication
   // succeeds - e.g. the clock in/out that was interrupted mid-flight.
   const pendingActionRef = useRef(null);
+  // The current session token, readable synchronously. State alone is not enough: a request started in the same
+  // tick as a sign-in has to compare its UNAUTHORIZED replies against the token that is current NOW, not the one
+  // the last render happened to hold. See sessionExpired and applyToken below.
+  const tokenRef = useRef(null);
   const [isClockedIn, setIsClockedIn] = useState(false);
 
   // A clock action refused for location, awaiting the member's acknowledgement. Held here rather
@@ -355,6 +360,28 @@ const getLoadingMessage = () => {
     setNeedsReauth(true);
   };
 
+  // Opens that prompt only when the reply was about the session we are HOLDING.
+  //
+  // A background refresh that was already in flight when somebody signed in again answers with UNAUTHORIZED for
+  // the token it was sent with - which is no longer ours. Prompting then asks a member who has just signed in to
+  // sign in again. See utils/sessionTimeout.unauthorizedIsStale, and note that both halves of that comparison
+  // come from the ref rather than state, because the ref is what is true right now.
+  const sessionExpired = (usedToken, retryAction = null) => {
+    if (unauthorizedIsStale(usedToken, tokenRef.current)) return false;
+    queueReauth(retryAction);
+    return true;
+  };
+
+  // The single way the session token changes.
+  //
+  // The REF is written first and synchronously, so a request started in the same tick as a sign-in already
+  // compares against the new token. `setAuthToken` alone would leave a window in which a fresh session looked
+  // superseded, which is exactly the case this whole guard exists for.
+  const applyToken = (token) => {
+    tokenRef.current = token;
+    setAuthToken(token);
+  };
+
   // Refreshes every cache an admin screen reads, in one parallel wave.
   //
   // This used to branch on the token argument and reload only ONE half of the data:
@@ -464,7 +491,7 @@ const getLoadingMessage = () => {
       setUsers(data.users);
     }
     if (data && data.code === 'UNAUTHORIZED') {
-      queueReauth(null);
+      sessionExpired(token);
       return;
     }
   };
@@ -476,7 +503,7 @@ const getLoadingMessage = () => {
     try {
       const data = await adminFetchScheduleTemplates(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.success) {
@@ -495,7 +522,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchMyShiftOffers(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.success && data.offers) setOffers(data.offers);
@@ -512,7 +539,7 @@ const getLoadingMessage = () => {
     try {
       const data = await adminFetchScheduleOffers(t);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.success && data.offers) setAdminOffers(data.offers);
@@ -525,7 +552,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchTimeclockLogs(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.logs) setLogs(data.logs);
@@ -538,7 +565,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchOnDutyUsers(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.onDuty) setOnDutyUsers(data.onDuty);
@@ -557,7 +584,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchEvents(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.events) {
@@ -576,7 +603,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchMyAnnouncements(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       // Replaces only the member's own list. The login-screen announcements came with the public initial
@@ -591,7 +618,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchTraining(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.trainings) setTrainings(data.trainings);
@@ -605,7 +632,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchUserSchedule(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.schedule) setSchedule(data.schedule);
@@ -632,7 +659,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchRoster(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.roster) setRoster(data.roster);
@@ -645,7 +672,7 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchAvailability(token);
       if (data && data.code === 'UNAUTHORIZED') {
-        queueReauth(null);
+        sessionExpired(token);
         return;
       }
       if (data && data.availability) setAvailability(data.availability);
@@ -690,7 +717,7 @@ const getLoadingMessage = () => {
 
       if (result.success) {
         setCurrentUser(result.user);
-        setAuthToken(result.token);
+        applyToken(result.token);
 
         // Only the first screen's data blocks the overlay now - see the note on
         // loadPostLoginData. Admin data loads via the authToken effect.
@@ -743,7 +770,7 @@ const getLoadingMessage = () => {
     pendingActionRef.current = null;
     setNeedsReauth(false);
     setCurrentUser(null);
-    setAuthToken(null);
+    applyToken(null);
     setIsSidebarOpen(false);
     setActiveTab('dashboard');
     // A refusal modal belongs to the session that hit it, so it must not survive a sign-out - the
@@ -758,7 +785,7 @@ const getLoadingMessage = () => {
     pendingActionRef.current = null;
     setNeedsReauth(false);
     setCurrentUser(null);
-    setAuthToken(null);
+    applyToken(null);
     setIsSidebarOpen(false);
     setActiveTab('dashboard');
     applyIdleWarning(null);
@@ -840,7 +867,7 @@ const getLoadingMessage = () => {
       }
 
       setCurrentUser(result.user);
-      setAuthToken(result.token);
+      applyToken(result.token);
 
       const retry = pendingActionRef.current;
       pendingActionRef.current = null;
@@ -889,7 +916,9 @@ const getLoadingMessage = () => {
       } else if (result.code === 'UNAUTHORIZED') {
         // Session expired mid-action: open the reauth modal and replay this exact
         // clock in/out (with the already-captured GPS coords) once verified.
-        queueReauth((freshToken) => performClockAction(actionType, coords, freshToken));
+        // Only when the refusal is about the token we are holding: a late reply from a superseded session
+        // must not interrupt a clock-in whose request was already accepted, nor replay it on the new one.
+        sessionExpired(token, (freshToken) => performClockAction(actionType, coords, freshToken));
       } else if (result.code === OUT_OF_RANGE_CODE) {
         // The backend refused on location. This happens when the station fence was enabled while
         // this page was already open, so the client check above never ran - hence the same modal.
