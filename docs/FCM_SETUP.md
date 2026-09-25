@@ -278,6 +278,7 @@ layer is broken.
 | "Push notifications have not been configured by an admin yet." | One of the four values in step 6 is missing. |
 | **Enable** does nothing | The browser has notifications blocked for the site. Unblock in the address-bar/site settings, then reload. |
 | `Firebase did not return a device token` | The VAPID key or web config is wrong or from a different Firebase project. Re-copy both. |
+| `403 PERMISSION_DENIED: Requests from referer … are blocked` | The Firebase web API key has an HTTP-referrer restriction that does not match. Firebase calls its Installations API with the **bare origin** as the referer (`https://<host>/`, no path), so a pattern scoped to the site path is refused and push cannot be enabled at all. Allow the whole host instead — see the note below the table. |
 | `Could not send the test message` + "not yet authorized to make external requests" | The script lacks the `script.external_request` scope. See **step 5** - run `diagnoseFcmSetup` from the editor, accept the prompt, then deploy a new version. |
 | `Exception: You do not have permission to call UrlFetchApp.fetch` | Same as above: the authorization was granted before the notification code existed. Not a trigger problem. |
 | `FCM rejected the test message (404)` | The device token was revoked (app data cleared, browser reinstalled). The backend clears it automatically; press **Enable** again on that device. |
@@ -292,6 +293,11 @@ layer is broken.
 Logs: Apps Script editor → **Executions** (per-call errors) and the
 `system_log` sheet (`PUSH_SHIFT_OFFER_<EVENT>` rows record how many devices were
 reached).
+
+> [!IMPORTANT]
+> **Allow the whole host when restricting the API key by referrer.** The key is public by design, so restricting it is worth doing — but requests to the Firebase *Installations* API arrive with the **origin** as the referer (`https://<host>/`), not the page URL. A pattern scoped to your app's path (`https://<host>/station-portal/*`) therefore blocks them and *Enable* fails with `403 PERMISSION_DENIED … blocked`, before any of the app's own code runs. Use `https://<your-site-host>/*` (which covers the bare origin and every path), plus `http://localhost:5173/*` if you test locally.
+>
+> Changes can take a few minutes to propagate; reload the page afterwards. If it still fails, check the key's **API restrictions** too: it must be allowed to call *Firebase Installations API* and *Firebase Cloud Messaging API*.
 
 ### Why the service worker must display the message itself
 

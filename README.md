@@ -532,7 +532,7 @@ The front end and the backend deploy separately, so **the app can be published w
 
 **4. Add the repository secret and enable Pages** (steps 2 and 3 above).
 
-**5. Restrict the Firebase web API key** to your new Pages URL once you know it. The key is public by design, but restricting it by HTTP referrer stops anyone else using your project's quota — Google Cloud Console → APIs & Services → Credentials.
+**5. Restrict the Firebase web API key** to your Pages URL once you know it. The key is public by design, but restricting it by HTTP referrer stops anyone else using your project's quota — Google Cloud Console → APIs & Services → Credentials. **Allow the whole host, not just the app's path** (`https://<host>/*`): Firebase's Installations request arrives with the bare origin as the referer, so a path-scoped pattern blocks it and notifications cannot be enabled at all (see the troubleshooting note in `docs/FCM_SETUP.md`).
 
 **6. Smoke-test the deployed site**: sign in, clock in/out, load My Schedule, open Administration, and check one admin tab per permission you granted. The guide at [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md) has the push-notification end-to-end test.
 
@@ -591,8 +591,12 @@ The front end and the backend deploy separately, so **the app can be published w
   (`FCM_SERVICE_ACCOUNT_EMAIL` alongside it) — the backend prefers that store
   over the sheet.
 - **Restrict the Firebase web API key** (Google Cloud Console → APIs & Services →
-  Credentials) to HTTP referrers for your Pages domain. The key ships in the
-  client by design, but restricting it stops anyone reusing it elsewhere.
+  Credentials) to HTTP referrers for your Pages domain — the key ships in the
+  client by design, but restricting it stops anyone reusing it elsewhere. **Use the
+  host-wide pattern `https://<your-site-host>/*` rather than one scoped to your app's
+  path**: Firebase's Installations call sends the bare origin as the referer, so a
+  path-scoped pattern is refused with `403 PERMISSION_DENIED` and push cannot be
+  enabled on any device.
 - **`.env` and credentials stay out of git.** `.gitignore` covers `.env`,
   `.env.*`, `Code.gs`, and the service-account JSON.
 - **Passwords are stored as PBKDF2-HMAC-SHA256 hashes** with a unique 16-byte

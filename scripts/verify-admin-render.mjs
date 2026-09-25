@@ -1082,58 +1082,45 @@ check('and no rank colour is applied', !/color:#/.test(String(noRanks)), true);
 const tabSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
 check('the tab forwards ranks to the roster', /<AdminAvailabilityRoster[\s\S]{0,300}?ranks=\{ranks\}/.test(tabSource), true);
 
-// --- sticky page furniture ---------------------------------------------------------------------
-console.log('\n--- the header and page title pin on mobile ---');
+// --- sticky app bar -----------------------------------------------------------------------------
+console.log('\n--- the app bar pins on mobile ---');
 
 const shellSource = readFileSync('src/App.jsx', 'utf8');
 const mobileHeader = /<header className="([^"]*md:hidden[^"]*)"/.exec(shellSource);
-const titleBlock = /<div className="(sticky [^"]*)"/.exec(shellSource);
-
 check('the mobile app bar was found', !!mobileHeader, true);
-check('the sticky page title was found', !!titleBlock, true);
 
 const headerClass = mobileHeader ? mobileHeader[1] : '';
-const titleClass = titleBlock ? titleBlock[1] : '';
 
-check('the app bar sticks to the top', /sticky/.test(headerClass) && /top-0/.test(headerClass), true);
-check('and the page title sticks under it', /top-16/.test(titleClass), true);
+check('it sticks to the top', /sticky/.test(headerClass) && /top-0/.test(headerClass), true);
+// The bar holds the menu button, so it has to stay reachable while the page scrolls beneath it.
+check('and spans the width above the content', /justify-between/.test(headerClass) && /p-4/.test(headerClass), true);
 
-// The two values are coupled: the title's offset IS the bar's height. If the bar's height changes
-// without the offset following, the title slides underneath the bar and covers it.
-//
-// Note this file's `check` takes a CONDITION, not an expected value - a bare `check(label, '14', '16')`
+// The page title deliberately does NOT stick: only the bar is fixed, so a heading scrolls out of the
+// way as you read. Pinned here so it does not creep back in.
+check(
+  'the page title scrolls with the page',
+  /<div className="mb-8">/.test(shellSource) && !/<div className="sticky/.test(shellSource),
+  true
+);
+
+// The stacking order: the bar must sit UNDER the sidebar's backdrop (z-20) and drawer (z-30), so
+// opening the menu on a phone dims the whole page rather than leaving a bright strip above the shade.
+// Note this file's `check` takes a CONDITION, not an expected value - a bare `check(label, '10', '20')`
 // would pass, because a non-empty string is truthy. Hence the explicit comparisons.
-const headerHeight = /(?:^|\s)h-(\d+)(?:\s|$)/.exec(headerClass);
-const titleOffset = /(?:^|\s)top-(\d+)(?:\s|$)/.exec(titleClass);
-check(
-  'the bar has a fixed height to offset against',
-  (headerHeight ? headerHeight[1] : null) === '16',
-  `found h-${headerHeight ? headerHeight[1] : 'none'}`
-);
-check(
-  'and the title offset matches it exactly',
-  Boolean(titleOffset && headerHeight) && titleOffset[1] === headerHeight[1],
-  `title top-${titleOffset ? titleOffset[1] : 'none'} vs bar h-${headerHeight ? headerHeight[1] : 'none'}`
-);
-
-// A pinned strip must span the container, or the page scrolls past in the gaps either side of it.
-check('the pinned strip cancels the container padding', /-mx-4/.test(titleClass) && /sm:-mx-6/.test(titleClass) && /lg:-mx-8/.test(titleClass), true);
-// And it must be opaque, or the text scrolls through it.
-check('it is painted in the page colour', /bg-slate-100/.test(titleClass) && /dark:bg-slate-900/.test(titleClass), true);
-// From md up the mobile bar is hidden, so the title is the topmost thing in the scroll container.
-check('on larger screens it pins to the top of the scroll area', /md:top-0/.test(titleClass), true);
-
-// The stacking order: both pinned elements must sit UNDER the sidebar's backdrop (z-20) and drawer
-// (z-30), so opening the menu on a phone dims the whole page rather than leaving a bright strip of
-// header above the shade.
 const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
 const backdropZ = /fixed inset-0 bg-black\/60 z-(\d+)/.exec(sidebarSource);
+const drawerZ = /fixed md:static md:h-screen inset-y-0 left-0 z-(\d+)/.exec(sidebarSource);
 const headerZ = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(headerClass);
-const titleZ = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(titleClass);
 check('the sidebar backdrop z-index was found', (backdropZ ? backdropZ[1] : null) === '20', true);
-check('the app bar sits below it', Number(headerZ && headerZ[1]) < Number(backdropZ && backdropZ[1]), true);
-check('and so does the page title', Number(titleZ && titleZ[1]) < Number(backdropZ && backdropZ[1]), true);
-check('while still sitting above the page content', Number(titleZ && titleZ[1]) > 0, true);
+check('the drawer z-index was found', (drawerZ ? drawerZ[1] : null) === '30', true);
+check(
+  'the app bar sits below both',
+  Boolean(headerZ && backdropZ && drawerZ) &&
+    Number(headerZ[1]) < Number(backdropZ[1]) &&
+    Number(headerZ[1]) < Number(drawerZ[1]),
+  `bar z-${headerZ ? headerZ[1] : 'none'}, backdrop z-${backdropZ ? backdropZ[1] : 'none'}, drawer z-${drawerZ ? drawerZ[1] : 'none'}`
+);
+check('while still sitting above the page content', Number(headerZ && headerZ[1]) > 0, true);
 
 
 // --- content width ----------------------------------------------------------------------------

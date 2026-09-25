@@ -40,6 +40,10 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
+**Version 1.02**
+* Fixed HTTP REFERRER blocks for push notifications
+* Fixed sticky header (again lol)
+
 **Version 1.01**
 * Fixed push notifications bug that didn't recognize different devices.
 * Fixed header to be sticky when on a mobile device or small screen.
