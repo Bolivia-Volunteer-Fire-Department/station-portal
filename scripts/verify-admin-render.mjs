@@ -436,6 +436,10 @@ check('a windowed assignment shows its dates', /Jan 1, 2020 - Jan 1, 2021/.test(
 check('a retired assignment says so', /Retired/.test(datedText), true);
 check('a future assignment says so', /Not yet/.test(datedText), true);
 check('and an undated one is nudged too', /No start date/.test(datedText), true);
+// The table used to lead with an ID column showing the assignment's UUID. Rendered rather than read from the source,
+// because a column that is present but empty reads exactly like a column that is gone when you only grep the file.
+check('the table has no ID column', !/>ID</.test(String(datedAssignmentsHtml)), true);
+check('and the row ids are not printed anywhere', !/>(r1|r2|r3)</.test(String(datedAssignmentsHtml)), true);
 
 // The one consequence an administrator could otherwise miss: retiring an assignment stops its templates
 // drawing shifts. The warning only appears once an end date is set, so the source is what is asserted
@@ -470,6 +474,12 @@ const availMember = { id: 'u1', name: 'Member 1', rank_id: 'k1', status: 'active
 const availRows = [
   { id: 1, schedule_template_id: 't1', date_from: availDay, date_to: availDay, user_id: 'u1' },
 ];
+// One event before the day's 8am shift and one after it, so the order asserted below cannot pass by accident: with
+// events drawn as their own block above the slots it would read Breakfast, Drill, Firefighter 3.
+const availEvents = [
+  { id: 'ae0', title: 'Breakfast', date_from: `${availDay} 07:00`, date_to: `${availDay} 07:30` },
+  { id: 'ae1', title: 'Drill', date_from: `${availDay} 19:00`, date_to: `${availDay} 19:30` },
+];
 
 const calendarHtml = (() => {
   try {
@@ -480,6 +490,7 @@ const calendarHtml = (() => {
         scheduleTemplates: [availTemplate],
         assignments: [availAssignment],
         ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
+        events: availEvents,
         onSave: async () => ({ success: true }),
       })
     );
@@ -496,6 +507,17 @@ check('showing the assignment icon too', String(calendarHtml).includes('lucide-f
 // changes yet) - that is the whole point of the batch.
 check('with a batch save button', String(calendarHtml).includes('Save availability'));
 check('starting disabled until something changes', calendarHtml.includes('disabled=""'));
+// The same ordering rule as the other calendars (utils/dayOrder), asserted on the rendering because a cell that
+// merges events and slots is the part the member actually reads. Split out of the grid by the day cell's class.
+const availCells = String(calendarHtml).split('min-h-[76px] rounded-lg flex flex-col items-stretch');
+const availDayCell = availCells.find((cell) => cell.includes('Breakfast')) || '';
+check('the availability day cell with its events was found', availDayCell.length > 0);
+const availOrder = ['Breakfast', 'Firefighter 3', 'Drill'].map((label) => availDayCell.indexOf(label));
+check(
+  'and the availability cell reads a 7am event, the 8am shift, a 7pm event',
+  availOrder.every((at, i) => at > -1 && (i === 0 || availOrder[i - 1] < at)),
+  `Breakfast, slot, Drill at ${availOrder.join(', ')}`
+);
 
 const myAvailabilityHtml = (() => {
   try {
@@ -593,6 +615,13 @@ const boardHtml = (() => {
         users: [],
         availability: [],
         offers: [],
+        // One event before the day's shift and one after it: with events still drawn as their own block above the
+        // shifts, the order would be Breakfast, Drill, Firefighter 3 - so asserting Breakfast, shift, Drill is what
+        // proves the two streams are actually interleaved (see npm run verify:day-order for the merge itself).
+        events: [
+          { id: 'be0', title: 'Breakfast', date_from: `${boardDay} 07:00`, date_to: `${boardDay} 07:30` },
+          { id: 'be1', title: 'Drill', date_from: `${boardDay} 19:00`, date_to: `${boardDay} 20:00` },
+        ],
         onOffersChanged: async () => {},
         onAdminDataChanged: async () => {},
       })
@@ -607,6 +636,20 @@ check('a vacant pill names the assignment', String(boardHtml).includes('Firefigh
 check('and no longer says "Open"', !String(boardHtml).includes('Open'));
 // Still styled as a vacancy, which is now doing the work the word used to do.
 check('keeping its vacancy styling', String(boardHtml).includes('text-slate-400'));
+// Tooltips repeat the labels (each pill has a title, and the day cell has a summary), so they are stripped before
+// measuring - what is being asserted is the order of the pills themselves.
+// Measured inside the ONE day cell that holds the events, not across the whole board: the template runs every week,
+// so its slot (and this assignment's name) appears in every week's cell, and an index into the page would be
+// measuring a later day. The cell is split out by its class.
+const boardCells = String(boardHtml).split('min-h-[124px] rounded-lg border p-1.5 flex flex-col gap-1');
+const boardDayCell = boardCells.find((cell) => cell.includes('Breakfast')) || '';
+check('the day cell with the events was found', boardDayCell.length > 0);
+const boardOrder = ['Breakfast', 'Firefighter 3', 'Drill'].map((label) => boardDayCell.indexOf(label));
+check(
+  'and reads a 7am event, the 8am shift, a 7pm event',
+  boardOrder.every((at, i) => at > -1 && (i === 0 || boardOrder[i - 1] < at)),
+  `Breakfast, shift, Drill at ${boardOrder.join(', ')}`
+);
 
 console.log('\n--- the Firefighter Runner easter egg ---');
 // The game carries a leaderboard panel now. Effects do not run during a server render, so
@@ -1001,7 +1044,7 @@ check('and it still says what it is for', String(collapsedForm).includes('Record
 // Editing a row opens it, so clicking Edit cannot appear to do nothing.
 const editingForm = formView({ editing: { id: 't9', date: '2026-03-14', title: 'Opened' } });
 check('editing opens the card', /aria-expanded="true"/.test(String(editingForm)));
-check('with the row loaded in', String(editingForm).includes('Edit Training #t9') && String(editingForm).includes('value="Opened"'));
+check('with the row loaded in', String(editingForm).includes('Edit Opened') && String(editingForm).includes('value="Opened"'));
 check('and the fields present', String(editingForm).includes('Narrative') && String(editingForm).includes('Duration (hours)'));
 check('plus a cancel action', String(editingForm).includes('Cancel edit'));
 
@@ -1747,12 +1790,16 @@ check(
   true
 );
 check(
-  'the five columns',
-  ['ID', 'Timestamp', 'Member', 'Action', 'Details'].every((heading) =>
+  'the four columns',
+  ['Timestamp', 'Member', 'Action', 'Details'].every((heading) =>
     String(logTabView).includes(`>${heading}<`)
   ),
   true
 );
+// The log used to show the row's own id as its first column. It is gone: a UUID is longer than the column it sat
+// in, says nothing about the entry, and is not how anybody refers to a log line. The timestamp and the order of the
+// rows are what locates an entry.
+check('and not the row id', !/aria-label="ID"|>ID</.test(String(logTabView)), true);
 // visibleText strips the SSR comment markers React inserts between text and an interpolation, so
 // "Page 1 of 1" matches rather than "Page <!-- -->1<!-- --> of ...".
 check('and a pager that is idle with no data', visibleText(logTabView).includes('Page 1 of 1'), true);

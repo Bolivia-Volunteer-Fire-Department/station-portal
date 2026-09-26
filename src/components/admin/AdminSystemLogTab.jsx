@@ -3,6 +3,7 @@ import {
   AlertCircle, ChevronLeft, ChevronRight, Filter, Info, Loader2, RefreshCw, RotateCcw, ScrollText,
 } from 'lucide-react';
 import { adminFetchSystemLog } from '../../services/api';
+import { unnamedLabel } from '../../utils/displayLabel';
 import {
   DEFAULT_LOG_SORT,
   LOG_ACTION_TONE_CLASSES,
@@ -240,7 +241,6 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
               <tr>
-                <th className="px-4 py-3 w-16">ID</th>
                 <th className="px-4 py-3 whitespace-nowrap">Timestamp</th>
                 <th className="px-4 py-3">Member</th>
                 <th className="px-4 py-3">Action</th>
@@ -252,7 +252,7 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
                   stays put and fades while the next one arrives, so paging does not blank the tab. */}
               {loading && !loadedOnce && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={4} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                     <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-red-500" />
                     Loading the system log…
                   </td>
@@ -260,7 +260,7 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
               )}
               {!loading && rows.length === 0 && !error && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={4} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                     {isFiltered ? 'No log entries match these filters.' : 'The system log is empty.'}
                   </td>
                 </tr>
@@ -274,15 +274,14 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
                        that were just requested. */
                     className={`align-top ${loading ? 'opacity-50' : ''}`}
                   >
-                    <td className="px-4 py-3 tabular-nums text-slate-400 dark:text-slate-500">{row.id || '—'}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300">
                       {formatLogTimestamp(row.timestamp, timeFormat)}
                     </td>
                     <td
                       className="px-4 py-3 text-slate-700 dark:text-slate-200"
-                      title={name ? `${name} (${row.user_id})` : row.user_id}
+                      title={name || undefined}
                     >
-                      {name || row.user_id || '—'}
+                      {name || unnamedLabel('member')}
                     </td>
                     <td className="px-4 py-3">
                       {row.action ? (

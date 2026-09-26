@@ -3,6 +3,7 @@ import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-reac
 import { adminSaveShift, adminDeleteShift } from '../../services/api';
 import { toTimeInputValue } from '../../utils/timeInputValue';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = {
   id: '',
@@ -111,7 +112,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? `Edit Shift #${formData.id}` : 'Add New Shift'}
+              {isEditing ? recordHeading('Shift', formData.description) : 'Add New Shift'}
             </h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">

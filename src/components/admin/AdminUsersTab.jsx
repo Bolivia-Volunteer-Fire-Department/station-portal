@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Music, KeyRound } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
 
@@ -98,7 +99,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? `Edit User #${formData.id}` : 'Add New User'}</h3>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? recordHeading('User', formData.name || formData.user_name) : 'Add New User'}</h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
                 <X className="w-4 h-4" /> Cancel

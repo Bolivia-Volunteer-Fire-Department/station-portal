@@ -224,14 +224,14 @@ const authorDirectory = [{ id: '1', name: 'Member 1' }, { id: 100, name: 'Member
 check('a known author by name', announcementAuthorLabel({ author_user_id: '1' }, authorDirectory), 'Created by Member 1');
 // Numeric ids arrive from Sheets as numbers and from the client as strings.
 check('a numeric author id still matches', announcementAuthorLabel({ author_user_id: 100 }, authorDirectory), 'Created by Member 3');
-check('an unknown author falls back to the id', announcementAuthorLabel({ author_user_id: '7' }, authorDirectory), 'Created by Member #7');
+check('an unknown author falls back to a phrase', announcementAuthorLabel({ author_user_id: '7' }, authorDirectory), 'Created by Unnamed member');
 // A row that predates the column, or one added by hand: nothing to show rather than a dangling "#".
 check('a blank author yields nothing', announcementAuthorLabel({ author_user_id: '' }, authorDirectory), '');
 check('a whitespace-only author yields nothing', announcementAuthorLabel({ author_user_id: '   ' }, authorDirectory), '');
 check('a missing author yields nothing', announcementAuthorLabel({}, authorDirectory), '');
 check('a missing announcement is safe', announcementAuthorLabel(null, authorDirectory), '');
-check('a nameless directory row falls back to the id', announcementAuthorLabel({ author_user_id: '1' }, [{ id: '1' }]), 'Created by Member #1');
-check('no directory at all still yields a label', announcementAuthorLabel({ author_user_id: '5' }), 'Created by Member #5');
+check('a nameless directory row falls back to a phrase', announcementAuthorLabel({ author_user_id: '1' }, [{ id: '1' }]), 'Created by Unnamed member');
+check('no directory at all still yields a label', announcementAuthorLabel({ author_user_id: '5' }), 'Created by Unnamed member');
 
 // The administrator's list is its own fetch, deliberately.
 //

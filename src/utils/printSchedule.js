@@ -23,6 +23,7 @@ import { MONTHS } from './calendarConstants';
 import { isShiftDay } from './shiftPlacement';
 import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from './events';
 import { prettyRange, rowTimeText, shiftTimeLabel, timeToMinutes } from './shiftTime';
+import { unnamedLabel } from './displayLabel';
 import { templateIsActiveOn } from './scheduleTemplates';
 import { assignmentIsActiveOn } from './assignmentDates';
 import { assignmentColor } from './assignmentColor';
@@ -118,7 +119,7 @@ export const printLinesForDate = ({
   const userName = (id) => {
     const found = (Array.isArray(users) ? users : []).find((u) => String(u?.id) === String(id));
     if (!found) return '';
-    return text(found.name) || `Member #${id}`;
+    return text(found.name) || unnamedLabel('member');
   };
 
   // Who may fill a vacancy, and whether it is still worth printing one.
@@ -158,7 +159,7 @@ export const printLinesForDate = ({
         assignments: assignmentList,
         assignmentsById,
         // The member's own shift needs no name; everyone else's does.
-        extraLabel: !who ? 'Open' : showsEveryone ? userName(who) || `Member #${who}` : '',
+        extraLabel: !who ? 'Open' : showsEveryone ? userName(who) : '',
       })
     );
   }
@@ -187,9 +188,9 @@ export const printLinesForDate = ({
     }
   }
 
-  // Events for this day, printed FIRST so they read as context above the shifts - the same order the
-  // calendars draw them in. Normalised defensively, and never given a name or an "Open" label: an event is
-  // not a shift and nothing about it is offerable.
+  // Events for this day, placed among the shifts by start time rather than printed above them all - the same order
+  // the calendars draw (see utils/dayOrder). Normalised defensively, and never given a name or an "Open" label: an
+  // event is not a shift and nothing about it is offerable.
   const dayEvents = eventSegmentsByDay(normalizeEventList(events), dateKey, dateKey, { ranks }).get(dateKey) || [];
   for (const segment of dayEvents) {
     const when = eventSegmentTimeLabel(segment, '12');
@@ -202,11 +203,12 @@ export const printLinesForDate = ({
     });
   }
 
-  // A shift with no readable start sorts last rather than pretending to be midnight.
+  // A shift with no readable start sorts last rather than pretending to be midnight. Equal start times are common
+  // (two shifts at 08:00) and an event among them goes first, which is the rule the calendars use too.
   return lines.sort((a, b) => {
     const aMin = Number.isFinite(a.startMin) ? a.startMin : Number.MAX_SAFE_INTEGER;
     const bMin = Number.isFinite(b.startMin) ? b.startMin : Number.MAX_SAFE_INTEGER;
-    return aMin - bMin || a.text.localeCompare(b.text);
+    return aMin - bMin || Number(!!b.isEvent) - Number(!!a.isEvent) || a.text.localeCompare(b.text);
   });
 };
 

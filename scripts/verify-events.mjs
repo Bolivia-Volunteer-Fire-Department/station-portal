@@ -498,7 +498,14 @@ check('it groups them by day', /eventSegmentsByDay\(/.test(calendarSource), true
 // Anchored on the pill loop itself: the day cell also calls dayAssignments.map() for its tooltip, which
 // comes first and would make this pass for the wrong reason.
 check('it renders an event pill', /<EventPill/.test(calendarSource), true);
-check('events are drawn before the shifts', calendarSource.indexOf('eventSegmentsByDate.get(key)') < calendarSource.indexOf('dayAssignments.map((a) => {'), true);
+// The pills must be drawn AMONG the shift pills, by start time, so the day reads in the order it happens - an event
+// at 6 PM must not be stranded above the morning's shifts. Anchored on the merge call itself, because that call is
+// what decides it. (The rule and its edge cases live in utils/dayOrder: see npm run verify:day-order.)
+check(
+  'it places events among the shifts',
+  /mergeDayItems\(dayAssignments, eventSegmentsByDate\.get\(key\)/.test(calendarSource),
+  true
+);
 // The hide toggle is a view choice, not a setting: nothing about it may be persisted.
 check('the events switch exists', /noun="events"/.test(calendarSource), true);
 // The switch defaults ON, and the verb follows the STATE rather than being fixed: while the events are shown
@@ -525,7 +532,9 @@ check('events are not turned into offerable rows', /events?[\s\S]{0,80}isOpen: t
 
 console.log('\n--- the app feeds the calendar ---');
 const appSource = readFileSync('src/App.jsx', 'utf8');
-check('App fetches events', /fetchEvents\(/.test(appSource), true);
+// Events arrive with the sign-in payload now (one request covers the whole screen) rather than from a fetch of
+// their own, so what matters is that App applies the field the payload carries.
+check('App applies the events from the sign-in payload', /if \(data\.events\) setEvents\(normalizeEventList\(data\.events\)\)/.test(appSource), true);
 check('App holds them in state', /const \[events, setEvents\]/.test(appSource), true);
 check('App normalises what it stores', /setEvents\(normalizeEventList\(data\.events\)\)/.test(appSource), true);
 check('and passes them to the schedule calendar', /events=\{events\}/.test(appSource), true);
@@ -671,7 +680,45 @@ const allDayPill = pillBody(allDayCalendar, 'Muster');
 check('the all-day pill was found', allDayPill.length > 5, true);
 check('and carries no clock on it', /\d{1,2}:\d{2}/.test(allDayPill), false);
 
-console.log('\n--- sorting, filtering and the two cards ---');
+console.log('\n--- a day reads in time order, events among the shifts ---');
+// The bug this covers: every event used to be drawn above every shift, so a 6 PM event sat above the morning
+// shift. A day cell is read top to bottom, so the pills now interleave by start minute, with an event above a
+// shift that starts at the same moment.
+//
+// Asserted on the rendered calendar rather than on the ordering function alone: the function being right and the
+// cell being wired to it are two different claims, and only rendering settles the second. The row carries no
+// template, which is the "custom shift" path - the same one My Schedule draws for a manually added shift.
+const orderDay = monthDay(1);
+const orderCalendar = renderToString(
+  React.createElement(ScheduleCalendar, {
+    currentUser: { id: 'u1', name: 'Member 1' },
+    schedule: [
+      { id: 'row-1', date_from: orderDay, date_to: orderDay, assignment_id: 'a1', user_id: 'u1', start_time: '09:00', end_time: '17:00' },
+    ],
+    assignments: [{ id: 'a1', description: 'Day shift', rank_order_required: '' }],
+    events: normalizeEventList([
+      { id: 'e-early', title: 'Early event', date_from: `${orderDay} 07:00`, date_to: `${orderDay} 08:00` },
+      { id: 'e-tie', title: 'Tied event', date_from: `${orderDay} 09:00`, date_to: `${orderDay} 10:00` },
+      { id: 'e-late', title: 'Late event', date_from: `${orderDay} 20:00`, date_to: `${orderDay} 21:00` },
+    ]),
+    eventAudience: { roleId: '', rankId: '', userId: '', ranks: [] },
+    timeFormat: '12',
+  })
+);
+// Where each pill appears in the markup: the order of the strings IS the order of the DOM. Tooltips are stripped
+// first - the day cell summarises its shifts in its own `title`, which appears before any pill, so the first
+// occurrence of a shift's name would otherwise be the summary rather than the pill.
+const pillOnly = String(orderCalendar).replace(/title="[^"]*"/g, '');
+const orderAt = ['Early event', 'Tied event', 'Day shift', 'Late event'].map((label) => pillOnly.indexOf(label));
+check('all four pills rendered', orderAt.every((at) => at > -1), true);
+check(
+  'the 7am event, the 9am event, the 9am shift, the 8pm event',
+  orderAt.every((at, i) => i === 0 || orderAt[i - 1] < at),
+  true
+);
+check('and the shift is not stranded above them all', orderAt[2] > orderAt[1], true);
+
+
 // A minimal event shape to sort and filter with. Declared here rather than further down because the two
 // sections below both use it.
 const anchorEvent = (over = {}) => ({
@@ -966,16 +1013,17 @@ check('the availability grid takes events', /events = \[\]/.test(availabilitySou
 check('and groups them by day', /eventSegmentsByDay\(/.test(availabilitySource), true);
 check('it normalises defensively', /normalizeEventList\(events\)/.test(availabilitySource), true);
 check('it has an events switch', /noun="events"/.test(availabilitySource), true);
-// An event must not become something a member can tick: the slots are buttons and the events are not.
-const availabilityEventBlock = availabilitySource.slice(
-  availabilitySource.indexOf('eventSegmentsByDate.get(dateKey)'),
-  availabilitySource.indexOf('daySlots.map((slot)')
-);
-check('the availability event block was found', availabilityEventBlock.length > 50, true);
-// An event must not become something a member can tick: the slots are buttons, the events are not. Here the
-// shared pill is handed no handler, so it stays the <div> it is by default - no tap, no button.
-check('the availability event block renders the shared pill', /<EventPill/.test(availabilityEventBlock), true);
-check('and never hands it a handler', /onClick/.test(availabilityEventBlock), false);
+// An event must not become something a member can tick: the slots are buttons and the events are not. The day cell
+// merges events and slots in time order (utils/dayOrder), so the event branch is the part of that merge before the
+// slot branch - anchored on both ends, and the anchors are asserted, because a slice whose end marker has moved
+// silently becomes the rest of the file and then asserts whatever it happens to find there.
+const mergeStart = availabilitySource.indexOf('mergeDayItems(daySlots,');
+const slotBranch = availabilitySource.indexOf('const slot = value;');
+check('the availability merge was found', mergeStart > -1 && slotBranch > mergeStart, true);
+const availabilityEventBranch = availabilitySource.slice(mergeStart, slotBranch);
+// The shared pill is handed no handler here, so it stays the <div> it is by default - no tap, no button.
+check('the availability event branch renders the shared pill', /<EventPill/.test(availabilityEventBranch), true);
+check('and never hands it a handler', /onClick/.test(availabilityEventBranch), false);
 // One shared pill for every calendar: none of them hand-rolls its own event markup, which is exactly how the
 // treatment would otherwise drift apart.
 [['ScheduleCalendar', calendarSource], ['AvailabilityCalendar', availabilitySource], ['the board', boardSource]].forEach(

@@ -5,6 +5,7 @@
 // columns, normalized to text the same way everywhere else in the app.
 
 import { parseSheetDateKey, toDateKey } from './scheduleDate';
+import { unnamedLabel } from './displayLabel';
 
 // The three places an announcement can appear, in the order the form lists them.
 export const ANNOUNCEMENT_LOCATIONS = [
@@ -149,11 +150,19 @@ export const announcementAudienceLabel = (announcement, { roles = [], ranks = []
   const parts = [];
   const nameOf = (list, id, key) => {
     const found = (Array.isArray(list) ? list : []).find((row) => String(row?.id) === String(id));
-    return found ? text(found[key]) || `#${id}` : `#${id}`;
+    return text(found?.[key]);
   };
-  if (userId) parts.push(`Only ${nameOf(users, userId, 'name')}`);
-  if (roleId) parts.push(`${parts.length ? 'and only ' : ''}${nameOf(roles, roleId, 'description')} role`);
-  if (rankId) parts.push(`${parts.length ? 'and only ' : ''}${nameOf(ranks, rankId, 'description')} rank`);
+  if (userId) parts.push(`Only ${nameOf(users, userId, 'name') || unnamedLabel('member')}`);
+  // A named role or rank keeps the noun that explains it; one that cannot be named reads as a phrase, because
+  // "Unnamed role role" is what a fallback built from a noun would produce.
+  if (roleId) {
+    const roleName = nameOf(roles, roleId, 'description');
+    parts.push(`${parts.length ? 'and only ' : ''}${roleName ? `${roleName} role` : unnamedLabel('role')}`);
+  }
+  if (rankId) {
+    const rankName = nameOf(ranks, rankId, 'description');
+    parts.push(`${parts.length ? 'and only ' : ''}${rankName ? `${rankName} rank` : unnamedLabel('rank')}`);
+  }
   return parts.length ? parts.join(', ') : 'Everyone';
 };
 
@@ -174,7 +183,7 @@ export const announcementAuthorLabel = (announcement, users = []) => {
   if (!authorId) return '';
   const found = (Array.isArray(users) ? users : []).find((row) => String(row?.id) === authorId);
   const name = found ? text(found.name) : '';
-  return `Created by ${name || `Member #${authorId}`}`;
+  return `Created by ${name || unnamedLabel('member')}`;
 };
 
 export const announcementReachesSomeone = ({ roleId = '', rankId = '', userId = '' } = {}, users = []) => {

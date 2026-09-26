@@ -7,6 +7,7 @@ import TrainingFilters from '../training/TrainingFilters';
 import TrainingForm from '../training/TrainingForm';
 import TrainingTotals from '../training/TrainingTotals';
 import { displayDate } from '../../utils/scheduleDate';
+import { unnamedLabel, userLabel } from '../../utils/displayLabel';
 import {
   DEFAULT_TRAINING_SORT,
   emptyTrainingFilters,
@@ -76,14 +77,14 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
       ...users
         .slice()
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
-        .map((user) => ({ value: String(user.id), label: user.name || `Member #${user.id}` })),
+        .map((user) => ({ value: String(user.id), label: userLabel(user) })),
     ],
     [users]
   );
 
   const counts = useMemo(() => signatureCounts(signatures), [signatures]);
   const memberName = (userId) =>
-    users.find((user) => String(user.id) === String(userId))?.name || `Member #${userId}`;
+    users.find((user) => String(user.id) === String(userId))?.name || unnamedLabel('member');
 
   useEffect(() => {
     if (message?.type === 'success') {

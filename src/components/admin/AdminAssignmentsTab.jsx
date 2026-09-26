@@ -14,6 +14,7 @@ import {
 import { toDateKey } from '../../utils/scheduleDate';
 import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = {
   id: '',
@@ -129,7 +130,7 @@ export default function AdminAssignmentsTab({
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? `Edit Assignment #${formData.id}` : 'Add New Assignment'}</h3>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? recordHeading('Assignment', formData.description) : 'Add New Assignment'}</h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
                 <X className="w-4 h-4" /> Cancel
@@ -330,7 +331,6 @@ export default function AdminAssignmentsTab({
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>
-              <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Description</th>
               <th className="px-4 py-3">Minimum Rank</th>
               <th className="px-4 py-3">Available</th>
@@ -343,7 +343,6 @@ export default function AdminAssignmentsTab({
               const elig = eligibilityFor({ users, ranks, assignment });
               return (
                 <tr key={assignment.id} className="text-slate-700 dark:text-slate-200">
-                  <td className="px-4 py-3 font-mono text-slate-500 dark:text-slate-400">{assignment.id}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span

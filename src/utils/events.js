@@ -15,6 +15,7 @@
 import { rankOrderOf } from './rankEligibility';
 import { displayDate, toDateKey } from './scheduleDate';
 import { formatClock } from './shiftTime';
+import { unnamedLabel } from './displayLabel';
 
 // --- small helpers ----------------------------------------------------------
 
@@ -460,7 +461,7 @@ export const eventShowsToEveryone = (event) =>
 export const eventVisibilityLabel = (event, { roles = [], ranks = [], users = [] } = {}) => {
   const nameOf = (list, id, key) => {
     const found = (Array.isArray(list) ? list : []).find((row) => String(row?.id) === String(id));
-    return found ? text(found[key]) || `#${id}` : `#${id}`;
+    return text(found?.[key]);
   };
 
   const parts = [];
@@ -468,9 +469,21 @@ export const eventVisibilityLabel = (event, { roles = [], ranks = [], users = []
   const rank = text(event?.rank_id);
   const user = text(event?.user_id);
 
-  if (user) parts.push(`Only ${nameOf(users, user, 'name')}`);
-  if (role) parts.push(`${parts.length ? 'and only ' : ''}${nameOf(roles, role, 'description')} role`);
-  if (rank) parts.push(`${parts.length ? 'and only ' : ''}${nameOf(ranks, rank, 'description')} rank and above`);
+  if (user) parts.push(`Only ${nameOf(users, user, 'name') || unnamedLabel('member')}`);
+  // A named role or rank keeps the noun that explains it ("Officer role", "Driver rank and above"); one that cannot
+  // be named reads as a phrase, because "Unnamed role role" is what a fallback built from a noun would produce.
+  if (role) {
+    const roleName = nameOf(roles, role, 'description');
+    parts.push(`${parts.length ? 'and only ' : ''}${roleName ? `${roleName} role` : unnamedLabel('role')}`);
+  }
+  if (rank) {
+    const rankName = nameOf(ranks, rank, 'description');
+    // "and above" belongs to the target rather than to the name: an unnamed rank still means that rank and every one
+    // above it, exactly as a named one does.
+    parts.push(
+      `${parts.length ? 'and only ' : ''}${rankName ? `${rankName} rank` : unnamedLabel('rank')} and above`
+    );
+  }
 
   return parts.length ? parts.join(', ') : 'Everyone';
 };

@@ -15,6 +15,7 @@ import RankIcon from '../RankIcon';
 import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
+import { mergeDayItems } from '../../utils/dayOrder';
 import { isAvailableForSlot } from '../../utils/availability';
 import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
 // The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
@@ -26,6 +27,7 @@ import {
   rankLabel,
 } from '../../utils/rankEligibility';
 import { WEEKDAYS, MONTHS, DAY_ORDER } from '../../utils/calendarConstants';
+import { unnamedLabel } from '../../utils/displayLabel';
 import PrintableSchedule from '../PrintableSchedule';
 
 const DRAFT_KEY = 'sp_schedule_draft';
@@ -220,7 +222,9 @@ export default function AdminScheduleManagementTab({
   }, [working, dirty]);
 
   const userById = (id) => users.find((u) => String(u.id) === String(id));
-  const userName = (id) => userById(id)?.name || `#${id}`;
+  // A member who cannot be resolved is named rather than numbered: an id here told an administrator nothing and
+  // made the pill the width of a UUID.
+  const userName = (id) => userById(id)?.name || unnamedLabel('member');
   const assignmentById = (id) => assignments.find((a) => String(a.id) === String(id));
 
   // What a pill calls the shift. A VACANCY (a row with no member) is labelled with the
@@ -1645,7 +1649,7 @@ export default function AdminScheduleManagementTab({
                         Pending approval
                       </p>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                        {offerUser ? offerUser.name : `#${slotOffer?.user_id}`} ·{' '}
+                        {offerUser ? offerUser.name : unnamedLabel('member')} ·{' '}
                         {slotLabelText(slot)}
                       </p>
                     </div>
@@ -1864,19 +1868,25 @@ export default function AdminScheduleManagementTab({
                   {day.getDate()}
                 </div>
 
-                {/* Events above the shift pills: context for the day, never clickable and never mistaken for
-                    a shift. Plain divs, so they carry none of the board's selection or drag behaviour. */}
-                {(eventSegmentsByDate.get(dateKey) || []).map((segment) => (
-                  <EventPill
-                    key={`event-${segment.eventId}-${segment.dateKey}`}
-                    segment={segment}
-                    timeFormat={timeFormat}
-                  />
-                ))}
+                {/* Chronological, with the day's events placed among its shifts rather than above them all - see
+                    utils/dayOrder. Events stay plain divs, so they carry none of the board's selection or drag
+                    behaviour; only their position changes. */}
 
-                {daySlots.map((slot) => {
+                {mergeDayItems(daySlots, eventSegmentsByDate.get(dateKey) || []).map(({ kind, value }) => {
+                  if (kind === 'event') {
+                    const segment = value;
+                    return (
+                      <EventPill
+                        key={`event-${segment.eventId}-${segment.dateKey}`}
+                        segment={segment}
+                        timeFormat={timeFormat}
+                      />
+                    );
+                  }
+
                   // displayOccupant, not slotOccupant: with a swap being offered the two rows are drawn in each
                   // other's places. See the hold-to-swap block above.
+                  const slot = value;
                   const occupant = displayOccupant(slot);
                   if (occupant) {
                     const occurred = isOccurred(occupant);
@@ -1987,6 +1997,8 @@ export default function AdminScheduleManagementTab({
                   );
                 })}
 
+                {/* Rows with no matching slot this day - a shift whose template is gone, or one added by hand -
+                    keep the foot of the day. They have no slot to sit among, and they sat here before. */}
                 {extraPills.map((e) => {
                   // Same rule as the occupant branch above: an unfilled row is a
                   // vacancy, so it is drawn like an empty slot rather than a

@@ -12,6 +12,7 @@ import {
 import RankIcon from './RankIcon';
 import EventPill from './EventPill';
 import { eventSegmentsByDay, normalizeEventList } from '../utils/events';
+import { mergeDayItems } from '../utils/dayOrder';
 import ViewToggle from './ViewToggle';
 
 // Month navigation, shared by the member editor and the administrator's roster view so
@@ -294,18 +295,23 @@ export default function AvailabilityCalendar({
                   {day.getDate()}
                 </span>
 
-                {/* Events above the slots: they are context for the day and must never look markable, so
-                    they are plain divs rather than buttons and carry no availability state. */}
-                {(eventSegmentsByDate.get(dateKey) || []).map((segment) => (
-                  <EventPill
-                    key={`event-${segment.eventId}-${segment.dateKey}`}
-                    segment={segment}
-                    timeFormat={timeFormat}
-                    className="mx-0.5 mt-0.5"
-                  />
-                ))}
+                {/* Chronological, with the day's events placed among its shifts rather than above them all - see
+                    utils/dayOrder. Events must never look markable, so they stay plain divs with no availability
+                    state: the ordering decides where they sit, not what they are. */}
+                {mergeDayItems(daySlots, eventSegmentsByDate.get(dateKey) || []).map(({ kind, value }) => {
+                  if (kind === 'event') {
+                    const segment = value;
+                    return (
+                      <EventPill
+                        key={`event-${segment.eventId}-${segment.dateKey}`}
+                        segment={segment}
+                        timeFormat={timeFormat}
+                        className="mx-0.5 mt-0.5"
+                      />
+                    );
+                  }
 
-                {daySlots.map((slot) => {
+                  const slot = value;
                   const marked = isMarked(slot);
                   const assignment = assignmentById(slot.assignmentId);
                   const timing = shiftTimeLabel(

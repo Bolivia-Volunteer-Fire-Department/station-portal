@@ -8,6 +8,7 @@ import { toDateKey } from '../../utils/scheduleDate';
 import { authorLabel } from '../../utils/authorLabel';
 import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading, unnamedLabel, userLabel } from '../../utils/displayLabel';
 import {
   DEFAULT_EVENT_SORT, EVENTS_PAGE_SIZE, EVENT_AUDIENCE_OPTIONS, EVENT_DEFAULT_COLOR, EVENT_FREQUENCIES,
   EVENT_SORT_OPTIONS, EVENT_WEEKDAYS, emptyEventFilters, eventFiltersActive, eventNextOccurrenceLabel,
@@ -412,7 +413,7 @@ export default function AdminEventsTab({
           <span className="min-w-0">
             <span className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
               <CalendarPlus className="w-5 h-5 text-red-500" />
-              {isEditing ? `Edit Event #${form.id}` : 'New Event'}
+              {isEditing ? recordHeading('Event', form.title) : 'New Event'}
             </span>
             <span className="block text-sm text-slate-500 dark:text-slate-400">
               {isEditing
@@ -642,7 +643,7 @@ export default function AdminEventsTab({
                 <select value={form.role_id} onChange={(e) => setField('role_id', e.target.value)} className={fieldClass}>
                   <option value="">-- All roles --</option>
                   {roles.map((role) => (
-                    <option key={role.id} value={String(role.id)}>{role.description || `#${role.id}`}</option>
+                    <option key={role.id} value={String(role.id)}>{role.description || unnamedLabel('role')}</option>
                   ))}
                 </select>
               </Field>
@@ -653,7 +654,7 @@ export default function AdminEventsTab({
                 <select value={form.rank_id} onChange={(e) => setField('rank_id', e.target.value)} className={fieldClass}>
                   <option value="">-- All ranks --</option>
                   {ranks.map((rank) => (
-                    <option key={rank.id} value={String(rank.id)}>{rank.description || `#${rank.id}`}</option>
+                    <option key={rank.id} value={String(rank.id)}>{rank.description || unnamedLabel('rank')}</option>
                   ))}
                 </select>
               </Field>
@@ -661,7 +662,7 @@ export default function AdminEventsTab({
                 <select value={form.user_id} onChange={(e) => setField('user_id', e.target.value)} className={fieldClass}>
                   <option value="">-- All members --</option>
                   {users.map((user) => (
-                    <option key={user.id} value={String(user.id)}>{user.name || `#${user.id}`}</option>
+                    <option key={user.id} value={String(user.id)}>{userLabel(user)}</option>
                   ))}
                 </select>
               </Field>

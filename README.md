@@ -131,6 +131,15 @@ points at your latest deployment. The schedule calendar endpoints (`GET_SCHEDULE
 `GET_ROSTER`) are part of that backend script, so redeploy the script after pulling
 this change.
 
+> **Deploy the backend BEFORE (or with) the client, not after.** Sign-in is two batched
+> requests now — `GET_BOOTSTRAP` for a member, `ADMIN_GET_BOOTSTRAP` for an administrator —
+> and a deployment that predates them answers `Invalid action`. The app says so in the
+> console (`[refresh] this Apps Script deployment does not know GET_BOOTSTRAP…`) instead of
+> showing an empty calendar and a 12-hour clock, but the fix is the redeploy: nine separate
+> requests became one, which is what stops the tail of the old sign-in wave from timing out
+> at 60 seconds. The individual actions are all still there, so an older *client* keeps
+> working against the newer backend.
+
 > **First-request redirect / CORS:** Apps Script answers the very first fetch to a
 > deployment with a 302 redirect that browsers follow as a GET (no POST body). The
 > backend's `doGet` returns `{"ok": true, "redirected": true}` via `ContentService`
@@ -512,7 +521,7 @@ asset URLs resolve correctly no matter what you name the repo.
 
 The front end and the backend deploy separately, so **the app can be published while the backend is behind it**. Work through this once; it is the difference between a working deployment and a screen full of "Invalid action type".
 
-**1. Redeploy the Apps Script backend.** Paste the current `src/services/Code.gs` into the editor, Save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. A deployment is pinned to a version, so editing the file is not enough. Everything added recently is server-side: events, announcements, training, the session timeout, the System Log, the clock geofence, and the write-only script lock.
+**1. Redeploy the Apps Script backend.** Paste the current `src/services/Code.gs` into the editor, Save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. A deployment is pinned to a version, so editing the file is not enough. Everything added recently is server-side: events, announcements, training, the session timeout, the System Log, the clock geofence, the write-only script lock, and the batched sign-in (`GET_BOOTSTRAP` / `ADMIN_GET_BOOTSTRAP` — see the warning above about deploying before the client).
 
 **2. Create the sheets and columns the app expects.** A missing *column* is usually silent, not an error — the write path drops values it cannot map — so check the names rather than assuming:
 
@@ -642,6 +651,24 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   content, and a definite row — so `npm run verify:app-shell` checks every link, both call sites
   (including that the Administration panel hands down a height, and that neither caller wraps the
   component in an auto-height element). Opening a guide also starts at the top of it.
+- **Sign-in is two requests, not seventeen.** An administrator's sign-in used to fire two waves of nine
+  Apps Script executions — six of them fetching what the other wave already had — and every execution pays a
+  second or three of startup. The calls at the back of that pile were the ones that ran out of the client's
+  60-second patience, and a call that gives up is data the screen never gets: no shifts on the calendar, a
+  12-hour clock for a member who chose 24. Now one request returns everything a member's sign-in needs
+  (`GET_BOOTSTRAP`) and one returns everything an admin screen reads (`ADMIN_GET_BOOTSTRAP`) — both built
+  from the same helpers the individual actions use, so the two paths cannot disagree about what a roster or a
+  schedule is. Reads an older client asks for twice in the same moment are sent **once** and shared
+  (`utils/readCoalescing`), and whatever still fails is **retried once, one at a time**, with one console line
+  naming what is missing (`utils/refreshWave`). Nothing is cached: a read after a write always sees the write,
+  and a write never joins anything. `npm run verify:bootstrap` runs the new payloads against a fake spreadsheet,
+  `verify:refresh-wiring` audits both halves of the wiring, and `verify:read-coalescing` counts the requests.
+- **A calendar day reads in the order it happens.** Events used to be drawn above every shift, so a
+  6 PM event sat over the morning shift. The pills are interleaved by start time instead, and where an
+  event and a shift start at the same moment the event goes first — it is context for the day rather than
+  work in it. The printed sheet follows the same rule, and the rule itself lives in `src/utils/dayOrder.js`:
+  `npm run verify:day-order` covers the merge (including that a shift with no time is *not* read as
+  midnight) and that all three pill calendars are still wired to it.
 - **A refused drag on the schedule board always explains itself.** Losing a pill used to do nothing at
   all in four different situations — dropping onto an open shift, onto a past day, back where it
   started, or on a day's empty space — and "nothing happens" is indistinguishable from a broken app.
@@ -650,6 +677,14 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   refusal too, and it says so: the way to exchange two shifts is to **hold** the pill there for a
   moment, which blinks while the hold is read and then shows the two exchanged — letting go keeps it,
   moving out puts them back.
+- **No record ids are shown on screen.** Every place that used to print one — an `Edit User #9f2c1e0a…`
+  heading, an ID column in two admin tables, a `#assignment_id` chip on the member calendar,
+  administrator filter dropdowns, the author line under an announcement, the printed schedule, the
+  timeclock export, and a dozen "could not find that member" fallbacks — now names the record, or says
+  **Unnamed member**. A UUID cannot be compared by eye, is wider than the column it sits in, and shows
+  whoever is looking at the screen how the records are keyed. The wording comes from one helper
+  (`src/utils/displayLabel.js`), and `npm run verify:no-raw-ids` fails if any of those shapes come back —
+  as does `verify:admin-render`, which renders the tabs that had them.
 - **Destructive actions ask in the app, not in a browser dialog.** Deleting a user, an event, a
   training (and its signatures with it), a timeclock entry and the rest used `window.confirm` —
   thirteen of them, across eleven administrator tabs. They now ask in one shared `ConfirmModal`,

@@ -12,23 +12,21 @@ import {
   SOUNDS_SETTING_KEY,
   SOUNDS_DEFAULT,
 } from './utils/uiSounds';
+import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from './utils/refreshWave';
 import {
   fetchInitialData,
+  fetchBootstrap,
+  adminFetchBootstrap,
   fetchTimeclockLogs,
-  fetchUserSchedule,
   fetchTraining,
   fetchOnDutyUsers,
-  fetchRoster,
   fetchMyShiftOffers,
-  adminFetchScheduleOffers,
   fetchAvailability,
   submitClockAction,
   saveUserSettings,
   updateUserPassword,
   loginUser,
   pingSession,
-  adminFetchUsers,
-  adminFetchScheduleTemplates,
   registerPushDevice,
   unregisterPushDevice,
   fetchMyPushDevices
@@ -74,7 +72,6 @@ import {
 import { stationLogoUrl } from './utils/assets';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
-import { fetchMyAnnouncements, fetchEvents } from './services/api';
 import { normalizeEventList } from './utils/events';
 import FirefighterRunner from './components/FirefighterRunner/FirefighterRunner';
 
@@ -470,32 +467,52 @@ const getLoadingMessage = () => {
   // leave another screen showing the old value. Requests run in parallel, and one failing
   // does not sink the rest.
   const refreshAdminData = async (token = authToken) => {
-    // The request list is built FIRST, so the reporter's total is DERIVED from it.
+    // ONE request, not nine.
     //
-    // A hand-maintained count is what left a toast stuck at "9 of 10 done…" while all nine requests had
-    // already finished: the number and the list were two facts that had to be kept in step by hand, and
-    // verification of that number was itself broken (see verify-refresh-wiring). Now there is nothing to
-    // keep in step - add a request to this list and the count follows.
-    const requests = [fetchInitialData()];
-
-    if (token) {
-      requests.push(
-        refreshAdminUsers(token),
-        refreshAdminScheduleData(token), // templates, assignments AND offers
-        refreshSchedule(token),
-        refreshRoster(token),
-        // The dashboard's on-duty card: an admin correcting a clock record should not leave someone
-        // looking still on duty.
-        refreshOnDuty(token),
-        // The Training report: a save there changes both trainings and signatures, and the member module
-        // reads the same two caches.
-        refreshTraining(token),
-        // Announcements: a newly created one should appear in the member views immediately.
-        refreshAnnouncements(token),
-        // Events: the calendars draw them, so they have to arrive with everything else.
-        refreshEvents(token)
-      );
-    }
+    // This wave used to be nine Apps Script executions (the public payload, users, templates/assignments/offers,
+    // the schedule rows, the roster, on-duty, training, announcements, events) - and at sign-in it ran alongside
+    // the member wave, six of whose calls were the same reads again. Every execution pays a second or three of
+    // startup, so the wave's tail was what ran out of the client's 60-second patience, and a call that gives up is
+    // a screen that keeps showing yesterday's data.
+    //
+    // ADMIN_GET_BOOTSTRAP answers all of it, built from the same helpers the individual actions use (see
+    // adminBootstrapPayload in Code.gs). Without a token - the pre-login load, which is all the login screen
+    // needs - the public payload is still its own request, unauthenticated by design.
+    const tasks = token
+      ? [
+          {
+            name: 'everything an admin screen reads',
+            run: async () => {
+              const data = await adminFetchBootstrap(token);
+              if (data && data.code === 'UNAUTHORIZED') {
+                sessionExpired(token);
+                return REFRESH_EXPIRED;
+              }
+              if (warnIfBackendPredatesBootstrap(data)) return REFRESH_FAILED;
+              if (!data || !data.success) return REFRESH_FAILED;
+              applyAdminBootstrap(data);
+              return REFRESH_OK;
+            }
+          }
+        ]
+      : [
+          {
+            name: 'the initial payload',
+            run: async () => {
+              const initial = await fetchInitialData();
+              if (!initial) return REFRESH_FAILED;
+              // No session yet, so only the public half can be applied: roles, ranks, the shift definitions, the
+              // system settings and the login-screen announcements.
+              if (initial.userSettings) setUserSettings(initial.userSettings);
+              if (initial.roles) setRoles(initial.roles);
+              if (initial.ranks) setRanks(initial.ranks);
+              if (initial.shifts) setShifts(initial.shifts);
+              if (initial.systemSettings) setSystemSettings(initial.systemSettings);
+              if (Array.isArray(initial.announcements)) setLoginAnnouncements(initial.announcements);
+              return REFRESH_OK;
+            }
+          }
+        ];
 
     // One toast per wave, with an id that is never reused, so a second wave (a save during sign-in, say)
     // STACKS rather than replacing the first. It reports and gets out of the way - nothing awaits it, and
@@ -503,37 +520,27 @@ const getLoadingMessage = () => {
     const waveId = nextWaveId();
     const report = createWaveReporter({
       label: 'Refreshing views',
-      total: requests.length,
+      total: tasks.length,
       onProgress: (message) => toast.loading(message, { id: waveId }),
       onDone: (message) => toast.success(message, { id: waveId, duration: 2500 }),
     });
 
     try {
-      // Each request is counted as it settles, WHETHER IT SUCCEEDED OR NOT. An earlier version counted only
-      // the ones it awaited, so a request that failed left the wave claiming to be unfinished forever.
-      const tracked = requests.map((request) =>
-        request.then(
-          (value) => {
-            report.settle(true);
-            return value;
-          },
-          (err) => {
-            console.error('Admin refresh: one request failed', err);
-            report.settle(false);
-            return null;
-          }
-        )
-      );
-
-      const [initial] = await Promise.all(tracked);
-
-      if (initial && initial.userSettings) setUserSettings(initial.userSettings);
-      if (initial && initial.roles) setRoles(initial.roles);
-      if (initial && initial.ranks) setRanks(initial.ranks);
-      if (initial && initial.shifts) setShifts(initial.shifts);
-      if (initial && initial.systemSettings) setSystemSettings(initial.systemSettings);
-      // The login screen's announcements ride with the public payload, since there is no session then.
-      if (initial && Array.isArray(initial.announcements)) setLoginAnnouncements(initial.announcements);
+      // The count follows the tasks as they settle, WHETHER THEY SUCCEEDED OR NOT - which is why the wave
+      // reports each one. A request that failed used to leave the wave claiming to be unfinished forever.
+      //
+      // Only the first pass is counted: a retry that recovers is reported in the console instead, because a
+      // toast cannot both say "done" and then change its mind.
+      const outcome = await runRefreshWave(tasks, {
+        onSettle: ({ status, pass }) => {
+          if (pass === 1) report.settle(status === REFRESH_OK || status === REFRESH_EXPIRED);
+        }
+      });
+      if (outcome.missing.length) {
+        console.error(`[refresh] admin wave still missing after a retry: ${outcome.missing.join(', ')}`);
+      } else if (outcome.recovered.length) {
+        console.warn(`[refresh] admin wave loaded on a second attempt: ${outcome.recovered.join(', ')}`);
+      }
     } catch (err) {
       console.error('Failed to refresh admin data', err);
     }
@@ -543,52 +550,66 @@ const getLoadingMessage = () => {
   useEffect(() => {
     if (!isAdmin || !authToken) return;
     
-    const fetchData = async () => {
-      try {
-        // refreshAdminScheduleData already fetches the offers table itself, so
-        // listing refreshAdminOffers here as well fired that call twice.
-        await Promise.all([
-          refreshAdminUsers(authToken),
-          refreshAdminScheduleData(authToken),
-        ]);
-      } catch (err) {
-        console.error('Failed to refresh admin data', err);
-      }
-    };
-    
-    fetchData();
+    void refreshAdminData(authToken);
   }, [authToken, isAdmin]);
 
   // Opens the reauthentication modal instead of logging the user out. An
-  const refreshAdminUsers = async (token) => {
-    const data = await adminFetchUsers(token);
-    if (data && data.success && data.users) {
-      setUsers(data.users);
-    }
-    if (data && data.code === 'UNAUTHORIZED') {
-      sessionExpired(token);
-      return;
-    }
+  // Applying a sign-in payload.
+  //
+  // One applier per payload, because the batch and the individual refreshers must agree about what a field MEANS:
+  // `roster` is the same roster whichever request carried it, and a field the server omitted (a permission the
+  // role does not have) must leave that cache exactly as it was rather than clearing it.
+  //
+  // The two member projections are skipped for an administrator, exactly as refreshSchedule skips them: an admin
+  // already holds the FULL assignment and template rows, and the narrower member copy must not replace them.
+  const applyBootstrap = (data) => {
+    if (data.schedule) setSchedule(data.schedule);
+    if (data.availability) setAvailability(data.availability);
+    if (data.roster) setRoster(data.roster);
+    if (data.offers) setOffers(data.offers);
+    if (data.trainings) setTrainings(data.trainings);
+    if (data.signatures) setTrainingSignatures(data.signatures);
+    if (data.announcements) setAnnouncements(data.announcements);
+    if (data.events) setEvents(normalizeEventList(data.events));
+    if (data.logs) setLogs(data.logs);
+    if (data.onDuty) setOnDutyUsers(data.onDuty);
+    if (!isAdmin && data.assignments) setAssignments(data.assignments);
+    if (!isAdmin && data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
+    // The public configuration, which rides along for the same reason the rest does: a member whose pre-login
+    // fetch was cut short would otherwise keep a 12-hour clock and a default system setting all session.
+    if (data.userSettings) setUserSettings(data.userSettings);
+    if (data.roles) setRoles(data.roles);
+    if (data.ranks) setRanks(data.ranks);
+    if (data.shifts) setShifts(data.shifts);
+    if (data.systemSettings) setSystemSettings(data.systemSettings);
   };
 
-  // Fetches schedule template configuration + reference data (templates,
-  // assignments, apparatus) plus every shift offer - only succeeds server-side
-  // for a logged-in admin.
-  const refreshAdminScheduleData = async (token) => {
-    try {
-      const data = await adminFetchScheduleTemplates(token);
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(token);
-        return;
-      }
-      if (data && data.success) {
-        if (data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
-        if (data.assignments) setAssignments(data.assignments);
-      }
-    } catch (err) {
-      console.error('Failed to update schedule templates', err);
+  // A backend that predates the batched actions answers "Invalid action" for them. That is worth saying out loud,
+  // because the symptom is otherwise indistinguishable from a slow backend: a signed-in app with no shifts on it.
+  // A deployment has to be ahead of (or level with) the client for the batched sign-in - see the deployment
+  // checklist in the README.
+  const warnIfBackendPredatesBootstrap = (data) => {
+    if (data && !data.success && /invalid action/i.test(String(data.message || ''))) {
+      console.error(
+        '[refresh] this Apps Script deployment does not know GET_BOOTSTRAP. Deploy the current Code.gs: the ' +
+          'sign-in payload is one request now, and an older deployment answers it with "Invalid action".'
+      );
+      return true;
     }
-    await refreshAdminOffers(token);
+    return false;
+  };
+
+  const applyAdminBootstrap = (data) => {
+    // The member half rides along in the same payload: one request, one apply, no chance of the two halves
+    // disagreeing about the schedule they both draw.
+    applyBootstrap(data);
+    if (data.users) setUsers(data.users);
+    if (data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
+    if (data.assignments) setAssignments(data.assignments);
+    if (data.scheduleOffers) setAdminOffers(data.scheduleOffers);
+    // The login screen's announcements, kept in their own state: they are shown before sign-in and are not
+    // cleared on sign-out, so they are not the member's dashboard list.
+    if (data.loginAnnouncements) setLoginAnnouncements(data.loginAnnouncements);
   };
 
   // The signed-in member's own shift offers (pending/approved/declined) - what
@@ -598,28 +619,13 @@ const getLoadingMessage = () => {
       const data = await fetchMyShiftOffers(token);
       if (data && data.code === 'UNAUTHORIZED') {
         sessionExpired(token);
-        return;
+        return REFRESH_EXPIRED;
       }
       if (data && data.success && data.offers) setOffers(data.offers);
+      return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update shift offers', err);
-    }
-  };
-
-  // Admin: the whole offers table, so Schedule Management can flag the slots
-  // waiting on approval.
-    const refreshAdminOffers = async (token) => {
-    const t = token || authToken;
-    if (!t) return;
-    try {
-      const data = await adminFetchScheduleOffers(t);
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(token);
-        return;
-      }
-      if (data && data.success && data.offers) setAdminOffers(data.offers);
-    } catch (err) {
-      console.error('Failed to update schedule offers', err);
+      return REFRESH_FAILED;
     }
   };
 
@@ -628,11 +634,13 @@ const getLoadingMessage = () => {
       const data = await fetchTimeclockLogs(token);
       if (data && data.code === 'UNAUTHORIZED') {
         sessionExpired(token);
-        return;
+        return REFRESH_EXPIRED;
       }
       if (data && data.logs) setLogs(data.logs);
+      return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update logs', err);
+      return REFRESH_FAILED;
     }
   };
 
@@ -641,53 +649,16 @@ const getLoadingMessage = () => {
       const data = await fetchOnDutyUsers(token);
       if (data && data.code === 'UNAUTHORIZED') {
         sessionExpired(token);
-        return;
+        return REFRESH_EXPIRED;
       }
       if (data && data.onDuty) setOnDutyUsers(data.onDuty);
+      return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update on-duty roster', err);
+      return REFRESH_FAILED;
     }
   };
 
-
-  // Training. The list is readable by any signed-in member, but the names/signatures payload
-  // differs by role - the server returns only the signed-in member's own signatures unless the
-  // role can administer trainings - so this simply stores whatever came back.
-  // Non-shift calendar entries for the signed-in member. The server filters by audience, so this list is
-  // already only what they may see; the calendar filters again by the same rule as a guard.
-  const refreshEvents = async (token) => {
-    try {
-      const data = await fetchEvents(token);
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(token);
-        return;
-      }
-      if (data && data.events) {
-        // Normalised at the boundary, once: every calendar (and the printed sheet) then reads the same
-        // shape, and none of them has to remember to convert a raw sheet row. Passing raw rows through was
-        // the bug that made events invisible - the engine reads `isAllDay`/`startsAt`, not `is_all_day`.
-        setEvents(normalizeEventList(data.events));
-      }
-    } catch (err) {
-      // A calendar without events is still a usable calendar, so this never blocks the app.
-      console.error('Failed to refresh events:', err);
-    }
-  };
-
-  const refreshAnnouncements = async (token) => {
-    try {
-      const data = await fetchMyAnnouncements(token);
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(token);
-        return;
-      }
-      // Replaces only the member's own list. The login-screen announcements came with the public initial
-      // payload, so signing out does not clear them.
-      if (data && data.announcements) setAnnouncements(data.announcements);
-    } catch (err) {
-      console.error('Failed to refresh announcements:', err);
-    }
-  };
 
   const refreshTraining = async (token) => {
     try {
@@ -698,48 +669,10 @@ const getLoadingMessage = () => {
       }
       if (data && data.trainings) setTrainings(data.trainings);
       if (data && data.signatures) setTrainingSignatures(data.signatures);
+      return REFRESH_OK;
     } catch (err) {
       console.error('Failed to refresh training data:', err);
-    }
-  };
-
-  const refreshSchedule = async (token) => {
-    try {
-      const data = await fetchUserSchedule(token);
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(token);
-        return;
-      }
-      if (data && data.schedule) setSchedule(data.schedule);
-      // GET_SCHEDULE also returns the assignment reference data (name, color,
-      // minimum rank). Admins already hold the FULL assignment rows from their own
-      // endpoint, and this payload is a four-column projection of them, so it is
-      // only applied for members - otherwise an admin's richer copy could be
-      // replaced by the narrower one.
-      if (!isAdmin && data && data.assignments) setAssignments(data.assignments);
-      // Same reasoning as the projection above: an admin already holds the full template
-      // rows from their own endpoint, so the narrower member copy is only applied for a
-      // role without Administration access. Without it a member has no template data at
-      // all, and so no shift windows, nicknames or unfilled template slots.
-      if (!isAdmin && data && data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
-    } catch (err) {
-      console.error('Failed to update schedule', err);
-    }
-  };
-
-  // Member-visible roster used to label other members on the schedule calendar.
-  // A backend deployment that predates GET_ROSTER returns no roster (or the
-  // action is unknown), which is non-fatal - names fall back to member ids.
-  const refreshRoster = async (token) => {
-    try {
-      const data = await fetchRoster(token);
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(token);
-        return;
-      }
-      if (data && data.roster) setRoster(data.roster);
-    } catch (err) {
-      console.error('Failed to update member roster', err);
+      return REFRESH_FAILED;
     }
   };
 
@@ -751,36 +684,52 @@ const getLoadingMessage = () => {
         return;
       }
       if (data && data.availability) setAvailability(data.availability);
+      return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update availability', err);
+      return REFRESH_FAILED;
     }
   };
 
   // Post-sign-in data load.
   //
-  // Every fetch here is a separate Apps Script execution (~1-3s). Awaiting all of
-  // them held the "Please Wait" overlay over an already-rendered app, which is
-  // what made signing in feel slow even after the token came back. Only the data
-  // the first screen actually shows (clock history + who is on duty) is awaited;
-  // everything else fills in its own tab in the background.
+  // ONE request. This used to be nine Apps Script executions (schedule, availability, roster, offers, training,
+  // announcements, events, clock history, who is on duty), fired alongside the admin wave - whose six shared reads
+  // were the same calls again. Every execution pays a second or three of startup before it reads a cell, so the
+  // tail of that pile was what ran out of the 60-second patience this app enforces, and a call that gives up is
+  // data the screen never gets: no shifts on the calendar, a 12-hour clock for a member who chose 24.
   //
-  // Admin-scoped data is deliberately NOT fetched here - the authToken effect
-  // below already does it, and doing both meant every admin call ran twice.
-  const loadPostLoginData = (token) => {
-    // Started first, so these are already in flight while the overlay waits on
-    // the two calls returned below.
-    void Promise.all([
-      refreshSchedule(token),
-      refreshAvailability(token),
-      refreshRoster(token),
-      refreshOffers(token),
-      refreshTraining(token),
-      refreshAnnouncements(token),
-      // The calendars draw events, so a member needs them as soon as they sign in.
-      refreshEvents(token)
+  // GET_BOOTSTRAP answers all nine (see memberBootstrapPayload in Code.gs). The individual refreshers all remain:
+  // a tab that reloads its own list still asks for its own list, and the panel's callbacks use them.
+  //
+  // The wave retries a failure once, one at a time, so a slow backend degrades into "a few seconds later" rather
+  // than "missing until you reload". See utils/refreshWave.
+  const loadPostLoginData = async (token) => {
+    const outcome = await runRefreshWave([
+      {
+        name: 'everything this screen needs',
+        run: async () => {
+          const data = await fetchBootstrap(token);
+          if (data && data.code === 'UNAUTHORIZED') {
+            sessionExpired(token);
+            return REFRESH_EXPIRED;
+          }
+          if (warnIfBackendPredatesBootstrap(data)) return REFRESH_FAILED;
+          if (!data || !data.success) return REFRESH_FAILED;
+          applyBootstrap(data);
+          return REFRESH_OK;
+        }
+      }
     ]);
 
-    return Promise.all([refreshLogs(token), refreshOnDuty(token)]);
+    // One line each, and only when something did not load on the first attempt: this is the difference between
+    // "the app is slow" and "the app is quietly missing data", which was previously invisible without opening
+    // DevTools on the right screen.
+    if (outcome.missing.length) {
+      console.error(`[refresh] still missing after a retry: ${outcome.missing.join(', ')}`);
+    } else if (outcome.recovered.length) {
+      console.warn(`[refresh] loaded on a second attempt: ${outcome.recovered.join(', ')}`);
+    }
   };
 
   const handleLogin = async (username, password) => {
@@ -1490,7 +1439,9 @@ const getLoadingMessage = () => {
                 // Non-shift entries, for the board and the availability grid this module hosts.
                 events={events}
                 offers={adminOffers}
-                onOffersChanged={refreshAdminOffers}
+                // The offers table is part of the sign-in payload now, so a change to it reloads the same batch
+                // every other admin save does - one request, and no second way for the table to be fetched.
+                onOffersChanged={refreshAdminData}
                 trainings={trainings}
                 trainingSignatures={trainingSignatures}
                 // Lets any admin tab show a saved row immediately instead of waiting for the

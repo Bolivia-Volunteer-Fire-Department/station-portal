@@ -15,6 +15,7 @@ import { assignmentColor } from '../../utils/assignmentColor';
 import { choosableAssignments } from '../../utils/assignmentDates';
 import { MINUTES_PER_DAY, layoutWeekDayCards } from '../../utils/weekLayout';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', day_of_week: '', start_time: '', end_time: '', assignment_id: '', nickname: '', effective_date: '', end_date: '' };
 
@@ -90,7 +91,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
   const assignmentLabel = (id) => {
     if (id === undefined || id === null || id === '') return '—';
     const found = assignments.find((a) => String(a.id) === String(id));
-    return found?.description || `#${id}`;
+    return found?.description || unnamedLabel('assignment');
   };
 
   const dayName = (value) => DAY_NAMES[String(value ?? '').trim().toLowerCase()] || 'Template';
@@ -186,7 +187,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     if (id === undefined || id === null || id === '') continue;
     if (legendAssignments.some((a) => String(a.id) === String(id))) continue;
     const found = assignments.find((a) => String(a.id) === String(id));
-    legendAssignments.push({ id, description: found?.description || `#${id}` });
+    legendAssignments.push({ id, description: found?.description || unnamedLabel('assignment') });
   }
 
   const handleDragStart = (e, template) => {
@@ -272,7 +273,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? `Edit Schedule Template #${formData.id}` : 'Add New Schedule Template'}
+              {isEditing ? recordHeading('Schedule Template', formData.day_of_week ? `${dayName(formData.day_of_week)} template` : '') : 'Add New Schedule Template'}
             </h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">

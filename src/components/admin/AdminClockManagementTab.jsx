@@ -6,6 +6,7 @@ import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHo
 import { CLOCK_LOG_SORT_OPTIONS, filterAndSortClockLogs } from '../../utils/clockLogs';
 import RankIcon from '../RankIcon';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
 // Shows a hover/focus popover with the reverse-geocoded address for a clock in/out time,
 // falling back to the raw GPS coordinates when no address was resolved.
@@ -209,7 +210,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
       const user = userById(log.user_id);
       const rank = rankFor(log.user_id);
       return [
-        user?.name || log.user_id,
+        user?.name || unnamedLabel('member'),
         rank?.description || '',
         log.time_in || '',
         log.time_out || '',
@@ -243,7 +244,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? `Edit Entry #${formData.id}` : 'Add New Timeclock Entry'}
+              {isEditing ? recordHeading('Timeclock Entry') : 'Add New Timeclock Entry'}
             </h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
@@ -399,7 +400,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
               const rank = rankFor(log.user_id);
               return (
                 <tr key={log.id} className="text-slate-700 dark:text-slate-200">
-                  <td className="px-4 py-3 font-medium">{user?.name || log.user_id}</td>
+                  <td className="px-4 py-3 font-medium">{user?.name || unnamedLabel('member')}</td>
                   <td className="px-4 py-3">
                     {rank ? (
                       <div className="flex items-center gap-1.5" style={{ color: rank.color || undefined }}>

@@ -16,7 +16,7 @@ Below the calendar, **Schedule Details** lists the shifts in the month with thei
 
 ## Events on the calendar
 
-Alongside the shift pills you will also see **events** — training, meetings, details. They are drawn *above* the shifts, in their own color, and they are not something you can take: an event is not a shift, has nobody assigned to it, and there is nothing to offer for.
+Alongside the shift pills you will also see **events** — training, meetings, details. They sit **among** the shifts in time order, so the day reads the way it happens: an event at 6 PM is below the morning's shifts, not above them. Where a shift and an event start at the same moment the event is drawn first. They are not something you can take: an event is not a shift, has nobody assigned to it, and there is nothing to offer for.
 
 An event is drawn *outlined* rather than filled, so it never reads as a shift: a thin border and a wash in its own color, with its times underneath the title. An event set as **all day** shows its title alone, with no times, because it occupies whole days rather than a window on one of them.
 

@@ -10,6 +10,8 @@
 //
 // Eligibility is decided purely on rank ORDER - rank ids are never compared.
 
+import { unnamedLabel } from './displayLabel';
+
 export const isTruthyFlag = (value) =>
   value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';
 
@@ -51,7 +53,7 @@ export const memberCanFillAssignment = ({ member, assignment, ranks } = {}) => {
 export const rankLabel = (rank) => {
   if (!rank) return '';
   const order = parseRankOrder(rank.rank_order);
-  const description = String(rank.description ?? '').trim() || `Rank #${rank.id}`;
+  const description = String(rank.description ?? '').trim() || unnamedLabel('rank');
   return order === null ? description : `${description} (order ${order})`;
 };
 

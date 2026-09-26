@@ -16,6 +16,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from '../src/utils/refreshWave.js';
+import { createReadCoalescer, isReadAction, readKey } from '../src/utils/readCoalescing.js';
 
 const root = process.cwd();
 const read = (rel) => fs.readFileSync(path.resolve(root, rel), 'utf8');
@@ -50,29 +52,52 @@ const waveBlock = appSource.slice(appSource.indexOf('const refreshAdminData = as
 const waveBody = waveBlock.slice(0, waveBlock.indexOf('\n  };'));
 const refreshBody = extractFunction(appSource, 'const refreshAdminData = async');
 
-// Each cache a screen renders from, and the refresher that reloads it. If a new cache is
-// added to the app, add it here - that is the point of the table.
+// Each cache a screen renders from, and the applier that fills it.
+//
+// The save wave is ONE request now (ADMIN_GET_BOOTSTRAP), so the audit follows the guarantee to where it still
+// lives: the applier that turns the payload into state, and - below - the backend, where each field must be read by
+// the same helper the individual action uses. That second half is the stronger claim, because it is the point at
+// which the batch and the granular actions could drift apart.
+const adminApplier = extractFunction(appSource, 'const applyAdminBootstrap =');
+const memberApplier = extractFunction(appSource, 'const applyBootstrap =');
+const appliers = `${memberApplier}\n${adminApplier}`;
+
 const CACHES = [
-  ['roles / ranks / shifts / settings', 'fetchInitialData'],
-  ['users', 'refreshAdminUsers'],
-  ['schedule templates, assignments, offers', 'refreshAdminScheduleData'],
-  ['the schedule rows', 'refreshSchedule'],
-  ['the member roster', 'refreshRoster'],
-  ['who is on duty', 'refreshOnDuty'],
+  ['roles / ranks / shifts / settings', /setUserSettings\([\s\S]*setRoles\([\s\S]*setRanks\([\s\S]*setShifts\([\s\S]*setSystemSettings\(/],
+  ['users', /setUsers\(/],
+  ['schedule templates and assignments', /setScheduleTemplates\([\s\S]*setAssignments\(/],
+  ['the offers table', /setAdminOffers\(/],
+  ['the schedule rows', /setSchedule\(/],
+  ['the member roster', /setRoster\(/],
+  ['who is on duty', /setOnDutyUsers\(/],
+  ['training and its signatures', /setTrainings\([\s\S]*setTrainingSignatures\(/],
+  ['announcements', /setAnnouncements\(/],
+  ['the login-screen announcements', /setLoginAnnouncements\(/],
+  ['events', /setEvents\(/],
 ];
-for (const [cache, refresher] of CACHES) {
-  check(
-    `a save reloads ${cache}`,
-    refreshBody.includes(`${refresher}(`),
-    `refreshAdminData no longer calls ${refresher}()`
-  );
+for (const [cache, pattern] of CACHES) {
+  check(`a save reloads ${cache}`, pattern.test(appliers), `${cache} is no longer applied anywhere`);
 }
 
-// The exact shape of the bug: a branch that skips half the data.
 check(
-  'and does not branch on whether a token was passed',
-  !/if\s*\(\s*!token\s*\)/.test(refreshBody),
-  'refreshAdminData branches on !token again, so one half goes stale'
+  'and the save goes through the batched action',
+  /adminFetchBootstrap\(token\)/.test(refreshBody),
+  'refreshAdminData no longer asks for the sign-in payload'
+);
+check(
+  'applying what it returned',
+  /applyAdminBootstrap\(data\)/.test(refreshBody),
+  'the payload is fetched but never applied'
+);
+
+// The two halves of the branch, and what may appear in each: the public payload carries no session data, and the
+// authenticated one carries the admin-scoped batch. This replaces the old "does not branch on !token" check - the
+// branch exists because the PRE-LOGIN load has no token, and that is the only thing the tokenless half may fetch.
+const preLoginBody = refreshBody.slice(refreshBody.indexOf('!data.success) return REFRESH_FAILED'));
+check(
+  'the tokenless half loads only the public payload',
+  refreshBody.includes('fetchInitialData()') && !/adminFetchBootstrap/.test(preLoginBody.split('\n').slice(0, 3).join('\n')),
+  'the pre-login branch is asking for authenticated data'
 );
 check(
   'with the token defaulting to the session token',
@@ -84,6 +109,49 @@ check(
   refreshBody.includes('settle('),
   'a rejected request would abandon the whole refresh'
 );
+
+// The backend half: every field the batch returns must be built by the same helper as the action it replaces,
+// or a save could refresh a screen from a different definition of the data than the tab that wrote it.
+console.log('\n--- and the batch reads each field the same way its own action does ---');
+const bootstrapGs = read('src/services/Code.gs');
+// A `case "ACTION": {...}` block, from its case to the next case at the same indentation.
+const caseBodyFor = (source, action) => {
+  const start = source.indexOf(`case "${action}":`);
+  if (start === -1) return '';
+  const rest = source.slice(start + 1);
+  const next = rest.search(/\n      case "/);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+const bootstrapSource = `${extractFunction(bootstrapGs, 'function memberBootstrapPayload(')}\n${extractFunction(
+  bootstrapGs,
+  'function adminBootstrapPayload('
+)}`;
+
+const SHARED_READS = [
+  ['the schedule rows', 'GET_SCHEDULE', 'getSheetData(ss, "schedule")'],
+  ['the member assignment projection', 'GET_SCHEDULE', 'memberAssignmentRows('],
+  ['the member template projection', 'GET_SCHEDULE', 'memberScheduleTemplateRows('],
+  ['availability', 'GET_AVAILABILITY', 'getSheetData(ss, "availability")'],
+  ['the member roster', 'GET_ROSTER', 'rosterRowsFor('],
+  ['who is on duty', 'GET_ON_DUTY', 'onDutyRowsFor('],
+  ['the member\u2019s own offers', 'GET_SHIFT_OFFERS', 'offersForUser('],
+  ['clock history', 'GET_TIMECLOCK_LOGS', 'getSheetData(ss, "timeclock")'],
+  ['the training list', 'GET_TRAINING', 'trainingRowsForApp('],
+  ['the member\u2019s signatures', 'GET_TRAINING', 'trainingSignaturesForUser('],
+  ['the announcements', 'MY_ANNOUNCEMENTS', 'announcementRowsFor('],
+  ['events', 'GET_EVENTS', 'eventsForViewer('],
+  ['the user directory', 'ADMIN_GET_USERS', 'getSheetData(ss, "users")'],
+  ['the schedule templates', 'ADMIN_GET_SCHEDULE_TEMPLATES', 'getSheetData(ss, "schedule_templates")'],
+  ['the assignments', 'ADMIN_GET_SCHEDULE_TEMPLATES', 'getSheetData(ss, "assignments")'],
+  ['the offers table', 'ADMIN_GET_SCHEDULE_OFFERS', 'normalizeOffer'],
+];
+for (const [cache, action, callee] of SHARED_READS) {
+  check(
+    `${cache}: the batch and ${action} use the same reader`,
+    bootstrapSource.includes(callee) && caseBodyFor(bootstrapGs, action).includes(callee),
+    `"${callee}" is in one place but not the other`
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 2. Every writing tab asks for a refresh
@@ -135,7 +203,9 @@ const panelProps = panelBlock.slice(0, panelBlock.indexOf('/>'));
 for (const [prop, fn] of [
   ['onDataChanged', 'refreshAdminData'],
   ['onAdminDataChanged', 'refreshAdminData'],
-  ['onOffersChanged', 'refreshAdminOffers'],
+  // The offers table travels in the sign-in payload, so a change to it reloads the same batch every other admin
+  // save does - there is no second fetcher for it to drift from.
+  ['onOffersChanged', 'refreshAdminData'],
   ['onLogsChanged', 'refreshLogs'],
   ['onAvailabilityChanged', 'refreshAvailability'],
 ]) {
@@ -344,10 +414,18 @@ check('with the failure counted, not hidden', waveDoneMessage('Refreshing views'
 // The first version hard-coded it (`token ? 10 : 1`) while the list held nine, so the toast stalled at
 // "9 of 10 done…". A number that has to be kept in step with a list by hand is the defect; assert there is
 // no number.
-check('the wave derives its total from the list', /total: requests\.length/.test(waveBody), 'the total is not derived');
+check('the wave derives its total from the task list', /total: tasks\.length/.test(waveBody), 'the total is not derived');
 check('and holds no hand-kept count', /requestCount|total: \d/.test(waveBody) === false, 'a hard-coded count is back');
-check('every request is tracked through the reporter', /requests\.map\(\(request\) =>/.test(waveBody), 'requests are not tracked');
-check('counting a failure as well as a success', /report\.settle\(false\)/.test(waveBody) && /report\.settle\(true\)/.test(waveBody), true);
+check('every task settles through the reporter', /onSettle: \(\{ status, pass \}\)/.test(waveBody), 'tasks are not reported');
+// The defect this replaced: every refresher caught its own error and resolved, so the reporter's failure path was
+// unreachable and a wave that had lost the schedule still toasted a success. The reporter is now handed the
+// status the refresher reported, which is the only way it can tell the difference.
+check(
+  'counting a failure as well as a success',
+  /report\.settle\(status === REFRESH_OK \|\| status === REFRESH_EXPIRED\)/.test(waveBody),
+  'the reporter is not told the status'
+);
+check('and a retry is not counted as a second task', /if \(pass === 1\)/.test(waveBody), 'a retry would double-count');
 
 // Stackable: two waves running at once must not share an id, or the second would replace the first.
 const firstId = nextWaveId();
@@ -364,6 +442,184 @@ check('and completion through the same toast', /toast\.success\(message, \{ id: 
 
 
 //
+// --- the retry wave itself -------------------------------------------------------------------
+//
+// Exercised rather than read, because the whole point of it is behaviour under failure: a retry that runs in
+// parallel with its siblings rebuilds the queue that caused the failure, and a task retried twice is an app that
+// hammers a backend already unwell.
+console.log('\n--- a failed refresh gets one more chance ---');
+
+const fakeSleep = async () => {};
+
+const waveTask = (name, results) => {
+  const state = { runs: 0 };
+  return {
+    state,
+    task: {
+      name,
+      run: async () => {
+        state.runs += 1;
+        const outcome = results[Math.min(state.runs - 1, results.length - 1)];
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      },
+    },
+  };
+};
+const runsOf = (pair) => pair.state.runs;
+
+const allOk = [waveTask('schedule', [REFRESH_OK]), waveTask('training', [REFRESH_OK])];
+const healthy = await runRefreshWave(allOk.map((t) => t.task), { retryDelayMs: 0 });
+check('nothing is retried when the wave is healthy', allOk.every((t) => runsOf(t) === 1), allOk.map(runsOf).join(','));
+check('and nothing is reported missing', healthy.missing.length === 0, healthy.missing.join(','));
+check('and nothing is reported recovered', healthy.recovered.length === 0, healthy.recovered.join(','));
+
+const flaky = [waveTask('schedule', [REFRESH_FAILED, REFRESH_OK]), waveTask('training', [REFRESH_OK])];
+const second = await runRefreshWave(flaky.map((t) => t.task), { retryDelayMs: 0 });
+check('a failed task is tried again', flaky.map(runsOf).join(',') === '2,1', flaky.map(runsOf).join(','));
+check('and reported as recovered', second.recovered.join(',') === 'schedule', second.recovered.join(','));
+check('with nothing left missing', second.missing.length === 0, second.missing.join(','));
+
+const hopeless = [waveTask('training', [REFRESH_FAILED, REFRESH_FAILED])];
+const third = await runRefreshWave(hopeless.map((t) => t.task), { retryDelayMs: 0 });
+check('a task that fails twice is retried exactly once', runsOf(hopeless[0]) === 2, String(runsOf(hopeless[0])));
+check('and is reported missing by name', third.missing.join(',') === 'training', third.missing.join(','));
+
+// A refused session is not a slow backend: retrying it is pointless, and the reauth prompt already handles it.
+const refused = [waveTask('schedule', [REFRESH_EXPIRED])];
+const fourth = await runRefreshWave(refused.map((t) => t.task), { retryDelayMs: 0 });
+check('a refused session is not retried', runsOf(refused[0]) === 1, String(runsOf(refused[0])));
+check('and is not reported as missing data', fourth.missing.length === 0, fourth.missing.join(','));
+check('but is named as expired', fourth.expired.join(',') === 'schedule', fourth.expired.join(','));
+
+// A refresher that throws is a failure with the same remedy as one that timed out.
+const thrown = [waveTask('events', [new Error('boom'), REFRESH_OK])];
+const fifth = await runRefreshWave(thrown.map((t) => t.task), { retryDelayMs: 0 });
+check('a task that throws is retried', runsOf(thrown[0]) === 2, String(runsOf(thrown[0])));
+check('and counted as recovered', fifth.recovered.join(',') === 'events', fifth.recovered.join(','));
+
+// A refresher that forgets to report a status has not succeeded. Reading `undefined` as success is exactly how a
+// lost fetch became a green toast, so the wave refuses to.
+const unreported = [waveTask('announcements', [undefined, undefined])];
+const sixth = await runRefreshWave(unreported.map((t) => t.task), { retryDelayMs: 0 });
+check('a task that reports no status counts as failed', runsOf(unreported[0]) === 2, String(runsOf(unreported[0])));
+check('and is reported missing', sixth.missing.join(',') === 'announcements', sixth.missing.join(','));
+
+// Sequentially, after a pause: in parallel the retries would re-form the queue that caused the failure. Only the
+// retry pass is measured - the first pass is meant to be concurrent.
+let onRetry = 0;
+let maxOnRetry = 0;
+const overlapping = ['a', 'b', 'c'].map((name) => {
+  let runs = 0;
+  return {
+    name,
+    run: async () => {
+      runs += 1;
+      const isRetry = runs > 1;
+      if (isRetry) {
+        onRetry += 1;
+        maxOnRetry = Math.max(maxOnRetry, onRetry);
+      }
+      await fakeSleep();
+      if (isRetry) onRetry -= 1;
+      return REFRESH_FAILED;
+    },
+  };
+});
+const sleeps = [];
+await runRefreshWave(overlapping, {
+  retryDelayMs: 25,
+  sleep: async (ms) => {
+    sleeps.push(ms);
+  },
+});
+check('the retries never overlap each other', maxOnRetry === 1, String(maxOnRetry));
+check('and each waits its turn', sleeps.length === 3 && sleeps.every((ms) => ms === 25), sleeps.join(','));
+
+check('an empty wave is safe', (await runRefreshWave([])).missing.length === 0);
+check('and so is a missing list', (await runRefreshWave(null)).missing.length === 0);
+
+// --- one read, one execution ------------------------------------------------------------------
+//
+// The two waves overlap at an admin sign-in and six reads are fetched by both. Against a backend that runs one
+// execution at a time that is pure queue - the duplicate of each call sat behind the original for no new data, and
+// the last calls in the queue were the ones that ran out of the client's patience.
+console.log('\n--- the same read is not sent twice at once ---');
+
+check('GET_ actions are reads', isReadAction('GET_SCHEDULE'));
+check('and so are the admin ones', isReadAction('ADMIN_GET_USERS'));
+check('and the ping', isReadAction('PING'));
+// Writes must never join anything: sharing a promise between two saves would make one of them look applied.
+check('a save is not a read', !isReadAction('ADMIN_SAVE_USER'));
+check('nor is a delete', !isReadAction('ADMIN_DELETE_USER'));
+check('nor a settings update', !isReadAction('UPDATE_USER_SETTINGS'));
+check('nor a clock action', !isReadAction('CLOCK_IN'));
+check('nor a sign-in', !isReadAction('LOGIN'));
+check('nor an empty action', !isReadAction(undefined));
+
+const sameRead = readKey({ action: 'GET_SCHEDULE', token: 't1' });
+check('an identical request has one key', sameRead === readKey({ action: 'GET_SCHEDULE', token: 't1' }));
+check('another session is another read', sameRead !== readKey({ action: 'GET_SCHEDULE', token: 't2' }));
+check('another action is another read', sameRead !== readKey({ action: 'GET_ROSTER', token: 't1' }));
+check(
+  'and a different payload is another read',
+  sameRead !== readKey({ action: 'GET_SCHEDULE', token: 't1', payload: { month: 3 } })
+);
+
+const coalescer = createReadCoalescer();
+const shared = coalescer.hold('k', new Promise(() => {}));
+check('a read in flight can be joined', coalescer.join('k') === shared);
+check('an unknown key cannot', coalescer.join('other') === null);
+check('and it is held only while it is in flight', coalescer.size() === 1, String(coalescer.size()));
+
+const settledRead = createReadCoalescer();
+let resolveIt;
+const pendingRead = new Promise((resolve) => {
+  resolveIt = resolve;
+});
+settledRead.hold('k', pendingRead);
+check('the entry exists while the request runs', settledRead.size() === 1, String(settledRead.size()));
+resolveIt('data');
+await pendingRead;
+// One more turn, so the release handler attached with .then has run.
+await Promise.resolve();
+check('and is dropped the moment it settles', settledRead.size() === 0, String(settledRead.size()));
+check('so a later read is never served a stale answer', settledRead.join('k') === null);
+
+const failedRead = createReadCoalescer();
+const boom = Promise.reject(new Error('nope'));
+boom.catch(() => {});
+failedRead.hold('k', boom);
+await boom.catch(() => {});
+await Promise.resolve();
+check('a failed read is not left holding the key', failedRead.size() === 0, String(failedRead.size()));
+
+// And the fetch layer is wired to it - with writes kept out, which is the part that must never drift.
+const fetchLayerSource = read('src/services/api.js');
+check('the fetch layer owns a coalescer', /createReadCoalescer\(\)/.test(fetchLayerSource), 'no coalescer in api.js');
+check(
+  'writes bypass it',
+  /if \(!isReadAction\(body\?\.action\)\) return appScriptRequest\(body, options\);/.test(fetchLayerSource),
+  'reads and writes are not separated'
+);
+check('an identical read in flight is joined', /readsInFlight\.join\(key\)/.test(fetchLayerSource), 'never joins');
+check(
+  'and held for the next caller',
+  /readsInFlight\.hold\(key, appScriptRequest\(body, options\)\)/.test(fetchLayerSource),
+  'never holds'
+);
+// Teeth: remove the read/write split and the check above must fail - a coalescer that takes writes would let two
+// saves share one request, which is exactly the class of bug this guard exists for.
+const unsplit = fetchLayerSource.replace(
+  'if (!isReadAction(body?.action)) return appScriptRequest(body, options);',
+  'if (!body?.action) return appScriptRequest(body, options);'
+);
+check('the mutation applied', unsplit !== fetchLayerSource);
+check(
+  'and the wiring check catches a coalescer that takes writes too',
+  !/if \(!isReadAction\(body\?\.action\)\) return appScriptRequest\(body, options\);/.test(unsplit)
+);
+
 // Not waiting on the wave left the table holding pre-save values, so re-opening a form showed the old ones
 // (the Users bug). The saved row is merged into app state instead - one applier, every collection.
 console.log('\n--- a save applies its own row ---');

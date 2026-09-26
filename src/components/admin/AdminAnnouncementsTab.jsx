@@ -6,6 +6,7 @@ import {
 import { adminDeleteAnnouncement, adminFetchAnnouncements, adminSaveAnnouncement } from '../../services/api';
 import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading, unnamedLabel, userLabel } from '../../utils/displayLabel';
 import { toDateKey } from '../../utils/scheduleDate';
 import {
   ANNOUNCEMENT_ICON_FALLBACK,
@@ -228,7 +229,7 @@ export default function AdminAnnouncementsTab({
           <span className="min-w-0">
             <span className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
               <Megaphone className="w-5 h-5 text-red-500" />
-              {isEditing ? `Edit Announcement #${formData.id}` : 'New Announcement'}
+              {isEditing ? recordHeading('Announcement', formData.title) : 'New Announcement'}
             </span>
             <span className="block text-sm text-slate-500 dark:text-slate-400">
               {isEditing
@@ -393,7 +394,7 @@ export default function AdminAnnouncementsTab({
               <select value={formData.role_id} onChange={(e) => setField('role_id', e.target.value)} className={fieldClass}>
                 <option value="">-- All roles --</option>
                 {roles.map((role) => (
-                  <option key={role.id} value={String(role.id)}>{role.description || `#${role.id}`}</option>
+                  <option key={role.id} value={String(role.id)}>{role.description || unnamedLabel('role')}</option>
                 ))}
               </select>
             </div>
@@ -402,7 +403,7 @@ export default function AdminAnnouncementsTab({
               <select value={formData.rank_id} onChange={(e) => setField('rank_id', e.target.value)} className={fieldClass}>
                 <option value="">-- All ranks --</option>
                 {ranks.map((rank) => (
-                  <option key={rank.id} value={String(rank.id)}>{rank.description || `#${rank.id}`}</option>
+                  <option key={rank.id} value={String(rank.id)}>{rank.description || unnamedLabel('rank')}</option>
                 ))}
               </select>
             </div>
@@ -411,7 +412,7 @@ export default function AdminAnnouncementsTab({
               <select value={formData.user_id} onChange={(e) => setField('user_id', e.target.value)} className={fieldClass}>
                 <option value="">-- All members --</option>
                 {users.map((user) => (
-                  <option key={user.id} value={String(user.id)}>{user.name || `#${user.id}`}</option>
+                  <option key={user.id} value={String(user.id)}>{userLabel(user)}</option>
                 ))}
               </select>
             </div>

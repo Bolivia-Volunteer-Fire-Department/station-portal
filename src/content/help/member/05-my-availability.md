@@ -4,7 +4,7 @@
 
 The calendar preloads every shift in the month that **your rank qualifies you to fill**. That is the only list you need to look at — anything you could not take is not shown, so you never have to work out whether a shift is open to you.
 
-You will also see **events** on this calendar — training, meetings, details. They are drawn above the shifts, in their own color, and they are **not markable**: an event is not a shift, so you cannot claim availability for it. Click **Hide events** above the calendar to see only the shifts (it reads **Show events** while they are hidden); it resets when you reload the page.
+You will also see **events** on this calendar — training, meetings, details. They sit among the shifts in time order, in their own color, and they are **not markable**: an event is not a shift, so you cannot claim availability for it. Click **Hide events** above the calendar to see only the shifts (it reads **Show events** while they are hidden); it resets when you reload the page.
 
 1. Click on the shifts you could work.
 2. The header shows how many changes are pending, such as **3 unsaved changes**.

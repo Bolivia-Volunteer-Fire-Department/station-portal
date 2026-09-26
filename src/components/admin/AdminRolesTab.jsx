@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, ShieldCheck, Lock } from 'lucide-react';
 import { adminSaveRole, adminDeleteRole } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading } from '../../utils/displayLabel';
 import {
   ADMIN_PERMISSIONS,
   ALL_PERMISSIONS,
@@ -182,10 +183,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
               return (
                 <tr key={role.id} className="text-slate-700 dark:text-slate-200">
                   <td className="px-4 py-3 font-medium">
-                    <div className="flex items-center gap-2">
-                      {role.description}
-                      <span className="font-mono text-xs text-slate-400">#{role.id}</span>
-                    </div>
+                    {role.description}
                   </td>
                   <td className="px-4 py-3">
                     {isAdminRole ? (
@@ -242,7 +240,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? `Edit Role #${formData.id}` : 'Add New Role'}
+              {isEditing ? recordHeading('Role', formData.description) : 'Add New Role'}
             </h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">

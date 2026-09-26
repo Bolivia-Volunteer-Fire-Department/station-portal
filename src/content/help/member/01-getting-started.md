@@ -50,6 +50,9 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed "apple-mobile-web-app-capable" deprecation.
 * Fixed some ugly confirm() usages.
 * Adjusted some wording on the Events configuration page.
+* Update the modal sounds to be shorter and better matching to the visual animation.
+* Removed the presence of UUIDs from the front end.
+* Batched the member network request wave into one action and the admin network request wave into another, taking ~12 executions down to 3–4. Should be a major performance increase.
 
 **Version 1.04x**
 * Fixed an issue with app state where loading messages couldn’t be edited (Administration > System Settings)

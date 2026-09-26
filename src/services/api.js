@@ -3,6 +3,7 @@ import { NOTIFICATION_TYPES } from '../utils/notificationPrefs';
 import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
+import { createReadCoalescer, isReadAction, readKey } from '../utils/readCoalescing';
 
 // The row version a save was based on, when the caller has one.
 //
@@ -83,7 +84,7 @@ const busyRetryWaitMs = (data) => {
 // failure, so the app still boots even before the backend is redeployed with
 // doGet. Mutations never retry on network errors (only on the safe redirect
 // marker, and on an explicit BUSY refusal), so a write can never be applied twice.
-async function appScriptFetch(body, { retryOnNetworkError = false } = {}) {
+async function appScriptRequest(body, { retryOnNetworkError = false } = {}) {
   // Every request is bounded. Apps Script serialises requests behind a script lock in doPost, so a
   // long queue was previously able to leave a caller waiting indefinitely - and because callers
   // await these before clearing a spinner, an unbounded wait looked like a hung screen. A timeout
@@ -141,8 +142,40 @@ async function appScriptFetch(body, { retryOnNetworkError = false } = {}) {
   return data;
 }
 
+// One read, one execution.
+//
+// The post-sign-in waves overlap (the member wave and the admin wave both fetch the schedule, the roster, on-duty,
+// training, announcements and events), and the backend runs one execution at a time - so the duplicate copies of
+// each read were pure queue. An identical read that is already in flight is shared instead of sent: see
+// utils/readCoalescing for why that is safe, and why writes never join anything.
+const readsInFlight = createReadCoalescer();
+
+function appScriptFetch(body, options) {
+  if (!isReadAction(body?.action)) return appScriptRequest(body, options);
+  const key = readKey(body);
+  const joined = readsInFlight.join(key);
+  if (joined) return joined;
+  return readsInFlight.hold(key, appScriptRequest(body, options));
+}
+
 export const fetchInitialData = async () =>
   appScriptFetch({ action: 'GET_INITIAL_DATA' }, { retryOnNetworkError: true });
+
+// The whole member sign-in in ONE request: schedule, availability, roster, offers, training, announcements,
+// events, clock history and who is on duty.
+//
+// Nine separate calls became one. Each of them was an Apps Script execution paying a second or three of startup
+// before it read a cell, and the calls at the end of that queue were the ones that ran out of the 60-second
+// patience this module enforces - which showed up as a calendar with no shifts on it and a clock that had gone
+// back to 12-hour. See memberBootstrapPayload in Code.gs.
+export const fetchBootstrap = async (token) =>
+  appScriptFetch({ action: 'GET_BOOTSTRAP', token }, { retryOnNetworkError: true });
+
+// Everything an administration sign-in - and every admin save's background reload - needs, in ONE request. The
+// admin-scoped fields are present only for a role that may have them: a section the caller cannot have is omitted
+// rather than refusing the whole response. See adminBootstrapPayload in Code.gs.
+export const adminFetchBootstrap = async (token) =>
+  appScriptFetch({ action: 'ADMIN_GET_BOOTSTRAP', token }, { retryOnNetworkError: true });
 
 export const loginUser = async (username, password) =>
   appScriptFetch({ action: 'LOGIN', username, password });

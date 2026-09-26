@@ -226,9 +226,9 @@ check(
   'Member role, and only Lieutenant rank and above'
 );
 check(
-  'an unresolvable id still prints something',
+  'an unresolvable id still prints something, and not the id',
   eventItemDetails(targeted.event, targeted.segments[0], {}).rows.at(-1).value,
-  '#2 role, and only #10 rank and above'
+  'Unnamed role, and only Unnamed rank and above'
 );
 // A popup that is handed nothing still has to stand up: it is the one place an engineer will look when an
 // event draws but says nothing.

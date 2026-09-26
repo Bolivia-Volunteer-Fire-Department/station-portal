@@ -2,6 +2,7 @@ import React from 'react';
 import { MapPin, Clock } from 'lucide-react';
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
+import { unnamedLabel } from '../../utils/displayLabel';
 
 export default function ClockTableRow({ log, showUserColumn = false, timeFormat = '12', shifts = [] }) {
   const formattedHours = log.calc_hours 
@@ -49,7 +50,7 @@ export default function ClockTableRow({ log, showUserColumn = false, timeFormat 
     <tr className="border-b border-slate-200 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
       {showUserColumn && (
         <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">
-          {log.user_name || log.user_id}
+          {log.user_name || unnamedLabel('member')}
         </td>
       )}
       <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-200 font-mono">

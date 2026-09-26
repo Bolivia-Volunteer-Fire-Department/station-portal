@@ -11,6 +11,7 @@ import {
 } from '../../utils/shiftOfferRow';
 import { assignmentColor } from '../../utils/assignmentColor';
 import RankIcon from '../RankIcon';
+import { unnamedLabel } from '../../utils/displayLabel';
 // From our own wrapper, not from sonner: it plays the sound for each toast kind and then delegates. Importing
 // 'sonner' directly here would silence every toast on this screen (the verifier fails on that import).
 import { toast } from '../../utils/toast';
@@ -30,7 +31,7 @@ export default function AdminPendingApprovalsTab({ token, offers = [], onOffersC
   
   // Lookup functions for display
   const userById = (id) => users.find((u) => String(u.id) === String(id)) || users.find((u) => String(u.user_name) === String(id));
-  const userName = (id) => userById(id)?.name || `User ${id}`;
+  const userName = (id) => userById(id)?.name || unnamedLabel('member');
 
   // One described row per offer, built once per data change.
   //

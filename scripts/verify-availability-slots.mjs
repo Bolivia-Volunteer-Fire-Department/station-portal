@@ -122,10 +122,10 @@ console.log('\n--- who is available for one slot ---');
 const mondaySlot = { templateId: 't-mon-ff', dateKey: '2026-09-07' };
 const mondayMembers = availableMembersForSlot(availability, mondaySlot, users);
 // The slot carries two members: a named one and one whose roster entry has no name, which renders as
-// "Member #<id>". The sort is by name, and "#" sorts before digits, so the unnamed member leads - an artifact of
-// the placeholder, not a rule worth encoding. What the assertion is for is that the list is sorted by name and
-// that a duplicate row collapses to one entry, which the single "Member #u9" proves.
-check('named in name order, duplicates collapsed', mondayMembers.map((m) => m.name), ['Member #u9', 'Member 1']);
+// "Unnamed member". The sort is by name, so "Member 1" leads - the placeholder is not special-cased, and the point
+// of the assertion is that the list is sorted by name and that a duplicate row collapses to one entry, which the
+// single "Unnamed member" proves.
+check('named in name order, duplicates collapsed', mondayMembers.map((m) => m.name), ['Member 1', 'Unnamed member']);
 check('one entry per member', mondayMembers.length, 2);
 check('a member who said nothing is absent', mondayMembers.some((m) => m.id === 'u2'), false);
 check('the same slot on another date', availableMembersForSlot(availability, { ...mondaySlot, dateKey: '2026-09-14' }, users).map((m) => m.name), ['Member 3']);
@@ -140,7 +140,7 @@ const sept8 = roster.find((d) => d.dateKey === '2026-09-08');
 const sept21 = roster.find((d) => d.dateKey === '2026-09-21');
 check('every day with a template occurrence is listed', roster.length, 9);
 check('both Monday shifts appear on the 7th', sept7.slots.map((s) => s.templateId), ['t-mon-ff', 't-mon-off']);
-check('the marked shift carries its members', sept7.slots[0].members.map((m) => m.name), ['Member #u9', 'Member 1']);
+check('the marked shift carries its members', sept7.slots[0].members.map((m) => m.name), ['Member 1', 'Unnamed member']);
 // The fixture marks the OTHER Monday shift for Member 3, which proves the roster keys on the
 // template and not just the date.
 check('so does the other shift that was marked', sept7.slots[1].members.map((m) => m.name), ['Member 3']);

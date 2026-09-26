@@ -10,6 +10,7 @@ import { soundsForProfile } from "../../utils/runnerSounds";
 // because nothing imported them.
 const SOUND_FILES = import.meta.glob("./*.wav", { eager: true, query: "?url", import: "default" });
 import { fetchRunnerLeaderboard, saveRunnerScore } from "../../services/api";
+import { unnamedLabel } from "../../utils/displayLabel";
 import "./FirefighterRunner.css";
 
 const DEFAULT_WIDTH = 800;
@@ -894,7 +895,7 @@ export default function FirefighterRunner({
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <span className="ffr__board-name">
-                    {row.name || `Member #${row.id}`}
+                    {row.name || unnamedLabel('member')}
                     {isMe ? " (you)" : ""}
                   </span>
                   <span className="ffr__board-score">

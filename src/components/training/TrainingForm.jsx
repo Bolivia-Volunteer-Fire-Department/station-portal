@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Lock, Save, Loader2, X } from 'lucide-react';
 import { MEMBER_EDITABLE_FLAGS, TRAINING_FLAGS, TRAINING_FLAG_KEYS, normalizeTraining, trainingLocked } from '../../utils/training';
+import { recordHeading } from '../../utils/displayLabel';
 
 // The add/edit form for a training activity.
 //
@@ -91,7 +92,7 @@ export default function TrainingForm({
         </span>
         <span className="min-w-0">
           <span className="block text-lg font-semibold text-slate-900 dark:text-white">
-            {isEditing ? `Edit Training #${form.id}` : 'Add New Training'}
+            {isEditing ? recordHeading('Training', form.title) : 'Add New Training'}
           </span>
           <span className="block text-sm text-slate-500 dark:text-slate-400">
             {isEditing

@@ -114,7 +114,32 @@ check(
   true
 );
 
-console.log('\n--- the rules the printed sheet inherits ---');
+console.log('\n--- events print in time order among the shifts ---');
+// The sheet used to print every event before every shift, mirroring how the calendars drew them. A day is read top
+// to bottom, so an event is placed by its start time instead - and where it starts at the same minute as a shift it
+// goes above it, which is the same rule the calendars and the merge in utils/dayOrder use.
+const eventLines = printLinesForDate({
+  dateKey: MONDAY,
+  mode: 'admin',
+  schedule,
+  scheduleTemplates: templates,
+  assignments,
+  users,
+  events: [
+    { id: 'e1', title: 'Late event', date_from: `${MONDAY} 19:00`, date_to: `${MONDAY} 20:00` },
+    { id: 'e2', title: 'Tied event', date_from: `${MONDAY} 08:00`, date_to: `${MONDAY} 09:00` },
+    { id: 'e3', title: 'Early event', date_from: `${MONDAY} 07:00`, date_to: `${MONDAY} 07:30` },
+  ],
+});
+const eventOrder = eventLines.map((l) => (l.isEvent ? l.text.split(' · ')[0] : 'shift'));
+check('the day prints its three events and its shift', eventOrder.length, 4);
+check(
+  'in the order they happen, the tied event above the 8am shift',
+  eventOrder,
+  ['Early event', 'Tied event', 'shift', 'Late event']
+);
+
+
 // A vacancy with no row at all: the template runs but nobody is scheduled.
 const uncovered = printLinesForDate({
   dateKey: MONDAY,

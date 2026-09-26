@@ -4,7 +4,7 @@
 // wins - because those are pure decisions worth testing without a browser. This file is the other half: the
 // Audio elements, the mute gate, and the one set of delegated listeners the whole app is covered by.
 //
-// Nine files, four uses:
+// Ten files, four uses:
 //
 //   - Clicks. ONE delegated listener on the document, not 145 call sites. Every button, switch, pill, menu item
 //     and dropdown is covered by CLICKABLE_SELECTOR, including ones added later, which is the point: a sound per
@@ -16,6 +16,9 @@
 //
 // The Firefighter Runner is left alone: it has its own sounds, and its root carries data-sound="none" so the UI
 // click does not intrude on them. Nothing here is imported by the minigame.
+//
+// Each sound is fetched ONCE per session, and every voice plays from those bytes - see the pool below, which used
+// to download each sound three times over.
 
 import clickSound from '../assets/click.mp3';
 import clickDoubleSound from '../assets/click_double.mp3';
@@ -83,18 +86,71 @@ export const setSoundsEnabled = (enabled) => {
 };
 
 // One pool per sound, so that rapid clicks overlap instead of cutting each other off: a single element restarts
-// and truncates the previous play.
+// and truncates the previous play. Three voices is the right number of ELEMENTS - but three `new Audio(url)`
+// elements each fetch the file, which is what a session's network log showed: a 206 for the first and two 304
+// revalidations for the others, three requests for one sound, every time it was used.
+//
+// So the bytes are fetched once and every voice is built from that in-memory copy. The one press that cannot wait
+// for it is the FIRST press of a sound, before the copy has arrived: that press plays from the file itself, inside
+// the same gesture, while the copy is fetched alongside it. The click sounds are primed on the first gesture of the
+// session, so that window is normally already closed by the time anything is pressed.
+//
+// A pool is only ever built AFTER its sound's answer is known - `playSound` stays in the pre-prime branch until it
+// is - so the voices are created from the copy when there is one and from the file when there is not, and nothing
+// has to be re-pointed afterwards.
 const POOL_SIZE = 3;
 const pools = new Map();
 let poolCursor = 0;
 
+// name -> object URL once the bytes are in hand, or null when the fetch failed. A null is REMEMBERED: an asset that
+// could not be fetched must not be re-fetched on every press.
+const blobUrls = new Map();
+const blobPromises = new Map();
+
+// Declared below the maps it reads, for the same reason App.jsx's derived values are: a `const` that mentions
+// `blobUrls` before that `const` has run throws, and it would throw on the first press of a sound.
+const objectUrlFor = (name) => blobUrls.get(name) || SOUND_FILES[name];
+
+// Fetches a sound's bytes once, so that the voices built afterwards play from memory rather than from the file.
+// Idempotent, and never awaited by a press.
+export const primeSound = (name) => {
+  if (blobUrls.has(name)) return Promise.resolve(blobUrls.get(name));
+  if (blobPromises.has(name)) return blobPromises.get(name);
+
+  const url = SOUND_FILES[name];
+  const canFetch =
+    !!url && typeof fetch === 'function' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function';
+  if (!canFetch) {
+    blobUrls.set(name, null);
+    return Promise.resolve(null);
+  }
+
+  const promise = fetch(url)
+    .then((response) => (response.ok ? response.blob() : Promise.reject(new Error(String(response.status)))))
+    .then((blob) => {
+      const objectUrl = URL.createObjectURL(blob);
+      blobUrls.set(name, objectUrl);
+      return objectUrl;
+    })
+    .catch(() => {
+      // Offline, or the asset is missing: the voices keep playing from the file, exactly as they did before, and
+      // no further fetches are attempted.
+      blobUrls.set(name, null);
+      return null;
+    })
+    .finally(() => blobPromises.delete(name));
+
+  blobPromises.set(name, promise);
+  return promise;
+};
+
 const audioFor = (name) => {
   if (pools.has(name)) return pools.get(name);
-  const url = SOUND_FILES[name];
-  if (!url || typeof Audio === 'undefined') return null;
+  const source = objectUrlFor(name);
+  if (!source || typeof Audio === 'undefined') return null;
   const voices = [];
   for (let i = 0; i < POOL_SIZE; i++) {
-    const audio = new Audio(url);
+    const audio = new Audio(source);
     audio.preload = 'auto';
     audio.volume = SOUND_VOLUME[name] ?? SOUND_VOLUME.default;
     voices.push(audio);
@@ -102,6 +158,18 @@ const audioFor = (name) => {
   pools.set(name, voices);
   return voices;
 };
+
+// The two sounds a first press is most likely to make, fetched as soon as the member touches anything. In capture
+// phase and once-only, so it costs nothing after the first gesture and cannot delay the press itself.
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  const primeClickSounds = () => {
+    void primeSound('click');
+    void primeSound('click_double');
+  };
+  document.addEventListener('pointerdown', primeClickSounds, { once: true, capture: true });
+  document.addEventListener('keydown', primeClickSounds, { once: true, capture: true });
+}
+
 
 // Plays one sound. Silent - and harmless - when sounds are off, the name is unknown, or the browser refuses to
 // start audio; none of which is worth surfacing, since every sound here is decoration.
@@ -111,6 +179,24 @@ const audioFor = (name) => {
 // rather than a check at the call site because the state lives here.
 export const playSound = (name, { force = false } = {}) => {
   if (!force && !soundsEnabled) return false;
+  if (!SOUND_FILES[name]) return false;
+
+  // The first press of a sound, before its in-memory copy has arrived: play it from the file, in this gesture, and
+  // fetch the copy so that every press after it is served from memory. That is the whole cost of a sound - two
+  // requests on its first press, then none, ever - instead of the three the pool used to spend on every press.
+  if (!blobUrls.has(name)) {
+    if (typeof Audio === 'undefined') return false;
+    try {
+      const oneOff = new Audio(SOUND_FILES[name]);
+      oneOff.volume = SOUND_VOLUME[name] ?? SOUND_VOLUME.default;
+      const started = oneOff.play();
+      if (started && typeof started.catch === 'function') started.catch(() => {});
+    } catch {
+      return false;
+    }
+    void primeSound(name);
+    return true;
+  }
 
   const voices = audioFor(name);
   if (!voices) return false;

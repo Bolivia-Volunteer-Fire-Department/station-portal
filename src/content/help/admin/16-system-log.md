@@ -7,7 +7,6 @@ The tab is fetched **only when you open it**. If your role has the permission bu
 
 | Column | What it holds |
 |---|---|
-| **ID** | The row number in the `system_log` sheet, in the order entries were written |
 | **Timestamp** | Station local time (America/New_York) |
 | **Member** | Who it was about. A failed sign-in names the *typed username*, which may not be a real member |
 | **Action** | A short code such as `USER_LOGIN`, `LOGIN_FAILED`, `PASSWORD_CHANGE` |

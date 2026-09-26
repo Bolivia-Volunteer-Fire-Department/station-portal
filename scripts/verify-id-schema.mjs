@@ -385,7 +385,9 @@ check('and a token is compared as a string, not by identity', unauthorizedIsStal
 const appSource = readFileSync('src/App.jsx', 'utf8');
 const unauthorizedSites = (appSource.match(/code === 'UNAUTHORIZED'/g) || []).length;
 const guardUses = (appSource.match(/sessionExpired\(/g) || []).length;
-check('every UNAUTHORIZED reply goes through the guard', [unauthorizedSites, guardUses], [13, 13]);
+// Eight reply sites now: the sign-in payloads are one request each, so the six refreshers they replaced (and the
+// two granular admin fetchers) are gone. What is asserted is unchanged - the two counts must match.
+check('every UNAUTHORIZED reply goes through the guard', [unauthorizedSites, guardUses], [8, 8]);
 check('and nothing opens the prompt directly', /queueReauth\(null\)/.test(appSource), false);
 check('the guard compares against the token ref, not state', /unauthorizedIsStale\(usedToken, tokenRef\.current\)/.test(appSource), true);
 // Order matters, not adjacency - the session-start stamp sits between them. The ref has to be written first, or a

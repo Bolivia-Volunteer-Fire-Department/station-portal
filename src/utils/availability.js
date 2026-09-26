@@ -17,6 +17,7 @@
 import { toDateKey, parseSheetDateKey } from './scheduleDate';
 import { DAY_ORDER } from './calendarConstants';
 import { memberCanFillAssignment } from './rankEligibility';
+import { unnamedLabel } from './displayLabel';
 import { templateIsActiveOn } from './scheduleTemplates';
 import { assignmentIsActiveOn } from './assignmentDates';
 import { timeToMinutes } from './shiftTime';
@@ -75,7 +76,7 @@ export const availableMembersForSlot = (availability, slot, users = []) => {
     );
     members.push({
       id: userId,
-      name: String(user?.name ?? '').trim() || `Member #${userId}`,
+      name: String(user?.name ?? '').trim() || unnamedLabel('member'),
       rank_id: String(user?.rank_id ?? '').trim(),
     });
   }

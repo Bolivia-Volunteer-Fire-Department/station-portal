@@ -12,12 +12,14 @@ import { templateIsActiveOn } from '../utils/scheduleTemplates';
 import { assignmentIsActiveOn } from '../utils/assignmentDates';
 import { parseRankOrder, memberCanFillAssignment } from '../utils/rankEligibility';
 import { compareCrewOrder } from '../utils/crewOrder';
+import { mergeDayItems } from '../utils/dayOrder';
 import { submitShiftOffer } from '../services/api';
 import ViewToggle from './ViewToggle';
 import ShiftOfferModal from './ShiftOfferModal';
 import ScheduleItemModal from './ScheduleItemModal';
 import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
 import PrintableSchedule from './PrintableSchedule';
+import { unnamedLabel } from '../utils/displayLabel';
 
 // Identity used for an unfilled shift wherever a member's name would go.
 const OPEN_SHIFT_LABEL = 'Open';
@@ -82,11 +84,11 @@ export default function ScheduleCalendar({
 
   // Friendly label for a member: the signed-in user always resolves from the
   // session, everyone else comes from the name directory (the admin directory
-  // or the member-visible roster), falling back to their member id.
+  // or the member-visible roster), falling back to a phrase rather than the id.
   const memberName = (userId) => {
     if (String(userId ?? '') === String(currentUser?.id ?? '')) return currentUser?.name || 'You';
     const found = users.find((u) => String(u.id) === String(userId));
-    return found?.name || `Member #${userId}`;
+    return found?.name || unnamedLabel('member');
   };
 
   // Rank order of the ASSIGNMENT a pill belongs to - the shift's own minimum
@@ -554,19 +556,24 @@ export default function ScheduleCalendar({
                     {day.getDate()}
                   </span>
 
-                  {/* Events first: they are context for the day, and rendering them above the shifts keeps
-                      them from being mistaken for one. Colored by the event's own color, with no offer
-                      machinery anywhere near them. */}
-                  {(eventSegmentsByDate.get(key) || []).map((segment) => (
-                    <EventPill
-                      key={`event-${segment.eventId}-${segment.dateKey}`}
-                      segment={segment}
-                      timeFormat={timeFormat}
-                      className="mx-0.5 mt-0.5"
-                      onClick={() => setDetailTarget({ kind: 'event', item: segment, event: eventFor(segment) })}
-                    />
-                  ))}
-                  {dayAssignments.map((a) => {
+                  {/* Chronological, with events placed among the shifts rather than above them all - see
+                      utils/dayOrder. Events stay visually distinct (outlined, never offerable): the order decides
+                      where a pill sits, not what it looks like. */}
+                  {mergeDayItems(dayAssignments, eventSegmentsByDate.get(key) || []).map(({ kind, value }) => {
+                    if (kind === 'event') {
+                      const segment = value;
+                      return (
+                        <EventPill
+                          key={`event-${segment.eventId}-${segment.dateKey}`}
+                          segment={segment}
+                          timeFormat={timeFormat}
+                          className="mx-0.5 mt-0.5"
+                          onClick={() => setDetailTarget({ kind: 'event', item: segment, event: eventFor(segment) })}
+                        />
+                      );
+                    }
+
+                    const a = value;
                     const offerState = a.isOpen ? offerStateFor(a) : '';
                     // Filled pills are solid (member name, or the assignment in
                     // the personal view). Open shifts are dashed and colored by
@@ -704,11 +711,6 @@ export default function ScheduleCalendar({
                     </span>
                   )}
                 </span>
-                {a.row.assignment_id !== undefined && a.row.assignment_id !== '' && (
-                  <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
-                    #{a.row.assignment_id}
-                  </span>
-                )}
               </button>
             ))}
           </div>

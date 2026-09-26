@@ -24,6 +24,7 @@ const FCM_KEYS = {
 // User Settings renders the member-facing wording. Keeping the keys in one place is what stops a new
 // toggle from existing in one screen and not the other.
 import { NOTIFICATION_TYPES } from '../../utils/notificationPrefs';
+import { userLabel } from '../../utils/displayLabel';
 
 function settingValue(systemSettings, key, fallback = '') {
   const setting = (systemSettings || []).find((s) => String(s.key) === key);
@@ -547,7 +548,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
             ) : (
               users.map((user) => (
                 <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{user.name || user.id}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{userLabel(user)}</td>
                   <td className="px-4 py-3">
                     <span className={user.device_registered
                       ? 'text-emerald-600 dark:text-emerald-400'

@@ -43,7 +43,7 @@ export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm 
     { label: 'Time', value: shift.timeLabel || 'Not specified' },
     {
       label: 'Assignment',
-      value: [assignment?.id ? `#${assignment.id}` : '', assignment?.description || ''].filter(Boolean).join(' · ') || '—',
+      value: assignment?.description || '—',
     },
   ];
 

@@ -37,6 +37,10 @@ function doGet(e) {
 var READ_ONLY_ACTIONS = {
   // The refresh wave: what every admin save reloads in the background, and what sign-in loads.
   GET_INITIAL_DATA: true,
+  // The whole sign-in in one execution each - see memberBootstrapPayload/adminBootstrapPayload. Listed here
+  // because the wave they replace was nine (member) and seventeen (admin) read-only executions.
+  GET_BOOTSTRAP: true,
+  ADMIN_GET_BOOTSTRAP: true,
   ADMIN_GET_USERS: true,
   ADMIN_GET_SCHEDULE_TEMPLATES: true,
   ADMIN_GET_SCHEDULE_OFFERS: true,
@@ -104,6 +108,136 @@ function busyResponseData(retryAfterSeconds) {
   };
 }
 
+// ============================================================================
+// Sign-in payloads
+//
+// Why these exist: signing in used to fire nine separate Apps Script executions for a member and seventeen for an
+// administrator (two waves of nine, six of them fetching what the other wave already had). Every execution pays a
+// second or three of runtime startup before it reads a single cell, so the calls at the END of that queue were the
+// ones that ran out of the client's 60-second patience - and a call that gives up is data the screen never gets:
+// no shifts on the calendar, a 12-hour clock for a member who chose 24, a training report that never fills in.
+//
+// These two actions answer that wave in ONE execution each. What matters is that they cannot disagree with the
+// actions they replace: every field below is built by the SAME helper the individual action uses, and the two
+// projections those actions had inline are now shared functions (rosterRowsFor, onDutyRowsFor). A change to what a
+// roster is reaches both paths or neither.
+//
+// The individual actions all remain. They are what a tab uses when it reloads its own list, and what an older
+// client keeps working against.
+// ============================================================================
+
+// The minimal, non-sensitive roster every signed-in member may see: no passwords, usernames, roles or status.
+// The schedule sheet stores only user ids, so members need this to label other people's shifts.
+function rosterRowsFor(ss) {
+  return getSheetData(ss, "users")
+    .filter(function (u) { return u && u.id !== "" && u.id !== undefined && u.id !== null; })
+    .map(function (u) { return { id: u.id, name: u.name, rank_id: u.rank_id }; });
+}
+
+// Who is clocked in right now, with the same three columns. No passwords, usernames or roles.
+function onDutyRowsFor(ss) {
+  const onDutyUserIds = new Set(
+    getSheetData(ss, "timeclock")
+      .filter(function (log) { return !log.time_out; })
+      .map(function (log) { return String(log.user_id); })
+  );
+
+  return getSheetData(ss, "users")
+    .filter(function (u) { return onDutyUserIds.has(String(u.id)); })
+    .map(function (u) { return { id: u.id, name: u.name, rank_id: u.rank_id }; });
+}
+
+// Everything a member's sign-in needs. See the section note above.
+function memberBootstrapPayload(ss, auth) {
+  const viewer = findRowById(getSheetData(ss, "users"), auth.userId) || {};
+  const isTrainingAdmin = canAdministerTrainings(ss, auth.userId);
+
+  return {
+    success: true,
+    // The public configuration GET_INITIAL_DATA serves unauthenticated, repeated here because this request
+    // happens while the app is already signed in: a member whose pre-login fetch was cut short would otherwise
+    // keep a 12-hour clock and a default system setting for the whole session.
+    roles: getSheetData(ss, "roles"),
+    ranks: getSheetData(ss, "ranks"),
+    shifts: getShiftsData(ss),
+    systemSettings: publicSystemSettings(ss),
+    userSettings: publicUserSettings(ss),
+    // GET_SCHEDULE
+    schedule: getSheetData(ss, "schedule"),
+    assignments: memberAssignmentRows(ss),
+    scheduleTemplates: memberScheduleTemplateRows(ss),
+    // GET_AVAILABILITY
+    availability: getSheetData(ss, "availability"),
+    // GET_ROSTER
+    roster: rosterRowsFor(ss),
+    // GET_SHIFT_OFFERS - the member's own only; the whole table stays admin-only.
+    offers: offersForUser(ss, auth.userId),
+    // GET_TRAINING - the list is members' to read; the SIGNATURES differ by permission.
+    trainings: trainingRowsForApp(ss),
+    signatures: isTrainingAdmin
+      ? normalizeSignatureRowsFor(ss, "", "")
+      : trainingSignaturesForUser(ss, auth.userId),
+    can_sign: canSignTrainings(ss, auth.userId),
+    can_edit: hasRolePermission(ss, auth.userId, "can_edit_trainings"),
+    can_administer: isTrainingAdmin,
+    // MY_ANNOUNCEMENTS - the audience comes from the SESSION, never the payload, and the login-screen ones are
+    // served publicly by GET_INITIAL_DATA, so including them here would show them twice.
+    announcements: announcementRowsFor(ss, {
+      roleId: viewer.role_id,
+      rankId: viewer.rank_id,
+      userId: auth.userId,
+      locations: ["is_visible_on_dashboard", "is_visible_on_sidebar"]
+    }),
+    // GET_EVENTS - filtered to what this member may see.
+    events: eventsForViewer(ss, viewer, auth.userId),
+    // GET_TIMECLOCK_LOGS
+    logs: getSheetData(ss, "timeclock"),
+    // GET_ON_DUTY
+    onDuty: onDutyRowsFor(ss)
+  };
+}
+
+// Everything an administrator's sign-in - and every admin save's background reload - needs, in one execution.
+//
+// It is the member payload plus the admin-scoped sections, each gated exactly as its own action gates it. The
+// difference is what a MISSING permission does: ADMIN_GET_USERS refuses the whole request, which is right for a tab
+// asking for its own list, but in a batch that refusal would take the schedule, the roster and the clock history
+// down with it. So a section the role cannot have is simply OMITTED, and the client leaves that cache as it is.
+function adminBootstrapPayload(ss, auth) {
+  const payload = memberBootstrapPayload(ss, auth);
+
+  // The login-screen announcements the client keeps in their own state: they are shown before sign-in and are not
+  // cleared on sign-out, so they are a separate field from the member's dashboard/sidebar list above.
+  payload.loginAnnouncements = announcementRowsFor(ss, {
+    locations: ["is_visible_on_login"],
+    everyoneOnly: true
+  });
+
+  if (hasRolePermission(ss, auth.userId, "can_edit_users")) {
+    // Passwords stripped, as ADMIN_GET_USERS does - the client is an administrator's browser, not a trusted peer.
+    payload.users = getSheetData(ss, "users").map(function (u) {
+      var userCopy = Object.assign({}, u);
+      delete userCopy.password;
+      return userCopy;
+    });
+  }
+
+  if (hasAnyRolePermission(ss, auth.userId, ["can_edit_schedule_templates", "can_edit_assignments", "can_edit_schedule"])) {
+    // The full rows, not the member projections: an administrator's pickers and labels read the whole assignment,
+    // and the narrower member copy must never replace it.
+    payload.scheduleTemplates = getSheetData(ss, "schedule_templates");
+    payload.assignments = getSheetData(ss, "assignments");
+    payload.apparatus = getSheetData(ss, "apparatus");
+  }
+
+  if (hasAnyRolePermission(ss, auth.userId, ["can_approve_shifts", "can_edit_schedule"])) {
+    // The whole offers table, so Schedule Management can flag the slots waiting on approval.
+    payload.scheduleOffers = getSheetData(ss, "schedule_offers").map(normalizeOffer);
+  }
+
+  return payload;
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   let locked = false;
@@ -166,6 +300,32 @@ function doPost(e) {
           })
         };
         break;
+
+      // The whole member sign-in in ONE execution. What used to be nine requests (schedule, availability,
+      // roster, offers, training, announcements, events, clock history, who is on duty) is one - see
+      // memberBootstrapPayload. Each of those actions still exists for a tab that reloads its own list.
+      case "GET_BOOTSTRAP": {
+        const authBootstrap = getAuthContext(ss, data);
+        if (!authBootstrap) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+        responseData = memberBootstrapPayload(ss, authBootstrap);
+        break;
+      }
+
+      // An administration sign-in (and every save's background reload) in ONE execution. Guarded by is_admin,
+      // which is what grants Administration in the first place - the admin-scoped sections inside are gated
+      // again individually, so a narrower role simply receives fewer fields.
+      case "ADMIN_GET_BOOTSTRAP": {
+        const authAdminBootstrap = getAuthContext(ss, data);
+        if (!authAdminBootstrap || !isAdminUser(ss, authAdminBootstrap.userId)) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+        responseData = adminBootstrapPayload(ss, authAdminBootstrap);
+        break;
+      }
 
       case "LOGIN": {
         // Authenticate against the typed username rather than a preloaded user list
@@ -575,21 +735,9 @@ function doPost(e) {
           break;
         }
 
-        // Minimal, non-sensitive roster of currently clocked-in users (no passwords/usernames/roles)
-        const timeclockRows = getSheetData(ss, "timeclock");
-        const allUsersForDuty = getSheetData(ss, "users");
-
-        const onDutyUserIds = new Set(
-          timeclockRows
-            .filter(function (log) { return !log.time_out; })
-            .map(function (log) { return String(log.user_id); })
-        );
-
-        const onDutyUsers = allUsersForDuty
-          .filter(function (u) { return onDutyUserIds.has(String(u.id)); })
-          .map(function (u) { return { id: u.id, name: u.name, rank_id: u.rank_id }; });
-
-        responseData = { onDuty: onDutyUsers };
+        // Minimal, non-sensitive roster of currently clocked-in users (no passwords/usernames/roles).
+        // Shared with the sign-in payload (onDutyRowsFor), so the two cannot disagree.
+        responseData = { onDuty: onDutyRowsFor(ss) };
         break;
       }
 
@@ -604,11 +752,9 @@ function doPost(e) {
         // (no passwords/usernames/roles/status). The schedule sheet only stores
         // user ids, so members need this to label other people's shifts - the
         // same projection already exposed through GET_ON_DUTY.
-        const rosterUsers = getSheetData(ss, "users")
-          .filter(function (u) { return u && u.id !== "" && u.id !== undefined && u.id !== null; })
-          .map(function (u) { return { id: u.id, name: u.name, rank_id: u.rank_id }; });
-
-        responseData = { roster: rosterUsers };
+        //
+        // Shared with the sign-in payload (rosterRowsFor), so the two cannot disagree about what a roster is.
+        responseData = { roster: rosterRowsFor(ss) };
         break;
       }
 

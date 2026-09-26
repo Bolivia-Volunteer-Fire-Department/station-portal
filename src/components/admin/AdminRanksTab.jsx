@@ -3,6 +3,7 @@ import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-reac
 import { adminSaveRank, adminDeleteRank } from '../../services/api';
 import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
 import ConfirmModal from '../ConfirmModal';
+import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', description: '', color: '#ef4444', icon: '', rank_order: '' };
 
@@ -76,7 +77,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? `Edit Rank #${formData.id}` : 'Add New Rank'}</h3>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? recordHeading('Rank', formData.description) : 'Add New Rank'}</h3>
             {isEditing && (
               <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
                 <X className="w-4 h-4" /> Cancel
