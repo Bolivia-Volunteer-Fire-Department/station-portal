@@ -1177,6 +1177,50 @@ checkIs(
   /Edit document|Add item/.test(itemEditorSource) && /handleSaveItem/.test(itemEditorSource),
   'no way to add items'
 );
+
+// Items cannot be written before the document they belong to exists, which is exactly what made the feature look
+// unimplemented: the panel used to appear only for a saved document, so a new checklist offered nowhere to type.
+checkIs(
+  'the item panel is offered for a checklist that has not been saved yet',
+  /\{form\.doc_type === 'checklist' && \(/.test(itemEditorSource) &&
+    !/\{isEditing && form\.doc_type === 'checklist'/.test(itemEditorSource),
+  'the panel only appears once the document exists'
+);
+checkIs(
+  'and it says the items are written when the document is created',
+  /they are written as soon as it is created/.test(itemEditorSource),
+  'staged items would look like saved ones'
+);
+checkIs(
+  'a new item is staged rather than sent',
+  /if \(!form\.id\) \{[\s\S]{0,400}setStagedItems/.test(itemEditorSource),
+  'an item would be posted against a document that does not exist'
+);
+checkIs(
+  'staged items are marked as not saved',
+  /not saved<\/span>|not saved yet/.test(itemEditorSource),
+  'nothing tells the author what is stored'
+);
+checkIs(
+  'and each one is still written through the item action once it is created',
+  /const flushStagedItems[\s\S]{0,900}adminSaveChecklistItem/.test(itemEditorSource),
+  'staged items would never be written'
+);
+checkIs(
+  'the flush happens only when a NEW checklist is created',
+  /wasNew && wasChecklist && stagedItems\.length > 0/.test(itemEditorSource),
+  'a save would re-post items'
+);
+checkIs(
+  'and what landed is counted, not assumed',
+  /flushed\.failed > 0[\s\S]{0,300}could not be saved/.test(itemEditorSource),
+  'a partial write would be reported as a complete one'
+);
+checkIs(
+  'removing a staged item needs no request',
+  /startsWith\('staged-'\)[\s\S]{0,220}setPendingItemRemoval\(null\)/.test(itemEditorSource),
+  'removing a staged item would try to delete it from the sheet'
+);
 checkIs(
   'removing an item asks first',
   /pendingItemRemoval[\s\S]{0,400}ConfirmModal/.test(itemEditorSource),

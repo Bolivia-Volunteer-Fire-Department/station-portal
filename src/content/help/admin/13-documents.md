@@ -101,15 +101,18 @@ The **Signatures** panel also names the checklist item each signature is about, 
 
 ## Checklist items
 
-A document of type **Checklist** is signed one item at a time. With that document open, the **Items** card appears under the editor:
+A document of type **Checklist** is signed one item at a time. Set the **Type** to *Checklist* and the **Checklist items** card appears under the editor — **before the document is saved as well as after**, so you can write the whole thing in one sitting:
 
 | Field | What it does |
 |---|---|
 | **Item** | The line the member ticks. Required |
 | **Section** | Groups items under a heading in both the member's view and the verification panel. Items with no section are shown last, under *Items* |
-| **Order** | Position within the list; lower first, with the label breaking ties |
+| **Order** | Position within the list; lower first, with the label breaking ties. Left blank, items keep the order you typed them in |
 
 Add each line with **Add item**, and use **edit** on a row to change it.
+
+> [!NOTE]
+> **On a new checklist, items are held until you save it.** They are marked *not saved* so you can see the difference, and they are written the moment the checklist is created — you do not have to save, reopen and start again. A checklist that arrives with nine items instead of ten tells you so rather than pretending. Once the document exists, every change to an item is stored immediately.
 
 > [!IMPORTANT]
 > Editing an item **keeps its signatures attached to it** — a signature points at the item's identity, not at its wording, so fixing a typo does not throw away somebody's work. Changing any item does mark signatures taken earlier as **before the last edit**, exactly as editing a document's text does.

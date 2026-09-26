@@ -82,6 +82,10 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
   const [savingItem, setSavingItem] = useState(false);
   const [pendingItemRemoval, setPendingItemRemoval] = useState(null);
   const [removingItem, setRemovingItem] = useState(false);
+  // Items typed before the document exists. A checklist's items need a document to belong to, so on a NEW checklist
+  // they are held here and written the moment the document is created - rather than making the author save, reopen
+  // and start again, which is exactly what made this look unimplemented.
+  const [stagedItems, setStagedItems] = useState([]);
 
   const memberLabel = useCallback(
     (userId) => {
@@ -175,12 +179,32 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
   };
 
   // Checklist items: one at a time, each written through its own action so the server can bump the document's
-  // revision and refuse the ones that must not change.
+  // revision and refuse the ones that must not change. On a document that does not exist yet there is nothing to
+  // write against, so the item is staged instead - and `flushStagedItems` writes them the instant the document is
+  // created.
   const handleSaveItem = async (event) => {
     event.preventDefault();
-    if (savingItem || !form.id) return;
+    if (savingItem) return;
     if (!String(itemForm.label || '').trim()) {
       toast.error('An item needs a label.');
+      return;
+    }
+
+    // Staging: no document yet, so this is local. The order follows the list, ten apart, so an author who never
+    // touches the Order field still gets the items in the order they typed them.
+    if (!form.id) {
+      const entry = {
+        id: itemForm.id,
+        label: itemForm.label,
+        section: itemForm.section,
+        sort_order: Number(itemForm.sort_order) || (stagedItems.length + 1) * 10,
+      };
+      setStagedItems((current) =>
+        entry.id
+          ? current.map((item) => (item.id === entry.id ? entry : item))
+          : [...current, { ...entry, id: `staged-${current.length + 1}-${Date.now()}` }]
+      );
+      setItemForm(EMPTY_ITEM_FORM);
       return;
     }
 
@@ -214,6 +238,15 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
   const handleRemoveItem = async () => {
     const target = pendingItemRemoval;
     if (!target || removingItem) return;
+
+    // A staged item was never written, so removing it is local - and there are no signatures to refuse it.
+    if (!form.id || String(target.id).startsWith('staged-')) {
+      setStagedItems((current) => current.filter((item) => item.id !== target.id));
+      if (itemForm.id === target.id) setItemForm(EMPTY_ITEM_FORM);
+      setPendingItemRemoval(null);
+      return;
+    }
+
     setRemovingItem(true);
     try {
       const result = await adminDeleteChecklistItem(target.id, token);
@@ -249,6 +282,41 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
     }
   };
 
+  // Writes the items staged before the document existed, one request each - that action owns an item's id, and an
+  // item is a record somebody will sign against, so it is worth a request of its own.
+  //
+  // What landed is COUNTED, not assumed. A checklist created with nine of ten items and a message saying ten would
+  // be worse than one that said so: the missing line is a line nobody would think to sign.
+  const flushStagedItems = async (documentId) => {
+    const pending = stagedItems.slice();
+    if (pending.length === 0) return { saved: 0, failed: 0 };
+
+    let saved = 0;
+    let failed = 0;
+    for (const item of pending) {
+      try {
+        const result = await adminSaveChecklistItem(
+          {
+            id: '',
+            document_id: documentId,
+            label: item.label,
+            section: item.section,
+            sort_order: Number(item.sort_order) || 0,
+          },
+          token
+        );
+        if (result?.success) saved += 1;
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    setStagedItems([]);
+    await loadSignatures(documentId);
+    return { saved, failed };
+  };
+
   const handleSave = async (event) => {
     event.preventDefault();
     if (saving) return;
@@ -261,17 +329,35 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
 
     setError('');
     setSaving(true);
+    // Captured before the await: an item can only be written once the document it belongs to has an id, so this is
+    // the one moment a staged checklist becomes a real one.
+    const wasNew = !form.id;
+    const wasChecklist = form.doc_type === 'checklist';
     try {
       const result = await adminSaveDocument(form, token);
       if (!result?.success) throw new Error(result?.message || 'Could not save the document.');
-      toast.success(form.id ? 'Document saved.' : 'Document created.');
+      const documentId = result.id || form.id;
       // Keep editing the row that was just written, now carrying its id and version, so a second save updates it
       // rather than creating a duplicate.
       setForm((current) => ({
         ...current,
-        id: result.id || current.id,
+        id: documentId,
         row_version: result.row_version ?? current.row_version,
       }));
+
+      if (wasNew && wasChecklist && stagedItems.length > 0) {
+        const flushed = await flushStagedItems(documentId);
+        if (flushed.failed > 0) {
+          toast.warning(`Checklist created with ${flushed.saved} of ${flushed.saved + flushed.failed} items.`, {
+            description: `${flushed.failed} could not be saved. Add them again from the page you are on.`,
+          });
+        } else {
+          toast.success(`Checklist created with ${flushed.saved} item${flushed.saved === 1 ? '' : 's'}.`);
+        }
+      } else {
+        toast.success(wasNew ? 'Document created.' : 'Document saved.');
+      }
+
       await refresh();
       onDataChanged?.();
     } catch (err) {
@@ -594,14 +680,26 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
       {/* Checklist items. Their own card, because an item is a record rather than part of the document's text: a
           signature points at an item's id, so editing the wording keeps it attached to what was signed, and a
           signed item cannot be removed at all. One form serves adding and editing, so the two cannot drift. */}
-      {isEditing && form.doc_type === 'checklist' && (
+      {form.doc_type === 'checklist' && (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Items</h3>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Checklist items</h3>
             <span className="text-xs text-slate-500 dark:text-slate-400">
               {items.length} item{items.length === 1 ? '' : 's'}
+              {stagedItems.length > 0 ? ` · ${stagedItems.length} not saved yet` : ''}
             </span>
           </div>
+
+          {/* The panel is here for a checklist that has never been saved, too - that is the whole point of it. The
+              items of a new checklist are held until the document exists, and written the moment it does, because
+              making the author save first, reopen the document and start again is how this looked like it was
+              missing altogether. */}
+          {!isEditing && (
+            <p className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+              Add the lines below now, then save this checklist: they are written as soon as it is created. Nothing is
+              stored until then.
+            </p>
+          )}
 
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Each item is signed on its own. Editing an item keeps its signatures attached to it; removing one is
@@ -609,42 +707,50 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
             &ldquo;before the last edit&rdquo;.
           </p>
 
-          {items.length === 0 ? (
+          {items.length + stagedItems.length === 0 ? (
             <p className="text-sm text-slate-500 dark:text-slate-400">This checklist has no items yet.</p>
           ) : (
             <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-              {items.map((item) => (
-                <li key={item.id} className="flex flex-wrap items-center gap-3 py-2">
-                  {item.section && (
-                    <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      {item.section}
-                    </span>
-                  )}
-                  <span className="text-sm text-slate-700 dark:text-slate-200">{item.label}</span>
-                  <span className="text-xs text-slate-400 dark:text-slate-500">#{item.sort_order}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setItemForm({
-                        id: item.id,
-                        label: item.label,
-                        section: item.section,
-                        sort_order: item.sort_order,
-                      })
-                    }
-                    className="ml-auto text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline"
-                  >
-                    edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingItemRemoval(item)}
-                    className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                  >
-                    remove
-                  </button>
-                </li>
-              ))}
+              {[...items, ...stagedItems].map((item) => {
+                const staged = !isEditing || String(item.id).startsWith('staged-');
+                return (
+                  <li key={item.id} className="flex flex-wrap items-center gap-3 py-2">
+                    {item.section && (
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        {item.section}
+                      </span>
+                    )}
+                    <span className="text-sm text-slate-700 dark:text-slate-200">{item.label}</span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500">#{item.sort_order}</span>
+                    {staged && (
+                      <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                        not saved
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setItemForm({
+                          id: item.id,
+                          label: item.label,
+                          section: item.section,
+                          sort_order: item.sort_order,
+                        })
+                      }
+                      className="ml-auto text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline"
+                    >
+                      edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingItemRemoval(item)}
+                      className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                    >
+                      remove
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
@@ -793,7 +899,11 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
       {pendingItemRemoval && (
         <ConfirmModal
           title={`Remove “${pendingItemRemoval.label}”?`}
-          message="The item disappears from the checklist. If anybody has signed it the server refuses, because a signature must never outlive what it was about."
+          message={
+            !isEditing || String(pendingItemRemoval.id).startsWith('staged-')
+              ? 'It has not been saved yet, so it simply disappears from the list.'
+              : 'The item disappears from the checklist. If anybody has signed it the server refuses, because a signature must never outlive what it was about.'
+          }
           confirmLabel={removingItem ? 'Removing…' : 'Remove item'}
           onConfirm={handleRemoveItem}
           onCancel={() => setPendingItemRemoval(null)}

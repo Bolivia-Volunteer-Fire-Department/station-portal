@@ -167,6 +167,11 @@ in the publish checklist below.
   lines and saving once is how the screen is used, and it gives the batch one timestamp, the same
   reasoning as the training module — while an item that is already signed or belongs elsewhere is
   *skipped and counted* rather than failing the whole batch.
+- **A new checklist's items are staged in the component, and flushed the moment it is created.** An item
+  cannot be written before the document it belongs to has an id, and requiring a save-then-reopen dance
+  is what made the feature look missing. They are held in `stagedItems`, shown as *not saved*, and each
+  one is then written through the ordinary item action — which counts what landed rather than assuming,
+  because a checklist that arrives with nine of ten lines would be missing a line nobody thinks to sign.
 - **Verification is a member permission, not an administrative one.** `can_verify_documents` opens the
   Verification panel inside Documents, because an officer confirming a new member's truck checklist is
   not an administrator. Three rules make it mean something: a verification **follows the member's own
