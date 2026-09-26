@@ -7,6 +7,7 @@ import { adminDeleteEvent, adminFetchEvents, adminSaveEvent } from '../../servic
 import { toDateKey } from '../../utils/scheduleDate';
 import { authorLabel } from '../../utils/authorLabel';
 import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
+import ConfirmModal from '../ConfirmModal';
 import {
   DEFAULT_EVENT_SORT, EVENTS_PAGE_SIZE, EVENT_AUDIENCE_OPTIONS, EVENT_DEFAULT_COLOR, EVENT_FREQUENCIES,
   EVENT_SORT_OPTIONS, EVENT_WEEKDAYS, emptyEventFilters, eventFiltersActive, eventNextOccurrenceLabel,
@@ -218,6 +219,8 @@ export default function AdminEventsTab({
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!form.id;
@@ -317,8 +320,14 @@ export default function AdminEventsTab({
     }
   };
 
-  const handleDelete = async (event) => {
-    if (!window.confirm(`Delete "${event.title}"? This cannot be undone.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (event) => setPendingDelete(event);
+
+  const confirmDelete = async () => {
+    const event = pendingDelete;
+    setPendingDelete(null);
+    if (!event) return;
     setDeletingId(event.id);
     setError(null);
     try {
@@ -408,7 +417,7 @@ export default function AdminEventsTab({
             <span className="block text-sm text-slate-500 dark:text-slate-400">
               {isEditing
                 ? 'Change this event. Saving redraws it on every calendar it appears on.'
-                : 'Add a non-shift entry to the calendars. Events never fill a shift and are never offered for.'}
+                : 'Add a non-shift entry to the calendars.'}
             </span>
           </span>
         </button>
@@ -434,7 +443,7 @@ export default function AdminEventsTab({
                   type="text"
                   value={form.title}
                   onChange={(e) => setField('title', e.target.value)}
-                  placeholder="e.g. Training, Company meeting, Standby"
+                  placeholder="e.g. Training, Business meeting"
                   className={fieldClass}
                 />
               </Field>
@@ -803,6 +812,18 @@ export default function AdminEventsTab({
             rowProps={{ roles, ranks, users, timeFormat, deletingId, onEdit: handleEdit, onDelete: handleDelete }}
           />
         </>
+      )}
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete event"
+          message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.title}</strong>? This cannot be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </div>
   );

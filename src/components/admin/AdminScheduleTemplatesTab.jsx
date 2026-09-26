@@ -14,6 +14,7 @@ import {
 import { assignmentColor } from '../../utils/assignmentColor';
 import { choosableAssignments } from '../../utils/assignmentDates';
 import { MINUTES_PER_DAY, layoutWeekDayCards } from '../../utils/weekLayout';
+import ConfirmModal from '../ConfirmModal';
 
 const EMPTY_FORM = { id: '', day_of_week: '', start_time: '', end_time: '', assignment_id: '', nickname: '', effective_date: '', end_date: '' };
 
@@ -76,6 +77,8 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [savingMoveId, setSavingMoveId] = useState(null);
   const [dragId, setDragId] = useState(null);
   const [dragOverDay, setDragOverDay] = useState(null);
@@ -137,8 +140,14 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     }
   };
 
-  const handleDelete = async (template) => {
-    if (!window.confirm(`Delete the ${dayName(template.day_of_week).toLowerCase()} template "${assignmentLabel(template.assignment_id)}"? This cannot be undone.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (template) => setPendingDelete(template);
+
+  const confirmDelete = async () => {
+    const template = pendingDelete;
+    setPendingDelete(null);
+    if (!template) return;
     setDeletingId(template.id);
     setError(null);
     try {
@@ -592,6 +601,18 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
           </div>
         </div>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete template"
+          message={<>Delete the {dayName(pendingDelete.day_of_week).toLowerCase()} template for <strong className="text-slate-900 dark:text-white">{assignmentLabel(pendingDelete.assignment_id)}</strong>? This cannot be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

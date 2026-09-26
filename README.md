@@ -650,6 +650,14 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   refusal too, and it says so: the way to exchange two shifts is to **hold** the pill there for a
   moment, which blinks while the hold is read and then shows the two exchanged — letting go keeps it,
   moving out puts them back.
+- **Destructive actions ask in the app, not in a browser dialog.** Deleting a user, an event, a
+  training (and its signatures with it), a timeclock entry and the rest used `window.confirm` —
+  thirteen of them, across eleven administrator tabs. They now ask in one shared `ConfirmModal`,
+  which is styled like the rest of the app, sounded like any other modal, dismissible with Escape
+  or a click outside, and — the part a browser dialog cannot do — *names* what is about to be lost,
+  in bold, instead of squeezing it into a sentence. The row is held in the tab's own state while
+  the dialog asks, so nothing is written before the answer. `npm run verify:confirmations` fails if
+  a native dialog ever comes back, and renders the dialog to check what a screen reader would get.
 - **The interface has sounds, and one switch to silence them.** A click for every press
   on a control, a heavier one for consequential actions (save, delete, edit, cancel,
   export, print, sign out), a tone for each modal, one for each toast kind, and the

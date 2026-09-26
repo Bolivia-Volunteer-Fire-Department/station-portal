@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-react';
 import { adminSaveShift, adminDeleteShift } from '../../services/api';
 import { toTimeInputValue } from '../../utils/timeInputValue';
+import ConfirmModal from '../ConfirmModal';
 
 const EMPTY_FORM = {
   id: '',
@@ -35,6 +36,8 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.id;
@@ -77,8 +80,14 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
     }
   };
 
-  const handleDelete = async (shift) => {
-    if (!window.confirm(`Delete shift "${shift.description}"? This cannot be undone.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (shift) => setPendingDelete(shift);
+
+  const confirmDelete = async () => {
+    const shift = pendingDelete;
+    setPendingDelete(null);
+    if (!shift) return;
     setDeletingId(shift.id);
     setError(null);
     try {
@@ -251,6 +260,18 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
           </tbody>
         </table>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete shift"
+          message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.description}</strong>? This cannot be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

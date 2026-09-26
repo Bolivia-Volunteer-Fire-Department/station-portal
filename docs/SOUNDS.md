@@ -12,7 +12,7 @@ Everything here is covered by `npm run verify:sounds`, which is what stops the w
 |---|---|---|
 | `click.mp3` | **Every press on a control** — buttons, switches, pills (grab, release, click), menu items, dropdowns, checkboxes, radio choices | The one delegated listener in `utils/uiSounds` |
 | `click_double.mp3` | Consequential, infrequent actions — **save, delete, edit, cancel, export, print, sign out, approve** | The same listener, on the controls the rule below recognises |
-| `modal_positive.mp3` | A modal the member opened, or a form they are expected to fill in | Each modal component as it mounts, via `MODAL_SOUNDS` |
+| `modal_positive.mp3` | A modal the member opened — including a delete confirmation — or a form they are expected to fill in | Each modal component as it mounts, via `MODAL_SOUNDS` |
 | `modal_error.mp3` | A modal that interrupts, or reports a refusal | Same table |
 | `notification.mp3` | A push notification that arrives while the member has the app open | `notificationToast()` in App.jsx |
 | `sound_on.mp3` / `sound_off.mp3` | The **Sound Effects** switch in User Settings, and nothing else | The switch itself, via its `data-sound` directive |
@@ -131,10 +131,10 @@ These are decisions, not oversights. Each is asserted in the verifier, so changi
 
 Reported rather than fixed, because each needs a decision rather than a line of code:
 
-1. **Destructive confirmations are native `window.confirm`.** Nine of them (delete user, delete event, delete
-   template, delete clock entry, and the rest). A browser-owned dialog cannot be styled, cannot be sounded, and
-   looks nothing like the rest of the app. Replacing them with an in-app confirm modal would give them
-   `modal_error` when they open and a toast sound on the outcome — at the cost of nine new modals.
+1. **Destructive confirmations used to be native `window.confirm`** — thirteen of them. A browser-owned dialog cannot
+   be styled, cannot be sounded, and looks nothing like the rest of the app. They now ask in `ConfirmModal` and
+   sound like any other modal (`modal_positive`, by the rule above: the member opened it, nobody interrupted them).
+   What is still silent is the *outcome* of the delete that follows, beyond the toast the tab already shows.
 2. **The items inside a native `<select>`.** The browser draws that list and the app never sees a press on an
    option. The press that *opens* the dropdown clicks, and choosing plays a click from the `change` event, so a
    choice is not silent — but it is one sound where a picker built from buttons would give two.

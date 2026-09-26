@@ -13,6 +13,7 @@ import {
 } from '../../utils/systemSettings';
 import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
+import ConfirmModal from '../ConfirmModal';
 
 // Keys surfaced in their own curated category card rather than the generic list below. The loading messages
 // are curated too - ten of them, named rather than repeated here (see utils/systemSettings).
@@ -669,6 +670,8 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingKey, setDeletingKey] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.originalKey;
@@ -700,8 +703,14 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
     }
   };
 
-  const handleDelete = async (setting) => {
-    if (!window.confirm(`Delete setting "${setting.key}"?`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (setting) => setPendingDelete(setting);
+
+  const confirmDelete = async () => {
+    const setting = pendingDelete;
+    setPendingDelete(null);
+    if (!setting) return;
     setDeletingKey(setting.key);
     setError(null);
     try {
@@ -818,6 +827,20 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
           </tbody>
         </table>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. It lives in THIS card, not at the
+          end of the file, because this is the component that holds the setting being deleted - the tab is a stack of
+          separate cards, and a dialog rendered from the wrong one would not compile, let alone work. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete setting"
+          message={<>Delete setting <strong className="text-slate-900 dark:text-white">{pendingDelete.key}</strong>?</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }
@@ -927,6 +950,7 @@ function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
           </button>
         </div>
       </form>
+
     </div>
   );
 }

@@ -48,6 +48,8 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Removed the ridiculous rubber band effect that happens on scrolling/dragging the viewport.
 * Made a small adjustment to how help guides scroll.
 * Fixed "apple-mobile-web-app-capable" deprecation.
+* Fixed some ugly confirm() usages.
+* Adjusted some wording on the Events configuration page.
 
 **Version 1.04x**
 * Fixed an issue with app state where loading messages couldn’t be edited (Administration > System Settings)

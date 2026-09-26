@@ -13,6 +13,7 @@ import {
 } from '../../utils/assignmentDates';
 import { toDateKey } from '../../utils/scheduleDate';
 import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
+import ConfirmModal from '../ConfirmModal';
 
 const EMPTY_FORM = {
   id: '',
@@ -40,6 +41,8 @@ export default function AdminAssignmentsTab({
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.id;
@@ -99,8 +102,14 @@ export default function AdminAssignmentsTab({
     }
   };
 
-  const handleDelete = async (assignment) => {
-    if (!window.confirm(`Delete assignment "${assignment.description}"? Schedule templates using it will need to be updated.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (assignment) => setPendingDelete(assignment);
+
+  const confirmDelete = async () => {
+    const assignment = pendingDelete;
+    setPendingDelete(null);
+    if (!assignment) return;
     setDeletingId(assignment.id);
     setError(null);
     try {
@@ -425,6 +434,18 @@ export default function AdminAssignmentsTab({
           </tbody>
         </table>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete assignment"
+          message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.description}</strong>? Schedule templates using it will need to be updated.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Music, KeyRound } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
+import ConfirmModal from '../ConfirmModal';
 
 const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
 
@@ -8,6 +9,8 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -65,8 +68,14 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
     }
   };
 
-  const handleDelete = async (user) => {
-    if (!window.confirm(`Delete user "${user.name}"? This cannot be undone.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (user) => setPendingDelete(user);
+
+  const confirmDelete = async () => {
+    const user = pendingDelete;
+    setPendingDelete(null);
+    if (!user) return;
     setDeletingId(user.id);
     setError(null);
     try {
@@ -340,6 +349,18 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
           </tbody>
         </table>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete user"
+          message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.name}</strong>? This cannot be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

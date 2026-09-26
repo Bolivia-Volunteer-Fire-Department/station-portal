@@ -8,7 +8,7 @@
 //   npm run verify:admin-render
 import React from 'react';
 import { readFileSync } from 'node:fs';
-import { renderToString } from 'react-dom/server';
+import { renderToString, renderToStaticMarkup } from 'react-dom/server';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from '../src/utils/contentWidth.js';
 import { ADMIN_BAR_LABELS, PAGE_BAR_LABELS, adminBarLabel, pageBarLabel } from '../src/utils/pageLabels.js';
 import CenteredContent from '../src/components/CenteredContent.jsx';
@@ -37,6 +37,7 @@ import AdminSystemLogTab from '../src/components/admin/AdminSystemLogTab.jsx';
 import { ADMIN_PERMISSIONS, roleAllowsTab } from '../src/utils/permissions.js';
 import TrainingModule from '../src/components/TrainingModule.jsx';
 import ClockBlockedModal from '../src/components/ClockBlockedModal.jsx';
+import ConfirmModal from '../src/components/ConfirmModal.jsx';
 import MyClockHistory from '../src/components/MyClockHistory.jsx';
 import { clockLocationNotice } from '../src/utils/clockLocation.js';
 import TrainingForm from '../src/components/training/TrainingForm.jsx';
@@ -1930,6 +1931,63 @@ check('and it renders nothing when handed no notice', /if \(!notice\) return nul
 
 const clockNoticeSource = readFileSync('src/utils/clockLocation.js', 'utf8');
 check('the notice builder is a pure function of the outcome', /export const clockLocationNotice = \(outcome, config\)/.test(clockNoticeSource), true);
+
+// --- the confirmation dialog, actually rendered ------------------------------------------------
+//
+// This replaced window.confirm in thirteen places. verify:confirmations reads the source for the contract (it must
+// be announced, dismissible, and sound like a confirmation); this renders it, because those are different kinds of
+// evidence - a component can read correctly and still render the wrong thing, which is what a screen reader and a
+// sighted member would actually get.
+console.log('\n--- confirmation dialog (rendered) ---');
+
+// Static markup rather than renderToString, because this asserts the exact text and characters a member reads:
+// renderToString inserts `<!-- -->` between adjacent text nodes to mark hydration boundaries, and those would sit
+// inside the sentence being matched.
+const confirmHtml = renderToStaticMarkup(
+  React.createElement(ConfirmModal, {
+    title: 'Delete user',
+    message: React.createElement(
+      React.Fragment,
+      null,
+      'Delete ',
+      React.createElement('strong', { className: 'font-semibold' }, 'Jane Smith'),
+      '? This cannot be undone.'
+    ),
+    confirmLabel: 'Delete',
+    onConfirm: () => {},
+    onCancel: () => {},
+  })
+);
+
+check('it renders an alert dialog', /role="alertdialog"/.test(confirmHtml), true);
+check('marked modal', /aria-modal="true"/.test(confirmHtml), true);
+check('labelled by an id', /aria-labelledby="[^"]+"/.test(confirmHtml), true);
+check('and described by an id', /aria-describedby="[^"]+"/.test(confirmHtml), true);
+check('the label id is a real one', confirmHtml.includes(`id="${/aria-labelledby="([^"]+)"/.exec(confirmHtml)?.[1]}"`), true);
+check('the title is a heading', /<h2[^>]*>Delete user<\/h2>/.test(confirmHtml), true);
+check(
+  'the message names what goes',
+  /Delete <strong class="font-semibold">Jane Smith<\/strong>\? This cannot be undone\./.test(confirmHtml),
+  true
+);
+check('the confirmation says what it does', /<button[^>]*>Delete<\/button>/.test(confirmHtml), true);
+check('and there is a way out', /<button[^>]*>Cancel<\/button>/.test(confirmHtml), true);
+check('the destructive button is the red one', /bg-red-600/.test(confirmHtml), true);
+
+// The message is optional, and a dialog that still describes a message it does not render is a lie to a screen
+// reader - so the aria-describedby has to disappear with it. The "expected" value here is a condition, not a value
+// to compare: this harness prints the third argument only when the condition FAILS, so it is the diagnostic.
+const bareHtml = renderToStaticMarkup(
+  React.createElement(ConfirmModal, { title: 'Remove it?', onConfirm: () => {}, onCancel: () => {} })
+);
+check('it renders with no message at all', /<h2[^>]*>Remove it\?<\/h2>/.test(bareHtml), true);
+check(
+  'and then describes nothing',
+  !/aria-describedby/.test(bareHtml),
+  `/aria-describedby="[^"]*"/.exec(bareHtml)?.[0] ?? 'present, but not as an attribute this check can show'`
+);
+check('the labels have sane defaults', /<button[^>]*>Confirm<\/button>/.test(bareHtml), true);
+check('including the way out', /<button[^>]*>Cancel<\/button>/.test(bareHtml), true);
 
 // --- My Clock History: filters, sorting and the summary cards ---------------------------------
 //

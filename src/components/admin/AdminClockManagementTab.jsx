@@ -5,6 +5,7 @@ import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
 import { CLOCK_LOG_SORT_OPTIONS, filterAndSortClockLogs } from '../../utils/clockLogs';
 import RankIcon from '../RankIcon';
+import ConfirmModal from '../ConfirmModal';
 
 // Shows a hover/focus popover with the reverse-geocoded address for a clock in/out time,
 // falling back to the raw GPS coordinates when no address was resolved.
@@ -114,6 +115,8 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const [filterUserId, setFilterUserId] = useState('');
@@ -163,8 +166,14 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
     }
   };
 
-  const handleDelete = async (log) => {
-    if (!window.confirm('Delete this timeclock entry? This cannot be undone.')) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (log) => setPendingDelete(log);
+
+  const confirmDelete = async () => {
+    const log = pendingDelete;
+    setPendingDelete(null);
+    if (!log) return;
     setDeletingId(log.id);
     setError(null);
     try {
@@ -455,6 +464,18 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
           </tbody>
         </table>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete timeclock entry"
+          message="Delete this timeclock entry? This cannot be undone."
+          confirmLabel="Delete entry"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

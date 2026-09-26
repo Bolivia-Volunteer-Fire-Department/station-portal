@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Trash2, UserMinus } from 'lucide-react';
 import { adminBulkSaveTraining, adminRemoveTrainingSignature } from '../../services/api';
 import TrainingBadges from '../training/TrainingBadges';
+import ConfirmModal from '../ConfirmModal';
 import TrainingFilters from '../training/TrainingFilters';
 import TrainingForm from '../training/TrainingForm';
 import TrainingTotals from '../training/TrainingTotals';
@@ -35,6 +36,10 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
   const [message, setMessage] = useState(null);
   const [filters, setFilters] = useState(emptyTrainingFilters);
   const [sort, setSort] = useState(DEFAULT_TRAINING_SORT);
+  // The action awaiting confirmation in the modal below, or null. One piece of state for all three
+  // confirmations this tab needs - locking, deleting, and removing a signature - so there is exactly one dialog
+  // and no chance of two stacking.
+  const [pending, setPending] = useState(null);
 
   const allRows = useMemo(() => normalizeTrainingList(trainings), [trainings]);
 
@@ -101,14 +106,16 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
     // Ticking the external-system marker locks the training permanently, so it is confirmed
     // before the write rather than reported after it - there is no way back through the app.
     if (!trainingLocked(editing) && Boolean(values.is_entered_into_external)) {
-      const confirmed = window.confirm(
-        `Mark "${values.title}" as entered into an external system?\n\n` +
-          'This locks the training and its signatures for everyone, including administrators, ' +
-          'and cannot be undone in the app. Only the training sheet can clear it.'
-      );
-      if (!confirmed) return;
+      setPending({ kind: 'lock', values });
+      return;
     }
 
+    await saveTraining(values);
+  };
+
+  // The write itself, run once the lock is confirmed (or straight through when it is not needed). It is separate
+  // from handleSave only because the confirmation is answered later, on a click.
+  const saveTraining = async (values) => {
     setSaving(true);
     setMessage(null);
     try {
@@ -124,17 +131,14 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
     }
   };
 
-  const handleDeleteTraining = async (training) => {
+  const handleDeleteTraining = (training) => {
     const signedCount = counts.get(String(training.id)) || 0;
     // Deleting a training throws away its signatures, so the confirmation says so rather than
     // asking a generic "are you sure?".
-    const confirmed = window.confirm(
-      signedCount > 0
-        ? `Delete "${training.title}"? This also removes ${signedCount} signature${signedCount === 1 ? '' : 's'} recorded against it, and cannot be undone.`
-        : `Delete "${training.title}"? This cannot be undone.`
-    );
-    if (!confirmed) return;
+    setPending({ kind: 'train', training, signedCount });
+  };
 
+  const deleteTraining = async (training) => {
     setSaving(true);
     setMessage(null);
     try {
@@ -150,12 +154,9 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
     }
   };
 
-  const handleRemoveSignature = async (signature) => {
-    const confirmed = window.confirm(
-      `Remove ${memberName(signature.user_id)}'s signature? They will be able to sign it again.`
-    );
-    if (!confirmed) return;
+  const handleRemoveSignature = (signature) => setPending({ kind: 'signature', signature });
 
+  const removeSignature = async (signature) => {
     setRemovingId(signature.id);
     setMessage(null);
     try {
@@ -169,6 +170,19 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
       setRemovingId(null);
     }
   };
+
+  // Runs whichever action was confirmed. The pending value is cleared first so a slow write cannot be confirmed
+  // twice; from here the row's own spinner takes over, exactly as it did when the native dialog returned.
+  const confirmPending = () => {
+    const action = pending;
+    setPending(null);
+    if (!action) return;
+    if (action.kind === 'lock') void saveTraining(action.values);
+    else if (action.kind === 'train') void deleteTraining(action.training);
+    else void removeSignature(action.signature);
+  };
+
+  const signatureName = pending?.kind === 'signature' ? memberName(pending.signature.user_id) : '';
 
   return (
     <div className="space-y-4">
@@ -384,6 +398,50 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
           </table>
         </div>
       </div>
+
+      {/* Every confirmation this tab needs. The wording is the same warning the native dialog carried, but it can
+          now name what is lost in bold rather than fitting it into a sentence. */}
+      {pending && (
+        <ConfirmModal
+          title={
+            pending.kind === 'lock'
+              ? 'Lock this training'
+              : pending.kind === 'train'
+                ? 'Delete training'
+                : 'Remove signature'
+          }
+          message={
+            pending.kind === 'lock' ? (
+              <>
+                Mark <strong className="text-slate-900 dark:text-white">{pending.values.title}</strong> as entered
+                into an external system? This locks the training and its signatures for everyone, including
+                administrators, and cannot be undone in the app. Only the training sheet can clear it.
+              </>
+            ) : pending.kind === 'train' ? (
+              pending.signedCount > 0 ? (
+                <>
+                  Delete <strong className="text-slate-900 dark:text-white">{pending.training.title}</strong>? This
+                  also removes {pending.signedCount} signature{pending.signedCount === 1 ? '' : 's'} recorded against
+                  it, and cannot be undone.
+                </>
+              ) : (
+                <>
+                  Delete <strong className="text-slate-900 dark:text-white">{pending.training.title}</strong>? This
+                  cannot be undone.
+                </>
+              )
+            ) : (
+              <>
+                Remove <strong className="text-slate-900 dark:text-white">{signatureName}</strong>&apos;s signature?
+                They will be able to sign it again.
+              </>
+            )
+          }
+          confirmLabel={pending.kind === 'lock' ? 'Lock training' : pending.kind === 'train' ? 'Delete' : 'Remove'}
+          onConfirm={confirmPending}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }

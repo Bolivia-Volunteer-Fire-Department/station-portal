@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { adminDeleteAnnouncement, adminFetchAnnouncements, adminSaveAnnouncement } from '../../services/api';
 import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
+import ConfirmModal from '../ConfirmModal';
 import { toDateKey } from '../../utils/scheduleDate';
 import {
   ANNOUNCEMENT_ICON_FALLBACK,
@@ -57,6 +58,8 @@ export default function AdminAnnouncementsTab({
 }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState(null);
 
@@ -177,8 +180,14 @@ export default function AdminAnnouncementsTab({
     }
   };
 
-  const handleDelete = async (announcement) => {
-    if (!window.confirm(`Delete "${announcement.title}"? This cannot be undone.`)) return;
+  // The announcement awaiting confirmation. The row that was clicked is held here while the modal below asks, and
+  // the delete runs only if it is confirmed.
+  const handleDelete = (announcement) => setPendingDelete(announcement);
+
+  const confirmDelete = async () => {
+    const announcement = pendingDelete;
+    setPendingDelete(null);
+    if (!announcement) return;
     setDeletingId(announcement.id);
     setError(null);
     try {
@@ -569,6 +578,23 @@ export default function AdminAnnouncementsTab({
           </ul>
         )}
       </div>
+
+      {/* The confirmation replaces a native dialog: styled, heard (ConfirmModal plays the tone), and able to say
+          what is being deleted rather than asking a generic question. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete announcement"
+          message={
+            <>
+              Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.title}</strong>? This cannot
+              be undone.
+            </>
+          }
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

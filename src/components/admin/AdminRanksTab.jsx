@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-react';
 import { adminSaveRank, adminDeleteRank } from '../../services/api';
 import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
+import ConfirmModal from '../ConfirmModal';
 
 const EMPTY_FORM = { id: '', description: '', color: '#ef4444', icon: '', rank_order: '' };
 
@@ -9,6 +10,8 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.id;
@@ -46,8 +49,14 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
     }
   };
 
-  const handleDelete = async (rank) => {
-    if (!window.confirm(`Delete rank "${rank.description}"? Users with this rank will need to be reassigned.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (rank) => setPendingDelete(rank);
+
+  const confirmDelete = async () => {
+    const rank = pendingDelete;
+    setPendingDelete(null);
+    if (!rank) return;
     setDeletingId(rank.id);
     setError(null);
     try {
@@ -227,6 +236,18 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
           </tbody>
         </table>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete rank"
+          message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.description}</strong>? Users with this rank will need to be reassigned.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

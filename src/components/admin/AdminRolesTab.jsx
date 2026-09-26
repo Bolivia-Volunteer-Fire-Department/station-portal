@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, ShieldCheck, Lock } from 'lucide-react';
 import { adminSaveRole, adminDeleteRole } from '../../services/api';
+import ConfirmModal from '../ConfirmModal';
 import {
   ADMIN_PERMISSIONS,
   ALL_PERMISSIONS,
@@ -48,6 +49,8 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
   const [formData, setFormData] = useState(buildEmptyForm);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  // The row whose delete is being confirmed in the modal below.
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.id;
@@ -86,8 +89,14 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
     }
   };
 
-  const handleDelete = async (role) => {
-    if (!window.confirm(`Delete role "${role.description}"? Users with this role will need to be reassigned.`)) return;
+  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
+  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  const handleDelete = (role) => setPendingDelete(role);
+
+  const confirmDelete = async () => {
+    const role = pendingDelete;
+    setPendingDelete(null);
+    if (!role) return;
     setDeletingId(role.id);
     setError(null);
     try {
@@ -340,6 +349,18 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
           </div>
         </form>
       </div>
+
+      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
+          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete role"
+          message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.description}</strong>? Users with this role will need to be reassigned.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }
