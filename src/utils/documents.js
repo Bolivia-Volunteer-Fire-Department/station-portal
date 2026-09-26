@@ -53,6 +53,8 @@ export const normalizeDocument = (row) => {
   const order = Number.parseInt(source.sort_order, 10);
   const revision = Number.parseInt(source.content_revision, 10);
   const length = Number.parseInt(source.content_length, 10);
+  const itemCount = Number.parseInt(source.item_count, 10);
+  const itemsSigned = Number.parseInt(source.items_signed, 10);
 
   return {
     id: text(source.id),
@@ -69,6 +71,11 @@ export const normalizeDocument = (row) => {
     end_date: effectiveDateKey(source.end_date),
     content_revision: Number.isFinite(revision) ? revision : 0,
     content_length: Number.isFinite(length) ? length : 0,
+    // How many items a checklist has, and how many of them THIS member has signed. Server-computed, because the
+    // list carries no items: a checklist cannot advertise "3 to sign" from a document-level signature, since it
+    // does not have one.
+    item_count: Number.isFinite(itemCount) ? itemCount : 0,
+    items_signed: Number.isFinite(itemsSigned) ? itemsSigned : 0,
     author_user_id: text(source.author_user_id),
     updated_at: text(source.updated_at),
     row_version: source.row_version ?? '',
@@ -86,7 +93,102 @@ export const isChecklist = (document) => normalizeDocument(document).doc_type ==
 // A link document holds an address instead of a body, so the reader offers to open it rather than rendering text.
 export const isLink = (document) => normalizeDocument(document).doc_type === 'link';
 
-// Where a document sits in its own life - 'active', 'scheduled' or 'retired' - and the label for it. The rule is the
+// ---------------------------------------------------------------------------
+// Ordering by dragging
+// ---------------------------------------------------------------------------
+//
+// The order is stored as `sort_order` on each document, and a drag has to turn "I dropped this here" into the
+// numbers that mean that. Both helpers below are pure and return the `{id, sort_order}` pairs to save, because the
+// rule is the part worth testing: whether dropping a document on another one puts it above or below, and what
+// dragging a FOLDER is supposed to do. The component only sends what comes back.
+//
+// A folder has no row of its own - a folder is a name carried by the documents in it (see documentFolders) - so
+// dragging a folder reorders whole BLOCKS of documents, and the folders then sort by the first document in each.
+// That is why `reorderFolders` rewrites the order of every document in the folders it touches: it is the only
+// thing there is to write.
+
+// Step between neighbours. Gaps of 10 leave room for one more document between any two without renumbering the
+// whole list, and the renumbering below only ever runs on the rows a drag actually touched.
+const ORDER_STEP = 10;
+
+// The documents of one folder, in the order they are shown. Exported because the editor's Move up / Move down
+// buttons need the same sequence the list is drawn from: a touch screen does not fire HTML5 drag events at all, so
+// dragging cannot be the only way to set a position.
+export const orderedFolderDocuments = (documents, folder) =>
+  (Array.isArray(documents) ? documents : [])
+    .map(normalizeDocument)
+    .filter((document) => documentFolder(document) === folder)
+    .sort((a, b) => a.sort_order - b.sort_order || a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
+
+// Dropping `movedId` onto `targetId` places the moved document where the target was, and pushes the rest down.
+// Dropping onto itself changes nothing, which is what makes a drag that goes nowhere harmless.
+export const reorderDocuments = (documents, movedId, targetId) => {
+  const moved = text(movedId);
+  const target = text(targetId);
+  if (!moved || !target || moved === target) return [];
+
+  const list = (Array.isArray(documents) ? documents : []).map(normalizeDocument);
+  const moving = list.find((document) => document.id === moved);
+  const landing = list.find((document) => document.id === target);
+  if (!moving || !landing) return [];
+
+  // A drag never moves a document between folders: the folder is a field on the document, and dropping a row on a
+  // row from another folder would silently move it. Reordering is about position, so the two have to agree.
+  const within = orderedFolderDocuments(list, documentFolder(moving));
+  if (documentFolder(moving) !== documentFolder(landing)) return [];
+
+  const without = within.filter((document) => document.id !== moved);
+  const at = without.findIndex((document) => document.id === target);
+  if (at === -1) return [];
+
+  // Which side of the target the row lands on is decided by the direction it travelled: dragging DOWN puts it
+  // after the target, dragging UP puts it before it - which is where the row looks like it went. Taking the
+  // target's index unconditionally would make a downward drag look like it did nothing.
+  const movingDown = moving.sort_order < landing.sort_order;
+  const next = movingDown ? at + 1 : at;
+  const ordered = [...without.slice(0, next), moving, ...without.slice(next)];
+
+  return ordered
+    .map((document, index) => ({ id: document.id, sort_order: index * ORDER_STEP }))
+    .filter((entry) => {
+      const current = list.find((document) => document.id === entry.id);
+      return !current || current.sort_order !== entry.sort_order;
+    });
+};
+
+// Dragging a folder to another folder's position, as one block of documents. Writes nothing about the folder
+// itself, because there is nothing to write: every document in the moved folder is given a place in the run.
+export const reorderFolders = (documents, movedFolder, targetFolder) => {
+  const moved = text(movedFolder);
+  const target = text(targetFolder);
+  if (!moved || !target || moved === target) return [];
+  // Unfiled is where documents with no folder go, and it is pinned last by documentFolders: a drag cannot move a
+  // folder after it, and cannot move it at all.
+  if (moved === UNFILED_LABEL || target === UNFILED_LABEL) return [];
+
+  const list = (Array.isArray(documents) ? documents : []).map(normalizeDocument);
+  const folderOrder = documentFolders(list);
+  const from = folderOrder.indexOf(moved);
+  const to = folderOrder.indexOf(target);
+  if (from === -1 || to === -1) return [];
+
+  const without = folderOrder.filter((folder) => folder !== moved);
+  const at = without.indexOf(target);
+  // The same rule as dragging a document: down lands after the target, up lands before it.
+  const movingDown = from < to;
+  const next = movingDown ? at + 1 : at;
+  const reordered = [...without.slice(0, next), moved, ...without.slice(next)];
+
+  // Flatten each folder's documents, folder by folder, in the new order. Documents keep their order WITHIN a
+  // folder and only the gaps between the blocks change, which is what makes a folder drag predictable.
+  const flat = reordered.flatMap((folder) => orderedFolderDocuments(list, folder).map((document) => document.id));
+  const wanted = new Map(flat.map((id, index) => [id, index * ORDER_STEP]));
+
+  return list
+    .filter((document) => wanted.has(document.id))
+    .filter((document) => document.sort_order !== wanted.get(document.id))
+    .map((document) => ({ id: document.id, sort_order: wanted.get(document.id) }));
+};
 // schedule's own (see utils/effectiveDates), reused rather than restated: the same two columns mean the same thing
 // on both sheets, and a document does not need a second opinion about whether a date has passed.
 export const documentLifecycle = (document, todayKey) => dateLifecycle(normalizeDocument(document), todayKey);
@@ -102,11 +204,28 @@ export const documentFolder = (document) => normalizeDocument(document).folder |
 
 // Every folder in a list, A-Z with Unfiled last. Derived rather than stored: a folder with no documents does not
 // exist, which is why nothing here can leave an empty folder behind.
+// Every folder in a list, in the order the documents put them in. Unfiled is pinned last, because it is where the
+// documents with no folder go rather than a folder anybody chose.
+//
+// The order is DRAGGABLE, so it cannot be alphabetical: a folder's place is its first document's `sort_order` (see
+// reorderFolders), with the name breaking ties so two folders that share a number still come out in a stable order.
+// A station that never drags anything still sees a sensible list - the documents were ordered when they were
+// written, so the folders come out in the order their contents were created.
 export const documentFolders = (documents) => {
-  const names = new Set((Array.isArray(documents) ? documents : []).map(documentFolder));
-  return [...names].sort((a, b) => {
+  const list = (Array.isArray(documents) ? documents : []).map(normalizeDocument);
+  const firstOrder = new Map();
+
+  list.forEach((document) => {
+    const folder = documentFolder(document);
+    const current = firstOrder.get(folder);
+    if (current === undefined || document.sort_order < current) firstOrder.set(folder, document.sort_order);
+  });
+
+  return [...firstOrder.keys()].sort((a, b) => {
     if (a === UNFILED_LABEL) return 1;
     if (b === UNFILED_LABEL) return -1;
+    const diff = firstOrder.get(a) - firstOrder.get(b);
+    if (diff !== 0) return diff;
     return a.toLowerCase() < b.toLowerCase() ? -1 : 1;
   });
 };
@@ -309,6 +428,17 @@ export const signedDocumentIds = (signatures, userId) => {
 // asking them for something.
 export const documentSignatureState = (document, signatures, userId) => {
   const normalized = normalizeDocument(document);
+
+  // A checklist is signed ITEM BY ITEM, so its state is read from its items: "signed" means there is nothing left
+  // for this member to tick. Its `is_sign_required` flag is always true (the server forces it for the type), so
+  // testing the flag alone - as the branch below does for everything else - would mark every checklist as
+  // outstanding forever, now that a checklist can no longer take a signature of its own.
+  if (normalized.doc_type === 'checklist') {
+    // A checklist with no items is not a task anybody can be waiting on.
+    if (normalized.item_count === 0) return 'not-required';
+    return normalized.items_signed >= normalized.item_count ? 'signed' : 'outstanding';
+  }
+
   if (!normalized.is_sign_required) return 'not-required';
   return signedDocumentIds(signatures, userId).has(normalized.id) ? 'signed' : 'outstanding';
 };

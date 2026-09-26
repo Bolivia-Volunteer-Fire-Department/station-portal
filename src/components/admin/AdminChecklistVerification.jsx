@@ -91,6 +91,30 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [items, signatures, currentUserId]
   );
 
+  // Why the list can be empty, worked out from the same data the list is built from. "Nothing is waiting to be
+  // verified" is true and useless: it reads as broken to somebody who has just watched a member tick boxes, and
+  // the honest answers are different problems with different fixes.
+  //
+  //   * the checklist has no items yet - nothing to sign, nothing to confirm;
+  //   * nobody has signed anything - the member has not saved their ticks;
+  //   * everything signed is the VIEWER's own, and the server refuses self-verification, so it is filtered out by
+  //     design. This is the one that looks like a bug and is not, which is why it says so;
+  //   * everything signed has already been confirmed.
+  const emptyReason = useMemo(() => {
+    if (items.length === 0) return 'no-items';
+
+    const wantedVerifier = String(currentUserId || '').trim();
+    const signedItems = signatures.filter(
+      (signature) =>
+        signature.signature_role === 'member' &&
+        signature.checklist_item_id !== '' &&
+        items.some((item) => item.id === signature.checklist_item_id)
+    );
+    if (signedItems.length === 0) return 'nothing-signed';
+    if (wantedVerifier && signedItems.every((signature) => signature.user_id === wantedVerifier)) return 'only-yours';
+    return 'all-verified';
+  }, [items, signatures, currentUserId]);
+
   const openMemberQueue = useMemo(
     () => (openMemberId ? verificationQueue(items, signatures, openMemberId) : null),
     [items, signatures, openMemberId]
@@ -192,6 +216,9 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
                 <option key={row.id} value={row.id}>
                   {row.title}
                   {row.folder ? ` — ${row.folder}` : ''}
+                  {row.item_count > 0
+                    ? ` (${row.item_count} item${row.item_count === 1 ? '' : 's'})`
+                    : ' (no items yet)'}
                 </option>
               ))}
             </select>
@@ -211,9 +238,35 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
           )}
 
           {!error && !loading && waiting.length === 0 && (
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Nothing is waiting to be verified on this checklist.
-            </p>
+            <div className="text-sm text-slate-500 dark:text-slate-400">
+              {emptyReason === 'no-items' && (
+                <p>
+                  This checklist has no items yet, so there is nothing for a member to sign or for you to confirm.
+                  Add them under <strong>Checklist items</strong> above.
+                </p>
+              )}
+              {emptyReason === 'nothing-signed' && (
+                <p>
+                  Nobody has signed any items on this checklist yet. A member&rsquo;s ticked items appear here once
+                  they have pressed <strong>Save signatures</strong> on their own screen.
+                </p>
+              )}
+              {emptyReason === 'only-yours' && (
+                <>
+                  <p>
+                    The only signed items on this checklist are <strong>yours</strong>, and nobody can verify their
+                    own checklist — that is the rule that makes a verification mean something.
+                  </p>
+                  <p className="mt-1">
+                    Another member&rsquo;s items appear here as soon as they sign them. To check your own, ask
+                    somebody else with the <strong>Verify checklists</strong> permission.
+                  </p>
+                </>
+              )}
+              {emptyReason === 'all-verified' && (
+                <p>Everything signed on this checklist has been verified. Nothing is waiting.</p>
+              )}
+            </div>
           )}
 
           {!error && waiting.length > 0 && (

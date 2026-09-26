@@ -45,7 +45,10 @@ import {
   normalizeChecklistItemList,
   normalizeDocument,
   normalizeDocumentList,
+  normalizeSignatureList,
   outstandingSignatureDocuments,
+  reorderDocuments,
+  reorderFolders,
   signatureDateLabel,
   signatureIsStale,
   signedDocumentIds,
@@ -755,8 +758,90 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// The window: retiring a document without deleting it.
+// Ordering by dragging
 // ---------------------------------------------------------------------------
+console.log('\n--- dragging to reorder ---');
+const folderFixtures = normalizeDocumentList([
+  { id: 'a1', title: 'A one', folder: 'Alpha', sort_order: 0 },
+  { id: 'a2', title: 'A two', folder: 'Alpha', sort_order: 10 },
+  { id: 'b1', title: 'B one', folder: 'Bravo', sort_order: 20 },
+  { id: 'c1', title: 'C one', folder: 'Charlie', sort_order: 30 },
+  { id: 'u1', title: 'Uno', folder: '', sort_order: 40 },
+]);
+
+check(
+  'folders come out in the order their documents are in, not alphabetically',
+  documentFolders(folderFixtures),
+  ['Alpha', 'Bravo', 'Charlie', UNFILED_LABEL]
+);
+check(
+  'and a dragged folder order is what the list shows',
+  documentFolders([
+    { id: 'x', title: 'X', folder: 'Zulu', sort_order: 0 },
+    { id: 'y', title: 'Y', folder: 'Alpha', sort_order: 10 },
+  ]),
+  ['Zulu', 'Alpha']
+);
+check('Unfiled is pinned last whatever the numbers say', documentFolders([
+  { id: 'x', title: 'X', folder: '', sort_order: 0 },
+  { id: 'y', title: 'Y', folder: 'Alpha', sort_order: 10 },
+]), ['Alpha', UNFILED_LABEL]);
+
+// A folder drag rewrites the run of documents, because a folder is only a name on a document. The pairs are
+// compared as a MAP with its keys in a fixed order - the order of the array or of the object's keys is irrelevant
+// when every pair is written independently, and asserting either would pin down something nobody depends on.
+const orderMap = (pairs) =>
+  Object.fromEntries(
+    pairs.map((entry) => [entry.id, entry.sort_order]).sort((a, b) => a[0].localeCompare(b[0]))
+  );
+
+const withinAlpha = normalizeDocumentList([
+  { id: 'a1', title: 'A one', folder: 'Alpha', sort_order: 0 },
+  { id: 'a2', title: 'A two', folder: 'Alpha', sort_order: 10 },
+  { id: 'a3', title: 'A three', folder: 'Alpha', sort_order: 20 },
+]);
+
+check(
+  'dragging a document down lands it after the target',
+  orderMap(reorderDocuments(withinAlpha, 'a1', 'a2')),
+  { a1: 10, a2: 0 }
+);
+check(
+  'dragging a document up lands it before the target',
+  orderMap(reorderDocuments(withinAlpha, 'a3', 'a1')),
+  { a1: 10, a2: 20, a3: 0 }
+);
+check('a drop onto itself writes nothing', reorderDocuments(withinAlpha, 'a2', 'a2'), []);
+check('an unknown id writes nothing', reorderDocuments(withinAlpha, 'nope', 'a1'), []);
+check(
+  'a drag never moves a document between folders',
+  reorderDocuments(
+    [
+      { id: 'a1', title: 'A', folder: 'Alpha', sort_order: 0 },
+      { id: 'b1', title: 'B', folder: 'Bravo', sort_order: 10 },
+    ],
+    'a1',
+    'b1'
+  ),
+  []
+);
+
+const folderMove = reorderFolders(folderFixtures, 'Charlie', 'Alpha');
+check(
+  'dragging a folder up in front of another moves the whole block',
+  orderMap(folderMove),
+  { a1: 10, a2: 20, b1: 30, c1: 0 }
+);
+check(
+  'and dragging one down moves it after',
+  orderMap(reorderFolders(folderFixtures, 'Alpha', 'Bravo')),
+  { a1: 10, a2: 20, b1: 0 }
+);
+check('Unfiled is never dragged', reorderFolders(folderFixtures, UNFILED_LABEL, 'Alpha'), []);
+check('nor is anything dragged after it', reorderFolders(folderFixtures, 'Alpha', UNFILED_LABEL), []);
+check('a folder dropped on itself writes nothing', reorderFolders(folderFixtures, 'Alpha', 'Alpha'), []);
+check('and a folder with no documents is not a folder', reorderFolders(folderFixtures, 'Ghost', 'Alpha'), []);
+
 console.log('\n--- effective and end dates ---');
 const windowed = normalizeDocument({
   id: 'w',
@@ -899,6 +984,39 @@ check(
   ['c']
 );
 check('and the count is the number of those', outstandingSignatureDocuments([signable, unsigned], [], 'user-ff').length, 2);
+
+// A checklist is signed item by item, so its state is read from its ITEMS rather than from a document signature -
+// which is what keeps it off the "to sign" list once the member has ticked everything, and on it while they have
+// not. The item counts come from the server, because the list carries no items.
+const checklistPartial = { id: 'cl', doc_type: 'checklist', is_sign_required: true, item_count: 4, items_signed: 1 };
+const checklistDone = { id: 'cl', doc_type: 'checklist', is_sign_required: true, item_count: 4, items_signed: 4 };
+const checklistEmpty = { id: 'cl', doc_type: 'checklist', is_sign_required: true, item_count: 0, items_signed: 0 };
+check('a partly ticked checklist is outstanding', documentSignatureState(checklistPartial, [], 'user-ff'), 'outstanding');
+check('a fully ticked one is not', documentSignatureState(checklistDone, [], 'user-ff'), 'signed');
+check(
+  'and a checklist with no items asks nothing of anybody',
+  documentSignatureState(checklistEmpty, [], 'user-ff'),
+  'not-required'
+);
+check(
+  'and it decides by the ITEMS even when a row predating the rule still has the flag off',
+  documentSignatureState(
+    { id: 'cl', doc_type: 'checklist', is_sign_required: false, item_count: 2, items_signed: 0 },
+    [],
+    'user-ff'
+  ),
+  'outstanding'
+);
+check(
+  'the outstanding list counts a checklist by its items',
+  outstandingSignatureDocuments([checklistPartial, checklistDone], [], 'user-ff').map((row) => row.id),
+  ['cl']
+);
+check(
+  'and the folder badge follows the same rule',
+  folderSummaries([checklistPartial, checklistDone], [], 'user-ff')[0].outstanding,
+  1
+);
 checkIs(
   'a signed row is dated by the shared formatter',
   /^Signed \S/.test(signatureDateLabel(memberRow)),
@@ -1439,9 +1557,14 @@ checkIs(
   'the back control is always on screen'
 );
 checkIs(
-  'and reading a document hides the list below lg',
-  /openId \? 'hidden lg:block'/.test(moduleSource),
-  'a narrow screen would show the list above the document it is reading'
+  'and reading a document takes the whole card',
+  /openId\s*\n\s*\? 'md:flex-1 md:min-h-0 md:flex'/.test(moduleSource),
+  'the reader would share the card with the list it came from'
+);
+checkIs(
+  'so the folder column and the list are put away, not merely narrowed',
+  (moduleSource.match(/\{!openId && \(/g) || []).length >= 2,
+  'a column would still be rendered beside the reader'
 );
 checkIs(
   'signing checklist items is collected and saved once',
@@ -1480,10 +1603,15 @@ checkIs(
   'a signed item would be tickable, then refused'
 );
 checkIs(
-  'a checklist that asks for no signatures says so, and says what to change',
-  /does not ask for signatures, so its items cannot be ticked/.test(moduleSource) &&
-    /switch on &ldquo;Members must sign/.test(moduleSource),
-  '"clicking does nothing" would still be the last word'
+  'a checklist is always signed item by item, so its items are always tickable',
+  /const itemsAreSignable = documentIsChecklist;/.test(moduleSource) &&
+    /canTick=\{itemsAreSignable\}/.test(moduleSource),
+  'a checklist whose stored flag is false would show items that refuse to be ticked'
+);
+checkIs(
+  'and the document-level sign block is not offered on a checklist',
+  /\{openDocument\.is_sign_required && !documentIsChecklist && \(/.test(moduleSource),
+  'a checklist would offer to be signed as a whole, which the server refuses'
 );
 
 // A link document: there is no body to render, so the reader offers the address instead.
@@ -1517,6 +1645,114 @@ checkIs(
 );
 
 // Verifying from the Administration module: pick the checklist, then the member, then confirm each item.
+console.log('\n--- a checklist is always signable, and signed only item by item ---');
+const memberRowsSource = (codeAll.match(/function memberDocumentRows\([\s\S]*?\n\}/) || [''])[0];
+checkIs('the member list helper is still there', memberRowsSource.length > 0, 'memberDocumentRows was renamed');
+checkIs(
+  'the document-level flag is forced on for the type, not chosen',
+  /is_sign_required: requestedType === "checklist" \? true : isTruthyValue\(read\("is_sign_required"\)\)/.test(
+    codeAll
+  ),
+  'a checklist could be stored that refuses its own items'
+);
+checkIs(
+  'signing a checklist as a whole is refused',
+  /doc_type \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "checklist"\) \{\n\s+responseData = \{\n\s+success: false,\n\s+message: "A checklist is signed item by item/.test(
+    action('SIGN_DOCUMENT')
+  ),
+  'a meaningless signature could clear the badge while every item was outstanding'
+);
+checkIs(
+  'and the item path no longer consults the document-level flag',
+  !/!isTruthyValue\(itemSignDocument\.is_sign_required\)/.test(action('SIGN_CHECKLIST_ITEM')),
+  'a checklist whose stored flag is false could never be signed, so nothing would ever reach a verifier'
+);
+checkIs(
+  'while it still has to BE a checklist',
+  /!== "checklist" \|\|/.test(action('SIGN_CHECKLIST_ITEM'))
+);
+checkIs(
+  'the member list carries the item counts a checklist needs',
+  /withItemSummaries\([\s\S]{0,2000}documentItemSummaries\(ss, user && user\.id\)/.test(memberRowsSource),
+  'a checklist could not advertise outstanding items'
+);
+checkIs(
+  'and so does the administrative one',
+  /withItemSummaries\([\s\S]{0,300}documentItemSummaries\(ss, ""\)/.test(action('ADMIN_GET_DOCUMENTS'))
+);
+
+console.log('\n--- the wire format the verification queue depends on ---');
+// The regression guard for "I ticked some items and the verify card said nothing was waiting". The queue is built
+// from the signatures `GET_DOCUMENT_SIGNATURES` returns, so the fields SIGN_CHECKLIST_ITEM WRITES are the contract:
+// a member-role row, on a real item id, for the member who signed. Losing any one of them empties the card without
+// an error anywhere - which is exactly how the bug presented.
+const writtenSignature = {
+  id: 'sig-1',
+  document_id: 'doc-1',
+  checklist_item_id: 'item-1',
+  user_id: 'user-new',
+  signed_by_user_id: 'user-new',
+  signature_role: 'member',
+  signed_at: '2026-07-01 08:00:00',
+  content_revision: 3,
+};
+const queueItems = [{ id: 'item-1', label: 'Check the pump', section: '', sort_order: 0 }];
+const queueSignatures = normalizeSignatureList([writtenSignature]);
+check(
+  'a member who signed an item is waiting to be verified',
+  membersAwaitingVerification(queueItems, queueSignatures, 'user-officer').map((entry) => entry.userId),
+  ['user-new']
+);
+check(
+  'with the item they signed named',
+  membersAwaitingVerification(queueItems, queueSignatures, 'user-officer')[0].remaining.map((state) => state.item.label),
+  ['Check the pump']
+);
+check(
+  'and the verifier\u2019s own signature is left out',
+  membersAwaitingVerification(queueItems, queueSignatures, 'user-new'),
+  []
+);
+check(
+  'the fields the server writes survive the round trip',
+  [
+    queueSignatures[0].checklist_item_id,
+    queueSignatures[0].signature_role,
+    queueSignatures[0].document_id,
+  ],
+  ['item-1', 'member', 'doc-1']
+);
+
+console.log('\n--- reordering is its own write, and cannot be a save ---');
+checkIs(
+  'ADMIN_REORDER_DOCUMENTS exists',
+  action('ADMIN_REORDER_DOCUMENTS').length > 0,
+  'there is no way to save a drag'
+);
+checkIs(
+  'it needs can_manage_documents',
+  /hasDocumentPermission\(ss, orderAuth\.userId, "can_manage_documents"\)/.test(action('ADMIN_REORDER_DOCUMENTS')),
+  'a verifier could reorder the station\'s documents'
+);
+checkIs(
+  'it writes one cell and never a whole row',
+  /setSheetCellById\(orderSheet, wantedId, "sort_order", wantedOrder\)/.test(action('ADMIN_REORDER_DOCUMENTS')) &&
+    !/upsertSheetRowById/.test(action('ADMIN_REORDER_DOCUMENTS')),
+  'a reorder would move row_version, telling an open editor somebody else changed the document'
+);
+checkIs(
+  'the one-cell writer exists and addresses the row by id',
+  /function setSheetCellById\(sheet, idValue, headerName, value\)/.test(codeAll)
+);
+checkIs(
+  'and the batch is capped',
+  /DOCUMENT_REORDER_LIMIT = 500/.test(codeAll) && /requestedOrder\.length > DOCUMENT_REORDER_LIMIT/.test(codeAll)
+);
+checkIs(
+  'it is logged like every other write',
+  /logSystemEvent\(ss, orderAuth\.userId, "ADMIN_REORDER_DOCUMENTS"/.test(action('ADMIN_REORDER_DOCUMENTS'))
+);
+
 console.log('\n--- verifying from Administration ---');
 const verificationView = readFileSync(
   path.resolve(process.cwd(), 'src/components/admin/AdminChecklistVerification.jsx'),
@@ -1558,6 +1794,69 @@ checkIs(
   /membersAwaitingVerification\(items, signatures, currentUserId\)/.test(verificationView) &&
     /currentUserId/.test(tabSource),
   'the self-verification the server refuses would be offered anyway'
+);
+checkIs(
+  'and an empty list says WHY, rather than "nothing is waiting"',
+  /emptyReason === 'no-items'/.test(verificationView) &&
+    /emptyReason === 'nothing-signed'/.test(verificationView) &&
+    /emptyReason === 'only-yours'/.test(verificationView) &&
+    /emptyReason === 'all-verified'/.test(verificationView),
+  'the case that looks like a bug - every signed item is the viewer\u2019s own - would read as broken'
+);
+checkIs(
+  'including the rule that makes it look empty',
+  /nobody can verify their\n\s+own checklist/.test(verificationView),
+  'the self-verification rule is not explained where it bites'
+);
+checkIs(
+  'and the picker says how many items each checklist has',
+  /row\.item_count > 0[\s\S]{0,160}no items yet/.test(verificationView)
+);
+
+console.log('\n--- ordering is dragged, not typed ---');
+checkIs('the Order box is gone from the editor', !/id="document-order"/.test(tabSource), 'there is still a number to type');
+checkIs(
+  'documents are draggable rows',
+  /draggable=\{!savingOrder\}[\s\S]{0,200}startDocumentDrag\(event, row\)/.test(tabSource)
+);
+checkIs('and folder headings are draggable too', /startFolderDrag\(event, group\.folder\)/.test(tabSource));
+checkIs(
+  'a document drop asks the pure helper what the order should become',
+  /reorderDocuments\(rows, movedId, row\.id\)/.test(tabSource),
+  'the drop rule would be re-implemented in the component'
+);
+checkIs('and a folder drop asks the other one', /reorderFolders\(rows, movedFolder, folder\)/.test(tabSource));
+checkIs(
+  'the new order is saved as its own action',
+  /adminReorderDocuments\(pairs, token\)/.test(tabSource)
+);
+checkIs(
+  'the list is redrawn from what the sheet holds',
+  /setRows\(normalizeDocumentList\(result\.documents\)\)/.test(tabSource)
+);
+checkIs(
+  'Unfiled cannot be dragged',
+  /draggable=\{group\.folder !== UNFILED_LABEL && !savingOrder\}/.test(tabSource)
+);
+checkIs(
+  'and a drag across folders says why nothing moved',
+  /A document cannot be dragged into another folder\./.test(tabSource)
+);
+checkIs(
+  'Move up / Move down exist for the devices that cannot drag',
+  /moveSelectedDocument\(-1\)/.test(tabSource) && /moveSelectedDocument\(1\)/.test(tabSource),
+  'a touch screen would have no way to reorder at all'
+);
+checkIs(
+  'and they move the selected document using the same helper',
+  /reorderDocuments\(rows, form\.id, neighbour\.id\)/.test(tabSource) &&
+    /orderedFolderDocuments\(rows, documentFolder\(form\)\)/.test(tabSource),
+  'the buttons and a drag could disagree about what "up one" means'
+);
+checkIs(
+  'with the ends disabled rather than wrapping',
+  /disabled=\{savingOrder \|\| selectedIndex <= 0\}/.test(tabSource) &&
+    /selectedIndex >= selectedSiblings\.length - 1/.test(tabSource)
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

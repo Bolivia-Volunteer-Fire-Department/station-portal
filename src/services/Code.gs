@@ -704,10 +704,14 @@ function doPost(e) {
           break;
         }
         // Every row, unfiltered: drafts included, because an author has to be able to see what they are
-        // working on - and no rank filter, because managing documents means seeing all of them.
+        // working on - and no rank filter, because managing documents means seeing all of them. The item counts
+        // come along: the checklist picker shows how many items each one has, and it costs one pass, not one per row.
         responseData = {
           success: true,
-          documents: getSheetData(ss, DOCUMENT_SHEET).map(documentListRow).sort(documentListSort)
+          documents: withItemSummaries(
+            getSheetData(ss, DOCUMENT_SHEET).map(documentListRow).sort(documentListSort),
+            documentItemSummaries(ss, "")
+          )
         };
         break;
       }
@@ -779,6 +783,60 @@ function doPost(e) {
           "ADMIN_SAVE_DOCUMENT",
           (documentIsNew ? "Created" : "Updated") + " document " + savedDocumentId
         );
+        break;
+      }
+
+      case "ADMIN_REORDER_DOCUMENTS": {
+        const orderAuth = getAuthContext(ss, data);
+        if (!orderAuth || !hasDocumentPermission(ss, orderAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        // The new order arrives as plain {id, sort_order} pairs, worked out by the CLIENT's own pure helper. That
+        // is deliberate: the rule "what does dropping A onto B mean" is a decision a person can see and a test can
+        // pin down (utils/documents.reorderDocuments), and it has no business being restated in a language that
+        // cannot be unit-tested. What the server owns is that the request is honest: rows that exist, integers, and
+        // only `sort_order` touched - so a drag can never rewrite a title, a body or, above all, a signature.
+        const requestedOrder = data.order || payload.order;
+        if (!Array.isArray(requestedOrder) || requestedOrder.length === 0) {
+          responseData = { success: false, message: "No order was given." };
+          break;
+        }
+        if (requestedOrder.length > DOCUMENT_REORDER_LIMIT) {
+          responseData = {
+            success: false,
+            message: "That is too many documents to reorder at once (" + DOCUMENT_REORDER_LIMIT + " at most)."
+          };
+          break;
+        }
+
+        const orderIds = Array.isArray(requestedOrder) ? requestedOrder : [];
+        const orderSheet = documentSheet(ss);
+        let orderChanged = 0;
+
+        orderIds.forEach(function (entry) {
+          const wantedId = String(entry && entry.id ? entry.id : "").trim();
+          const wantedOrder = parseInt(entry && entry.sort_order, 10);
+          if (!wantedId || !isFinite(wantedOrder)) return;
+          // One cell, one row at a time. `changed` counts rows actually written, so a drag that lands where the row
+          // already was is reported as the no-op it is rather than as an edit.
+          if (setSheetCellById(orderSheet, wantedId, "sort_order", wantedOrder)) orderChanged += 1;
+        });
+
+        responseData = {
+          success: true,
+          changed: orderChanged,
+          // The list comes back the way every other write returns it, so the tab redraws from the sheet's own order
+          // rather than from the order the drag hoped for.
+          documents: withItemSummaries(
+            getSheetData(ss, DOCUMENT_SHEET).map(documentListRow).sort(documentListSort),
+            documentItemSummaries(ss, "")
+          )
+        };
+        if (orderChanged > 0) {
+          logSystemEvent(ss, orderAuth.userId, "ADMIN_REORDER_DOCUMENTS", "Reordered " + orderChanged + " document(s)");
+        }
         break;
       }
 
@@ -918,6 +976,17 @@ function doPost(e) {
         }
         if (!isTruthyValue(signDocumentRow.is_sign_required)) {
           responseData = { success: false, message: "That document does not need a signature." };
+          break;
+        }
+        // A checklist is signed item by item, so there is no such thing as signing the document itself. Its
+        // `is_sign_required` flag means "the items are signable" - the flag is forced on for the type - so without
+        // this check a caller could record a signature that means nothing against the checklist as a whole, and
+        // the "to sign" badge would then clear while every item was still outstanding.
+        if (String(signDocumentRow.doc_type || "").trim().toLowerCase() === "checklist") {
+          responseData = {
+            success: false,
+            message: "A checklist is signed item by item. Tick and save the items instead."
+          };
           break;
         }
 
@@ -1158,11 +1227,16 @@ function doPost(e) {
         const itemSignDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), itemSignDocumentId);
 
         // The same answer GET_DOCUMENT gives: what the member may not see is reported as unavailable to sign.
+        //
+        // Note what is NOT tested here: `is_sign_required`. For a checklist the type IS the consent - the flag is
+        // forced on when one is saved - so requiring it would have locked every checklist created before that rule
+        // out of being signed at all, which is exactly how "I ticked some items and nothing reached the verifier"
+        // happens. The document-level flag means "this DOCUMENT wants a signature"; SIGN_DOCUMENT is where it is
+        // read, and a checklist is refused there outright.
         if (!itemSignDocument ||
             !isTruthyValue(itemSignDocument.is_published) ||
             !documentIsLiveOn(itemSignDocument, todayDateKey()) ||
             String(itemSignDocument.doc_type || "").trim().toLowerCase() !== "checklist" ||
-            !isTruthyValue(itemSignDocument.is_sign_required) ||
             !documentMeetsRank(getSheetData(ss, "ranks"), itemSignAuth.user && itemSignAuth.user.rank_id, itemSignDocument.rank_id)) {
           responseData = { success: false, message: "That checklist is not available to sign." };
           break;
@@ -4527,6 +4601,29 @@ function upsertSheetRowById(sheet, fields) {
 // allocate ids from the sheet it is about to write - the "sequential ids after
 // the current max" this used to do was the last place a create depended on
 // reading the sheet first.
+// Write ONE cell of one row, addressed by the row's id and a header name. Used where a change is deliberately NOT
+// a save: a reorder must not move `row_version`, because an administrator with that document open would then be
+// told somebody else had edited it, and dragging a row would cost them the edit they were making. Upserting the
+// whole row to change a number is how that happens.
+function setSheetCellById(sheet, idValue, headerName, value) {
+  const data = sheet.getDataRange().getValues();
+  const headers = data.length && data[0] ? data[0].slice() : [];
+  const idCol = headers.indexOf("id");
+  const valueCol = headers.indexOf(headerName);
+  if (idCol === -1 || valueCol === -1) return false;
+
+  const wanted = String(idValue === undefined || idValue === null ? "" : idValue).trim();
+  if (!wanted) return false;
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]).trim() === wanted) {
+      sheet.getRange(i + 1, valueCol + 1).setValue(value);
+      return true;
+    }
+  }
+  return false;
+}
+
 function bulkUpsertSheetRowsById(sheet, entries) {
   const list = Array.isArray(entries) ? entries : [];
   if (!list.length) return [];
@@ -6541,6 +6638,10 @@ const DOCUMENT_HEADERS = [
 const DOCUMENT_TYPES = ["markdown", "checklist", "link"];
 const DOCUMENT_CONTENT_LIMIT = 45000;
 
+// A drag can hand over the whole visible list at once; this is the ceiling on one reorder request, so a crafted
+// call cannot ask the script to walk an unbounded batch of rows.
+const DOCUMENT_REORDER_LIMIT = 500;
+
 // A link document's `content` is an address, and only these two schemes are allowed. Everything else - `javascript:`
 // above all - is refused rather than stored and rendered as a clickable link to it. The check is here AND in
 // utils/documents on the client, because a refusal has to happen where the value is stored: a document written
@@ -6609,7 +6710,12 @@ function documentFieldsFrom(data, payload) {
     // save nobody can see would be the confusing default.
     is_published: read("is_published") === undefined ? true : isTruthyValue(read("is_published")),
     rank_id: String(read("rank_id") || "").trim(),
-    is_sign_required: isTruthyValue(read("is_sign_required")),
+    // A checklist is signed ITEM BY ITEM, and that is the whole point of the type, so the flag is not a choice for
+    // one: forcing it here rather than only in the form is what makes "you cannot create a checklist that does not
+    // accept checks" true for a hand-written sheet row or an older client as well. `is_sign_required` on a
+    // checklist therefore means "its items are signable", never "it wants a signature of its own" - SIGN_DOCUMENT
+    // refuses a checklist outright, so the two can never be confused.
+    is_sign_required: requestedType === "checklist" ? true : isTruthyValue(read("is_sign_required")),
     // The window, from the same two columns the schedule has used for the same reason: to start a record on a date
     // and retire it on a date without deleting it. Blank means no restriction, so every document that existed
     // before these columns keeps behaving exactly as it did.
@@ -6769,18 +6875,64 @@ function documentFullRow(ss, row) {
 
 // Documents a member may read: published, and at or above their rank. A draft is invisible to them - it is visible
 // to anyone who can manage documents, which is what makes a draft a draft.
+// How many items each checklist has, and how many of them a given member has signed - one pass over the two
+// sheets, keyed by document id, rather than a lookup per row.
+//
+// This exists because a checklist can no longer be advertised by a document-level signature: its work IS its items,
+// so "3 to sign" has to mean three items. Reading the item sheet once and the signatures once keeps a list of a
+// hundred documents cheap; `userId` of '' (the administrative list) leaves `items_signed` at 0, since "signed by
+// whom" is not a question the editor asks.
+function documentItemSummaries(ss, userId) {
+  const wantedUser = String(userId || "").trim();
+  const summaries = {};
+
+  getSheetData(ss, DOCUMENT_ITEM_SHEET).forEach(function (item) {
+    const documentId = String(item.document_id || "").trim();
+    if (!documentId || !String(item.id || "").trim()) return;
+    if (!summaries[documentId]) summaries[documentId] = { item_count: 0, items_signed: 0 };
+    summaries[documentId].item_count += 1;
+  });
+
+  if (wantedUser) {
+    documentSignatureRows(ss).forEach(function (signature) {
+      if (signature.signature_role !== "member") return;
+      if (signature.user_id !== wantedUser) return;
+      if (signature.checklist_item_id === "") return;
+      if (!summaries[signature.document_id]) return;
+      summaries[signature.document_id].items_signed += 1;
+    });
+  }
+
+  return summaries;
+}
+
+// A list row with its item counts attached. Applied to a whole list at once so the sheets are read once, and only
+// for checklists - a plain document has no items to count.
+function withItemSummaries(rows, summaries) {
+  return rows.map(function (row) {
+    const summary = row.doc_type === "checklist" ? summaries[row.id] : null;
+    return Object.assign({}, row, {
+      item_count: summary ? summary.item_count : 0,
+      items_signed: summary ? summary.items_signed : 0
+    });
+  });
+}
+
 function memberDocumentRows(ss, user, ranks) {
   const today = todayDateKey();
 
-  return getSheetData(ss, DOCUMENT_SHEET)
-    .filter(function (row) { return isTruthyValue(row.is_published); })
-    .filter(function (row) { return documentMeetsRank(ranks, user && user.rank_id, row.rank_id); })
-    // A document outside its dates is RETIRED (or not yet started), so a member stops seeing it - and stops being
-    // asked to sign it. Nothing is deleted: the row stays, its signatures stay attached to it, and administrators
-    // still see it in the tab with its window on it. That is what makes retiring a document safe.
-    .filter(function (row) { return documentIsLiveOn(row, today); })
-    .map(documentListRow)
-    .sort(documentListSort);
+  return withItemSummaries(
+    getSheetData(ss, DOCUMENT_SHEET)
+      .filter(function (row) { return isTruthyValue(row.is_published); })
+      .filter(function (row) { return documentMeetsRank(ranks, user && user.rank_id, row.rank_id); })
+      // A document outside its dates is RETIRED (or not yet started), so a member stops seeing it - and stops being
+      // asked to sign it. Nothing is deleted: the row stays, its signatures stay attached to it, and administrators
+      // still see it in the tab with its window on it. That is what makes retiring a document safe.
+      .filter(function (row) { return documentIsLiveOn(row, today); })
+      .map(documentListRow)
+      .sort(documentListSort),
+    documentItemSummaries(ss, user && user.id)
+  );
 }
 
 // The one place the dependency between the documents permissions lives, on the server.

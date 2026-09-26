@@ -14,7 +14,9 @@ Pick a folder and its documents appear; pick a document and it opens. A document
 
 A **link** document holds no text of its own — it points at something kept elsewhere. Opening it shows the address with an **Open in a new tab** button, so the station's app stays exactly where it was.
 
-On a narrower screen the three parts become one column at a time: the folders turn into a row of chips above the list, and opening a document replaces the list. The **left arrow beside "Documents"** at the top of the card brings you back — it is always there while you are reading something.
+On a narrower screen the three parts become one column at a time: the folders turn into a row of chips above the list. The **left arrow beside "Documents"** at the top of the card brings you back — it is always there while you are reading something.
+
+**Opening a document gives it the whole card**, at every width: the folders and the list are put away rather than squeezed beside it, so a policy gets the width it deserves and there is never a half-hidden column to scroll past. The left arrow is the way back, and it returns you to the folder and filter you left.
 
 The search box narrows the list by title or folder, and it searches **every folder** rather than the one you are in, so a result also tells you which folder it came from. The same is true of the **to sign** filter.
 
@@ -53,9 +55,9 @@ A **checklist** is a document signed line by line: *check the tire pressure*, *c
 
 Tick the lines you have done — several at once is fine — and press **Save signatures** when you are done. Each line is recorded against your name and the date, with one date for the whole batch, because saving them is one act.
 
-**Tick anywhere on the line**, not just in the small square: the whole row is the target, which matters most on a phone. Ticking is a selection you can change your mind about — nothing is recorded until you press **Save signatures**, so ticking the wrong line and unticking it again costs nothing.
+**Tick anywhere on the line**, not just in the small square: the whole row is the target, which matters most on a phone. Ticking is a selection you can change your mind about — nothing is recorded until you press **Save signatures**, so ticking the wrong line and unticking it again costs nothing. Ticking is always available on a checklist: it is what the type is for.
 
-If a checklist's lines do not respond at all, it is because the document does not ask for signatures: its lines are a list to read, and the panel says so, along with what an administrator would change to make them signable.
+**A checklist is never signed as a whole.** The *lines* are the acknowledgment — there is no **Sign this document** button on a checklist, however it is set up, because "I did these specific things" is a stronger statement than "I read this" and a second signature would only muddle which one applied.
 
 | What you see | What it means |
 |---|---|
@@ -64,7 +66,7 @@ If a checklist's lines do not respond at all, it is because the document does no
 | **Verified** | Somebody has confirmed it — usually an officer, on the same screen you are looking at |
 | A line in blue-gray, unticked | Not signed yet. Tick it and save |
 
-If a document says **Members must sign this** *and* has items, you sign both: the document itself with the button in the box above, and the lines here. They are separate records on purpose — one is "I have read this", the other is "I did this specific thing".
+If a document says **Members must sign this** and has *no* items, you sign the document itself with the button in the box above. On a checklist you sign the lines here instead — they are separate records on purpose: one is "I have read this", the other is "I did this specific thing".
 
 > [!NOTE]
 > **Verification is not something you ask for.** It appears when somebody with the *Verify checklists* permission opens this checklist and confirms your lines. If your work is waiting, it shows as **Awaiting verification** until they do. Nobody can verify their own checklist, so an officer who is also on the crew has somebody else check theirs.

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, FolderInput, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, FileText, FolderInput, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import {
   adminDeleteChecklistItem,
   adminDeleteDocument,
@@ -8,6 +8,7 @@ import {
   adminFetchDocuments,
   adminRemoveDocumentSignature,
   adminRenameDocumentFolder,
+  adminReorderDocuments,
   adminSaveChecklistItem,
   adminSaveDocument,
 } from '../../services/api';
@@ -23,6 +24,7 @@ import {
   DOCUMENT_TYPES,
   EMPTY_DOCUMENT_FORM,
   UNFILED_LABEL,
+  documentFolder,
   documentFolders,
   documentLifecycle,
   documentSaveProblem,
@@ -33,6 +35,9 @@ import {
   normalizeChecklistItemList,
   normalizeDocumentList,
   normalizeSignatureList,
+  orderedFolderDocuments,
+  reorderDocuments,
+  reorderFolders,
   signatureDateLabel,
 } from '../../utils/documents';
 
@@ -102,6 +107,16 @@ export default function AdminDocumentsTab({
   const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
   const [savingItem, setSavingItem] = useState(false);
   const [pendingItemRemoval, setPendingItemRemoval] = useState(null);
+  // Dragging to reorder. `dragging` holds whichever thing was picked up - a document id or a folder name - and
+  // `dragOver` is where the pointer currently is, so the row under it can look like the place the drop will land.
+  // Both are cleared on drop and on drag end, so a drag that is abandoned (Escape, or dropped outside) leaves no
+  // highlight behind.
+  const [draggingDocumentId, setDraggingDocumentId] = useState('');
+  const [dragOverDocumentId, setDragOverDocumentId] = useState('');
+  const [draggingFolder, setDraggingFolder] = useState('');
+  const [dragOverFolder, setDragOverFolder] = useState('');
+  const [savingOrder, setSavingOrder] = useState(false);
+
   const [removingItem, setRemovingItem] = useState(false);
   // Items typed before the document exists. A checklist's items need a document to belong to, so on a NEW checklist
   // they are held here and written the moment the document is created - rather than making the author save, reopen
@@ -388,6 +403,127 @@ export default function AdminDocumentsTab({
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // Dragging to reorder
+  // ---------------------------------------------------------------------------
+  //
+  // The two ways a member of staff expects to order things: drag a DOCUMENT within its folder, and drag a FOLDER to
+  // sit in front of another one. Neither writes anything itself - both ask a pure helper in utils/documents what
+  // the numbers should become, then send that. The helper is where the rules live (dropping up lands above, the
+  // Unfiled shelf is pinned last, a document is never dragged into another folder by accident) and it is where
+  // they are tested; a rule restated here would be a second version of it.
+  //
+  // A drag that ends where it started sends nothing at all, which is what makes a fumbled drag harmless.
+  const applyOrder = useCallback(
+    async (pairs, description) => {
+      if (pairs.length === 0 || savingOrder) return;
+      setSavingOrder(true);
+      try {
+        const result = await adminReorderDocuments(pairs, token);
+        if (!result?.success) throw new Error(result?.message || 'Could not save the new order.');
+        // The list is redrawn from what the sheet holds, not from the order that was hoped for, so a row somebody
+        // else moved in the meantime is shown where it actually is.
+        setRows(normalizeDocumentList(result.documents));
+        toast.success(description);
+      } catch (err) {
+        toast.error(err?.message || 'Could not save the new order.');
+      } finally {
+        setSavingOrder(false);
+      }
+    },
+    [savingOrder, token]
+  );
+
+  const startDocumentDrag = (event, row) => {
+    if (savingOrder) {
+      event.preventDefault();
+      return;
+    }
+    setDraggingDocumentId(row.id);
+    event.dataTransfer?.setData('text/plain', String(row.id));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const dropOnDocument = (event, row) => {
+    event.preventDefault();
+    setDragOverDocumentId('');
+    const movedId = draggingDocumentId || readDraggedId(event);
+    setDraggingDocumentId('');
+    if (!movedId || movedId === row.id) return;
+
+    const moved = rows.find((candidate) => candidate.id === movedId);
+    if (!moved) return;
+    const pairs = reorderDocuments(rows, movedId, row.id);
+    if (pairs.length === 0) {
+      // The only way here is a drop across folders, which the helper refuses. Saying so is better than a row that
+      // silently refuses to move.
+      if (documentFolder(moved) !== documentFolder(row)) {
+        toast.warning('A document cannot be dragged into another folder.', {
+          description: 'Change its Folder field instead - dragging only sets the order.',
+        });
+      }
+      return;
+    }
+    applyOrder(pairs, `Moved “${moved.title}”.`);
+  };
+
+  const startFolderDrag = (event, folder) => {
+    // Unfiled is not a folder anybody made: it is where documents with no folder are shown, and it is pinned last.
+    if (savingOrder || folder === UNFILED_LABEL) {
+      event.preventDefault();
+      return;
+    }
+    setDraggingFolder(folder);
+    event.dataTransfer?.setData('text/plain', String(folder));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const dropOnFolder = (event, folder) => {
+    event.preventDefault();
+    setDragOverFolder('');
+    const movedFolder = draggingFolder || readDraggedFolder(event, rows);
+    setDraggingFolder('');
+    if (!movedFolder || movedFolder === folder) return;
+
+    const pairs = reorderFolders(rows, movedFolder, folder);
+    if (pairs.length === 0) return;
+    applyOrder(pairs, `Moved the ${movedFolder} folder.`);
+  };
+
+  function readDraggedId(event) {
+    try {
+      return String(event.dataTransfer?.getData('text/plain') || '');
+    } catch {
+      return '';
+    }
+  }
+
+  // A folder drag carries the name rather than an id, and the fallback has to tell the two apart: an id belongs to
+  // a document, a name to a folder.
+  function readDraggedFolder(event, list) {
+    const carried = readDraggedId(event);
+    if (!carried) return '';
+    if (list.some((row) => row.id === carried)) return '';
+    return list.some((row) => documentFolder(row) === carried) ? carried : '';
+  }
+
+  // The same move a drag performs, for a device that cannot drag: a touch screen fires no HTML5 drag events, and
+  // "you cannot reorder on a tablet" is not a trade worth making for a tidier form. It uses the same helper, so the
+  // buttons and a drag can never disagree about what "up one" means.
+  const moveSelectedDocument = (direction) => {
+    if (!form.id || savingOrder) return;
+    const siblings = orderedFolderDocuments(rows, documentFolder(form));
+    const index = siblings.findIndex((row) => row.id === form.id);
+    const neighbour = index === -1 ? null : siblings[index + direction];
+    if (!neighbour) return;
+    const pairs = reorderDocuments(rows, form.id, neighbour.id);
+    if (pairs.length === 0) return;
+    applyOrder(pairs, direction < 0 ? 'Moved up.' : 'Moved down.');
+  };
+
+  const selectedSiblings = form.id ? orderedFolderDocuments(rows, documentFolder(form)) : [];
+  const selectedIndex = selectedSiblings.findIndex((row) => row.id === form.id);
+
   const handleDelete = async () => {
     const target = pendingDelete;
     if (!target || deleting) return;
@@ -507,9 +643,46 @@ export default function AdminDocumentsTab({
           </p>
         ) : (
           <div className="p-3">
+            {/* The list is the drag surface: pick a row up and drop it where it should sit, and pick a folder
+                heading up and drop it in front of another folder. There is no Order box to type into any more -
+                the position is the position you see. */}
+            <p className="px-1 pb-2 text-xs text-slate-500 dark:text-slate-400">
+              Drag a document to reorder it, or a folder heading to move the whole folder.
+            </p>
             {groups.map((group) => (
               <div key={group.folder} className="mt-3 first:mt-0">
-                <div className="flex items-center gap-2 px-1">
+                <div
+                  // Dropping onto a heading reorders FOLDERS. The heading itself is the target rather than the
+                  // documents under it, so a folder can be put before an empty-looking one without aiming at a row.
+                  onDragOver={(event) => {
+                    if (!draggingFolder || draggingFolder === group.folder) return;
+                    event.preventDefault();
+                    setDragOverFolder(group.folder);
+                  }}
+                  onDragLeave={() => setDragOverFolder((current) => (current === group.folder ? '' : current))}
+                  onDrop={(event) => dropOnFolder(event, group.folder)}
+                  className={`flex items-center gap-2 rounded-lg px-1 py-1 transition ${
+                    dragOverFolder === group.folder ? 'bg-red-50 dark:bg-red-950/40 ring-1 ring-red-400' : ''
+                  } ${draggingFolder === group.folder ? 'opacity-50' : ''}`}
+                >
+                  <span
+                    draggable={group.folder !== UNFILED_LABEL && !savingOrder}
+                    onDragStart={(event) => startFolderDrag(event, group.folder)}
+                    onDragEnd={() => {
+                      setDraggingFolder('');
+                      setDragOverFolder('');
+                    }}
+                    title={
+                      group.folder === UNFILED_LABEL
+                        ? 'Unfiled is always shown last'
+                        : `Drag to move the ${group.folder} folder`
+                    }
+                    className={`${
+                      group.folder === UNFILED_LABEL ? '' : 'cursor-grab active:cursor-grabbing'
+                    } text-slate-300 dark:text-slate-600`}
+                  >
+                    <FolderInput className="w-3.5 h-3.5" />
+                  </span>
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {group.folder}
                   </h4>
@@ -530,11 +703,31 @@ export default function AdminDocumentsTab({
                       key={row.id}
                       type="button"
                       onClick={() => openDocument(row.id)}
+                      draggable={!savingOrder}
+                      onDragStart={(event) => startDocumentDrag(event, row)}
+                      // Only a DOCUMENT drag highlights a document row: a folder being carried has the headings as
+                      // its targets, and marking rows under it would suggest a drop into that folder.
+                      onDragOver={(event) => {
+                        if (!draggingDocumentId || draggingDocumentId === row.id) return;
+                        event.preventDefault();
+                        setDragOverDocumentId(row.id);
+                      }}
+                      onDragLeave={() =>
+                        setDragOverDocumentId((current) => (current === row.id ? '' : current))
+                      }
+                      onDrop={(event) => dropOnDocument(event, row)}
+                      onDragEnd={() => {
+                        setDraggingDocumentId('');
+                        setDragOverDocumentId('');
+                      }}
+                      title={`${row.title} — drag to reorder`}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm transition ${
                         form.id === row.id
                           ? 'bg-red-600 text-white'
                           : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      }`}
+                      } ${savingOrder ? '' : 'cursor-grab active:cursor-grabbing'} ${
+                        dragOverDocumentId === row.id ? 'ring-2 ring-red-400' : ''
+                      } ${draggingDocumentId === row.id ? 'opacity-50' : ''}`}
                     >
                       {row.title}
                       {!row.is_published && (
@@ -644,7 +837,17 @@ export default function AdminDocumentsTab({
               <select
                 id="document-type"
                 value={form.doc_type}
-                onChange={(event) => setField('doc_type', event.target.value)}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+                  // Choosing Checklist turns the signature on with it, because a checklist IS its items being
+                  // signed. Set here as well as on the server so the box the author is looking at matches what
+                  // will be stored - a locked checkbox showing the wrong state is worse than no checkbox.
+                  setForm((current) => ({
+                    ...current,
+                    doc_type: nextType,
+                    is_sign_required: nextType === 'checklist' ? true : current.is_sign_required,
+                  }));
+                }}
                 className={fieldClass}
               >
                 {DOCUMENT_TYPES.map((type) => (
@@ -654,17 +857,38 @@ export default function AdminDocumentsTab({
                 ))}
               </select>
             </div>
-            <div>
-              <label htmlFor="document-order" className={labelClass}>
-                Order
-              </label>
-              <input
-                id="document-order"
-                type="number"
-                value={form.sort_order}
-                onChange={(event) => setField('sort_order', Number(event.target.value) || 0)}
-                className={fieldClass}
-              />
+            <div className="flex flex-col justify-end gap-2">
+              {/* There is no Order box: position is set by dragging the row in the list above, which is the only
+                  place the order is visible - a number typed here and a row sitting there would be two answers to
+                  the same question, and the one on screen would win. The number is still carried on save, so an
+                  untouched document keeps the position it has. */}
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Position in the list is set by <strong>dragging the rows</strong> above, and the folder by its place
+                on a document.
+              </p>
+              {/* The keyboard-and-tablet path to the same thing: a touch screen fires no drag events. */}
+              {isEditing && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => moveSelectedDocument(-1)}
+                    disabled={savingOrder || selectedIndex <= 0}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                    Move up
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveSelectedDocument(1)}
+                    disabled={savingOrder || selectedIndex === -1 || selectedIndex >= selectedSiblings.length - 1}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                    Move down
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -689,20 +913,38 @@ export default function AdminDocumentsTab({
           </div>
 
           <div className="flex flex-col justify-end gap-2 text-sm text-slate-700 dark:text-slate-200">
-            {[
-              { key: 'is_published', label: 'Visible to members' },
-              { key: 'is_sign_required', label: 'Members must sign this' },
-            ].map((toggle) => (
-              <label key={toggle.key} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={Boolean(form[toggle.key])}
-                  onChange={(event) => setField(toggle.key, event.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500"
-                />
-                {toggle.label}
-              </label>
-            ))}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={Boolean(form.is_published)}
+                onChange={(event) => setField('is_published', event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500"
+              />
+              Visible to members
+            </label>
+
+            {/* Locked ON for a checklist, because a checklist is signed line by line and that is the whole point of
+                the type: "you cannot create a checklist that does not accept checks". The server forces the flag
+                too, so this is the visible half of one rule rather than the rule itself. For every other type the
+                box is an ordinary choice. */}
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={form.doc_type === 'checklist' ? true : Boolean(form.is_sign_required)}
+                disabled={form.doc_type === 'checklist'}
+                onChange={(event) => setField('is_sign_required', event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500 disabled:opacity-60"
+              />
+              <span>
+                Members must sign this
+                {form.doc_type === 'checklist' && (
+                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                    Always on for a checklist: its items are what members sign. There is no separate signature for
+                    the checklist itself.
+                  </span>
+                )}
+              </span>
+            </label>
           </div>
         </div>
 

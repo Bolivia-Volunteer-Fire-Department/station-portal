@@ -121,18 +121,40 @@ in the publish checklist below.
   page calls an action, so it cannot change a row; the two dialogs that normally submit are
   previews whose buttons close instead. It needs no backend change, which is why it is the one
   tab whose permission works against a deployment that has not been re-published.
-- **The Documents module is a three-part browser**: folders (with how many documents each holds, and how many are
-  waiting on *this* member's signature), the documents in the chosen folder, and the document itself. A filter —
-  a search, or the **to sign** button — spans every folder, so its rows name theirs. Below `lg` the folder column
-  becomes a row of chips and reading a document replaces the list, with a back arrow in the card's own header.
-  The folder counts come from `folderSummaries` in `utils/documents` rather than from the component, because a
-  folder showing "2" must contain the two documents the next column lists.
+- **The Documents module is a three-part browser, and the reader owns the card.** Folders (with how many documents
+  each holds, and how many are waiting on *this* member's signature), the documents in the chosen folder, and the
+  document itself — but **opening a document gives it the whole card at every width**: the two columns are not
+  rendered at all while something is open (`{!openId && (`), and the back arrow in the card's header is the only way
+  back. A reader that shared the card at one width and owned it at another was two answers to the same question.
+  A filter — a search, or the **to sign** button — spans every folder, so its rows name theirs, and both are put away
+  while reading, because a filter that changes a hidden list looks like a button that does nothing. The folder counts
+  come from `folderSummaries` in `utils/documents` rather than from the component, because a folder showing "2" must
+  contain the two documents the next column lists.
+- **Position is dragged, not typed.** There is no Order box: documents are draggable rows and folder headings are
+  draggable blocks. The rule lives in two pure helpers — `reorderDocuments` and `reorderFolders` in
+  `utils/documents` — which return the `{id, sort_order}` pairs to save, so "what does dropping A onto B mean" is
+  testable; the component only sends what comes back. Two consequences worth knowing:
+  - **A folder has no row of its own** (it is a name carried by its documents), so dragging a folder rewrites the
+    order of the documents inside it, and a folder then sorts by its first document's `sort_order`. That is why
+    `documentFolders` is no longer alphabetical, and why **Unfiled is pinned last** and cannot be dragged at all.
+  - **A drag is not a save.** `ADMIN_REORDER_DOCUMENTS` writes one cell per row through `setSheetCellById` and never
+    calls `upsertSheetRowById`, so `row_version` does not move and an administrator with a document open is not told
+    somebody else changed it. Dropping a document onto a row in another folder is refused with a message rather than
+    moving it, since position and membership are different fields. The editor also carries **Move up** / **Move
+    down** for the open document: touch screens fire no drag events at all, and dragging must not be the only way.
+- **A checklist is always signable, and signed only item by item.** `doc_type === 'checklist'` forces
+  `is_sign_required` on (server-side, in `documentFieldsFrom`) and locks the box in the editor, so a checklist cannot
+  be created that refuses its own checks; the flag now means *"its items are signable"*, never *"this document wants a
+  signature"*. `SIGN_DOCUMENT` refuses a checklist outright — otherwise a meaningless document-level signature would
+  clear the "to sign" badge while every item was still outstanding — and the item path deliberately does **not**
+  consult the flag, because requiring it locked every checklist created before the rule out of being signed at all.
+  A checklist therefore cannot advertise itself through a document signature: `documentItemSummaries` puts
+  `item_count` / `items_signed` on the list rows, and `documentSignatureState` reads a checklist from those, so
+  "3 to sign" means three items and a fully ticked checklist stops asking.
 - **A checklist item's whole ROW is the control.** The report that started this was "clicking checklist items does
   nothing", and a 16px square that only its own pixels respond to is exactly that: the label swallowed the tap.
   The row is now a single `<button>` with the tick drawn as a `<span>` inside it — a button inside a button is
-  invalid and would swallow the click — and a row that cannot be ticked (signed, or a checklist that asks for no
-  signatures) is not a button at all. A checklist with items that asks for no signatures says so *and* what to
-  change, because "nothing happens" is not an explanation.
+  invalid and would swallow the click — and a row that cannot be ticked (signed) is not a button at all.
 - **A document can start on a date and retire on one, and retiring is not deleting.** `effective_date` and
   `end_date` are read through the *same* helper the schedule uses (`utils/effectiveDates`), with the same rule:
   a blank cell means no restriction, so every document written before these columns behaves exactly as it did.
@@ -218,6 +240,13 @@ in the publish checklist below.
   asks first, because a verification is a record that a check was made. `GET_DOCUMENT_SIGNATURES` carries the items
   alongside the signatures so its two audiences (document managers, and verifiers with no other access) can both
   name a row.
+- **The verification panel says WHICH reason the queue is empty.** "Nothing is waiting to be verified" is true and
+  useless: it reads as broken to somebody who has just watched a member tick boxes, and the panel now distinguishes
+  four cases — the checklist has no items, nobody has signed, everything signed is *yours* (the server refuses
+  self-verification, so it is filtered by design — the one that looks like a bug and is not), or everything signed is
+  already verified. `verify:documents` also pins the wire format the queue depends on: the exact fields
+  `SIGN_CHECKLIST_ITEM` writes, run through `membersAwaitingVerification`, because losing any one of them empties the
+  card with no error anywhere.
 - **`can_edit_notification_settings` without `is_admin`** can manage the station
   defaults but not the Firebase credentials: the FCM card is disabled, and the backend
   refuses those actions. That role may only write `notify_*` keys, so the permission

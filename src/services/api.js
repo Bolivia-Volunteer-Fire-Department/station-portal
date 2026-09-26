@@ -504,6 +504,14 @@ export const adminDeleteDocument = async (id, token) =>
 export const adminRenameDocumentFolder = async (from, to, token) =>
   appScriptFetch({ action: 'ADMIN_RENAME_DOCUMENT_FOLDER', token, from, to: to || '' });
 
+// Drag-and-drop ordering. The pairs are worked out by `reorderDocuments` / `reorderFolders` in
+// utils/documents - the rule belongs on the side that can be tested - and the server only checks that the rows
+// exist and writes `sort_order` on them. Nothing else about a document is touched, which is what keeps a drag
+// from being a save: no `row_version` moves, so an open editor does not get told somebody else changed the
+// document when all that happened is a row moving up.
+export const adminReorderDocuments = async (order, token) =>
+  appScriptFetch({ action: 'ADMIN_REORDER_DOCUMENTS', token, order });
+
 // --- Document signatures -----------------------------------------------------------
 //
 // A signature is ADD-ONLY from the member's side: the backend refuses a removal outright rather than ignoring

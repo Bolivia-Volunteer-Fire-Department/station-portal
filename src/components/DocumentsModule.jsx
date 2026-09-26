@@ -291,6 +291,12 @@ export default function DocumentsModule({
   const documentIsChecklist = isChecklist(openDocument || {});
   const openDocumentId = openDocument?.id || '';
 
+  // A checklist's items are always signable: the type IS the consent, and the server no longer consults the
+  // document-level flag for items at all (it forces that flag on for a checklist anyway). Deriving it here means a
+  // checklist created before that rule - one whose stored flag is still false - behaves like every other one,
+  // rather than showing lines that refuse to be ticked.
+  const itemsAreSignable = documentIsChecklist;
+
   // The address of an open link document, or '' when it is not usable as one. Empty is what makes the reader show
   // the "no usable address" note instead of an href built from whatever the cell happens to contain.
   const openLinkUrl = useMemo(() => documentLinkUrl(openDocument || {}), [openDocument]);
@@ -548,8 +554,9 @@ export default function DocumentsModule({
           <BookText className="w-4 h-4 text-red-500 shrink-0" />
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Documents</h3>
           {/* The one thing on this screen that is asking the member for something, so it is the one thing that
-              gets to shout - and only while there is something to do. */}
-          {outstanding.length > 0 && (
+              gets to shout - and only while there is something to do, and only while the list it filters is on
+              screen. A filter that changes a hidden list would look like a button that does nothing. */}
+          {!openId && outstanding.length > 0 && (
             <button
               type="button"
               onClick={() => setOnlyOutstanding((current) => !current)}
@@ -564,9 +571,11 @@ export default function DocumentsModule({
               {outstanding.length} to sign
             </button>
           )}
-          <span className={`text-xs text-slate-500 dark:text-slate-400 ${outstanding.length > 0 ? '' : 'ml-auto'}`}>
-            {onlyOutstanding ? `${visible.length} of ${documents.length}` : `${documents.length} document${documents.length === 1 ? '' : 's'}`}
-          </span>
+          {!openId && (
+            <span className={`text-xs text-slate-500 dark:text-slate-400 ${outstanding.length > 0 ? '' : 'ml-auto'}`}>
+              {onlyOutstanding ? `${visible.length} of ${documents.length}` : `${documents.length} document${documents.length === 1 ? '' : 's'}`}
+            </span>
+          )}
         </div>
 
         {loading && (
@@ -594,34 +603,44 @@ export default function DocumentsModule({
           </div>
         )}
 
+        {/* Reading a document takes the WHOLE card: the folders and the list are put away rather than sitting beside
+            it in a third of the width, and the back arrow in the header above is the way back to them. That is one
+            layout for every screen size - a reader that shared the card at one width and owned it at another was
+            two answers to the same question - which is why the reader below is the only child when something is
+            open. */}
         {!loading && !loadError && documents.length > 0 && (
-          <div className="md:flex-1 md:min-h-0 md:grid md:grid-rows-1 md:grid-cols-[18rem_1fr] lg:grid-cols-[15rem_16rem_1fr]">
+          <div
+            className={
+              openId
+                ? 'md:flex-1 md:min-h-0 md:flex'
+                : 'md:flex-1 md:min-h-0 md:grid md:grid-rows-1 md:grid-cols-[18rem_1fr] lg:grid-cols-[15rem_16rem_1fr]'
+            }
+          >
             {/* Column 1: the folders, with what is in each one. Hidden below `lg`, where the same choice is a row of
                 chips above the document list - so a narrow screen shows one column at a time rather than three
                 cramped ones. */}
-            <div className="hidden lg:block border-r border-slate-200 dark:border-slate-700 lg:overflow-y-auto">
-              <h4 className="px-3 pt-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Folders
-              </h4>
-              <div className="p-2 space-y-1">
-                {folders.map((entry) => (
-                  <FolderOption
-                    key={entry.folder}
-                    entry={entry}
-                    active={!filtering && entry.folder === activeFolder}
-                    onClick={() => chooseFolder(entry.folder)}
-                  />
-                ))}
+            {!openId && (
+              <div className="hidden lg:block border-r border-slate-200 dark:border-slate-700 lg:overflow-y-auto">
+                <h4 className="px-3 pt-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Folders
+                </h4>
+                <div className="p-2 space-y-1">
+                  {folders.map((entry) => (
+                    <FolderOption
+                      key={entry.folder}
+                      entry={entry}
+                      active={!filtering && entry.folder === activeFolder}
+                      onClick={() => chooseFolder(entry.folder)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Column 2: the documents in the chosen folder - or the matches, when a filter is on. On a narrow screen
-                this is the first column, and reading a document replaces it. */}
-            <div
-              className={`border-b border-slate-200 dark:border-slate-700 lg:border-b-0 lg:border-r lg:overflow-y-auto ${
-                openId ? 'hidden lg:block' : ''
-              }`}
-            >
+            {/* Column 2: the documents in the chosen folder - or the matches, when a filter is on. Gated the same way
+                as the folder column: while a document is open this whole column is put away, at every width. */}
+            {!openId && (
+              <div className="border-b border-slate-200 dark:border-slate-700 lg:border-b-0 lg:border-r lg:overflow-y-auto">
               <div className="p-3">
                 <label className="relative block">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -726,11 +745,13 @@ export default function DocumentsModule({
                   </div>
                 )}
               </div>
-            </div>
+              </div>
+            )}
 
-            {/* The document. Nothing is fetched until one is chosen, which is the point of splitting the list
-                from the body: a station with a hundred documents still opens in one small request. */}
-            <div className="p-4 md:overflow-y-auto">
+            {/* The document, and now the whole card's width when it is open. Nothing is fetched until one is chosen,
+                which is the point of splitting the list from the body: a station with a hundred documents still
+                opens in one small request. */}
+            <div className="p-4 md:overflow-y-auto md:flex-1">
               {!openId && (
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   Choose a document from the list to read it.
@@ -797,7 +818,11 @@ export default function DocumentsModule({
                   {/* The signature block: what this document asks of the reader, and the answer already on file.
                       A signed document does not offer to sign again - signatures are not a toggle, and the button
                       that would do nothing is replaced by the sentence that explains why. */}
-                  {openDocument.is_sign_required && (
+                  {/* A checklist is signed ITEM BY ITEM, so there is no "Sign this document" button on one: the
+                      items below are the whole acknowledgment, and the server refuses a signature on a checklist
+                      outright. Its `is_sign_required` flag is still true - that is what makes the items signable -
+                      which is exactly why this cannot simply test the flag. */}
+                  {openDocument.is_sign_required && !documentIsChecklist && (
                     <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4">
                       {openDocument.signature ? (
                         <>
@@ -847,7 +872,7 @@ export default function DocumentsModule({
                         {openProgressLabel && (
                           <span className="text-xs text-slate-500 dark:text-slate-400">{openProgressLabel}</span>
                         )}
-                        {openDocument.is_sign_required && pendingItemCount > 0 && (
+                        {itemsAreSignable && pendingItemCount > 0 && (
                           <button
                             type="button"
                             onClick={handleSaveItems}
@@ -877,7 +902,7 @@ export default function DocumentsModule({
                                   item={item}
                                   state={checklistItemState(item, signatures, userId)}
                                   ticked={pendingItemIds.has(item.id)}
-                                  canTick={openDocument.is_sign_required}
+                                  canTick={itemsAreSignable}
                                   onToggle={togglePendingItem}
                                 />
                               ))}
@@ -886,20 +911,13 @@ export default function DocumentsModule({
                         ))
                       )}
 
-                      {/* A checklist that asks for no signatures still shows its items - but a reader who taps one
-                          and sees nothing happen has been told nothing. This says what the state is and what the
-                          fix is, rather than leaving "clicking does nothing" as the last word. */}
-                      {!openDocument.is_sign_required && openDocument.items.length > 0 && (
-                        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                          <p className="font-medium">This checklist does not ask for signatures, so its items cannot be ticked.</p>
-                          <p className="mt-0.5">
-                            The lines below are a list to read. An administrator can switch on &ldquo;Members must sign
-                            this&rdquo; on the document to make each item tickable and verifiable.
-                          </p>
-                        </div>
-                      )}
+                      {/* There is no "this checklist asks for no signatures" case any more: a checklist's items are
+                          always signable, the server forces the flag on for the type, and the item path no longer
+                          consults it - so the explanation that used to live here would be explaining a state the app
+                          can no longer reach. An administrator wanting a list that is only READ writes a Document,
+                          not a Checklist. */}
 
-                      {openDocument.is_sign_required && pendingItemCount > 0 && (
+                      {itemsAreSignable && pendingItemCount > 0 && (
                         <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                           {pendingItemCount} item{pendingItemCount === 1 ? '' : 's'} ticked. Saving records them
                           against your name and today&rsquo;s date.

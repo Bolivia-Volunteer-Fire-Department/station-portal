@@ -12,12 +12,13 @@ Unlike the Help guides — which are files in the app's repository, written by w
 | **Title** | What members see in the list. Required |
 | **Folder** | Groups documents in the list. Type a new name to make a new folder |
 | **Type** | *Document* for reading, *Checklist* for something signed item by item, or *Link* for an address kept elsewhere |
-| **Order** | Position within its folder; lower first, with the title breaking ties |
 | **Minimum rank** | Who may see it. *Everyone*, or a rank and above |
 | **Effective Date** | The first date members may see it. Blank means it is live now |
 | **End Date** | The last date members may see it. After that it is **retired** — see below |
 | **Visible to members** | Untick for a draft — it stays out of every member's list, including yours |
-| **Members must sign this** | How the document appears as needing a signature |
+| **Members must sign this** | For a *Document* or *Link*: whether members sign it. **Always on, and fixed on, for a Checklist** — a checklist's items are what gets signed |
+
+There is no **Order** box: position is set by dragging the rows in the list above (see *Ordering*), which is the only place the order is visible. A number typed in the editor and a row sitting in the list would be two answers to the same question, and the one on screen would win.
 
 Write the text in **Write** mode — the default — and press **Preview** to see it exactly as a member will: the preview is the same renderer the Documents module uses, so there is nothing to guess at.
 
@@ -95,6 +96,24 @@ A folder is simply a name carried by the documents in it, so there is no folder 
 
 The folder button beside a heading opens a rename box. Renaming moves **every document in that folder**, and clearing the name moves them all to *Unfiled*. Documents with no folder are shown last, under **Unfiled**.
 
+## Ordering
+
+Position is set by **dragging**, not by typing numbers:
+
+- **Drag a document** onto another one in the same folder to put it where you dropped it — above the row if you dragged up, below it if you dragged down.
+- **Drag a folder heading** to move the whole folder, and every document in it, in front of another folder.
+- **Unfiled is pinned last** and cannot be dragged: it is where documents with no folder are shown, not a shelf you chose.
+
+Both are saved the moment you drop, and the list is redrawn from what the sheet holds — so a row somebody else moved while you were dragging appears where it actually is. A drag that ends where it started writes nothing at all.
+
+> [!NOTE]
+> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button greyed out. If your crew writes documents on an iPad, that is the way to set a position.
+
+A drag **never changes a document's folder**: the folder is a field on the document, and dragging is about position. Drop a document onto a row from another folder and the app says so instead of moving it silently — change the **Folder** field for that.
+
+> [!NOTE]
+> A folder only exists as a name carried by the documents in it, so there is no folder order stored anywhere: a folder sits where its first document sits. That is why dragging a folder heading rewrites the order of the documents inside it — it is the only thing there is to write.
+
 ## Publishing and deleting
 
 New documents are **visible to members straight away**, so untick *Visible to members* before you start writing something you would rather nobody read yet.
@@ -124,7 +143,9 @@ The **Signatures** panel also names the checklist item each signature is about, 
 
 ## Checklist items
 
-A document of type **Checklist** is signed one item at a time. Set the **Type** to *Checklist* and the **Checklist items** card appears under the editor — **before the document is saved as well as after**, so you can write the whole thing in one sitting:
+A document of type **Checklist** is signed one item at a time. A checklist is **always** open to signing — the **Members must sign this** box is ticked and locked, because the lines are what gets signed, and there is no separate signature for the checklist itself. Choosing *Checklist* as the type turns it on; the server enforces it too, so a checklist cannot be stored in a state where its own items refuse to be ticked.
+
+Set the **Type** to *Checklist* and the **Checklist items** card appears under the editor — **before the document is saved as well as after**, so you can write the whole thing in one sitting:
 
 | Field | What it does |
 |---|---|
@@ -158,6 +179,17 @@ There are two ways to do it, and they answer different questions:
 The second one is the one to use for a backlog. It lists the station's checklists, and for the one you pick it lists every member with something outstanding — *3 to verify, 8 of 12 signed* — busiest first. Expanding a member shows their signed items with **Verify** on each, and **Verify all 3** for the rest. Confirming several at once asks first, because a verification is a record that a check was made.
 
 A role with *Verify checklists* opens this tab for that panel alone: it sees no editor, no folder list and no signatures report. That is why the permission is a member permission — a verifier has nothing to edit here.
+
+**If the panel says nothing is waiting, it now tells you which of the four reasons it is** — because the most common one looks exactly like a bug:
+
+| What it says | What is actually going on |
+|---|---|
+| *This checklist has no items yet* | There is nothing to sign or confirm. Add the lines under **Checklist items** |
+| *Nobody has signed any items on this checklist yet* | The member has ticked but not pressed **Save signatures** — nothing is recorded until they do |
+| *The only signed items are yours* | You signed them yourself, and **nobody can verify their own checklist** — that rule is what makes a verification mean something. Ask another verifier to check yours, or wait for a member's items to arrive |
+| *Everything signed has been verified* | Nothing outstanding — this is the good one |
+
+The checklist picker says how many items each checklist has, so a checklist with none is visible before you select it.
 
 | Rule | Why |
 |---|---|
