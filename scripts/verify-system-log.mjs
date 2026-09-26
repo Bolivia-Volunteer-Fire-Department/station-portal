@@ -225,7 +225,7 @@ const logFunctions = [
   'systemLogPage',
 ].map(extract);
 
-// A minimal `Utilities.formatDate` for the sandbox. Intl does the zone maths, so a known instant
+// A minimal `Utilities.formatDate` for the sandbox. Intl does the zone math, so a known instant
 // formats exactly as Apps Script would for America/New_York - which is what makes the Date-cell case
 // below assertable rather than merely shape-checked.
 const utilitiesStub = {
@@ -405,7 +405,7 @@ check('filtering by member', server.systemLogPage({}, { member: 'u2' }).total, L
 check('an unknown member matches nothing', server.systemLogPage({}, { member: 'nobody' }).total, 0);
 // Date-range expectations are DERIVED from the fixture rather than hand-counted - the generator's day
 // cycle is not obvious, and hand-counting it produced two wrong numbers here. They are derived from
-// the DATED rows only: the undated entry is excluded by a range, which is the behaviour under test,
+// the DATED rows only: the undated entry is excluded by a range, which is the behavior under test,
 // so including it in the expectation would re-introduce the very bug being checked.
 const dayOf = (row) => row.timestamp.slice(0, 10);
 const datedDayOf = (row) => row.timestamp.slice(0, 10);
@@ -427,7 +427,7 @@ check(
   datedRows.filter((r) => datedDayOf(r) >= '2026-03-10' && datedDayOf(r) <= '2026-03-15').length
 );
 check('the day helper agrees with the fixture', dayOf(LOG_ROWS[0]), LOG_ROWS[0].timestamp.slice(0, 10));
-// The single most important filter behaviour: a blank filter is "no filter", not "match nothing".
+// The single most important filter behavior: a blank filter is "no filter", not "match nothing".
 check('blank filters match everything', server.systemLogPage({}, { from: '', to: '', action_filter: '', member: '' }).total, 46);
 check('whitespace filters match everything too', server.systemLogPage({}, { action_filter: '   ' }).total, 46);
 check(

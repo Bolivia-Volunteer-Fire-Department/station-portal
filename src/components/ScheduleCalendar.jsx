@@ -194,7 +194,7 @@ export default function ScheduleCalendar({
   // cell, and never mixed with the shift pills below - an event is not a shift, is not offerable, and does
   // not affect coverage. See utils/events.
   //
-  // Normalised here as well as at the boundary, so the calendar is correct whichever caller hands it rows:
+  // Normalized here as well as at the boundary, so the calendar is correct whichever caller hands it rows:
   // the engine reads `isAllDay`/`startsAt`, and a raw sheet row silently produces no occurrences at all.
   const normalizedEvents = useMemo(() => normalizeEventList(events), [events]);
   const eventSegmentsByDate = showEvents
@@ -764,7 +764,7 @@ export default function ScheduleCalendar({
           assignments={assignments}
           users={users}
           ranks={ranks}
-          // The normalised list the calendar draws, so the sheet cannot disagree with the screen.
+          // The normalized list the calendar draws, so the sheet cannot disagree with the screen.
           events={normalizedEvents}
           onDone={() => setPrintOpen(false)}
         />

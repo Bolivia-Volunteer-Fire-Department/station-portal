@@ -257,8 +257,8 @@ check('macOS Chrome', deviceLabelFromUserAgent('Mozilla/5.0 (Macintosh; Intel Ma
 check('Android Chrome', deviceLabelFromUserAgent('Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Mobile Safari/537.36'), 'Chrome on Android');
 check('Windows Edge', deviceLabelFromUserAgent('Mozilla/5.0 (Windows NT 10.0) Chrome/120.0 Safari/537.36 Edg/120.0'), 'Edge on Windows');
 check('iPad Safari', deviceLabelFromUserAgent('Mozilla/5.0 (iPad; CPU OS 17_0) Version/17.0 Safari/604.1'), 'Safari on iPad');
-// An unrecognised agent still produces something a member can recognise rather than an empty cell.
-check('something unknown is still labelled', deviceLabelFromUserAgent(''), 'Browser on device');
+// An unrecognized agent still produces something a member can recognize rather than an empty cell.
+check('something unknown is still labeled', deviceLabelFromUserAgent(''), 'Browser on device');
 check('and a null agent does not throw', deviceLabelFromUserAgent(null), 'Browser on device');
 
 console.log('\n--- the admin view counts devices ---');

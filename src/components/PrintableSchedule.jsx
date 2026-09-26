@@ -18,7 +18,7 @@ import {
  * know how printing works.
  *
  * onDone is called once the browser has finished with the print dialog, whether the member printed or
- * cancelled, so the sheet never lingers in the DOM.
+ * canceled, so the sheet never lingers in the DOM.
  */
 export default function PrintableSchedule({
   mode = 'member',
@@ -64,7 +64,7 @@ export default function PrintableSchedule({
   const isEmpty = shiftCount === 0;
 
   useEffect(() => {
-    // afterprint fires for both printing and cancelling in every current browser. The timeout is a
+    // afterprint fires for both printing and canceling in every current browser. The timeout is a
     // safety net for a browser that never fires it, so a failed print cannot leave the app hidden.
     const finish = () => onDone?.();
     window.addEventListener('afterprint', finish);

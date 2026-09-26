@@ -29,7 +29,7 @@ const OWN_OFFER_KEYS = ['notify_offer_approved', 'notify_offer_declined'];
 const EVERYONE_KEYS = ['notify_announcements'];
 const ALL_KEYS = ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS];
 
-console.log('--- the catalogue itself ---');
+console.log('--- the catalog itself ---');
 check('four switches exist', NOTIFICATION_TYPES.length, 4);
 check('exactly one is approver-only', NOTIFICATION_TYPES.filter((t) => t.approverOnly).map((t) => t.key), [
   'notify_new_offer'
@@ -62,12 +62,12 @@ console.log('\n--- the member\'s own offer switches are never hidden ---');
   check(`both own-offer switches shown for ${JSON.stringify(value)}`, OWN_OFFER_KEYS.every((k) => shown.includes(k)), true);
 });
 
-console.log('\n--- the filter does not mutate the catalogue ---');
+console.log('\n--- the filter does not mutate the catalog ---');
 visibleNotificationTypes(false);
-check('catalogue still has four entries', NOTIFICATION_TYPES.length, 4);
+check('catalog still has four entries', NOTIFICATION_TYPES.length, 4);
 
 // Every switch must be savable. This is the drift guard for a bug that shipped: the Announcements
-// switch was added to the catalogue and to the push gate, but NOT to the backend's
+// switch was added to the catalog and to the push gate, but NOT to the backend's
 // UPDATE_USER_SETTINGS whitelist, so flipping it produced an empty settings payload, the backend
 // answered "No settings were supplied.", and the member saw "Failed to save notification
 // preference." Two hand-maintained lists that cannot share code, so they are compared here.
@@ -89,29 +89,29 @@ const mergeBlock = /'notify_new_offer',([\s\S]*?)\]\.forEach/.exec(appSource);
 check('the client optimistic-merge list was found', !!mergeBlock, true);
 const clientKeys = mergeBlock ? [...mergeBlock[0].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
 
-const catalogueKeys = keys(NOTIFICATION_TYPES);
+const catalogKeys = keys(NOTIFICATION_TYPES);
 
-catalogueKeys.forEach((key) => {
+catalogKeys.forEach((key) => {
   check(`the backend accepts ${key}`, backendKeys.includes(key), true);
   check(`the client merges ${key} into state`, clientKeys.includes(key), true);
 });
 
 // And nothing extra, so a removed switch cannot leave a column being written for nothing.
 backendKeys.forEach((key) => {
-  check(`the backend whitelist has no stale key ${key}`, catalogueKeys.includes(key), true);
+  check(`the backend whitelist has no stale key ${key}`, catalogKeys.includes(key), true);
 });
 clientKeys.forEach((key) => {
-  check(`the client merge list has no stale key ${key}`, catalogueKeys.includes(key), true);
+  check(`the client merge list has no stale key ${key}`, catalogKeys.includes(key), true);
 });
 
 // The SENDER — api.js's saveUserSettings payload. This is the list that actually caused the
-// reported bug: the catalogue and the backend whitelist were both fixed while this third copy was
+// reported bug: the catalog and the backend whitelist were both fixed while this third copy was
 // still missing the key, so nothing was sent and the backend answered "No settings were
 // supplied." A guard covering only two of the three lists would have kept passing, which is exactly
 // what happened - so the sender is checked here too.
-console.log('\n--- the sender enumerates the catalogue (no third hand-written list) ---');
+console.log('\n--- the sender enumerates the catalog (no third hand-written list) ---');
 const apiSource = readFileSync('src/services/api.js', 'utf8');
-check('api.js imports the switch catalogue', /import\s*\{[^}]*NOTIFICATION_TYPES[^}]*\}\s*from\s*'\.\.\/utils\/notificationPrefs'/.test(apiSource), true);
+check('api.js imports the switch catalog', /import\s*\{[^}]*NOTIFICATION_TYPES[^}]*\}\s*from\s*'\.\.\/utils\/notificationPrefs'/.test(apiSource), true);
 check('api.js spreads the derived fields into the save payload', /\.\.\.notificationPrefFields\(updatedSettings\)/.test(apiSource), true);
 
 // No hand-written notify_ keys may remain in the payload builder: a literal there is the drift risk.
@@ -123,7 +123,7 @@ check('the payload builder hard-codes no notification key', literalKeys, []);
 // And the derived fields really do carry every key, exercised by calling the builder the way
 // saveUserSettings does.
 const derived = notificationPrefFields({ notify_new_offer: 'TRUE', notify_announcements: '' });
-catalogueKeys.forEach((key) => {
+catalogKeys.forEach((key) => {
   check(`the derived payload carries ${key}`, Object.prototype.hasOwnProperty.call(derived, key), true);
 });
 check('an unsent key stays undefined so the backend ignores it', derived.notify_offer_approved, undefined);

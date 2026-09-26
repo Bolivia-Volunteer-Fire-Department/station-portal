@@ -513,7 +513,7 @@ check(
   true
 );
 
-// The signature counts have to reach the client for the module to grey out Edit.
+// The signature counts have to reach the client for the module to gray out Edit.
 check('the read hands back signature counts', /trainingRowsForApp\(ss\)/.test(getCase), true);
 
 

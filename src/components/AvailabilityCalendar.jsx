@@ -54,7 +54,7 @@ export function MonthNav({ year, month, onPrev, onNext, onToday, isCurrentMonth 
   );
 }
 
-// Month-at-a-time availability editor, modelled on the schedule calendar.
+// Month-at-a-time availability editor, modeled on the schedule calendar.
 //
 // It preloads every shift template occurrence the member could actually fill (same rank
 // rule the schedule uses) and lets them mark each one available or not. There is no
@@ -109,7 +109,7 @@ export default function AvailabilityCalendar({
   const byDay = useMemo(() => slotsByDay(slots), [slots]);
   const slotByKey = useMemo(() => new Map(slots.map((slot) => [slot.key, slot])), [slots]);
 
-  // Events for the visible month, grouped by day. Normalised defensively so the calendar is correct
+  // Events for the visible month, grouped by day. Normalized defensively so the calendar is correct
   // whichever caller hands it rows: the engine reads `isAllDay`/`startsAt`, and a raw sheet row would
   // silently produce no occurrences at all.
   const normalizedEvents = useMemo(() => normalizeEventList(events), [events]);

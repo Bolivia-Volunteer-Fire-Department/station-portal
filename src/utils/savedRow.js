@@ -1,7 +1,7 @@
 // Applying a saved row to an in-memory list, for the tables that render app state rather than their own.
 //
 // Why this exists: a save is ONE backend write, but the screen it lives on is refreshed by a wave of
-// requests (App.jsx#refreshAdminData asks for nine things). Apps Script serialises those behind a script
+// requests (App.jsx#refreshAdminData asks for nine things). Apps Script serializes those behind a script
 // lock in doPost, so the wave takes tens of seconds - far too long to hold a form or a button on. So a save
 // now applies its own row locally and lets the wave land whenever it lands.
 //

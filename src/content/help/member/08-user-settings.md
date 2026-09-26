@@ -54,7 +54,7 @@ When an administrator sets a password **for** you, they can require you to repla
 Misbehaving? Work through the checks in order:
 
 1. **Something is missing entirely** — the guide for that module is in the list on the left.
-2. **A button is greyed out** — hover it. Most of them explain why.
+2. **A button is grayed out** — hover it. Most of them explain why.
 4. **You were signed out unexpectedly** — see *Being signed out for inactivity* in [Getting started](#).
 
 - **A preference did not stick.** The change is saved to the server; a failure shows a message. If you see no message and the setting reverts, tell an administrator.

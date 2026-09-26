@@ -45,7 +45,7 @@ const ALL_TABS = ADMIN_PERMISSIONS.map((permission) => permission.tab);
 // granted to anyone with Administration access.
 const ALL_TABS_WITH_PERMISSIONLESS = [...ALL_TABS, ...ADMIN_PERMISSIONLESS_TABS];
 
-console.log('--- the catalogue is well formed ---');
+console.log('--- the catalog is well formed ---');
 check('every permission has a label and description', ALL_PERMISSIONS.every((p) => p.label && p.description), true);
 check('keys are unique', new Set(PERMISSION_KEYS).size, PERMISSION_KEYS.length);
 check('keys are all can_* columns', PERMISSION_KEYS.every((key) => key.startsWith('can_')), true);

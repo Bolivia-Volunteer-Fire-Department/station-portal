@@ -8,7 +8,7 @@
 export const MUST_CHANGE_PASSWORD_COLUMN = 'is_change_password_on_login';
 
 // Tolerant on purpose: this arrives from a spreadsheet cell somebody may have typed into by hand, and a blank
-// or unrecognised value is off. TRUE is what the app writes, so that is what to expect.
+// or unrecognized value is off. TRUE is what the app writes, so that is what to expect.
 export const mustChangePassword = (user) => {
   const raw = String(user?.[MUST_CHANGE_PASSWORD_COLUMN] ?? '').trim().toUpperCase();
   return raw === 'TRUE' || raw === 'YES' || raw === '1';

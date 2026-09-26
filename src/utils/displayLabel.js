@@ -17,6 +17,6 @@ export const userLabel = (user) =>
 // The heading for an edit form: "Edit Chainsaw Ticket".
 //
 // It used to carry the record's id - "Edit User #9f2c1e0a-..." - above a form that already contains the record, so
-// it named the row in the one way nobody recognises it. Where a record has a name, the name identifies it; where it
+// it named the row in the one way nobody recognizes it. Where a record has a name, the name identifies it; where it
 // does not (a new one, or a blank field), the plain noun is clearer than a UUID.
 export const recordHeading = (noun, label) => `Edit ${String(label ?? '').trim() || noun}`;

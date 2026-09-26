@@ -7,7 +7,7 @@ not. Everything here lives in the Apps Script backend (`src/services/Code.gs`) a
 ## The short version
 
 Google Sheets has **no transactions and no conflict detection**. Two writers to the same cell produce last-one-
-wins, silently; you get a lost update, never a corrupt cell. So the app serialises its own writes with an Apps
+wins, silently; you get a lost update, never a corrupt cell. So the app serializes its own writes with an Apps
 Script script lock, re-checks business rules before filling anything, and versions the records an administrator
 edits. Recovery, if it is ever needed, is the spreadsheet's **File → Version history**; the **System Log**
 sheet records who did what.
@@ -26,12 +26,12 @@ sheet records who did what.
 
 ## The rules, as they stand
 
-**Writes are serialised.** `doPost` takes a script lock for any action that is not in `READ_ONLY_ACTIONS`, waits
+**Writes are serialized.** `doPost` takes a script lock for any action that is not in `READ_ONLY_ACTIONS`, waits
 up to 20 seconds, and refuses rather than proceeding. `scripts/verify-refresh-wiring.mjs` fails the build if an
 action listed as read-only contains a write call, and `scripts/verify-write-safety.mjs` fails it if a refusal
 writes anything at all.
 
-**Reads hold nothing.** That is deliberate: a save's refresh wave is ten requests, and serialising those behind
+**Reads hold nothing.** That is deliberate: a save's refresh wave is ten requests, and serializing those behind
 a write is what made a save settle in thirty seconds instead of two. `getAuthContext` does write one session
 property per authenticated request (the sliding expiry) - see the epoch note below for why that is safe.
 

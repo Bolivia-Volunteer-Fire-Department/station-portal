@@ -76,7 +76,7 @@ member data fetches) is unchanged.
 | `LOGIN_GLOBAL_MAX_FAILURES` | 200 | Failures across all usernames before a site-wide refusal |
 | `LOGIN_GLOBAL_WINDOW_SECONDS` | 900 | Window for the global counter |
 
-Behaviour:
+Behavior:
 
 - Lock duration doubles every additional `LOGIN_MAX_FAILURES` failures, capped at
   `LOGIN_LOCK_MAX_SECONDS`.
@@ -104,11 +104,11 @@ npm run verify:auth
 This extracts the real hashing and throttling functions out of `Code.gs`, runs them
 with stubs for the Apps Script globals, and checks PBKDF2 output against Node's
 `crypto.pbkdf2Sync` and the published PBKDF2-HMAC-SHA256 test vectors. It covers the
-stored format, legacy upgrade behaviour, blank and corrupted cells, constant-time
+stored format, legacy upgrade behavior, blank and corrupted cells, constant-time
 comparison, iteration clamping, lockout timing and escalation, enumeration
-resistance, and fail-open behaviour — 84 checks.
+resistance, and fail-open behavior — 84 checks.
 
-## Behaviour changes worth knowing
+## Behavior changes worth knowing
 
 - **Passwords are no longer trimmed.** The hash must see exactly what was stored,
   and trimming silently would have locked out anyone whose password contains
@@ -144,7 +144,7 @@ writes it.
 
 Two limits are deliberate and worth stating plainly:
 
-- **The block is a user-interface guard, not an authorisation boundary.** The
+- **The block is a user-interface guard, not an authorization boundary.** The
   server holds no "must change password" state against a session, so any request
   carrying a valid token is served as usual. What the feature buys is that the
   temporary password stops being the member's real password — not that a member

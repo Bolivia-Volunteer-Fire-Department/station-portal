@@ -28,7 +28,7 @@ import {
 // Signing is collected locally and written in ONE request, because the natural way to use this
 // page is to work down the list - a request per row would be a request per click.
 //
-// A signature is an acknowledgement of attendance, so it is add-only: a signed row's button is
+// A signature is an acknowledgment of attendance, so it is add-only: a signed row's button is
 // disabled rather than toggling back, and the backend refuses a removal by any other route than
 // an administrator's.
 export default function TrainingModule({
@@ -243,7 +243,7 @@ export default function TrainingModule({
                 const isSigned = signedIds.has(id);
                 const isPending = pendingSignIds.has(id);
                 // Rule: a training the module may not edit - because somebody has signed it, or
-                // because it is locked - greys out its Edit button rather than failing on save.
+                // because it is locked - grays out its Edit button rather than failing on save.
                 const editable = trainingEditable(training);
                 const editBlockedReason = trainingEditBlockedReason(training);
                 return (

@@ -87,7 +87,7 @@ const bareServerRefusal = clockLocationNotice({ allowed: false, code: OUT_OF_RAN
 check('a refusal with no message still has one', bareServerRefusal.message.length > 0);
 check('and says to do it on site', /on site/i.test(bareServerRefusal.message));
 
-// The whole point: an unrecognised refusal must NOT be silent.
+// The whole point: an unrecognized refusal must NOT be silent.
 const unknown = clockLocationNotice({ allowed: false, code: 'SOMETHING_NEW', message: 'Nope.' });
 check('an unknown refusal still produces a notice', unknown !== null);
 check('of a generic kind', unknown.kind === 'blocked');

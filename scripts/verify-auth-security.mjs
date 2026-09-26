@@ -279,8 +279,8 @@ const oracleDigest = crypto
   .toString('hex');
 check('the digest matches crypto.pbkdf2Sync over the recorded salt', toHex(parsed.digest) === oracleDigest, toHex(parsed.digest));
 
-check('a parsed hash is recognised as hashed', api.isHashedPasswordValue(STORED) === true);
-check('plain text is not recognised as hashed', api.isHashedPasswordValue('hunter2') === false);
+check('a parsed hash is recognized as hashed', api.isHashedPasswordValue(STORED) === true);
+check('plain text is not recognized as hashed', api.isHashedPasswordValue('hunter2') === false);
 
 const secondHash = api.hashPasswordValue('correct horse battery staple');
 check('identical passwords produce different hashes (unique salts)', STORED !== secondHash);
@@ -291,7 +291,7 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// Verification behaviour
+// Verification behavior
 // ---------------------------------------------------------------------------
 section('Password verification');
 const good = api.verifyPasswordValue(STORED, 'correct horse battery staple');
@@ -463,7 +463,7 @@ check('the global refusal is reported with the global scope', globalBlock.scope 
 flood.advanceClock(901 * 1000);
 check('the global cap clears once the window passes', flood.checkLoginRateLimit('fresh-username').allowed === true);
 
-section('Fail-open behaviour when the cache is unavailable');
+section('Fail-open behavior when the cache is unavailable');
 const noCache = loadAuth({
   cacheService: {
     getScriptCache: () => {

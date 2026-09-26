@@ -8,7 +8,7 @@ import React from 'react';
 // switch communicates a saved state; a pressed button communicates a temporary filter.
 //
 // The text names the ACTION, not the state: "Show events" while they are hidden, "Hide events" while they are
-// shown. A button labelled "Show events" that is currently showing them reads as a promise the button has
+// shown. A button labeled "Show events" that is currently showing them reads as a promise the button has
 // already kept, so the verb follows the state. It is derived from `noun` in this one place, so a call site
 // cannot pair the wrong verb with the wrong state.
 //

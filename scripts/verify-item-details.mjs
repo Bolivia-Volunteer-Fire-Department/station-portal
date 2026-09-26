@@ -265,7 +265,7 @@ check(
 // offering for a shift by reading about it. The only controls are the two ways out.
 check('the only controls are the two dismissals', (html.match(/<button/g) || []).length, 2);
 check('and neither acts on the shift', /onConfirm|bg-red-600/.test(html), false);
-check('and it is labelled Close', html.includes('Close'), true);
+check('and it is labeled Close', html.includes('Close'), true);
 check('nothing is rendered without details', renderToString(React.createElement(ScheduleItemModal, { details: null })), '');
 check(
   'an event popup keeps its own icon',
@@ -285,7 +285,7 @@ const tappablePill = renderToString(
 );
 check('with a handler it is a button', tappablePill.startsWith('<button'), true);
 check('which says so in its tooltip', tappablePill.includes('click for details'), true);
-// A button is inline-block and centres its label, unlike the div it replaces, so the shared class has to be
+// A button is inline-block and centers its label, unlike the div it replaces, so the shared class has to be
 // corrected for it - otherwise every event pill on My Schedule would jump to the middle of its cell.
 check('and keeps the pill layout', /block self-stretch text-left/.test(tappablePill), true);
 check('the wash is unchanged', tappablePill.includes('background-color:#227dc333'), true);
@@ -335,7 +335,7 @@ check(
   true
 );
 check('and carry no block content', !/<button[\s\S]{0,900}?<p className="flex items-center/.test(calendar), true);
-check('the modal centres on a backdrop', /fixed inset-0 z-\[60\] flex items-center justify-center/.test(modal), true);
+check('the modal centers on a backdrop', /fixed inset-0 z-\[60\] flex items-center justify-center/.test(modal), true);
 check('which closes it', /onClick=\{onClose\}/.test(modal), true);
 check('while clicks inside it do not', /onClick=\{\(e\) => e\.stopPropagation\(\)\}/.test(modal), true);
 // The calendar still renders with everything omitted, which is what a caller that forgets a prop gets.

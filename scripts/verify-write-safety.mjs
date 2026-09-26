@@ -303,7 +303,7 @@ const makeLock = ({ available = true } = {}) => {
 const rowsOf = (sheet) => JSON.stringify(sheet.rows);
 
 // The Apps Script allocator, deterministic for the tests. Hex-shaped and 36 characters, so the id assertions
-// below are about a real UUID rather than a placeholder - and so isUuidValue would recognise one.
+// below are about a real UUID rather than a placeholder - and so isUuidValue would recognize one.
 const uuidStub = {
   getUuid: (() => {
     let issued = 0;
@@ -331,7 +331,7 @@ const gate = new Function(`
 check('a read does not need the lock', gate.actionNeedsWriteLock('GET_SCHEDULE'), false);
 check('a write does', gate.actionNeedsWriteLock('CLOCK_IN'), true);
 // An unknown action must still be treated as a write: doPost reaches it before the switch, and guessing "read"
-// for a name nobody listed is how a new write action would silently lose its serialisation.
+// for a name nobody listed is how a new write action would silently lose its serialization.
 check('an unknown action is treated as a write', gate.actionNeedsWriteLock('SOMETHING_NEW'), true);
 check('no action is lock-optional yet', Object.keys(gate.LOCK_OPTIONAL_ACTIONS).length, 0);
 check('the wait is longer than any single save holds it', gate.WRITE_LOCK_WAIT_MS, 20000);
@@ -427,7 +427,7 @@ const between = codeSource.slice(gateAt, busyAt);
 const WRITE_CALLS = /appendRow\(|setValue\(|setValues\(|deleteRow\(|insertSheet\(|logSystemEvent|createSession|revokeSessionsForUser|retuneSessions|upsertSheetRowById|upsertKeyValueRow|saveRunnerScore/;
 check('the gate runs before the switch', gateAt !== -1 && gateAt < codeSource.indexOf('switch (action)', gateAt), true);
 checkIs('and the refusal writes nothing', !WRITE_CALLS.test(between));
-// The old gate, which ignored the answer, must be gone - otherwise the whole file is theatre.
+// The old gate, which ignored the answer, must be gone - otherwise the whole file is theater.
 checkIs('the fail-open gate is gone', !/tryLock\(10000\)/.test(codeSource), 'a 10s tryLock whose result is discarded is still there');
 
 // ---------------------------------------------------------------------------

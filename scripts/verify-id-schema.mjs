@@ -195,7 +195,7 @@ const migrationHarness = (initialSheets, { lockAvailable = true } = {}) => {
       }),
     },
     {
-      // Hex-shaped and 36 characters, so the code's own UUID check recognises it - a fake that is merely
+      // Hex-shaped and 36 characters, so the code's own UUID check recognizes it - a fake that is merely
       // "unique-looking" would make every assertion about idempotence pass for the wrong reason.
       getUuid: () => {
         uuidCount++;

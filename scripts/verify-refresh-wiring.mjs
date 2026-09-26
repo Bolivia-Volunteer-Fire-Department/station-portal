@@ -1,7 +1,7 @@
 /**
  * Audits the "did the screen refresh after a save?" wiring, statically.
  *
- * This is a SOURCE-LEVEL audit, not a behavioural test: it cannot prove a refresh actually
+ * This is a SOURCE-LEVEL audit, not a behavioral test: it cannot prove a refresh actually
  * ran. What it does prove are the two invariants whose violation caused a real bug - an
  * assignment saved to the sheet but the table kept showing the old value:
  *
@@ -228,7 +228,7 @@ check(
 // 4. No save WAITS on the fan-out.
 //
 // The same wave is why a save "takes a long time from the front end but lands on the sheet almost
-// immediately": the write is one request, the wave behind it is nine, and doPost serialises them behind a
+// immediately": the write is one request, the wave behind it is nine, and doPost serializes them behind a
 // script lock. Awaited, that held the Save button spinning over a sheet that was already written. So no tab
 // may await the fan-out - while every tab must still START it.
 console.log('\n--- no save waits on the nine-request refresh wave ---');
@@ -307,7 +307,7 @@ check(
 // A gate whose answer is ignored is not a gate. This is the rule that was broken before: a timed-out tryLock
 // used to be discarded, so the write ran UNLOCKED and two of them could allocate the same id.
 check(
-  'and refuses a write it cannot serialise rather than running it unlocked',
+  'and refuses a write it cannot serialize rather than running it unlocked',
   /if \(!gate\.ok\)[\s\S]{0,300}busyResponseData/.test(gsSource),
   'a failed lock acquisition is ignored again, so a write can run without the lock'
 );
@@ -403,7 +403,7 @@ const mixed = createWaveReporter({
 mixed.settle(true);
 mixed.settle(false); // the aborted one
 mixed.settle(true);
-check('a failed request still counts towards the total', mixed.settled === 3, `settled ${mixed.settled}`);
+check('a failed request still counts toward the total', mixed.settled === 3, `settled ${mixed.settled}`);
 check('and the wave finishes', mixedDone.length === 1, `got ${mixedDone.length}`);
 check('reporting the failure rather than claiming to be current', mixedDone[0].failed === 1, JSON.stringify(mixedDone[0]));
 check('and naming it', /1 could not be refreshed/.test(mixedDone[0].message), mixedDone[0].message);
@@ -444,7 +444,7 @@ check('and completion through the same toast', /toast\.success\(message, \{ id: 
 //
 // --- the retry wave itself -------------------------------------------------------------------
 //
-// Exercised rather than read, because the whole point of it is behaviour under failure: a retry that runs in
+// Exercised rather than read, because the whole point of it is behavior under failure: a retry that runs in
 // parallel with its siblings rebuilds the queue that caused the failure, and a task retried twice is an app that
 // hammers a backend already unwell.
 console.log('\n--- a failed refresh gets one more chance ---');

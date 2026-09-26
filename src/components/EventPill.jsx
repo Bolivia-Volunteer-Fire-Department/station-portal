@@ -38,7 +38,7 @@ export default function EventPill({ segment, timeFormat = '12', className = '', 
   if (!onClick) return <div {...shared}>{body}</div>;
 
   // `block self-stretch text-left` reproduces what the browser gave the div for free: a button is otherwise
-  // inline-block (shrinking to its text) and centres its label. The hover only ever appears on the tappable
+  // inline-block (shrinking to its text) and centers its label. The hover only ever appears on the tappable
   // copy, which is how a member can tell at a glance which things respond to a tap.
   return (
     <button

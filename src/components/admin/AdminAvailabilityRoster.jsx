@@ -50,7 +50,7 @@ export default function AdminAvailabilityRoster({
     assignments,
   });
 
-  // The month's events, keyed by date. Normalised defensively so a raw sheet row cannot silently vanish.
+  // The month's events, keyed by date. Normalized defensively so a raw sheet row cannot silently vanish.
   const eventsByDay = useMemo(
     () =>
       eventSegmentsByDay(

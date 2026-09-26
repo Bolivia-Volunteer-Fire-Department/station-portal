@@ -85,7 +85,7 @@ export const eventInstant = (value) => {
 
 // --- color ------------------------------------------------------------------
 
-// Normalises a hex color, or null when the value is not usable. Mirrors
+// Normalizes a hex color, or null when the value is not usable. Mirrors
 // utils/assignmentColor so an admin typing a color gets the same treatment in both places.
 export const normalizeEventColor = (value) => {
   const raw = text(value).toLowerCase();
@@ -100,7 +100,7 @@ export const normalizeEventColor = (value) => {
 
 export const eventColor = (value) => normalizeEventColor(value) || EVENT_DEFAULT_COLOR;
 
-// --- normalisation ----------------------------------------------------------
+// --- normalization ----------------------------------------------------------
 
 // Sunday-first, matching Date.prototype.getDay() and the is_sunday..is_saturday columns.
 export const EVENT_WEEKDAYS = [
@@ -159,19 +159,19 @@ const clockFromMinutes = (minutes) => {
 // this only ever fires on pathological input and stops a runaway loop from freezing the tab.
 const MAX_OCCURRENCES = 400;
 
-// --- normalisation ----------------------------------------------------------
+// --- normalization ----------------------------------------------------------
 
 // One sheet row as the renderer needs it, or null when there is nothing drawable.
 //
 // A row with no id or no usable start is dropped rather than rendered as a mystery pill - the same
 // treatment a training row with no date gets.
 //
-// **Idempotent**: an already-normalised event is passed straight through. That matters because the app
-// normalises the payload once and then every calendar normalises again defensively - and re-parsing a
-// normalised event returns null, because this function reads the sheet's raw column names
-// (`is_recurring`, `date_from`) while a normalised event is camelCase (`isRecurring`, `startsAt`). That
+// **Idempotent**: an already-normalized event is passed straight through. That matters because the app
+// normalizes the payload once and then every calendar normalizes again defensively - and re-parsing a
+// normalized event returns null, because this function reads the sheet's raw column names
+// (`is_recurring`, `date_from`) while a normalized event is camelCase (`isRecurring`, `startsAt`). That
 // mismatch silently erased every event from every calendar, which is exactly the kind of failure the
-// defensive normalisation was meant to prevent.
+// defensive normalization was meant to prevent.
 export const isNormalizedEvent = (value) =>
   !!value &&
   typeof value === 'object' &&
@@ -306,7 +306,7 @@ const eventAnchorMinutes = (event) => (event && event.startsAt ? event.startsAt.
 
 // Ordering.
 //
-// The list an administrator reads runs alongside a calendar, so it reads forwards: earliest first by default.
+// The list an administrator reads runs alongside a calendar, so it reads forward: earliest first by default.
 // Undated events sort LAST in every direction - a row whose date is unreadable is not the earliest event - which
 // is why the direction is a parameter of the comparison rather than a negation of it (negating would carry the
 // undated rows to the top of "latest first").
@@ -667,7 +667,7 @@ const eventSegment = (event, occurrence, dateKey) => {
     continuesBefore: !startsOnDay,
     continuesAfter: !endsOnDay,
     startMinutes: startsOnDay ? occurrence.startMinutes : 0,
-    // The part of the day the event covers, clamped for the intersection maths. 1440 means the whole day.
+    // The part of the day the event covers, clamped for the intersection math. 1440 means the whole day.
     endMinutes: endsOnDay ? occurrence.endMinutes : 1440,
     occurrenceStartMinutes: occurrence.startMinutes,
     occurrenceEndMinutes: occurrence.endMinutes,

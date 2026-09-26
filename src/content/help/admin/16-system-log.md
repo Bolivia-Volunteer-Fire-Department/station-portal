@@ -18,7 +18,7 @@ Entries are **newest first** by default, twenty to a page. The badge color on an
 
 - **Red** — something failed, was denied, or was removed (`LOGIN_FAILED`, `...DECLINED`).
 - **Green** — something completed (`USER_LOGIN`, `...APPROVED`).
-- **Grey** — everything else.
+- **Gray** — everything else.
 
 Actions are matched on whole words, so `CLOCK_IN` shows as a normal event — it contains "LOCK", but nobody is going to mistake a clock-in for a lockout.
 

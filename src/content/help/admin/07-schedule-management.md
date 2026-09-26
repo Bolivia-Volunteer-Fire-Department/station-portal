@@ -10,7 +10,7 @@ Each day shows its shifts, ordered by start time. A shift is one of:
 | Appearance | Meaning |
 |---|---|
 | **Filled pill** | A member is on it. The pill shows their name, the assignment and the time |
-| **Vacant pill** | Nobody is on it. It is drawn in muted styling and labelled with the **assignment** rather than the word "Open" |
+| **Vacant pill** | Nobody is on it. It is drawn in muted styling and labeled with the **assignment** rather than the word "Open" |
 | **Empty slot** | A template slot with no row at all. Click it to assign somebody |
 
 Vacant shifts also carry a warning icon, and an orange count appears in the header, when nobody on the shift has marked themselves available for it — see *Member availability* below.

@@ -18,7 +18,7 @@
 //   * anything with no readable start time sorts after everything timed, rather than pretending to be midnight.
 //
 // The two are kept as separate streams rather than one list of "things", because only one of them is a shift: the
-// calendars colour, sort and click them differently, and only the shifts are offerable or draggable.
+// calendars color, sort and click them differently, and only the shifts are offerable or draggable.
 //
 // Pure and dependency-free, so it can be exercised without React - see scripts/verify-crew-order.mjs.
 const MISSING = Number.MAX_SAFE_INTEGER;

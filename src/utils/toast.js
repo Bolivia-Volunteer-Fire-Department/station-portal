@@ -5,7 +5,7 @@
 // sound utils/uiSounds maps to that kind first, which is why every toast in the app gets an earcon for free.
 //
 // The mapping is by KIND, never by message text, so a toast cannot end up with the wrong sound because its
-// wording changed. Anything unrecognised - including a kind added to the wrapper later and forgotten here -
+// wording changed. Anything unrecognized - including a kind added to the wrapper later and forgotten here -
 // falls back to toast_normal, per the "when in doubt, normal" rule.
 //
 // Import `toast` from HERE rather than from 'sonner'. The verifier fails if any other file imports it directly,

@@ -65,7 +65,7 @@ export default function AdminNotificationsTab({ token, systemSettings, isAdmin =
     await refreshStatus();
   };
 
-  // Capped and centred: a stack of configuration and status cards rather than a table, so full width on a
+  // Capped and centerd: a stack of configuration and status cards rather than a table, so full width on a
   // wide monitor would leave labels and their controls far apart. See utils/contentWidth.
   return (
     <CenteredContent className="space-y-6">
@@ -132,7 +132,7 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
 
     try {
       // The web config has to be parseable JSON, otherwise the browser can't
-      // initialise Firebase and members will see "not configured yet".
+      // initialize Firebase and members will see "not configured yet".
       const rawConfig = String(form.webConfig || '').trim();
       if (rawConfig) {
         try {

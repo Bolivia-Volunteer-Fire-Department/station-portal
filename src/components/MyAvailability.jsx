@@ -5,7 +5,7 @@ import AvailabilityCalendar from './AvailabilityCalendar';
 
 // "My Availability" - the member marks the shifts they could work.
 //
-// Modelled on My Schedule: it preloads every shift template occurrence the member's rank
+// Modeled on My Schedule: it preloads every shift template occurrence the member's rank
 // qualifies for and lets them mark each one, rather than asking them to describe their week
 // as time windows. There is deliberately no "show everyone" toggle here - this screen is
 // about the member's own availability, and seeing the crew's would not help answer it.

@@ -136,7 +136,7 @@ for (const value of ['2026-07-01', '7/1/2026', '2026-07-01T04:00:00.000Z', '', n
   check(`both sheets read ${JSON.stringify(value)} the same`, assignmentDateKey(value), effectiveDateKey(value));
 }
 check('an assignment and a template are judged by the same function', templateIsActiveOn(list[1], '2020-06-01'), assignmentIsActiveOn(list[1], '2020-06-01'));
-check('and labelled by the same one', assignmentDateLabel(list[1]), dateWindowLabel(list[1]));
+check('and labeled by the same one', assignmentDateLabel(list[1]), dateWindowLabel(list[1]));
 check('and a single date formatted the same', assignmentDateText('2026-06-30'), dateKeyText('2026-06-30'));
 
 const coreSource = readFileSync('src/utils/effectiveDates.js', 'utf8');

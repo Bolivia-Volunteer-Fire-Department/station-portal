@@ -17,7 +17,7 @@ import { playSound, modalSoundFor } from '../utils/uiSounds';
  * what has the focus when it opens.
  *
  * `tone="danger"` (the default) paints the confirm button red, for anything destructive. Use `tone="default"` when
- * the confirmation is not a warning - it is only ever the button's colour, not the wording.
+ * the confirmation is not a warning - it is only ever the button's color, not the wording.
  */
 export default function ConfirmModal({
   title,

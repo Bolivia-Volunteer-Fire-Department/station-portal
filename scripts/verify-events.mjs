@@ -106,7 +106,7 @@ check('a 24:00-ish hour is not a time', eventInstant('2026-03-14 24:30'), null);
 
 console.log('\n--- colors ---');
 check('a short hex expands', normalizeEventColor('#abc'), '#aabbcc');
-check('case is normalised', normalizeEventColor('#AABBCC'), '#aabbcc');
+check('case is normalized', normalizeEventColor('#AABBCC'), '#aabbcc');
 check('a bad value falls back to gray', eventColor('cornflowerblue'), EVENT_DEFAULT_COLOR);
 check('a blank value falls back to gray', eventColor(''), EVENT_DEFAULT_COLOR);
 check('a good value is kept', eventColor('#123456'), '#123456');
@@ -117,7 +117,7 @@ check('a padded lowercase true is a flag', eventFlag(' true '), true);
 check('FALSE text is not', eventFlag('FALSE'), false);
 check('missing is not', eventFlag(undefined), false);
 
-console.log('\n--- normalisation ---');
+console.log('\n--- normalization ---');
 check('a row with no id is dropped', normalizeEvent({ title: 'x' }), null);
 check('a single event with no start is dropped', normalizeEvent({ id: '1', title: 'x' }), null);
 check('a recurring event needs only a start DATE', normalizeEvent({
@@ -463,7 +463,7 @@ const apiSource = readFileSync('src/services/api.js', 'utf8');
 ['fetchEvents', 'adminFetchEvents', 'adminSaveEvent', 'adminDeleteEvent'].forEach((name) => {
   check(`api.js exports ${name}`, new RegExp(`export const ${name} =`).test(apiSource), true);
 });
-// The weekday flags are enumerated from the catalogue rather than listed by hand - the mistake that broke
+// The weekday flags are enumerated from the catalog rather than listed by hand - the mistake that broke
 // the notification preferences. Scoped to the events payload: api.js also saves shift templates, which
 // legitimately name their own weekday columns.
 check('the weekday fields are derived, not hand-written', /eventWeekdayFields/.test(apiSource) && /EVENT_WEEKDAYS\.forEach/.test(apiSource), true);
@@ -536,11 +536,11 @@ const appSource = readFileSync('src/App.jsx', 'utf8');
 // their own, so what matters is that App applies the field the payload carries.
 check('App applies the events from the sign-in payload', /if \(data\.events\) setEvents\(normalizeEventList\(data\.events\)\)/.test(appSource), true);
 check('App holds them in state', /const \[events, setEvents\]/.test(appSource), true);
-check('App normalises what it stores', /setEvents\(normalizeEventList\(data\.events\)\)/.test(appSource), true);
+check('App normalizes what it stores', /setEvents\(normalizeEventList\(data\.events\)\)/.test(appSource), true);
 check('and passes them to the schedule calendar', /events=\{events\}/.test(appSource), true);
 check('with the viewer audience', /eventAudience=\{announcementAudience\}/.test(appSource), true);
-// The calendar normalises as well, so it is right whichever caller hands it rows.
-check('the calendar normalises defensively', /useMemo\(\(\) => normalizeEventList\(events\)/.test(calendarSource), true);
+// The calendar normalizes as well, so it is right whichever caller hands it rows.
+check('the calendar normalizes defensively', /useMemo\(\(\) => normalizeEventList\(events\)/.test(calendarSource), true);
 
 console.log('\n--- rendered: the pills actually appear ---');
 // The engine can be perfect and still show nothing if a raw sheet row reaches it, which is exactly what
@@ -553,7 +553,7 @@ const now = new Date();
 const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 const monthDay = (n) => `${monthKey}-${String(n).padStart(2, '0')}`;
 
-// Deliberately RAW rows, shaped like the sheet, to prove the component copes without being pre-normalised.
+// Deliberately RAW rows, shaped like the sheet, to prove the component copes without being pre-normalized.
 // The rendered toggle text, with React's SSR separators removed.
 //
 // `{enabled ? 'Hide' : 'Show'} {noun}` renders as `Hide<!-- --> <!-- -->events`, so the label never appears as
@@ -596,10 +596,10 @@ check('an all-day single-date event still renders', hiddenCalendar.includes('Con
 
 // THE APP'S ACTUAL PATH, and the test whose absence let a total failure ship.
 //
-// App.jsx stores `normalizeEventList(data.events)`, and every calendar then normalises again defensively.
-// Re-parsing an already-normalised event used to return null - the function reads the sheet's raw column
-// names while a normalised event is camelCase - so EVERY event was erased on every calendar, while both
-// halves passed their own tests: the raw-row render above, and the normaliser's own unit tests.
+// App.jsx stores `normalizeEventList(data.events)`, and every calendar then normalizes again defensively.
+// Re-parsing an already-normalized event used to return null - the function reads the sheet's raw column
+// names while a normalized event is camelCase - so EVERY event was erased on every calendar, while both
+// halves passed their own tests: the raw-row render above, and the normalizer's own unit tests.
 const weekdayKeys = [
   'is_sunday', 'is_monday', 'is_tuesday', 'is_wednesday', 'is_thursday', 'is_friday', 'is_saturday',
 ];
@@ -616,9 +616,9 @@ const weeklyRow = {
   [weekdayKeys[firstOfMonth.getDay()]]: 'TRUE',
 };
 
-check('normalising an event twice keeps it', normalizeEventList(normalizeEventList([weeklyRow])).length, 1);
+check('normalizing an event twice keeps it', normalizeEventList(normalizeEventList([weeklyRow])).length, 1);
 check(
-  'and a normalised event is recognised',
+  'and a normalized event is recognized',
   isNormalizedEvent(normalizeEventList([weeklyRow])[0]),
   true
 );
@@ -629,13 +629,13 @@ const normalizedCalendar = renderToString(
     currentUser: { id: '1', name: 'Member 1', rank_id: '10' },
     ranks: [{ id: '10', description: 'Firefighter', rank_order: '1' }],
     token: 'T',
-    // Exactly what App.jsx hands the calendar: already normalised.
+    // Exactly what App.jsx hands the calendar: already normalized.
     events: normalizeEventList([weeklyRow]),
     eventAudience: { roleId: '', rankId: '10', userId: '1', ranks: [] },
     timeFormat: '12',
   })
 );
-check('a pre-normalised weekly event still renders', normalizedCalendar.includes('Weekly training'), true);
+check('a pre-normalized weekly event still renders', normalizedCalendar.includes('Weekly training'), true);
 
 // The pill's OWN contents, from its title span to the end of the pill.
 //
@@ -706,7 +706,7 @@ const orderCalendar = renderToString(
   })
 );
 // Where each pill appears in the markup: the order of the strings IS the order of the DOM. Tooltips are stripped
-// first - the day cell summarises its shifts in its own `title`, which appears before any pill, so the first
+// first - the day cell summarizes its shifts in its own `title`, which appears before any pill, so the first
 // occurrence of a shift's name would otherwise be the summary rather than the pill.
 const pillOnly = String(orderCalendar).replace(/title="[^"]*"/g, '');
 const orderAt = ['Early event', 'Tied event', 'Day shift', 'Late event'].map((label) => pillOnly.indexOf(label));
@@ -968,9 +968,9 @@ check('the pill borders itself in its color', bluePill.borderColor, '#227dc3');
 check('and writes in it', bluePill.color, '#227dc3');
 check('with a translucent wash', bluePill.backgroundColor, '#227dc333');
 check('the wash is not opaque', /^#[0-9a-f]{6}[0-9a-f]{2}$/.test(bluePill.backgroundColor) && bluePill.backgroundColor.slice(-2) !== 'ff', true);
-const greyPill = eventPillStyle('');
-check('a blank color falls back to the default grey', greyPill.color, EVENT_DEFAULT_COLOR);
-check('and still washes', greyPill.backgroundColor, `${EVENT_DEFAULT_COLOR}33`);
+const grayPill = eventPillStyle('');
+check('a blank color falls back to the default gray', grayPill.color, EVENT_DEFAULT_COLOR);
+check('and still washes', grayPill.backgroundColor, `${EVENT_DEFAULT_COLOR}33`);
 // A solid pill would mean white text on a saturated fill - the shift treatment, which events must not take.
 check('the pill never writes white', /text-white/.test(pillCode), false);
 check('the pill is a div when nothing happens on a tap', /if \(!onClick\) return <div/.test(pillCode), true);
@@ -1011,7 +1011,7 @@ console.log('\n--- every other calendar draws them too ---');
 // integration covers two screens.
 check('the availability grid takes events', /events = \[\]/.test(availabilitySource), true);
 check('and groups them by day', /eventSegmentsByDay\(/.test(availabilitySource), true);
-check('it normalises defensively', /normalizeEventList\(events\)/.test(availabilitySource), true);
+check('it normalizes defensively', /normalizeEventList\(events\)/.test(availabilitySource), true);
 check('it has an events switch', /noun="events"/.test(availabilitySource), true);
 // An event must not become something a member can tick: the slots are buttons and the events are not. The day cell
 // merges events and slots in time order (utils/dayOrder), so the event branch is the part of that merge before the
@@ -1034,7 +1034,7 @@ check('and never hands it a handler', /onClick/.test(availabilityEventBranch), f
 
 check('the board takes events', /events = \[\]/.test(boardSource), true);
 check('and groups them by day', /eventSegmentsByDay\(/.test(boardSource), true);
-check('it normalises defensively', /normalizeEventList\(events\)/.test(boardSource), true);
+check('it normalizes defensively', /normalizeEventList\(events\)/.test(boardSource), true);
 check('the board uses the shared events toggle', /noun="events"/.test(boardSource), true);
 // The board draws the whole crew, so it must not audience-filter: an event aimed at one rank still belongs
 // on the board an administrator builds from. Sliced to the board's own event memo, so a match elsewhere in
@@ -1047,7 +1047,7 @@ check('the board event memo was found', boardEventBlock.length > 100, true);
 check('the board does not audience-filter', /eventSegmentsByDay\(/.test(boardEventBlock) && !/eventAudience/.test(boardEventBlock), true);
 
 check('printing takes events', /events = \[\]/.test(printSource), true);
-check('and normalises them', /normalizeEventList\(events\)/.test(printSource), true);
+check('and normalizes them', /normalizeEventList\(events\)/.test(printSource), true);
 
 console.log('\n--- printed events ---');
 const { printLinesForDate } = await import('../src/utils/printSchedule.js');
@@ -1090,7 +1090,7 @@ const spanDays = ['2026-03-10', '2026-03-11', '2026-03-12'].map((day) =>
 check('a span prints on all three days', spanDays, [1, 1, 1]);
 
 // An event must carry none of the shift machinery: no member name, no "Open".
-check('an event is never labelled Open', printLinesForDate({
+check('an event is never labeled Open', printLinesForDate({
   dateKey: printDay,
   mode: 'admin',
   events: [{ id: '7', title: 'Training', date_from: `${printDay} 08:00`, date_to: `${printDay} 10:00` }],
@@ -1132,7 +1132,7 @@ console.log('\n--- rendered: the All Members list shows them per day ---');
 // event belongs to the day, and repeating it down every shift would bury the names the view exists to show.
 const rosterSource = readFileSync('src/components/admin/AdminAvailabilityRoster.jsx', 'utf8');
 check('the roster takes events', /events = \[\]/.test(rosterSource), true);
-check('and normalises them', /normalizeEventList\(events\)/.test(rosterSource), true);
+check('and normalizes them', /normalizeEventList\(events\)/.test(rosterSource), true);
 check('it does not audience-filter', /eventSegmentsByDay\([\s\S]{0,200}\{ ranks \}/.test(rosterSource) && !/eventAudience/.test(rosterSource), true);
 check('the calendar tab forwards events to it', /<AdminAvailabilityRoster[\s\S]{0,600}events=\{events\}/.test(
   readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8')
@@ -1199,8 +1199,8 @@ check('and mentions no date at all', /Sep|Thu/.test(eventTimesLabel(anchoredThur
 check('the next occurrence is the following Tuesday', eventNextOccurrenceLabel(anchoredThursday, { fromKey: '2026-09-01' }), 'Next: Tue, Sep 29 at 5:30 PM');
 check('and the anchor date is genuinely not where it lands', keysOf(eventSegmentsByDay([anchoredThursday], '2026-09-01', '2026-09-30', {})), ['2026-09-29']);
 // An anchor that already falls on the chosen weekday lands on that very day, so the two only diverge sometimes.
-// Built from the raw row, not the normalised one: normalising twice would drop the `is_recurring` flag, since
-// the normalised shape is camelCase and the sheet columns are not.
+// Built from the raw row, not the normalized one: normalizing twice would drop the `is_recurring` flag, since
+// the normalized shape is camelCase and the sheet columns are not.
 check('an anchor on the chosen weekday lands that day', eventNextOccurrenceLabel(
   normalizeEvent({ ...anchoredThursdayRow, recurring_start: '2026-09-22' }), { fromKey: '2026-09-01' }
 ), 'Next: Tue, Sep 22 at 5:30 PM');

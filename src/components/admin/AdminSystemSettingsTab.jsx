@@ -34,7 +34,7 @@ function isTruthySetting(value) {
 }
 
 export default function AdminSystemSettingsTab({ token, systemSettings, onDataChanged }) {
-  // Capped and centred: this is a stack of setting cards rather than a table, so full width on a wide
+  // Capped and centerd: this is a stack of setting cards rather than a table, so full width on a wide
   // monitor would leave the labels and their controls far apart. See utils/contentWidth.
   return (
     <CenteredContent className="space-y-6">
@@ -129,7 +129,7 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
  *
  * All three keys must be filled in for the fence to apply; any blank one leaves clocking exactly
  * as it is today, so a half-finished setup cannot lock the station out of its own timeclock. The
- * card says which state it is in so the behaviour is never a guess.
+ * card says which state it is in so the behavior is never a guess.
  *
  * "Use my current location" exists because typing a latitude and longitude by hand is the most
  * error-prone part of this, and the person configuring it is usually standing at the station.
@@ -407,7 +407,7 @@ function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
             <>
               Sessions are{' '}
               <strong className="text-slate-700 dark:text-slate-300">not timed out for inactivity</strong>.
-              Leave this blank to keep the previous behaviour of a 12-hour session; fill it in to sign
+              Leave this blank to keep the previous behavior of a 12-hour session; fill it in to sign
               members out after that many idle minutes.
             </>
           )}

@@ -60,7 +60,7 @@ Treat it as the last step for a training: collect the signatures, check the deta
 
 ## Removing a signature
 
-This is the one action in the app that can take away a member's acknowledgement, so it asks for confirmation and names the member. Use it when:
+This is the one action in the app that can take away a member's acknowledgment, so it asks for confirmation and names the member. Use it when:
 
 - a member signed the wrong training by mistake,
 - a training was entered twice and someone signed both rows, or

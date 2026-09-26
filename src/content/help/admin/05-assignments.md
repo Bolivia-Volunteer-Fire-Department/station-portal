@@ -49,11 +49,11 @@ Leave the color blank and the assignment keeps an **automatic color** derived fr
 
 ## Icons
 
-The icon catalogue is the same one the **Ranks** tab uses, so the two look like one system. The icon is drawn beside the assignment name on schedule pills, in the schedule details list, and in the pending-approvals queue.
+The icon catalog is the same one the **Ranks** tab uses, so the two look like one system. The icon is drawn beside the assignment name on schedule pills, in the schedule details list, and in the pending-approvals queue.
 
 ## Adding an assignment
 
-1. **Description** — something members will recognise. This is drawn on every pill for the shift, so keep it short; "Engine 1" reads better than "Engine 1 - Station 2".
+1. **Description** — something members will recognize. This is drawn on every pill for the shift, so keep it short; "Engine 1" reads better than "Engine 1 - Station 2".
 2. **Minimum Rank** — the lowest rank that may take it.
 3. **Color** and **Icon** — as above.
 4. **Effective Date** — required; the first date the assignment may be used. **End Date** — leave blank unless you are retiring it; see above.

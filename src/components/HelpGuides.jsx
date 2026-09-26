@@ -117,7 +117,7 @@ export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
               })}
             </nav>
 
-            {/* The guide itself, and the only thing that scrolls on desktop. A labelled region with a tab stop:
+            {/* The guide itself, and the only thing that scrolls on desktop. A labeled region with a tab stop:
                 a scrollable box that the keyboard cannot reach is a scrollable box a keyboard user cannot read
                 past, and the outline shows where the focus is. */}
             <article

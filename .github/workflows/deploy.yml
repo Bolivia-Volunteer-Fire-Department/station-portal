@@ -47,7 +47,7 @@ jobs:
 
       # Lint before building. It is fast and deterministic, and it catches the class of mistake a build
       # cannot: an undefined identifier in an expression (a missing destructured prop) compiles fine and
-      # throws at runtime. The behavioural suite is run locally - see "Before you publish" in the README -
+      # throws at runtime. The behavioral suite is run locally - see "Before you publish" in the README -
       # because several of its assertions depend on the current date.
       - name: Lint
         run: npm run lint

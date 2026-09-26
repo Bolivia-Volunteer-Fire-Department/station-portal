@@ -9,7 +9,7 @@
 |---|---|
 | **Department Name** | Shown on the login screen and in the browser tab title |
 
-It is the first thing a member sees, so use the name they would recognise.
+It is the first thing a member sees, so use the name they would recognize.
 
 ## Clock Location
 

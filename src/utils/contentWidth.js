@@ -2,7 +2,7 @@
 //
 // Most screens fill the panel the sidebar leaves. Table- and calendar-heavy pages need that: capping them
 // wasted the horizontal space a wide monitor has. But a form or a status page stretched edge to edge looks
-// sparse and is harder to scan, so those are capped and centred instead.
+// sparse and is harder to scan, so those are capped and centerd instead.
 //
 // Two ways to opt in, and only these two:
 //
@@ -14,5 +14,5 @@
 
 export const CONTENT_MAX_WIDTH = 'max-w-3xl';
 
-// Top-level modules whose content is capped and centred.
+// Top-level modules whose content is capped and centerd.
 export const CENTERED_CONTENT_TABS = ['dashboard', 'settings'];

@@ -60,7 +60,7 @@ const formatYmd = (date) => {
 };
 const Utilities = {
   formatDate: (value) => formatYmd(value instanceof Date ? value : new Date(value)),
-  // Deterministic, hex-shaped and 36 characters, so the code's own UUID check recognises it.
+  // Deterministic, hex-shaped and 36 characters, so the code's own UUID check recognizes it.
   getUuid: (() => {
     let issued = 0;
     return () => {
@@ -232,7 +232,7 @@ console.log('\n--- a wrong date must not match ---');
   const { api, ss } = makeApi(sheet, templates);
   api.setAvailabilityRows(ss, 'u1', [slot('t1', '2026-09-07')], []);
   const result = api.setAvailabilityRows(ss, 'u1', [], [slot('t1', '2026-09-08')]);
-  check('a neighbouring date does not delete it', [result.cleared, sheet.rows().length - 1], [0, 1]);
+  check('a neighboring date does not delete it', [result.cleared, sheet.rows().length - 1], [0, 1]);
 }
 
 console.log('\n--- other members are never touched ---');

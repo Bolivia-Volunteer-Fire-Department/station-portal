@@ -83,7 +83,7 @@ const memberLines = printLinesForDate({
   users,
 });
 check('a member sees their own shift', memberLines.length, 1);
-check('labelled with the time and assignment', memberLines[0].text, '8:00 AM – 6:00 PM · Engine 1');
+check('labeled with the time and assignment', memberLines[0].text, '8:00 AM – 6:00 PM · Engine 1');
 check('and no member name, since it is their own sheet', /Member 1/.test(memberLines[0].text), false);
 check('with the automatic assignment color', typeof memberLines[0].color === 'string' && /^#[0-9a-f]{6}$/.test(memberLines[0].color), true);
 
@@ -150,7 +150,7 @@ const uncovered = printLinesForDate({
   users,
 });
 check('a template with no row prints as Open', uncovered.length, 1);
-check('labelled Open with the window', uncovered[0].text, 'Open · 8:00 AM – 6:00 PM · Engine 1');
+check('labeled Open with the window', uncovered[0].text, 'Open · 8:00 AM – 6:00 PM · Engine 1');
 // A member's own sheet lists only real assignments, so a vacancy is not on it.
 check(
   'but a member sheet does not invent vacancies',

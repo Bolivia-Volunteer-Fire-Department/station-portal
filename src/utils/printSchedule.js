@@ -189,7 +189,7 @@ export const printLinesForDate = ({
   }
 
   // Events for this day, placed among the shifts by start time rather than printed above them all - the same order
-  // the calendars draw (see utils/dayOrder). Normalised defensively, and never given a name or an "Open" label: an
+  // the calendars draw (see utils/dayOrder). Normalized defensively, and never given a name or an "Open" label: an
   // event is not a shift and nothing about it is offerable.
   const dayEvents = eventSegmentsByDay(normalizeEventList(events), dateKey, dateKey, { ranks }).get(dateKey) || [];
   for (const segment of dayEvents) {

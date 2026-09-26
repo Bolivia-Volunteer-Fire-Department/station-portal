@@ -227,7 +227,7 @@ export default function AdminScheduleManagementTab({
   const userName = (id) => userById(id)?.name || unnamedLabel('member');
   const assignmentById = (id) => assignments.find((a) => String(a.id) === String(id));
 
-  // What a pill calls the shift. A VACANCY (a row with no member) is labelled with the
+  // What a pill calls the shift. A VACANCY (a row with no member) is labeled with the
   // ASSIGNMENT rather than the word "Open": the vacancy styling already shows that nobody
   // is on it, and the assignment is what an administrator is scanning this board for.
   // A row created without an assignment of its own borrows the slot template's. "Open"
@@ -359,7 +359,7 @@ export default function AdminScheduleManagementTab({
     return arr;
   }, [year, month]);
 
-  // Non-shift entries for the visible month, grouped by day. Normalised defensively so a raw sheet row
+  // Non-shift entries for the visible month, grouped by day. Normalized defensively so a raw sheet row
   // cannot silently render nothing: the engine reads `isAllDay`/`startsAt`, not `is_all_day`/`date_from`.
   //
   // No audience filter: the board draws the whole crew and an administrator needs to see an event however
@@ -804,7 +804,7 @@ export default function AdminScheduleManagementTab({
   //
   // It is also where the hold-to-swap is driven from, and the one thing that must not be read here is what the
   // board is DRAWING: with the two pills shown exchanged, the slot under the pointer looks like the row being
-  // dragged, and reading that cancelled the swap the instant it appeared - then re-armed it, forever. The real
+  // dragged, and reading that canceled the swap the instant it appeared - then re-armed it, forever. The real
   // occupant is the source of truth; the verdict logic is in planSwapHover.
   const handleSlotDragOver = (e, slot) => {
     e.preventDefault();
@@ -1870,7 +1870,7 @@ export default function AdminScheduleManagementTab({
 
                 {/* Chronological, with the day's events placed among its shifts rather than above them all - see
                     utils/dayOrder. Events stay plain divs, so they carry none of the board's selection or drag
-                    behaviour; only their position changes. */}
+                    behavior; only their position changes. */}
 
                 {mergeDayItems(daySlots, eventSegmentsByDate.get(dateKey) || []).map(({ kind, value }) => {
                   if (kind === 'event') {

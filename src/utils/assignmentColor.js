@@ -16,7 +16,7 @@
 //
 // The derived hue: FNV-1a mixes the id string well (consecutive ids like 1, 2, 3
 // land far apart), and the golden-angle multiplier spreads hues evenly around the
-// wheel so neighbouring assignments stay visually distinct.
+// wheel so neighboring assignments stay visually distinct.
 
 const HEX_COLOR = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 

@@ -54,13 +54,13 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
   const query = useMemo(() => logQueryParams({ page, sort, filters }), [page, sort, filters]);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     setLoading(true);
     setError(null);
 
     adminFetchSystemLog(query, token)
       .then((result) => {
-        if (cancelled) return;
+        if (canceled) return;
         if (!result?.success) throw new Error(result?.message || 'Failed to load the system log.');
 
         // A different contract version means the deployed script predates this build. Reported rather
@@ -85,15 +85,15 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
         setLoadedOnce(true);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (canceled) return;
         setError(err?.message || 'Failed to load the system log.');
         setRows([]);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!canceled) setLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => { canceled = true; };
   }, [query, token, reloadCount]);
 
   const memberName = (userId) => users.find((user) => String(user.id) === String(userId))?.name || '';

@@ -87,7 +87,7 @@ export default function AdminAvailabilityTab({
       </div>
 
       {showingAll ? (
-        // The All Members list is capped and centred: it is a date-grouped reading list. The single-member
+        // The All Members list is capped and centerd: it is a date-grouped reading list. The single-member
         // view below is deliberately NOT: it renders the seven-column month grid, which needs the width.
         <CenteredContent>
           <AdminAvailabilityRoster

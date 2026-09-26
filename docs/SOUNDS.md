@@ -11,7 +11,7 @@ Everything here is covered by `npm run verify:sounds`, which is what stops the w
 | File | Used for | Played from |
 |---|---|---|
 | `click.mp3` | **Every press on a control** — buttons, switches, pills (grab, release, click), menu items, dropdowns, checkboxes, radio choices | The one delegated listener in `utils/uiSounds` |
-| `click_double.mp3` | Consequential, infrequent actions — **save, delete, edit, cancel, export, print, sign out, approve** | The same listener, on the controls the rule below recognises |
+| `click_double.mp3` | Consequential, infrequent actions — **save, delete, edit, cancel, export, print, sign out, approve** | The same listener, on the controls the rule below recognizes |
 | `modal_positive.mp3` | A modal the member opened — including a delete confirmation — or a form they are expected to fill in | Each modal component as it mounts, via `MODAL_SOUNDS` |
 | `modal_error.mp3` | A modal that interrupts, or reports a refusal | Same table |
 | `notification.mp3` | A push notification that arrives while the member has the app open | `notificationToast()` in App.jsx |
@@ -102,7 +102,7 @@ to be **off**, since a missing row already means on.
 - **Which sound for a modal:** `MODAL_SOUNDS` in `utils/soundRules`. Every `*Modal.jsx` component must declare its
   own key, and the verifier fails if one does not — a new modal cannot be silent by accident, and a stale entry
   cannot hide a deleted component. Unlisted modals default to **positive**.
-- **Which sound for a toast:** `TOAST_SOUNDS`, by kind. Anything unrecognised gets `toast_normal`.
+- **Which sound for a toast:** `TOAST_SOUNDS`, by kind. Anything unrecognized gets `toast_normal`.
 - **Volume:** `SOUND_VOLUME`. The click is mixed at 0.35 rather than 0.8, because it fires on every single press
   and at the same level it reads as noise rather than feedback.
 - **A click on a control the selector cannot see** (a `div` with an `onClick`): add `data-sound="click"` to it.

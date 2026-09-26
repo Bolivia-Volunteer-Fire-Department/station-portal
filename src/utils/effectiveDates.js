@@ -9,7 +9,7 @@
 //
 //   blank effective_date -> no start, has always run
 //   blank end_date       -> no end, still running
-//   both blank           -> exactly the previous behaviour, forever
+//   both blank           -> exactly the previous behavior, forever
 //
 // That is what makes these columns safe to add: every existing record keeps doing what it did before,
 // because an empty cell is "no restriction" rather than "retired".
@@ -111,6 +111,6 @@ export const dateWindowError = (effectiveDate, endDate, { requireFrom = false } 
 };
 
 // Whether a record already in the sheet is missing the now-required effective date. Used to nudge an
-// administrator towards fixing rows created before the rule existed, since those rows keep working
+// administrator toward fixing rows created before the rule existed, since those rows keep working
 // (blank = no restriction) and would otherwise never be noticed.
 export const needsEffectiveDate = (record) => !effectiveDateKey(record?.effective_date);

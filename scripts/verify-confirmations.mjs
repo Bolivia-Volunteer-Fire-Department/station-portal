@@ -135,12 +135,12 @@ for (const { file, kinds } of ASK_IN_APP) {
     // One dialog for three actions: the pending value says which.
     checkIs(`${name} holds which action is pending`, /setPending\(\{ kind: '/.test(source));
     checkIs(`${name} and dispatches on confirm`, /void saveTraining\(action\.values\)/.test(source));
-    checkIs(`${name} cancelling clears it`, /onCancel=\{\(\) => setPending\(null\)\}/.test(source));
+    checkIs(`${name} canceling clears it`, /onCancel=\{\(\) => setPending\(null\)\}/.test(source));
   } else {
     // The row the button was clicked on is held in state, and the work runs from the dialog's callback - so nothing
     // is written before the answer.
     checkIs(`${name} holds the row while it asks`, holdsTheRow(source));
-    checkIs(`${name} cancelling clears it`, /onCancel=\{\(\) => setPendingDelete\(null\)\}/.test(source));
+    checkIs(`${name} canceling clears it`, /onCancel=\{\(\) => setPendingDelete\(null\)\}/.test(source));
   }
   // The dialog has to be rendered from the component that holds the row. The two are on opposite sides of the file
   // in every one of these tabs, so nothing else in this file would notice them drifting apart.
@@ -157,7 +157,7 @@ for (const { file, kinds } of ASK_IN_APP) {
 }
 // --- 3. the dialog's own contract -------------------------------------------------------------
 //
-// Source-level, not behavioural: there is no jsdom in this project, so "Escape cancels it" is asserted as the
+// Source-level, not behavioral: there is no jsdom in this project, so "Escape cancels it" is asserted as the
 // handler that does so being present and reached from a document-level listener - not by pressing Escape.
 const modalSource = readFileSync('src/components/ConfirmModal.jsx', 'utf8');
 

@@ -83,23 +83,23 @@ export default function AdminAnnouncementsTab({
   }, [token]);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     setLoading(true);
     setLoadError(null);
 
     loadRows()
       .then((list) => {
-        if (!cancelled) setRows(list);
+        if (!canceled) setRows(list);
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(err.message || 'Failed to load announcements.');
+        if (!canceled) setLoadError(err.message || 'Failed to load announcements.');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!canceled) setLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [loadRows]);
 

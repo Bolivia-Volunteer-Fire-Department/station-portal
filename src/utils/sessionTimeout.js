@@ -96,7 +96,7 @@ export const idleRemainingMs = (lastActivityAt, now, config) => {
 
 // 'off' when the feature is unconfigured, otherwise where the session stands right now.
 //
-// Separate from the countdown because the timer's behaviour is driven by this, and the states have
+// Separate from the countdown because the timer's behavior is driven by this, and the states have
 // to be distinguishable at the boundary: at the threshold the session is over, not merely warning.
 export const idleState = (lastActivityAt, now, config) => {
   if (!config || !config.configured) return 'off';

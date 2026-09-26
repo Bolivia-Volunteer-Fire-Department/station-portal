@@ -48,7 +48,7 @@ const CONFIGURED = {
 
 console.log('--- distance, in the units the setting uses ---');
 // One degree of latitude is ~69 statute miles, i.e. ~364,000 ft. This is the sanity check that
-// the feet conversion is right and not, say, metres.
+// the feet conversion is right and not, say, meters.
 close('one degree of latitude', distanceInFeet({ latitude: 0, longitude: 0 }, { latitude: 1, longitude: 0 }), 364000, 2000);
 // One degree of longitude at 39.28 N is ~0.774 of a degree of latitude.
 close(
@@ -58,7 +58,7 @@ close(
   3000
 );
 check('a point is zero feet from itself', Math.round(distanceInFeet({ latitude: 39.28, longitude: -78.24 }, { latitude: 39.28, longitude: -78.24 })), 0);
-close('the same point in metres', distanceInFeet({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 0 }), 0, 0.0001);
+close('the same point in meters', distanceInFeet({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 0 }), 0, 0.0001);
 // Antipodal -1/1 on the sine/cosine: asin must be clamped, not NaN. Pole to pole along a meridian
 // is exactly half the circumference, pi * R.
 close(

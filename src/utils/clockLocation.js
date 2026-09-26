@@ -222,7 +222,7 @@ export const clockLocationNotice = (outcome, config) => {
     };
   }
 
-  // An unrecognised refusal still gets a modal rather than silence - that is the whole point.
+  // An unrecognized refusal still gets a modal rather than silence - that is the whole point.
   return {
     kind: 'blocked',
     title: 'Clock action blocked',

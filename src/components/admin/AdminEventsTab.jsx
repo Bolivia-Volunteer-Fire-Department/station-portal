@@ -174,7 +174,7 @@ function EventRow({ event, roles, ranks, users, timeFormat, deletingId, onEdit, 
   );
 }
 
-// One labelled control, so twenty fields stay readable instead of repeating a wrapper each time.
+// One labeled control, so twenty fields stay readable instead of repeating a wrapper each time.
 function Field({ label, hint, wide, children }) {
   return (
     <div className={wide ? 'md:col-span-2' : undefined}>
@@ -236,23 +236,23 @@ export default function AdminEventsTab({
   }, [token]);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     setLoading(true);
     setLoadError(null);
 
     loadRows()
       .then((list) => {
-        if (!cancelled) setRows(list);
+        if (!canceled) setRows(list);
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(err.message || 'Failed to load events.');
+        if (!canceled) setLoadError(err.message || 'Failed to load events.');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!canceled) setLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [loadRows]);
 

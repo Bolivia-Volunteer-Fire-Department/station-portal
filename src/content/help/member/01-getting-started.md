@@ -21,7 +21,7 @@ Welcome to the **Station Portal**. This guide is for members: what each module i
 
 Your username and password are issued by an administrator. If you have forgotten your password, ask an administrator to reset it — you can change it yourself afterwards in **User Settings**.
 
-Towards the start you may be asked to confirm your password again before a sensitive action such as clocking in. That is normal: the app is re-checking that it is still you, and it replays the action you were trying once you have confirmed, without needing you to repeat it.
+Toward the start you may be asked to confirm your password again before a sensitive action such as clocking in. That is normal: the app is re-checking that it is still you, and it replays the action you were trying once you have confirmed, without needing you to repeat it.
 
 > [!CAUTION]
 > If you share a device, use **Log out** at the bottom of the sidebar rather than just closing the tab. Closing the tab leaves you signed in.
@@ -39,6 +39,10 @@ Modules are switched on by your **role**, not by you. If something you expect is
 ## About this app
 
 This app was created by Matt Wills for the Bolivia Fire Department.
+
+**Version 1.06**
+* Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...
+* Added Checklists - used for creating and viewing things like new hire orientation packet lists.
 
 **Version 1.05x**
 * Added sounds.

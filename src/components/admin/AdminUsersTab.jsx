@@ -56,7 +56,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       onRowSaved?.('users', { ...formData, id: result.id || formData.id });
       resetForm();
 
-      // The refresh is NOT awaited: doPost serialises every request behind a script lock, so
+      // The refresh is NOT awaited: doPost serializes every request behind a script lock, so
       // waiting for the wave meant the spinner stayed up for the length of the queue rather than
       // for the save. It is tracked instead, so the tab can say it is happening rather than
       // leaving the list silently stale.

@@ -53,7 +53,7 @@ export const availabilityRowsFor = (availability, userId) => {
 
 // The members who have marked themselves available for one slot, in name order.
 //
-// Rows pointing at a member missing from `users` still appear, labelled by id: silently
+// Rows pointing at a member missing from `users` still appear, labeled by id: silently
 // dropping someone the sheet says is available would be worse than showing an id.
 //
 // `rank_id` travels with each member so the roster can color the name and show the rank's icon.

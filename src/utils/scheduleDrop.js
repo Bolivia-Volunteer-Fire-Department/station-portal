@@ -2,7 +2,7 @@
 //
 // This exists because deciding it from what the board DRAWS rather than from the rows caused a swap to cancel
 // itself the instant it appeared. With the two pills drawn exchanged, the slot under the pointer looks like the
-// row being dragged - the hover handler read that as "back over my own shift", cancelled, and the next hover
+// row being dragged - the hover handler read that as "back over my own shift", canceled, and the next hover
 // re-armed the countdown, so the board swapped and reverted about every second and a half, indefinitely.
 //
 // So the caller passes the REAL occupant (slotOccupant), never the preview's.

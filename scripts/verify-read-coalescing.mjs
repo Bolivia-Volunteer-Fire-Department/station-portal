@@ -8,7 +8,7 @@
  * that is what pushed the last calls in the queue past the client's 60-second patience, and a call that gives up is
  * data the screen never gets (no shifts on the calendar, a 12-hour clock for a member who chose 24).
  *
- * The behaviour is asserted by driving the REAL api module against a stubbed fetch and counting the requests, which
+ * The behavior is asserted by driving the REAL api module against a stubbed fetch and counting the requests, which
  * is the only way to show that two callers really share one. What it deliberately does not do is cache anything:
  * the entry is dropped the moment a request settles, so a read that follows a write still sees the write, and a
  * failure is shared rather than remembered.
@@ -116,7 +116,7 @@ const main = async () => {
   );
 
   console.log('\n--- the rule itself ---');
-  checkIs('a read action is recognised', isReadAction('ADMIN_GET_SCHEDULE_TEMPLATES'));
+  checkIs('a read action is recognized', isReadAction('ADMIN_GET_SCHEDULE_TEMPLATES'));
   checkIs('a write action is not', !isReadAction('ADMIN_SAVE_SCHEDULE_TEMPLATE'));
   checkIs('a missing action is not a read', !isReadAction(undefined));
   check(

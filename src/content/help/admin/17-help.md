@@ -46,7 +46,7 @@ Which type to use:
 |---|---|
 | **Note** | Context or an explanation |
 | **Tip** | Helpful advice |
-| **Important** | A behaviour or consequence the reader needs to know |
+| **Important** | A behavior or consequence the reader needs to know |
 | **Warning** | Risk of losing work |
 | **Caution** | Risk to the member or the station (security) |
 

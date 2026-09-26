@@ -2,7 +2,7 @@
  * Verifies the Users tab's immediate-update path.
  *
  * A user save is one write, but the list it renders is refreshed by a separate wave of requests
- * that Apps Script serialises behind a script lock - tens of seconds. The saved row is therefore
+ * that Apps Script serializes behind a script lock - tens of seconds. The saved row is therefore
  * merged into the list locally, and these are the rules that merge has to keep:
  *
  *   - only an EXISTING row is touched (a new member's id is server-assigned)

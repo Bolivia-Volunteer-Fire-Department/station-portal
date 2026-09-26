@@ -84,7 +84,7 @@ check('the open row it replaces is named, so the caller can drop it', ontoVacanc
 checkIs('and the notice says what happened to it', /replacing it/.test(ontoVacancy.message), ontoVacancy.message);
 checkIs('including the reminder to save', /Remember to Save/.test(ontoVacancy.message), ontoVacancy.message);
 
-// A vacancy is recognised however the row was typed: whitespace-only is still nobody.
+// A vacancy is recognized however the row was typed: whitespace-only is still nobody.
 check('a whitespace-only member is a vacancy too', drop({ targetOccupant: row({ ...vacancyOnSlot, user_id: '   ' }) }).reason, 'vacancy');
 check('a null member likewise', drop({ targetOccupant: row({ ...vacancyOnSlot, user_id: null }) }).reason, 'vacancy');
 
@@ -272,7 +272,7 @@ checkIs(
 // 6c. Hovering a slot, with and without a swap on screen
 // ---------------------------------------------------------------------------
 // The bug these cover: the verdict used to be read from what the board DRAWS. Once the two pills were shown
-// exchanged, the slot under the pointer looked like the row being dragged, so the next hover cancelled the swap -
+// exchanged, the slot under the pointer looked like the row being dragged, so the next hover canceled the swap -
 // and the one after that re-armed the countdown. The board swapped and reverted every second and a half, for as
 // long as the pointer stayed over the slot.
 console.log('\n--- hovering a slot, with and without a swap on screen ---');
@@ -281,7 +281,7 @@ const hoverArgs = { draggedKey: 'db-1', entry: mine, occupant: theirsOnSlot, slo
 check('a filled slot starts the hold', planSwapHover(hoverArgs).action, 'hold');
 check('holding on the same slot does not restart it', planSwapHover({ ...hoverArgs, dwellSlotKey: SLOT }).action, 'keep');
 // THE regression: continuing to hover the slot whose swap is already shown must leave it alone. This is the case
-// that cancelled, because by then the slot was drawing the dragged row.
+// that canceled, because by then the slot was drawing the dragged row.
 check('and the slot already showing the swap keeps it', planSwapHover({ ...hoverArgs, previewSlotKey: SLOT }).action, 'keep');
 check('a free slot has nothing to swap with', planSwapHover({ ...hoverArgs, occupant: null }).action, 'cancel');
 check('nor does your own pill', planSwapHover({ ...hoverArgs, occupant: mine }).action, 'cancel');
@@ -361,7 +361,7 @@ checkIs('and the not-conditional check catches it', /onDrop=\{droppable \?/.test
 // ---------------------------------------------------------------------------
 // 8. The hold-to-swap, wired
 // ---------------------------------------------------------------------------
-// The pure rules above are only reachable if the dwell is armed on a filled slot, cancelled when the pointer
+// The pure rules above are only reachable if the dwell is armed on a filled slot, canceled when the pointer
 // leaves, and committed on release - one wrong link and the gesture either never fires or fires on everything.
 console.log('\n--- the hold-to-swap, wired to the board ---');
 const styles = readFileSync('src/index.css', 'utf8');

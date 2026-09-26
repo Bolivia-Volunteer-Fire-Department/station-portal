@@ -11,7 +11,7 @@ Depending on your role, a form appears above the list and each row gains an **Ed
 - **A date and a title are required** — without them there is nothing to display or sign, so the form will not save.
 - Editing changes the training for everyone, since everyone signs the same activity.
 
-**A training can only be edited until the first person signs it.** After that the record is evidence, not a draft, and its **Edit** action is greyed out for everyone — corrections move to the Administration module, where the change is a deliberate step. The tooltip on a greyed-out Edit says which of the two reasons applies.
+**A training can only be edited until the first person signs it.** After that the record is evidence, not a draft, and its **Edit** action is grayed out for everyone — corrections move to the Administration module, where the change is a deliberate step. The tooltip on a grayed-out Edit says which of the two reasons applies.
 
 You cannot **delete** a training: that would throw away other members' signatures with it. If something needs to be fixed, let an administrator know.
 

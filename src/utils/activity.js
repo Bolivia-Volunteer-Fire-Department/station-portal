@@ -5,7 +5,7 @@
 // updates itself a few seconds later, and there is no sign anything was in flight. So each wave reports
 // itself through a toast that counts up and then gets out of the way.
 //
-// The counting and the wording live here, apart from sonner, so the behaviour can be exercised directly:
+// The counting and the wording live here, apart from sonner, so the behavior can be exercised directly:
 // the toast library is injected as three callbacks.
 //
 // Toasts are keyed by an id this module never reuses, so a wave that starts while another is still running

@@ -3,7 +3,7 @@
 // Two sheets behind one feature:
 //
 //   training             one row per training activity (the definition)
-//   training_signatures  one row per (training, member) - the member's acknowledgement
+//   training_signatures  one row per (training, member) - the member's acknowledgment
 //
 // A signature is a *signature*, so members can only ever add one: it acknowledges attendance,
 // and letting someone quietly withdraw it would defeat the point. Removal exists only for

@@ -28,7 +28,7 @@ A higher number means more senior, so a Chief is a larger number than a Firefigh
 Both are cosmetic but they are used consistently:
 
 - The **color** appears on rank badges and beside the member's name.
-- The **icon** is drawn from the same catalogue as assignment icons, so ranks and assignments look like part of the same system.
+- The **icon** is drawn from the same catalog as assignment icons, so ranks and assignments look like part of the same system.
 
 > [!NOTE]
 > Leaving the color blank gives that rank an automatic color derived from its id, which is perfectly usable — set a color only when you want a specific one.
