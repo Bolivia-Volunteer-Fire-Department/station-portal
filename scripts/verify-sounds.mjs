@@ -25,6 +25,12 @@ import path from 'node:path';
 import {
   REQUIRED_SOUNDS,
   SOUND_VOLUME,
+  SOUND_VOLUME_MIN,
+  SOUND_VOLUME_MAX,
+  SOUND_VOLUME_STEP,
+  clampSoundVolume,
+  soundVolumeFor,
+  soundVolumeRows,
   SOUNDS_SETTING_KEY,
   SOUNDS_DEFAULT,
   soundsActiveFrom,
@@ -183,7 +189,7 @@ checkIs(
 );
 checkIs('no element at all is silence, not a crash', soundForPress(null) === '');
 
-// The recogniser on its own, since the change event and dragend call it directly rather than through a press.
+// The recognizer on its own, since the change event and dragend call it directly rather than through a press.
 checkIs('a button is a control', isClickableElement(el({ selectors: ['button'] })) === true);
 checkIs('and so is a <select>', isClickableElement(el({ selectors: ['select'] })) === true);
 checkIs('while a bare div is not', isClickableElement(plainDiv()) === false);
@@ -206,7 +212,7 @@ checkIs(
   soundDirectiveFor(el({ selectors: ['[data-sound]'], attrs: { 'data-sound': 'sound-on' } })) === 'sound-on'
 );
 checkIs(
-  'an unrecognised directive falls back to the click',
+  'an unrecognized directive falls back to the click',
   soundForPress(el({ selectors: ['button'], attrs: { 'data-sound': 'loud' } })) === 'click'
 );
 checkIs(
@@ -340,6 +346,61 @@ checkIs('and only the toggle pair bypasses the mute gate', isToggleSound('sound_
 checkIs('the heavier click obeys the member\'s setting like the plain one', !isToggleSound('click_double') && !TOGGLE_SOUNDS.includes('click'));
 
 // ---------------------------------------------------------------------------
+// 3b. The levels, and the Debug page's session overrides
+// ---------------------------------------------------------------------------
+// A level can arrive from a slider, so it can arrive wrong: too high for an Audio element, or not a number at all.
+// Clamping is therefore a rule rather than a detail - and the fallback direction matters, because a level that
+// cannot be read must not be the one that silences a sound.
+console.log('\n--- levels ---');
+check('the range is what an Audio element accepts', [SOUND_VOLUME_MIN, SOUND_VOLUME_MAX], [0, 1]);
+checkIs('and the slider step divides it evenly', Number.isInteger(1 / SOUND_VOLUME_STEP), `step ${SOUND_VOLUME_STEP}`);
+check('below the range is clamped up to nothing', clampSoundVolume(-0.5), 0);
+check('above it is clamped down to full', clampSoundVolume(4), 1);
+check('a level inside it passes through', clampSoundVolume(0.35), 0.35);
+check('a numeric string is read', clampSoundVolume('0.2'), 0.2);
+check('and anything unreadable falls back to the shipped default', clampSoundVolume('loud'), SOUND_VOLUME.default);
+check('including a missing value', clampSoundVolume(undefined), SOUND_VOLUME.default);
+check('and a NaN', clampSoundVolume(Number.NaN), SOUND_VOLUME.default);
+
+check('a tuned sound plays at its own level', soundVolumeFor('click', {}), SOUND_VOLUME.click);
+check('an untuned one at the shared default', soundVolumeFor('toast_success', {}), SOUND_VOLUME.default);
+check('an override wins', soundVolumeFor('click', { click: 0.85 }), 0.85);
+check('but only for its own sound', soundVolumeFor('toast_success', { click: 0.85 }), SOUND_VOLUME.default);
+check('a null override is not an override', soundVolumeFor('click', { click: null }), SOUND_VOLUME.click);
+check('and a silly one is clamped, not obeyed', soundVolumeFor('click', { click: 9 }), 1);
+check('the engine holds its overrides in a Map', soundVolumeFor('click', new Map([['click', 0.1]])), 0.1);
+
+// The rows are what the Debug page renders. Every sound has one, seeded from the shipped mix, and only the sounds
+// somebody moved are marked as moved - which is what lets a row be put back on its own.
+const shippedRows = soundVolumeRows({});
+check('every sound has a level row', shippedRows.map((row) => row.name), REQUIRED_SOUNDS);
+check('seeded from the shipped mix', shippedRows.every((row) => row.volume === row.shipped), true);
+check('with none of them marked as moved', shippedRows.filter((row) => row.overridden).length, 0);
+check(
+  'and each row says where its shipped level came from',
+  [
+    shippedRows.find((row) => row.name === 'click').shippedFrom,
+    shippedRows.find((row) => row.name === 'toast_success').shippedFrom,
+  ],
+  ['click', 'default']
+);
+checkIs(
+  'every shipped level lands exactly on a slider position',
+  shippedRows.every((row) => Math.abs(row.shipped / SOUND_VOLUME_STEP - Math.round(row.shipped / SOUND_VOLUME_STEP)) < 1e-9),
+  `shipped: ${shippedRows.map((row) => row.shipped).join(', ')}`
+);
+
+const movedRows = soundVolumeRows({ click: 0.05, notification: 0.2 });
+check('a moved sound is marked as moved', movedRows.filter((row) => row.overridden).map((row) => row.name), ['click', 'notification']);
+check('and shows the level in force', movedRows.find((row) => row.name === 'notification').volume, 0.2);
+check('while still showing what it ships at', movedRows.find((row) => row.name === 'notification').shipped, SOUND_VOLUME.default);
+check(
+  'every other sound is untouched',
+  movedRows.filter((row) => !row.overridden).every((row) => row.volume === row.shipped),
+  true
+);
+
+// ---------------------------------------------------------------------------
 // 4. The rule, applied to the app's own buttons
 // ---------------------------------------------------------------------------
 // The table above says what the policy MEANS; this reads every button in the codebase and says what it DOES. It is
@@ -376,10 +437,10 @@ allSources.forEach((file) => {
     if (close === -1 || tagEnd === -1) break;
     // A button's own words: an explicit label, or its visible text with any JSX expressions removed.
     const attributes = source.slice(cursor, tagEnd);
-    const labelled = /(?:aria-label|title)="([^"]{2,40})"/.exec(attributes);
+    const labeled = /(?:aria-label|title)="([^"]{2,40})"/.exec(attributes);
     const inner = source.slice(tagEnd + 1, close).replace(/\{[\s\S]*?\}/g, '');
     const text = inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    const words = labelled ? labelled[1] : text;
+    const words = labeled ? labeled[1] : text;
     // Skip entries that are code rather than a label: a button built from several JSX fragments can leave
     // attribute text behind, and listing it would make the report harder to trust than it is useful.
     if (words && !/["={}<>]|\/\//.test(words)) interactiveLabels.push(words.slice(0, CONTROL_LABEL_LIMIT));
@@ -504,14 +565,14 @@ const touchPointer = { clientX: 10, clientY: 10, button: 0, pointerType: 'touch'
   const scrolled = trackerWith();
   scrolled.tracker.onPointerDown(touch);
   scrolled.tracker.onPointerUp({ ...touch, clientX: 10, clientY: 220 });
-  check('a finger that travelled was scrolling, and is silent', scrolled.played.length, 0);
+  check('a finger that traveled was scrolling, and is silent', scrolled.played.length, 0);
 
-  const cancelled = trackerWith();
-  cancelled.tracker.onPointerDown(touch);
+  const canceled = trackerWith();
+  canceled.tracker.onPointerDown(touch);
   // A scroll the browser takes over arrives as pointercancel, and nothing else follows it.
-  cancelled.tracker.onPointerCancel({ ...touch });
-  cancelled.tracker.onPointerUp({ ...touch, clientX: 10, clientY: 10 });
-  check('and a cancelled touch plays nothing at all', cancelled.played.length, 0);
+  canceled.tracker.onPointerCancel({ ...touch });
+  canceled.tracker.onPointerUp({ ...touch, clientX: 10, clientY: 10 });
+  check('and a canceled touch plays nothing at all', canceled.played.length, 0);
 
   // The sounds toggle still speaks for itself on a touch screen, and still forces its sound through the mute gate.
   const toggled = trackerWith();
@@ -686,7 +747,7 @@ checkIs('and removes every one of them again', /removeEventListener\(event, hand
 const codeSource = readSource('src/services/Code.gs');
 checkIs('the backend accepts the key', /settingsValues\.is_sounds_active =/.test(codeSource));
 checkIs(
-  'and normalises it to TRUE/FALSE rather than storing whatever arrives',
+  'and normalizes it to TRUE/FALSE rather than storing whatever arrives',
   /String\(payload\.is_sounds_active\)\.trim\(\)\.toUpperCase\(\) === "FALSE" \? "FALSE" : "TRUE"/.test(codeSource)
 );
 checkIs(
@@ -839,7 +900,7 @@ checkIs('and its fallback when the sheet has no such row is TRUE', /is_sounds_ac
 // The minigame: its own sounds untouched, and opted out of the app's click.
 const runnerSource = readSource('src/components/FirefighterRunner/FirefighterRunner.jsx');
 checkIs('the runner opts the whole minigame out of the UI click', /data-sound="none"/.test(runnerSource));
-// An IMPORT is what would change its behaviour - the comment above data-sound mentions uiSounds by name, which is
+// An IMPORT is what would change its behavior - the comment above data-sound mentions uiSounds by name, which is
 // documentation rather than coupling.
 checkIs(
   'and nothing in it imports the app sounds, so its own audio is untouched',

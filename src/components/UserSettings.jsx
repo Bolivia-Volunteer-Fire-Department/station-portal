@@ -421,16 +421,16 @@ function NotificationsCard({
   // was on. Both calls are cheap - the token comes from the SDK's own cache, and no permission
   // prompt is involved once a subscription exists.
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
 
     const readDevice = async () => {
       if (!supported) {
-        if (!cancelled) setThisDevice({ known: true, enabled: false, token: '' });
+        if (!canceled) setThisDevice({ known: true, enabled: false, token: '' });
         return;
       }
 
       const token = fcmConfigured ? await currentDeviceToken(webConfig, vapidKey) : null;
-      if (cancelled) return;
+      if (canceled) return;
 
       setThisDevice({ known: true, enabled: !!token, token: token || '' });
       setPermission(notificationPermission());
@@ -440,7 +440,7 @@ function NotificationsCard({
       try {
         await pushDeviceApi.register(token, deviceLabelFromUserAgent(navigator.userAgent));
         const result = await pushDeviceApi.list();
-        if (!cancelled && result?.success) setDeviceTotal((result.devices || []).length);
+        if (!canceled && result?.success) setDeviceTotal((result.devices || []).length);
       } catch (err) {
         // Not fatal: the device is still subscribed, it just may not be listed. Enabling again from
         // the button below re-registers it.
@@ -450,7 +450,7 @@ function NotificationsCard({
 
     readDevice();
     return () => {
-      cancelled = true;
+      canceled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supported, fcmConfigured, currentUser?.id]);
@@ -794,7 +794,7 @@ function AccessCard({ currentRole }) {
             </p>
             {audit.unknownColumns.length > 0 && (
               <p className="text-xs">
-                These columns are not recognised, so they do nothing:{' '}
+                These columns are not recognized, so they do nothing:{' '}
                 <span className="font-mono">{shorten(audit.unknownColumns)}</span> — check for a typo.
               </p>
             )}

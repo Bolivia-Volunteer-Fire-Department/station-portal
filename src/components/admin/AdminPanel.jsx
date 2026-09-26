@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, GraduationCap, ScrollText, Megaphone, Book } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -12,9 +12,11 @@ import AdminClockManagementTab from './AdminClockManagementTab';
 import AdminPendingApprovalsTab from './AdminPendingApprovalsTab';
 import AdminNotificationsTab from './AdminNotificationsTab';
 import AdminSystemLogTab from './AdminSystemLogTab';
+import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
 import AdminTrainingTab from './AdminTrainingTab';
 import AdminAnnouncementsTab from './AdminAnnouncementsTab';
+import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
 import { allowedAdminTabs, shouldFocusApprovals } from '../../utils/permissions';
@@ -72,6 +74,7 @@ export const ADMIN_NAV_CATEGORIES = [
     icon: Book,
     items: [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
+      { id: 'documents', label: 'Documents', icon: BookText },
       { id: 'training', label: 'Training', icon: GraduationCap },
     ],
   },
@@ -85,6 +88,9 @@ export const ADMIN_NAV_CATEGORIES = [
       // Deliberately NOT part of refreshAdminData: the log is the largest table in the app, so it is
       // fetched only when this tab is opened. See AdminSystemLogTab.
       { id: 'system-log', label: 'System Log', icon: ScrollText },
+      // Debug fires the app's own toasts, dialogs and sounds from buttons. Like the log it is not part of the
+      // refresh wave, and unlike the log it fetches nothing at all - see AdminDebugTab.
+      { id: 'debug', label: 'Debug', icon: Bug },
       // Help needs no permission column - see ADMIN_PERMISSIONLESS_TABS in
       // utils/permissions.js. It is open to anyone who can reach Administration at all.
       { id: 'help', label: 'Help', icon: BookOpen },
@@ -398,6 +404,12 @@ export default function AdminPanel({
         <AdminSystemLogTab token={token} users={users} timeFormat={timeFormat} />
       )}
 
+      {/* Debug: fires the app's own feedback on demand. Gated on can_access_debug by the nav. It takes no token
+          and fetches nothing - every button on it is client-side, which is also why nothing here can be a way to
+          change a row. The station's own loading messages are passed through so the overlay preview says what this
+          station would say. */}
+      {activeSubTab === 'debug' && <AdminDebugTab systemSettings={systemSettings} />}
+
       {/* Guides for administrators, from src/content/help/admin/*.md. No permission gates
           this tab beyond being able to open Administration at all. */}
       {activeSubTab === 'help' && <HelpGuides scope="admin" />}
@@ -410,6 +422,17 @@ export default function AdminPanel({
           roles={roles}
           ranks={ranks}
           users={users}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Documents: gated on can_manage_documents by the nav, and enforced again by every action behind it. */}
+      {activeSubTab === 'documents' && (
+        <AdminDocumentsTab
+          token={token}
+          ranks={ranks}
+          users={users}
+          timeFormat={timeFormat}
           onDataChanged={onDataChanged}
         />
       )}

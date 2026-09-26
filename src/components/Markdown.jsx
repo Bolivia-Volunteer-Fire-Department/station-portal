@@ -1,56 +1,27 @@
 import React, { useMemo } from 'react';
 import { CircleAlert, Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
 import { parseMarkdown } from '../utils/markdown';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, headingClass } from '../utils/markdownStyles';
 
 // Renders the parsed markdown tree as React elements.
 //
-// Nothing here uses dangerouslySetInnerHTML: every piece of guide text becomes a text node, so
-// HTML written inside a guide shows up as literal text instead of being executed. Links open in
-// a new tab (a guide is documentation, not a navigation step) and carry rel="noreferrer".
+// Nothing here uses dangerouslySetInnerHTML: every piece of guide text becomes a text node, so HTML written inside
+// a guide shows up as literal text instead of being executed. Links open in a new tab (a guide is documentation,
+// not a navigation step) and carry rel="noreferrer".
+//
+// THE STYLES ARE SHARED. Every class that decides how something looks comes from utils/markdownStyles, which the
+// rich editor also renders with - so a heading cannot look one way while an author writes it and another way when
+// a member reads it. What stays here is only what React owns: which icon a callout wears.
 
-const HEADING_CLASSES = {
-  1: 'text-lg font-bold text-slate-900 dark:text-white',
-  2: 'text-base font-semibold text-slate-900 dark:text-white',
-  3: 'text-sm font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300',
+// The five alert types, styled like GitHub's: a colored left rule, the type's icon, and its name, because color
+// alone is not a signal everyone receives. The classes and the name come from the shared table; the icon is here.
+const CALLOUT_ICONS = {
+  note: Info,
+  tip: Lightbulb,
+  important: CircleAlert,
+  warning: TriangleAlert,
+  caution: OctagonAlert,
 };
-
-// The five alert types, styled like GitHub's: a colored left rule, the type's icon, and its name -
-// the label matters because color alone is not a signal everyone receives.
-const ALERTS = {
-  note: {
-    label: 'Note',
-    Icon: Info,
-    box: 'border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-900/50',
-    head: 'text-slate-600 dark:text-slate-300',
-  },
-  tip: {
-    label: 'Tip',
-    Icon: Lightbulb,
-    box: 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/40',
-    head: 'text-emerald-700 dark:text-emerald-400',
-  },
-  important: {
-    label: 'Important',
-    Icon: CircleAlert,
-    box: 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/40',
-    head: 'text-violet-700 dark:text-violet-400',
-  },
-  warning: {
-    label: 'Warning',
-    Icon: TriangleAlert,
-    box: 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40',
-    head: 'text-amber-700 dark:text-amber-400',
-  },
-  caution: {
-    label: 'Caution',
-    Icon: OctagonAlert,
-    box: 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40',
-    head: 'text-red-700 dark:text-red-400',
-  },
-};
-
-const headingClass = (level) =>
-  HEADING_CLASSES[level] || HEADING_CLASSES[3];
 
 const inlineChildren = (tokens, keyPrefix) =>
   (tokens || []).map((token, index) => {
@@ -61,24 +32,21 @@ const inlineChildren = (tokens, keyPrefix) =>
         return <strong key={key}>{inlineChildren(token.children, key)}</strong>;
       case 'italic':
         return <em key={key}>{inlineChildren(token.children, key)}</em>;
+      case 'color':
+        return (
+          <mark key={key} className={INLINE_CLASSES.highlight}>
+            {inlineChildren(token.children, key)}
+          </mark>
+        );
       case 'code':
         return (
-          <code
-            key={key}
-            className="rounded bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 px-1 py-0.5 font-mono text-[11px]"
-          >
+          <code key={key} className={INLINE_CLASSES.code}>
             {token.value}
           </code>
         );
       case 'link':
         return (
-          <a
-            key={key}
-            href={token.href}
-            target="_blank"
-            rel="noreferrer"
-            className="text-red-600 dark:text-red-400 underline underline-offset-2"
-          >
+          <a key={key} href={token.href} target="_blank" rel="noreferrer" className={INLINE_CLASSES.link}>
             {inlineChildren(token.children, key)}
           </a>
         );
@@ -101,10 +69,7 @@ const renderBlock = (block, index) => {
     }
     case 'code':
       return (
-        <pre
-          key={key}
-          className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-3 text-[11px] leading-relaxed"
-        >
+        <pre key={key} className={BLOCK_CLASSES.code}>
           <code>{block.value}</code>
         </pre>
       );
@@ -113,7 +78,7 @@ const renderBlock = (block, index) => {
       return (
         <Tag
           key={key}
-          className={`${block.ordered ? 'list-decimal' : 'list-disc'} pl-5 space-y-1`}
+          className={`${block.ordered ? BLOCK_CLASSES.numbers : BLOCK_CLASSES.bullets} ${BLOCK_CLASSES.list}`}
         >
           {block.items.map((item, itemIndex) => (
             <li key={`${key}-${itemIndex}`}>{inlineChildren(item, `${key}-${itemIndex}`)}</li>
@@ -123,38 +88,36 @@ const renderBlock = (block, index) => {
     }
     case 'quote':
       return (
-        <blockquote
-          key={key}
-          className="border-l-4 border-slate-300 dark:border-slate-600 pl-3 text-slate-500 dark:text-slate-400 italic"
-        >
+        <blockquote key={key} className={BLOCK_CLASSES.quote}>
           {inlineChildren(block.children, key)}
         </blockquote>
       );
     case 'rule':
-      return <hr key={key} className="border-slate-200 dark:border-slate-700" />;
+      return <hr key={key} className={BLOCK_CLASSES.rule} />;
     case 'alert': {
-      // An unknown kind cannot reach here (the parser refuses unrecognised markers), but defaulting
-      // to Note keeps a future kind from rendering as an unstyled box.
-      const alert = ALERTS[block.kind] || ALERTS.note;
-      const { Icon } = alert;
+      // An unknown kind cannot reach here (the parser refuses unrecognized markers), but defaulting to Note keeps a
+      // future kind from rendering as an unstyled box.
+      const kind = CALLOUT_CLASSES[block.kind] ? block.kind : 'note';
+      const style = CALLOUT_CLASSES[kind];
+      const Icon = CALLOUT_ICONS[kind] || Info;
       return (
-        <div key={key} className={`rounded-xl border border-l-4 px-3 py-2 ${alert.box}`}>
-          <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${alert.head}`}>
+        <div key={key} className={`${BLOCK_CLASSES.calloutBox} ${style.box}`}>
+          <div className={`${BLOCK_CLASSES.calloutHead} ${style.head}`}>
             <Icon className="w-3.5 h-3.5 shrink-0" />
-            <span>{alert.label}</span>
+            <span>{style.label}</span>
           </div>
-          <div className="mt-1.5 space-y-2">{block.blocks.map(renderBlock)}</div>
+          <div className={BLOCK_CLASSES.calloutBody}>{block.blocks.map(renderBlock)}</div>
         </div>
       );
     }
     case 'table':
       return (
-        <div key={key} className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs">
+        <div key={key} className={BLOCK_CLASSES.tableWrap}>
+          <table className={BLOCK_CLASSES.table}>
             <thead>
-              <tr className="border-b border-slate-300 dark:border-slate-600">
+              <tr className={BLOCK_CLASSES.tableHeadRow}>
                 {block.head.map((cell, cellIndex) => (
-                  <th key={`${key}-h-${cellIndex}`} className="py-1.5 pr-3 font-semibold">
+                  <th key={`${key}-h-${cellIndex}`} className={BLOCK_CLASSES.tableHeadCell}>
                     {inlineChildren(cell, `${key}-h-${cellIndex}`)}
                   </th>
                 ))}
@@ -162,12 +125,9 @@ const renderBlock = (block, index) => {
             </thead>
             <tbody>
               {block.rows.map((row, rowIndex) => (
-                <tr
-                  key={`${key}-r-${rowIndex}`}
-                  className="border-b border-slate-100 dark:border-slate-800"
-                >
+                <tr key={`${key}-r-${rowIndex}`} className={BLOCK_CLASSES.tableRow}>
                   {row.map((cell, cellIndex) => (
-                    <td key={`${key}-r-${rowIndex}-${cellIndex}`} className="py-1.5 pr-3 align-top">
+                    <td key={`${key}-r-${rowIndex}-${cellIndex}`} className={BLOCK_CLASSES.tableCell}>
                       {inlineChildren(cell, `${key}-r-${rowIndex}-${cellIndex}`)}
                     </td>
                   ))}
@@ -185,9 +145,5 @@ const renderBlock = (block, index) => {
 export default function Markdown({ markdown }) {
   const blocks = useMemo(() => parseMarkdown(markdown), [markdown]);
 
-  return (
-    <div className="space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
-      {blocks.map(renderBlock)}
-    </div>
-  );
+  return <div className={BLOCK_CLASSES.body}>{blocks.map(renderBlock)}</div>;
 }

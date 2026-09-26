@@ -15,10 +15,10 @@ const rowVersionField = (record) => (record && record.row_version !== undefined 
 // here by hand.
 //
 // This file used to keep its own copy of the keys, and that copy is what broke: a switch added to the
-// catalogue and to the backend whitelist but NOT here was never sent, so the payload carried only an
+// catalog and to the backend whitelist but NOT here was never sent, so the payload carried only an
 // id, the backend answered "No settings were supplied.", and the member saw "Failed to save
 // notification preference." Three hand-maintained lists existed; this removes one of them entirely,
-// and verify:notification-prefs asserts the remaining two agree with the catalogue.
+// and verify:notification-prefs asserts the remaining two agree with the catalog.
 //
 // Exported so the verifier can exercise it directly rather than re-implementing the enumeration.
 export const notificationPrefFields = (settings) => {
@@ -31,7 +31,7 @@ export const notificationPrefFields = (settings) => {
 
 // How long any single backend call may take before it is abandoned.
 //
-// Generous on purpose: Apps Script serialises requests behind a script lock, so a refresh wave can
+// Generous on purpose: Apps Script serializes requests behind a script lock, so a refresh wave can
 // legitimately queue for tens of seconds under load. This is a backstop against a request that
 // never returns at all, not a performance budget - without it, one stalled call leaves a caller
 // awaiting forever, which the UI shows as a spinner that never stops.
@@ -47,7 +47,7 @@ const isTimeoutAbort = (err) =>
 
 // How long a refused write waits before its single retry, in ms, and its ceiling.
 //
-// The server refuses a write it could not serialise (code BUSY) and asks for a short wait; this caps how long
+// The server refuses a write it could not serialize (code BUSY) and asks for a short wait; this caps how long
 // that wait can be so a hostile or mistaken `retry_after` cannot stall a save behind a long sleep.
 const BUSY_RETRY_DEFAULT_MS = 1000;
 const BUSY_RETRY_CAP_MS = 6000;
@@ -85,7 +85,7 @@ const busyRetryWaitMs = (data) => {
 // doGet. Mutations never retry on network errors (only on the safe redirect
 // marker, and on an explicit BUSY refusal), so a write can never be applied twice.
 async function appScriptRequest(body, { retryOnNetworkError = false } = {}) {
-  // Every request is bounded. Apps Script serialises requests behind a script lock in doPost, so a
+  // Every request is bounded. Apps Script serializes requests behind a script lock in doPost, so a
   // long queue was previously able to leave a caller waiting indefinitely - and because callers
   // await these before clearing a spinner, an unbounded wait looked like a hung screen. A timeout
   // turns that into a normal, retryable error.
@@ -385,7 +385,7 @@ export const fetchTraining = async (token) =>
   appScriptFetch({ action: 'GET_TRAINING', token });
 
 // Signs a batch of trainings in one request. Add-only on purpose - the backend refuses any
-// removal, because a signature is an acknowledgement of attendance rather than a preference.
+// removal, because a signature is an acknowledgment of attendance rather than a preference.
 export const signTraining = async (trainingIds, token) =>
   appScriptFetch({
     action: 'SIGN_TRAINING',
@@ -461,12 +461,124 @@ export const adminSaveAnnouncement = async (announcementData, token) =>
 export const adminDeleteAnnouncement = async (id, token) =>
   appScriptFetch({ action: 'ADMIN_DELETE_ANNOUNCEMENT', token, id });
 
+// --- Documents -------------------------------------------------------------------
+//
+// Two read pairs, because the audiences differ: a member reads what is published and at or above
+// their rank, an administrator reads everything including drafts. Both list reads are METADATA
+// ONLY - the body is fetched one document at a time - which is what keeps opening the module
+// cheap however large the library gets.
+
+export const fetchDocuments = async (token) => appScriptFetch({ action: 'GET_DOCUMENTS', token });
+
+export const fetchDocument = async (id, token) => appScriptFetch({ action: 'GET_DOCUMENT', token, id });
+
+export const adminFetchDocuments = async (token) => appScriptFetch({ action: 'ADMIN_GET_DOCUMENTS', token });
+
+export const adminFetchDocument = async (id, token) => appScriptFetch({ action: 'ADMIN_GET_DOCUMENT', token, id });
+
+export const adminSaveDocument = async (documentData, token) =>
+  appScriptFetch({
+    action: 'ADMIN_SAVE_DOCUMENT',
+    token,
+    // A blank id creates; otherwise it updates in place. author_user_id is deliberately not sent: the
+    // backend stamps it from the session on create and never lets it change.
+    id: documentData.id || '',
+    row_version: rowVersionField(documentData),
+    title: documentData.title || '',
+    folder: documentData.folder || '',
+    doc_type: documentData.doc_type || 'markdown',
+    sort_order: documentData.sort_order ?? 0,
+    content: documentData.content ?? '',
+    // Defaults to published: the switch is a deliberate "hide while I write".
+    is_published: documentData.is_published === undefined ? true : Boolean(documentData.is_published),
+    rank_id: documentData.rank_id || '',
+    is_sign_required: Boolean(documentData.is_sign_required),
+  });
+
+export const adminDeleteDocument = async (id, token) =>
+  appScriptFetch({ action: 'ADMIN_DELETE_DOCUMENT', token, id });
+
+// Renames a folder by rewriting the column on the documents that carry the name. A blank `to` moves the
+// folder's documents back to unfiled, which is the only way to get rid of a folder - there is no folder
+// row to delete, because a folder is a name here rather than a record.
+export const adminRenameDocumentFolder = async (from, to, token) =>
+  appScriptFetch({ action: 'ADMIN_RENAME_DOCUMENT_FOLDER', token, from, to: to || '' });
+
+// --- Document signatures -----------------------------------------------------------
+//
+// A signature is ADD-ONLY from the member's side: the backend refuses a removal outright rather than ignoring
+// one, and removing a signature is an administrator's action. Note what is NOT sent by `signDocument`: the date,
+// who signed it and who it was for. All three are stamped from the session on the server.
+
+export const signDocument = async (id, token) => appScriptFetch({ action: 'SIGN_DOCUMENT', token, id });
+
+// The signature report for one document: administrators who manage documents, and the officers who verify
+// checklists. Named for what it returns rather than for who calls it - a verifier is not an administrator.
+export const fetchDocumentSignatures = async (id, token) =>
+  appScriptFetch({ action: 'GET_DOCUMENT_SIGNATURES', token, id });
+
+export const adminRemoveDocumentSignature = async (signatureId, token) =>
+  appScriptFetch({ action: 'ADMIN_REMOVE_DOCUMENT_SIGNATURE', token, id: signatureId });
+
+// --- Checklist items ---------------------------------------------------------------
+//
+// Signing and verifying a checklist item are two different things and are two different calls. `signChecklistItem`
+// is the member's own - the backend takes the member and the timestamp from the session, and refuses if the item
+// belongs to another document. `verifyChecklistItem` is somebody else's, and names the member whose item it is;
+// the backend refuses that user_id being the caller's own.
+//
+// `verifyChecklistRemaining` is the bulk form: everything one member has signed and nobody has confirmed, in one
+// request. It exists because a 40-item checklist would otherwise be 40 round trips against a script that takes
+// seconds per call, with no way to tell which of them had landed.
+
+export const signChecklistItems = async (documentId, itemIds, token) =>
+  appScriptFetch({
+    action: 'SIGN_CHECKLIST_ITEM',
+    token,
+    document_id: documentId,
+    // A list, because ticking several boxes and saving once is how the screen is used. The backend skips an item
+    // that is already signed or that belongs to another checklist, and counts it, rather than failing the batch.
+    item_ids: Array.isArray(itemIds) ? itemIds : [],
+  });
+
+export const verifyChecklistItem = async (documentId, itemId, userId, token) =>
+  appScriptFetch({
+    action: 'VERIFY_CHECKLIST_ITEM',
+    token,
+    document_id: documentId,
+    item_id: itemId,
+    user_id: userId,
+  });
+
+export const verifyChecklistRemaining = async (documentId, userId, token) =>
+  appScriptFetch({
+    action: 'VERIFY_CHECKLIST_REMAINING',
+    token,
+    document_id: documentId,
+    user_id: userId,
+  });
+
+export const adminSaveChecklistItem = async (item, token) =>
+  appScriptFetch({
+    action: 'ADMIN_SAVE_CHECKLIST_ITEM',
+    token,
+    // A blank id creates; an id edits IN PLACE, which is what keeps the signatures pointing at it.
+    id: item.id || '',
+    document_id: item.document_id || '',
+    sort_order: item.sort_order ?? 0,
+    section: item.section || '',
+    label: item.label || '',
+  });
+
+export const adminDeleteChecklistItem = async (id, token) =>
+  appScriptFetch({ action: 'ADMIN_DELETE_CHECKLIST_ITEM', token, id });
+
 // --- Events ---------------------------------------------------------------------
 //
 // Events are read by every signed-in member, because their calendars need them, and written only by a
 // role holding can_create_events.
 
-// The weekday flags, enumerated from the shared catalogue rather than listed by hand.
+// The weekday flags, enumerated from the shared catalog rather than listed by hand.
 //
 // Same reasoning as notificationPrefFields above: a hand-written copy of a key list is exactly what broke
 // the notification preferences, so anything enumerable is enumerated.

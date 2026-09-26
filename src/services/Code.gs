@@ -57,12 +57,20 @@ var READ_ONLY_ACTIONS = {
   ADMIN_GET_SYSTEM_LOG: true,
   ADMIN_GET_FCM_STATUS: true,
   ADMIN_GET_PUSH_STATUS: true,
+  // Documents: the list is metadata-only and a body is fetched one document at a time, so all four of these
+  // are cheap enough to skip the script lock.
+  GET_DOCUMENTS: true,
+  GET_DOCUMENT: true,
+  ADMIN_GET_DOCUMENTS: true,
+  ADMIN_GET_DOCUMENT: true,
+  // The signature report: a read of one document's signatures, so it needs no lock either.
+  GET_DOCUMENT_SIGNATURES: true,
 };
 
 // How long a WRITE waits for the script lock before giving up.
 //
 // It used to wait 10 seconds and then run the write ANYWAY, unlocked: `locked` was only consulted to decide
-// whether to release it, so a timed-out wait silently downgraded a serialised write to a racing one. Two
+// whether to release it, so a timed-out wait silently downgraded a serialized write to a racing one. Two
 // writers that overlap can lose one of the two updates, so failing to take the lock is now a refusal the
 // caller can retry rather than a silent risk.
 //
@@ -88,7 +96,7 @@ function actionNeedsWriteLock(action) {
 //
 // The caller MUST refuse the action when this comes back not-ok, without touching the sheet. The refusal is
 // only honest if it writes nothing at all - no cell, no log row, no session property - because writing is
-// precisely what could not be serialised.
+// precisely what could not be serialized.
 function acquireWriteLock(lock, action) {
   if (!actionNeedsWriteLock(action)) return { ok: true, took: false };
   if (lock.tryLock(WRITE_LOCK_WAIT_MS)) return { ok: true, took: true };
@@ -250,7 +258,7 @@ function doPost(e) {
 
     // The lock is taken for WRITES only.
     //
-    // Apps Script runs a script's executions concurrently, but this lock serialised every request - and a
+    // Apps Script runs a script's executions concurrently, but this lock serialized every request - and a
     // refresh wave is ten requests, so a save's background reloads crawled through one at a time behind
     // whatever write was in flight. Reads hold nothing, so they now run together and the wave finishes in
     // about the time of its slowest request.
@@ -615,6 +623,784 @@ function doPost(e) {
         break;
       }
 
+      // --- Documents ----------------------------------------------------------
+      //
+      // Read by any signed-in member (a station's own documents are for the crew), filtered by the
+      // session's own rank, and written only by a role holding can_manage_documents. The list is
+      // metadata-only and the body is fetched one document at a time - see the DOCUMENTS section for why.
+
+      case "GET_DOCUMENTS": {
+        const docAuth = getAuthContext(ss, data);
+        if (!docAuth) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+        responseData = {
+          success: true,
+          documents: memberDocumentRows(ss, docAuth.user, getSheetData(ss, "ranks")),
+          // The member's OWN signatures, filtered here by the session's id: what they have signed, and the
+          // verifier rows recorded about them. Never another member's.
+          signatures: documentSignaturesForUser(ss, docAuth.userId)
+        };
+        break;
+      }
+
+      case "GET_DOCUMENT": {
+        const docOneAuth = getAuthContext(ss, data);
+        if (!docOneAuth) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+        const wantedDocumentId = String(data.id || payload.id || "").trim();
+        const documentRanks = getSheetData(ss, "ranks");
+        const wantedDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), wantedDocumentId);
+
+        // A document the member may not see is reported as MISSING rather than as forbidden. Telling a member
+        // that a document exists but is above their rank is itself a disclosure, and the practical difference
+        // for the reader is nothing.
+        if (!wantedDocument ||
+            !isTruthyValue(wantedDocument.is_published) ||
+            !documentMeetsRank(documentRanks, docOneAuth.user && docOneAuth.user.rank_id, wantedDocument.rank_id)) {
+          responseData = { success: false, message: "That document is not available." };
+          break;
+        }
+
+        responseData = {
+          success: true,
+          document: documentFullRow(ss, wantedDocument),
+          // This member's own signature for it, so the module can say "signed on …" rather than asking again -
+          // and whether that signature predates the last edit.
+          signature: documentSignatureFor(ss, wantedDocument.id, docOneAuth.userId),
+          signature_stale: signatureIsStale(
+            documentSignatureFor(ss, wantedDocument.id, docOneAuth.userId),
+            wantedDocument
+          )
+        };
+        break;
+      }
+
+      case "ADMIN_GET_DOCUMENTS": {
+        const docListAuth = getAuthContext(ss, data);
+        if (!docListAuth || !hasRolePermission(ss, docListAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+        // Every row, unfiltered: drafts included, because an author has to be able to see what they are
+        // working on - and no rank filter, because managing documents means seeing all of them.
+        responseData = {
+          success: true,
+          documents: getSheetData(ss, DOCUMENT_SHEET).map(documentListRow).sort(documentListSort)
+        };
+        break;
+      }
+
+      case "ADMIN_GET_DOCUMENT": {
+        const docOneAdmin = getAuthContext(ss, data);
+        if (!docOneAdmin || !hasRolePermission(ss, docOneAdmin.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+        const adminDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), String(data.id || payload.id || "").trim());
+        if (!adminDocument) {
+          responseData = { success: false, message: "That document no longer exists." };
+          break;
+        }
+        responseData = { success: true, document: documentFullRow(ss, adminDocument) };
+        break;
+      }
+
+      case "ADMIN_SAVE_DOCUMENT": {
+        const docSaveAuth = getAuthContext(ss, data);
+        if (!docSaveAuth || !hasRolePermission(ss, docSaveAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const documentFields = documentFieldsFrom(data, payload);
+        const documentProblem = documentValidationError(documentFields, getSheetData(ss, "ranks"));
+        if (documentProblem) {
+          responseData = { success: false, message: documentProblem };
+          break;
+        }
+
+        const documentIsNew = String(documentFields.id || "") === "";
+        const existingDocument = documentIsNew
+          ? null
+          : findRowById(getSheetData(ss, DOCUMENT_SHEET), documentFields.id);
+        if (!documentIsNew && !existingDocument) {
+          responseData = { success: false, message: "That document no longer exists." };
+          break;
+        }
+
+        // The revision counts BODY edits only, so moving a document between folders does not make every
+        // signature look stale.
+        documentFields.content_revision = documentRevisionFor(documentFields, existingDocument);
+        documentFields.updated_at = getEasternTimestamp();
+
+        // The author comes from the session on create, and is stripped on update so an edit can never rewrite
+        // who wrote it.
+        if (documentIsNew) documentFields.author_user_id = docSaveAuth.userId;
+        else delete documentFields.author_user_id;
+
+        const documentTargetSheet = documentSheet(ss);
+        // Grow the header row for anything this save carries, so a column added to DOCUMENT_HEADERS later
+        // appears by itself the first time a document is saved.
+        ensureSheetHeaders(documentTargetSheet, Object.keys(documentFields));
+
+        const savedDocumentId = upsertSheetRowById(documentTargetSheet, documentFields);
+        responseData = { success: true, id: savedDocumentId, revision: documentFields.content_revision };
+
+        logSystemEvent(
+          ss,
+          docSaveAuth.userId,
+          "ADMIN_SAVE_DOCUMENT",
+          (documentIsNew ? "Created" : "Updated") + " document " + savedDocumentId
+        );
+        break;
+      }
+
+      case "ADMIN_DELETE_DOCUMENT": {
+        const docDeleteAuth = getAuthContext(ss, data);
+        if (!docDeleteAuth || !hasRolePermission(ss, docDeleteAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const documentIdToDelete = String(data.id || payload.id || "").trim();
+        if (!documentIdToDelete) {
+          responseData = { success: false, message: "No document was named." };
+          break;
+        }
+
+        const documentDeleteSheet = ss.getSheetByName(DOCUMENT_SHEET);
+        const documentToDelete = documentDeleteSheet
+          ? findRowById(getSheetData(ss, DOCUMENT_SHEET), documentIdToDelete)
+          : null;
+        if (!documentToDelete) {
+          responseData = { success: false, message: "That document no longer exists." };
+          break;
+        }
+
+        // Nothing may erase a signature by deleting what it was about. A signed document is retired by
+        // unpublishing it, and the refusal names the count so an administrator knows what to do instead.
+        const documentSignatures = documentSignatureCount(ss, documentIdToDelete);
+        if (documentSignatures > 0) {
+          responseData = {
+            success: false,
+            message: "This document has " + documentSignatures + " signature" +
+              (documentSignatures === 1 ? "" : "s") + ". Unpublish it instead of deleting it."
+          };
+          break;
+        }
+
+        responseData = { success: true, deleted: deleteSheetRowById(documentDeleteSheet, documentIdToDelete) };
+        logSystemEvent(ss, docDeleteAuth.userId, "ADMIN_DELETE_DOCUMENT", "Deleted document " + documentIdToDelete);
+        break;
+      }
+
+      case "ADMIN_RENAME_DOCUMENT_FOLDER": {
+        const docFolderAuth = getAuthContext(ss, data);
+        if (!docFolderAuth || !hasRolePermission(ss, docFolderAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const folderFrom = String(data.from || payload.from || "").trim();
+        const folderToRaw = data.to !== undefined ? data.to : payload.to;
+        const folderTo = String(folderToRaw === undefined || folderToRaw === null ? "" : folderToRaw)
+          .trim()
+          .slice(0, DOCUMENT_FOLDER_LIMIT);
+        if (!folderFrom) {
+          responseData = { success: false, message: "No folder was named." };
+          break;
+        }
+        if (folderFrom === folderTo) {
+          responseData = { success: true, renamed: 0 };
+          break;
+        }
+
+        const folderSheet = ss.getSheetByName(DOCUMENT_SHEET);
+        if (!folderSheet) {
+          responseData = { success: false, message: "There are no documents yet." };
+          break;
+        }
+
+        // One bulk write rather than one per row: the whole range is rewritten in a single setValues. These rows
+        // deliberately carry no row_version, so a rename can never be refused for being concurrent - it is not
+        // editing a document, it is moving the shelf the documents sit on.
+        const folderData = folderSheet.getDataRange().getValues();
+        const folderHeaders = (folderData[0] || []).map(String);
+        const folderColumn = folderHeaders.indexOf("folder");
+        if (folderColumn === -1) {
+          responseData = { success: false, message: "The documents sheet has no folder column." };
+          break;
+        }
+
+        let renamedCount = 0;
+        for (let folderRow = 1; folderRow < folderData.length; folderRow++) {
+          if (String(folderData[folderRow][folderColumn] || "").trim() !== folderFrom) continue;
+          folderData[folderRow][folderColumn] = folderTo;
+          renamedCount++;
+        }
+        if (renamedCount > 0) {
+          folderSheet.getRange(1, 1, folderData.length, folderData[0].length).setValues(folderData);
+        }
+
+        responseData = { success: true, renamed: renamedCount };
+        logSystemEvent(
+          ss,
+          docFolderAuth.userId,
+          "ADMIN_RENAME_DOCUMENT_FOLDER",
+          "Renamed folder " + folderFrom + " to " + (folderTo || "(unfiled)") +
+            " (" + renamedCount + " document" + (renamedCount === 1 ? "" : "s") + ")"
+        );
+        break;
+      }
+
+      case "SIGN_DOCUMENT": {
+        const signAuth = getAuthContext(ss, data);
+        if (!signAuth) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+
+        // Deliberately ADD-ONLY, exactly as SIGN_TRAINING is: a signature is an acknowledgment, so this action
+        // REFUSES a removal rather than ignoring one. A silent no-op would look like a working un-sign to a caller
+        // that expected one. Removal is ADMIN_REMOVE_DOCUMENT_SIGNATURE, behind can_manage_documents.
+        const requestedSignatureRemovals = payload.remove_signature_ids || data.remove_signature_ids || [];
+        if (Array.isArray(requestedSignatureRemovals) && requestedSignatureRemovals.length > 0) {
+          responseData = {
+            success: false,
+            message: "A signature cannot be withdrawn. Ask an administrator to remove it."
+          };
+          break;
+        }
+
+        const signDocumentId = String(data.id || payload.id || "").trim();
+        const signDocumentRow = findRowById(getSheetData(ss, DOCUMENT_SHEET), signDocumentId);
+
+        // The same answer GET_DOCUMENT gives: what the member may not see is reported as MISSING rather than as
+        // forbidden, so a crafted request learns nothing about what exists above their rank.
+        if (!signDocumentRow ||
+            !isTruthyValue(signDocumentRow.is_published) ||
+            !documentMeetsRank(getSheetData(ss, "ranks"), signAuth.user && signAuth.user.rank_id, signDocumentRow.rank_id)) {
+          responseData = { success: false, message: "That document is not available." };
+          break;
+        }
+        if (!isTruthyValue(signDocumentRow.is_sign_required)) {
+          responseData = { success: false, message: "That document does not need a signature." };
+          break;
+        }
+
+        const existingSignature = documentSignatureFor(ss, signDocumentId, signAuth.userId);
+        if (existingSignature) {
+          // Signing twice is a repeated click, not an error - the sheet must not gain a second row for the same
+          // member and document, and the caller is told what is already on file.
+          responseData = {
+            success: true,
+            signed: 0,
+            already_signed: true,
+            signature: existingSignature,
+            signatures: documentSignaturesForUser(ss, signAuth.userId)
+          };
+          break;
+        }
+
+        const signatureFields = {
+          id: "",
+          document_id: signDocumentId,
+          checklist_item_id: "",
+          // BOTH identities come from the SESSION. Who signed, and who it was for, is never taken from the
+          // payload - which is what makes "a member cannot sign another member's checklist" a fact rather than a
+          // convention a crafted request can ignore.
+          user_id: String(signAuth.userId),
+          signed_by_user_id: String(signAuth.userId),
+          signature_role: "member",
+          // Server-stamped: a date the caller supplies is not evidence of anything.
+          signed_at: getEasternTimestamp(),
+          // What the document said when it was signed, for the "signed before the latest edit" report.
+          content_revision: parseInt(signDocumentRow.content_revision, 10) || 0
+        };
+
+        const signatureSheet = documentSignatureSheet(ss);
+        ensureSheetHeaders(signatureSheet, Object.keys(signatureFields));
+        const savedSignatureId = upsertSheetRowById(signatureSheet, signatureFields);
+
+        responseData = {
+          success: true,
+          signed: 1,
+          id: savedSignatureId,
+          signature: documentSignatureFor(ss, signDocumentId, signAuth.userId),
+          signatures: documentSignaturesForUser(ss, signAuth.userId)
+        };
+        logSystemEvent(ss, signAuth.userId, "SIGN_DOCUMENT", "Signed document " + signDocumentId);
+        break;
+      }
+
+      case "GET_DOCUMENT_SIGNATURES": {
+        const signatureListAuth = getAuthContext(ss, data);
+        // Administrators who manage documents, and the officers who verify checklists: verifying somebody's
+        // checklist does not make you an administrator, and it is not a job that should require one.
+        if (!signatureListAuth || !hasAnyRolePermission(ss, signatureListAuth.userId, ["can_manage_documents", "can_verify_documents"])) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+        const signatureDocumentId = String(data.id || payload.id || "").trim();
+        const signatureDocumentRow = findRowById(getSheetData(ss, DOCUMENT_SHEET), signatureDocumentId);
+        if (!signatureDocumentRow) {
+          responseData = { success: false, message: "That document no longer exists." };
+          break;
+        }
+        responseData = {
+          success: true,
+          // Whoever is looking at this list is looking at ITEMS: the panel is the checklist's rows, and reading
+          // them separately would mean a rank-restricted verifier could hold the signatures but not the labels.
+          // Only the items travel with the signatures - never the document's text.
+          items: documentItemRows(ss, signatureDocumentId).map(function (item) {
+            return {
+              id: String(item.id || ""),
+              document_id: String(item.document_id || ""),
+              sort_order: parseInt(item.sort_order, 10) || 0,
+              section: String(item.section || ""),
+              label: String(item.label || "")
+            };
+          }),
+          signatures: documentSignaturesForDocument(ss, signatureDocumentId).map(function (signature) {
+            // Staleness is decided HERE, against the document as it stands now, so every screen shows the same
+            // judgment instead of each computing its own.
+            return Object.assign({}, signature, { stale: signatureIsStale(signature, signatureDocumentRow) });
+          })
+        };
+        break;
+      }
+
+      case "ADMIN_REMOVE_DOCUMENT_SIGNATURE": {
+        const signatureRemoveAuth = getAuthContext(ss, data);
+        if (!signatureRemoveAuth || !hasRolePermission(ss, signatureRemoveAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+        const signatureIdToRemove = String(
+          data.id || payload.id || data.signature_id || payload.signature_id || ""
+        ).trim();
+        if (!signatureIdToRemove) {
+          responseData = { success: false, message: "No signature was named." };
+          break;
+        }
+
+        const signatureRemoveSheet = ss.getSheetByName(DOCUMENT_SIGNATURE_SHEET);
+        const signatureToRemove = signatureRemoveSheet
+          ? findRowById(getSheetData(ss, DOCUMENT_SIGNATURE_SHEET), signatureIdToRemove)
+          : null;
+        if (!signatureToRemove) {
+          responseData = { success: false, message: "That signature no longer exists." };
+          break;
+        }
+
+        responseData = { success: true, deleted: deleteSheetRowById(signatureRemoveSheet, signatureIdToRemove) };
+        logSystemEvent(
+          ss,
+          signatureRemoveAuth.userId,
+          "ADMIN_REMOVE_DOCUMENT_SIGNATURE",
+          "Removed a signature on document " + String(signatureToRemove.document_id || "")
+        );
+        break;
+      }
+
+      case "ADMIN_SAVE_CHECKLIST_ITEM": {
+        const itemAuth = getAuthContext(ss, data);
+        if (!itemAuth || !hasRolePermission(ss, itemAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const itemFields = checklistItemFieldsFrom(data, payload);
+        const itemDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), itemFields.document_id);
+        const itemProblem = checklistItemValidationError(itemFields, itemDocument);
+        if (itemProblem) {
+          responseData = { success: false, message: itemProblem };
+          break;
+        }
+
+        // Editing an existing item keeps its id, so every signature pointing at it stays pointing at it. An item
+        // is deliberately never re-pointed at a different document: that would move a signature to another
+        // checklist, which is exactly what the stable id exists to prevent.
+        if (String(itemFields.id || "") !== "") {
+          const existingItem = checklistItemById(ss, itemFields.id);
+          if (!existingItem) {
+            responseData = { success: false, message: "That item no longer exists." };
+            break;
+          }
+          if (String(existingItem.document_id || "").trim() !== itemFields.document_id) {
+            responseData = { success: false, message: "An item cannot be moved to another document." };
+            break;
+          }
+        }
+
+        const itemSheet = checklistItemSheet(ss);
+        ensureSheetHeaders(itemSheet, Object.keys(itemFields));
+        const savedItemId = upsertSheetRowById(itemSheet, itemFields);
+
+        // The wording of a checklist changed, so signatures taken before now are stale - the same rule as an edit
+        // to a document's own text.
+        bumpDocumentRevision(ss, itemFields.document_id, null);
+
+        responseData = { success: true, id: savedItemId, items: documentItemRows(ss, itemFields.document_id) };
+        logSystemEvent(
+          ss,
+          itemAuth.userId,
+          "ADMIN_SAVE_CHECKLIST_ITEM",
+          (String(itemFields.id || "") === "" ? "Created" : "Updated") + " item " + savedItemId
+        );
+        break;
+      }
+
+      case "ADMIN_DELETE_CHECKLIST_ITEM": {
+        const itemDeleteAuth = getAuthContext(ss, data);
+        if (!itemDeleteAuth || !hasRolePermission(ss, itemDeleteAuth.userId, "can_manage_documents")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const itemIdToDelete = String(data.id || payload.id || "").trim();
+        const itemToDelete = checklistItemById(ss, itemIdToDelete);
+        if (!itemToDelete) {
+          responseData = { success: false, message: "That item no longer exists." };
+          break;
+        }
+
+        // Nothing may erase a signature by deleting what it was about - the same rule that stops a signed
+        // document being deleted.
+        const itemSignatures = documentSignatureRows(ss).filter(function (signature) {
+          return signature.checklist_item_id === itemIdToDelete;
+        });
+        if (itemSignatures.length > 0) {
+          responseData = {
+            success: false,
+            message: "This item has been signed (" + itemSignatures.length + " time" +
+              (itemSignatures.length === 1 ? "" : "s") + "), so it cannot be removed. Edit it instead."
+          };
+          break;
+        }
+
+        const itemDeleteSheet = ss.getSheetByName(DOCUMENT_ITEM_SHEET);
+        const itemDeleted = deleteSheetRowById(itemDeleteSheet, itemIdToDelete);
+        bumpDocumentRevision(ss, String(itemToDelete.document_id || ""), null);
+
+        responseData = {
+          success: true,
+          deleted: itemDeleted,
+          items: documentItemRows(ss, String(itemToDelete.document_id || ""))
+        };
+        logSystemEvent(ss, itemDeleteAuth.userId, "ADMIN_DELETE_CHECKLIST_ITEM", "Removed item " + itemIdToDelete);
+        break;
+      }
+
+      // Signs one or more items of the caller's OWN checklist, in one request.
+      //
+      // A list rather than a single item because ticking several boxes and saving once is how the screen is
+      // actually used - the Training module signs attendance the same way, for the same reason. One request also
+      // means one timestamp for the whole batch: 12 rows stamped a second apart would suggest 12 separate acts.
+      //
+      // Per item: it must belong to THIS document and to the caller's own checklist, and it is add-only. An item
+      // that fails any of those is SKIPPED and counted, not a reason to abandon the items that would have worked.
+      case "SIGN_CHECKLIST_ITEM": {
+        const itemSignAuth = getAuthContext(ss, data);
+        if (!itemSignAuth) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+
+        // Add-only, like every other signature: a member cannot take their own item back.
+        const itemSignRemovals = payload.remove_signature_ids || data.remove_signature_ids || [];
+        if (Array.isArray(itemSignRemovals) && itemSignRemovals.length > 0) {
+          responseData = {
+            success: false,
+            message: "A signature cannot be withdrawn. Ask an administrator to remove it."
+          };
+          break;
+        }
+
+        const itemSignDocumentId = String(data.document_id || payload.document_id || "").trim();
+        const itemSignDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), itemSignDocumentId);
+
+        // The same answer GET_DOCUMENT gives: what the member may not see is reported as unavailable to sign.
+        if (!itemSignDocument ||
+            !isTruthyValue(itemSignDocument.is_published) ||
+            String(itemSignDocument.doc_type || "").trim().toLowerCase() !== "checklist" ||
+            !isTruthyValue(itemSignDocument.is_sign_required) ||
+            !documentMeetsRank(getSheetData(ss, "ranks"), itemSignAuth.user && itemSignAuth.user.rank_id, itemSignDocument.rank_id)) {
+          responseData = { success: false, message: "That checklist is not available to sign." };
+          break;
+        }
+
+        const itemSignIds = (function () {
+          const single = data.item_id || payload.item_id;
+          const many = data.item_ids || payload.item_ids;
+          if (Array.isArray(many)) return many.map(function (id) { return String(id).trim(); }).filter(Boolean);
+          if (single) return [String(single).trim()];
+          return [];
+        })();
+        if (itemSignIds.length === 0) {
+          responseData = { success: false, message: "No items were named." };
+          break;
+        }
+
+        const itemSignRevision = parseInt(itemSignDocument.content_revision, 10) || 0;
+        const itemSignNow = getEasternTimestamp();
+        const itemSignSheet = documentSignatureSheet(ss);
+        ensureSheetHeaders(itemSignSheet, [
+          "id",
+          "document_id",
+          "checklist_item_id",
+          "user_id",
+          "signed_by_user_id",
+          "signature_role",
+          "signed_at",
+          "content_revision"
+        ]);
+
+        let itemSignSigned = 0;
+        let itemSignSkipped = 0;
+
+        itemSignIds.forEach(function (itemId) {
+          // The item has to belong to THIS document: an id from a stale page - or from somebody else's
+          // checklist - must not be able to create a signature pointing at it.
+          const item = checklistItemById(ss, itemId);
+          if (!item || String(item.document_id || "").trim() !== itemSignDocumentId) {
+            itemSignSkipped += 1;
+            return;
+          }
+
+          if (checklistItemSignatures(ss, itemSignDocumentId, itemId, itemSignAuth.userId, "member").length > 0) {
+            // Already signed, most likely by an earlier press of the same button. Not a failure.
+            itemSignSkipped += 1;
+            return;
+          }
+
+          upsertSheetRowById(itemSignSheet, {
+            id: "",
+            document_id: itemSignDocumentId,
+            checklist_item_id: itemId,
+            // Their OWN checklist, and their own signature: both from the session.
+            user_id: String(itemSignAuth.userId),
+            signed_by_user_id: String(itemSignAuth.userId),
+            signature_role: "member",
+            signed_at: itemSignNow,
+            content_revision: itemSignRevision
+          });
+          itemSignSigned += 1;
+        });
+
+        responseData = {
+          success: true,
+          signed: itemSignSigned,
+          skipped: itemSignSkipped,
+          signatures: documentSignaturesForUser(ss, itemSignAuth.userId)
+        };
+        if (itemSignSigned > 0) {
+          logSystemEvent(
+            ss,
+            itemSignAuth.userId,
+            "SIGN_CHECKLIST_ITEM",
+            "Signed " + itemSignSigned + " item(s) of document " + itemSignDocumentId
+          );
+        }
+        break;
+      }
+
+      case "VERIFY_CHECKLIST_ITEM": {
+        const verifyAuth = getAuthContext(ss, data);
+        if (!verifyAuth || !hasRolePermission(ss, verifyAuth.userId, "can_verify_documents")) {
+          responseData = { success: false, message: "Your role does not verify checklists." };
+          break;
+        }
+
+        const verifyDocumentId = String(data.document_id || payload.document_id || "").trim();
+        const verifyItemId = String(data.item_id || payload.item_id || "").trim();
+        const verifyUserId = String(data.user_id || payload.user_id || "").trim();
+        if (!verifyUserId) {
+          responseData = { success: false, message: "No member was named." };
+          break;
+        }
+
+        // NOBODY VERIFIES THEIR OWN CHECKLIST. An officer who is also on the crew signs their own items as
+        // themselves; verifying those items would be one person agreeing with themselves, which is the opposite
+        // of what a verification is for.
+        if (verifyUserId === String(verifyAuth.userId)) {
+          responseData = { success: false, message: "You cannot verify your own checklist." };
+          break;
+        }
+
+        const verifyDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), verifyDocumentId);
+        if (!verifyDocument || String(verifyDocument.doc_type || "").trim().toLowerCase() !== "checklist") {
+          responseData = { success: false, message: "That checklist no longer exists." };
+          break;
+        }
+
+        const verifyItem = checklistItemById(ss, verifyItemId);
+        if (!verifyItem || String(verifyItem.document_id || "").trim() !== verifyDocumentId) {
+          responseData = { success: false, message: "That item is not on this checklist." };
+          break;
+        }
+
+        // Verification FOLLOWS the member's signature: there is nothing to verify about an item they have not
+        // signed, and allowing it would let a verifier mark work that was never claimed.
+        const memberItemSignatures = checklistItemSignatures(ss, verifyDocumentId, verifyItemId, verifyUserId, "member");
+        if (memberItemSignatures.length === 0) {
+          responseData = { success: false, message: "That member has not signed this item yet." };
+          break;
+        }
+
+        const existingVerification = checklistItemSignatures(ss, verifyDocumentId, verifyItemId, verifyUserId, "verifier");
+        if (existingVerification.length > 0) {
+          responseData = {
+            success: true,
+            verified: 0,
+            already_verified: true,
+            signatures: documentSignaturesForDocument(ss, verifyDocumentId)
+          };
+          break;
+        }
+
+        const verificationFields = {
+          id: "",
+          document_id: verifyDocumentId,
+          checklist_item_id: verifyItemId,
+          // The member the row is ABOUT...
+          user_id: verifyUserId,
+          // ...and the verifier, from the session. The two are different people by the check above.
+          signed_by_user_id: String(verifyAuth.userId),
+          signature_role: "verifier",
+          signed_at: getEasternTimestamp(),
+          content_revision: parseInt(verifyDocument.content_revision, 10) || 0
+        };
+
+        const verificationSheet = documentSignatureSheet(ss);
+        ensureSheetHeaders(verificationSheet, Object.keys(verificationFields));
+        upsertSheetRowById(verificationSheet, verificationFields);
+
+        responseData = {
+          success: true,
+          verified: 1,
+          signatures: documentSignaturesForDocument(ss, verifyDocumentId)
+        };
+        logSystemEvent(
+          ss,
+          verifyAuth.userId,
+          "VERIFY_CHECKLIST_ITEM",
+          "Verified item " + verifyItemId + " for member " + verifyUserId
+        );
+        break;
+      }
+
+      // Verifies everything one member has signed and nobody has verified yet, in one call.
+      //
+      // This exists because the alternative is a request per item: a 40-item checklist would be 40 round trips
+      // against a script that takes seconds per call, and a partly-finished bulk action would leave the panel
+      // showing a half-verified list with no way to tell which half. One call, one log entry, one answer.
+      case "VERIFY_CHECKLIST_REMAINING": {
+        const bulkAuth = getAuthContext(ss, data);
+        if (!bulkAuth || !hasRolePermission(ss, bulkAuth.userId, "can_verify_documents")) {
+          responseData = { success: false, message: "Your role does not verify checklists." };
+          break;
+        }
+
+        const bulkDocumentId = String(data.document_id || payload.document_id || "").trim();
+        const bulkUserId = String(data.user_id || payload.user_id || "").trim();
+        if (!bulkUserId) {
+          responseData = { success: false, message: "No member was named." };
+          break;
+        }
+        if (bulkUserId === String(bulkAuth.userId)) {
+          responseData = { success: false, message: "You cannot verify your own checklist." };
+          break;
+        }
+
+        const bulkDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), bulkDocumentId);
+        if (!bulkDocument || String(bulkDocument.doc_type || "").trim().toLowerCase() !== "checklist") {
+          responseData = { success: false, message: "That checklist no longer exists." };
+          break;
+        }
+
+        // The same two sets the single-item action reasons about, computed once rather than per item.
+        const bulkItemIds = documentItemRows(ss, bulkDocumentId).map(function (item) {
+          return String(item.id || "");
+        });
+        const bulkRows = documentSignatureRows(ss).filter(function (signature) {
+          return signature.document_id === bulkDocumentId && signature.user_id === bulkUserId;
+        });
+        const bulkSignedIds = bulkRows
+          .filter(function (signature) {
+            return signature.signature_role === "member" && bulkItemIds.indexOf(signature.checklist_item_id) !== -1;
+          })
+          .map(function (signature) {
+            return signature.checklist_item_id;
+          });
+        const bulkVerifiedIds = bulkRows
+          .filter(function (signature) {
+            return signature.signature_role === "verifier";
+          })
+          .map(function (signature) {
+            return signature.checklist_item_id;
+          });
+        const bulkPending = bulkSignedIds.filter(function (itemId) {
+          return bulkVerifiedIds.indexOf(itemId) === -1;
+        });
+
+        if (bulkPending.length === 0) {
+          responseData = {
+            success: true,
+            verified: 0,
+            already_verified: true,
+            signatures: documentSignaturesForDocument(ss, bulkDocumentId)
+          };
+          break;
+        }
+
+        const bulkRevision = parseInt(bulkDocument.content_revision, 10) || 0;
+        const bulkSignedAt = getEasternTimestamp();
+        const bulkSheet = documentSignatureSheet(ss);
+        ensureSheetHeaders(bulkSheet, [
+          "id",
+          "document_id",
+          "checklist_item_id",
+          "user_id",
+          "signed_by_user_id",
+          "signature_role",
+          "signed_at",
+          "content_revision"
+        ]);
+        // Same timestamp for the whole batch: the batch is one act, and 40 rows stamped a second apart would
+        // suggest 40 separate decisions.
+        bulkPending.forEach(function (itemId) {
+          upsertSheetRowById(bulkSheet, {
+            id: "",
+            document_id: bulkDocumentId,
+            checklist_item_id: itemId,
+            user_id: bulkUserId,
+            signed_by_user_id: String(bulkAuth.userId),
+            signature_role: "verifier",
+            signed_at: bulkSignedAt,
+            content_revision: bulkRevision
+          });
+        });
+
+        responseData = {
+          success: true,
+          verified: bulkPending.length,
+          signatures: documentSignaturesForDocument(ss, bulkDocumentId)
+        };
+        logSystemEvent(
+          ss,
+          bulkAuth.userId,
+          "VERIFY_CHECKLIST_REMAINING",
+          "Verified " + bulkPending.length + " remaining item(s) for member " + bulkUserId +
+            " on document " + bulkDocumentId
+        );
+        break;
+      }
+
       // --- Events ------------------------------------------------------------
       //
       // Read by every signed-in member (a calendar is useless if half the crew cannot see it), written
@@ -961,7 +1747,7 @@ function doPost(e) {
         //
         // Trailing blanks are trimmed before the append. The row is mapped over EVERY header, so columns this
         // action has no value for come back as "" - and writing an explicit "" into a column the app does not
-        // own (the clock-in `calc_address`, which the sheet fills itself) is a change in behaviour for no gain.
+        // own (the clock-in `calc_address`, which the sheet fills itself) is a change in behavior for no gain.
         // Trimming keeps the old write identical for today's layout while still being correct by name.
         const timeclockHeadersIn = timeclockSheetIn.getRange(1, 1, 1, Math.max(timeclockSheetIn.getLastColumn(), 1)).getValues()[0];
         const clockInRow = rowValuesForHeaders(timeclockHeadersIn, {
@@ -1086,7 +1872,7 @@ function doPost(e) {
           settingsValues.is_dark_mode = String(payload.is_dark_mode);
         }
 
-        // Sound effects. Stored as TRUE/FALSE like the other switches, and normalised here rather than trusted:
+        // Sound effects. Stored as TRUE/FALSE like the other switches, and normalized here rather than trusted:
         // a row a member can write is a row anybody can post to, and this one decides whether the app makes a
         // noise, so it should never hold "maybe".
         if (payload.is_sounds_active !== undefined && payload.is_sounds_active !== null) {
@@ -1184,7 +1970,7 @@ function doPost(e) {
       // The signed-in member's own devices, WITHOUT tokens.
       //
       // A label and a last-seen stamp are what the settings card needs to say "also on 2 other
-      // devices", and a token is a credential-shaped value that has no business travelling to a
+      // devices", and a token is a credential-shaped value that has no business traveling to a
       // browser that does not already hold it.
       case "MY_PUSH_DEVICES": {
         const authMyDevices = getAuthContext(ss, data);
@@ -1732,9 +2518,9 @@ function doPost(e) {
         // Optional icon (the `icon` column) drawn with this assignment wherever it
         // appears, chosen from the same curated lucide set the ranks sheet uses.
         //
-        // Stored as the icon's NAME and not validated here on purpose: the catalogue
+        // Stored as the icon's NAME and not validated here on purpose: the catalog
         // lives in the client (src/components/RankIcon.jsx), exactly like the permission
-        // list, so the server just keeps whatever it is given. An unrecognised name
+        // list, so the server just keeps whatever it is given. An unrecognized name
         // renders the fallback icon rather than breaking the row.
         const rawIcon = data.icon !== undefined ? data.icon : payload.icon;
         if (rawIcon !== undefined) {
@@ -2290,7 +3076,7 @@ function doPost(e) {
       case "SIGN_TRAINING": {
         // Members sign in bulk: the module collects a set of ticked trainings and saves once.
         //
-        // Deliberately add-only. A signature is an acknowledgement of attendance, so this
+        // Deliberately add-only. A signature is an acknowledgment of attendance, so this
         // action refuses removals outright rather than ignoring them - a silent no-op would
         // look like a working un-sign to a caller that expected one. Removal is
         // ADMIN_REMOVE_TRAINING_SIGNATURE, which requires can_administer_trainings.
@@ -2477,7 +3263,7 @@ function doPost(e) {
 
       case "ADMIN_REMOVE_TRAINING_SIGNATURE": {
         // The only way a signature is ever removed. Guarded by its own permission rather than
-        // can_edit_trainings, because removing somebody else's acknowledgement is exactly the
+        // can_edit_trainings, because removing somebody else's acknowledgment is exactly the
         // thing that has to be deliberate.
         const authSignature = getAuthContext(ss, data);
         if (!authSignature || !canAdministerTrainings(ss, authSignature.userId)) {
@@ -2582,7 +3368,7 @@ function doPost(e) {
           success: false,
           code: "UNKNOWN_ACTION",
           message:
-            "The server does not recognise the action \"" + action + "\". " +
+            "The server does not recognize the action \"" + action + "\". " +
             "If this is a new feature, the Apps Script deployment is probably older than this version of the app."
         };
         logSystemEvent(
@@ -2755,7 +3541,7 @@ var EVENT_WEEKDAY_COLUMNS = [
   "is_saturday",
 ];
 
-// The repeating fields a save may set, normalised so the stored row is always usable.
+// The repeating fields a save may set, normalized so the stored row is always usable.
 //
 // A blank amount becomes 1 rather than being stored as blank, because 1 is what "every day" means and a
 // blank would have to be re-interpreted on every read. The weekday flags are only meaningful for weekly
@@ -4519,7 +5305,7 @@ function runnerSoundProfileIsValid(profile) {
 // CLOCK LOCATION (optional geofence)
 // ============================================================================
 
-// Imperial feet per metre, matching the client's utils/clockLocation.js.
+// Imperial feet per meter, matching the client's utils/clockLocation.js.
 const FEET_PER_METER = 3.280839895;
 
 function clockLocationNumber(raw) {
@@ -4602,7 +5388,7 @@ function clockLocationRejection(ss, rawLat, rawLon) {
 //   can_edit_trainings       add/change training activities (implies can_sign_trainings)
 //   can_administer_trainings  the Training report: signatures for everyone, and removal
 //
-// A signature is an acknowledgement of attendance, so members can only ADD one - the
+// A signature is an acknowledgment of attendance, so members can only ADD one - the
 // member-facing action refuses to remove. Only can_administer_trainings can remove, and
 // that goes through a separate admin action. Keeping the two actions apart is what makes
 // the rule enforceable rather than a UI convention.
@@ -5600,7 +6386,7 @@ function recordLoginFailure(username) {
     lock = LockService.getScriptLock();
     lock.waitLock(5000);
   } catch (err) {
-    // Could not serialise the increments. Counting is best-effort, so carry on
+    // Could not serialize the increments. Counting is best-effort, so carry on
     // rather than risk blocking a legitimate sign-in attempt.
     lock = null;
   }
@@ -5673,6 +6459,478 @@ function storePasswordHash(ss, userId, plainPassword) {
 }
 
 // ============================================================================
+// DOCUMENTS
+// ============================================================================
+//
+// One sheet, `documents`, one row per document, with the body in a single `content` cell. A Sheets cell holds
+// 50,000 characters, so a save is capped below that (DOCUMENT_CONTENT_LIMIT) rather than failing inside setValues
+// with a message nobody can act on.
+//
+// Three rules shape everything below:
+//
+//   * LIST READS NEVER CARRY THE BODY. getSheetData reads every cell of the sheet whatever the projection, so the
+//     only cost that can be removed is what crosses the wire: the list returns metadata, and a body is fetched one
+//     document at a time. Same reasoning as the System Log's paging and the sign-in bootstrap's projections.
+//   * VISIBILITY IS DECIDED BY THE SESSION. The minimum rank is applied on the server from the member's OWN
+//     rank_id, never from the payload, so a crafted request cannot ask for a document it may not see.
+//   * THE AUTHOR IS STAMPED FROM THE SESSION on create, and cannot be changed afterwards.
+//
+// The sheet builds itself: the header row grows for whatever a save carries, so a column added here later needs no
+// spreadsheet work. That is the same promise `user_settings` makes.
+
+const DOCUMENT_SHEET = "documents";
+const DOCUMENT_ITEM_SHEET = "document_checklist_items";
+
+const DOCUMENT_HEADERS = [
+  "id",
+  "title",
+  "folder",
+  "doc_type",
+  "sort_order",
+  "content",
+  "is_published",
+  "rank_id",
+  "is_sign_required",
+  "content_revision",
+  "author_user_id",
+  "updated_at"
+];
+
+// `markdown` is free text with formatting; `checklist` adds items signed one at a time. Anything unrecognized
+// reads as markdown rather than as an empty screen.
+const DOCUMENT_TYPES = ["markdown", "checklist"];
+const DOCUMENT_CONTENT_LIMIT = 45000;
+const DOCUMENT_TITLE_LIMIT = 200;
+const DOCUMENT_FOLDER_LIMIT = 80;
+
+// Adds any of `headers` the sheet's first row lacks, and returns the row as it now stands.
+//
+// One helper rather than a copy per sheet: the header row of every document sheet grows the same way, and a second
+// implementation would be a second set of bugs. A sheet whose header row is empty (never set up) starts from the
+// canonical list, because appending to an empty row puts the first column in the wrong place.
+function ensureSheetHeaders(sheet, headers) {
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const first = sheet.getRange(1, 1, 1, width).getValues()[0] || [];
+  const names = first.map(function (value) {
+    return String(value === undefined || value === null ? "" : value).trim();
+  });
+
+  if (names.every(function (name) { return name === ""; })) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers.slice()]);
+    return headers.slice();
+  }
+
+  const missing = headers.filter(function (name) { return names.indexOf(name) === -1; });
+  if (!missing.length) return names;
+
+  const grown = names.concat(missing);
+  sheet.getRange(1, 1, 1, grown.length).setValues([grown]);
+  return grown;
+}
+
+// The documents sheet, created with its headers if this deployment has never had one.
+function documentSheet(ss) {
+  let sheet = ss.getSheetByName(DOCUMENT_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(DOCUMENT_SHEET);
+    sheet.appendRow(DOCUMENT_HEADERS.slice());
+    return sheet;
+  }
+  ensureSheetHeaders(sheet, DOCUMENT_HEADERS);
+  return sheet;
+}
+
+// The fields a document save owns. Values are read from the payload the client sends, trimmed, and capped so a bad
+// value cannot become a bad row.
+function documentFieldsFrom(data, payload) {
+  const source = payload || {};
+  const read = function (key) {
+    return data[key] !== undefined ? data[key] : source[key];
+  };
+  const requestedType = String(read("doc_type") || "markdown").trim().toLowerCase();
+  const requestedOrder = parseInt(read("sort_order"), 10);
+
+  return {
+    id: String(data.id || source.id || ""),
+    title: String(read("title") || "").trim().slice(0, DOCUMENT_TITLE_LIMIT),
+    folder: String(read("folder") || "").trim().slice(0, DOCUMENT_FOLDER_LIMIT),
+    doc_type: DOCUMENT_TYPES.indexOf(requestedType) === -1 ? "markdown" : requestedType,
+    sort_order: isFinite(requestedOrder) ? requestedOrder : 0,
+    content: String(read("content") === undefined || read("content") === null ? "" : read("content")),
+    // New documents are published by default: hiding one is a deliberate act ("not finished yet"), and a first
+    // save nobody can see would be the confusing default.
+    is_published: read("is_published") === undefined ? true : isTruthyValue(read("is_published")),
+    rank_id: String(read("rank_id") || "").trim(),
+    is_sign_required: isTruthyValue(read("is_sign_required"))
+  };
+}
+
+function documentValidationError(fields, ranks) {
+  if (!String(fields.title || "").trim()) return "A title is required.";
+  if (fields.content.length > DOCUMENT_CONTENT_LIMIT) {
+    return "This document is longer than the sheet can hold (the limit is " +
+      DOCUMENT_CONTENT_LIMIT.toLocaleString("en-US") + " characters). Split it into two documents.";
+  }
+  if (fields.rank_id && !findRowById(ranks || [], fields.rank_id)) {
+    return "The minimum rank on this document no longer exists. Choose another, or clear it.";
+  }
+  return "";
+}
+
+// Whether a member's rank reaches a document's minimum.
+//
+// Mirrors the client rule (utils/rankEligibility.js): a higher numeric `rank_order` is a higher rank, a blank
+// minimum means everyone, and a rank whose order cannot be read fails CLOSED - a member whose rank has no usable
+// order does not see a restricted document. That is the safe direction, and the administration list still shows
+// the document normally, so an administrator can see and fix whatever happened rather than being told nothing.
+//
+// Note what is NOT here: `status` and `exclude_from_scheduling`. Those decide who may be SCHEDULED, and reusing
+// them would hide documents from a member who is merely left out of the rota.
+function documentMeetsRank(ranks, memberRankId, documentRankId) {
+  const required = String(documentRankId || "").trim();
+  if (!required) return true;
+
+  const memberRank = findRowById(ranks || [], memberRankId);
+  const memberOrder = memberRank ? parseInt(memberRank.rank_order, 10) : NaN;
+  if (!isFinite(memberOrder)) return false;
+
+  const requiredRank = findRowById(ranks || [], required);
+  const requiredOrder = requiredRank ? parseInt(requiredRank.rank_order, 10) : NaN;
+  if (!isFinite(requiredOrder)) return false;
+
+  return memberOrder >= requiredOrder;
+}
+
+// The list projection: everything except the body. `content_length` lets the list say whether there is anything to
+// read without shipping the thing itself.
+function documentListRow(row) {
+  const source = row || {};
+  const requestedType = String(source.doc_type || "").trim().toLowerCase();
+  const revision = parseInt(source.content_revision, 10);
+  const order = parseInt(source.sort_order, 10);
+  const content = source.content === undefined || source.content === null ? "" : source.content;
+
+  return {
+    id: String(source.id || "").trim(),
+    title: String(source.title || "").trim(),
+    folder: String(source.folder || "").trim(),
+    doc_type: DOCUMENT_TYPES.indexOf(requestedType) === -1 ? "markdown" : requestedType,
+    sort_order: isFinite(order) ? order : 0,
+    is_published: isTruthyValue(source.is_published),
+    rank_id: String(source.rank_id || "").trim(),
+    is_sign_required: isTruthyValue(source.is_sign_required),
+    content_revision: isFinite(revision) ? revision : 0,
+    content_length: String(content).length,
+    author_user_id: String(source.author_user_id || "").trim(),
+    updated_at: String(source.updated_at || "").trim()
+  };
+}
+
+// The checklist items of one document, in order. Empty when the sheet does not exist, which is the honest answer
+// for a library that has never had a checklist - and it means a markdown-only deployment needs no special case.
+function documentItemRows(ss, documentId) {
+  const wanted = String(documentId || "").trim();
+  if (!wanted) return [];
+
+  return getSheetData(ss, DOCUMENT_ITEM_SHEET)
+    .filter(function (item) { return String(item.document_id || "").trim() === wanted; })
+    .map(function (item) {
+      const order = parseInt(item.sort_order, 10);
+      return {
+        id: String(item.id || "").trim(),
+        document_id: String(item.document_id || "").trim(),
+        sort_order: isFinite(order) ? order : 0,
+        section: String(item.section || "").trim(),
+        label: String(item.label || "").trim()
+      };
+    })
+    .filter(function (item) { return item.id !== "" && item.label !== ""; })
+    .sort(function (a, b) {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+      return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1;
+    });
+}
+
+// One document with its body, plus its items. The only read in this feature that carries content.
+function documentFullRow(ss, row) {
+  const source = row || {};
+  const full = documentListRow(source);
+  full.content = String(source.content === undefined || source.content === null ? "" : source.content);
+  full.items = documentItemRows(ss, full.id);
+  return full;
+}
+
+// Documents a member may read: published, and at or above their rank. A draft is invisible to them - it is visible
+// to anyone who can manage documents, which is what makes a draft a draft.
+function memberDocumentRows(ss, user, ranks) {
+  return getSheetData(ss, DOCUMENT_SHEET)
+    .filter(function (row) { return isTruthyValue(row.is_published); })
+    .filter(function (row) { return documentMeetsRank(ranks, user && user.rank_id, row.rank_id); })
+    .map(documentListRow)
+    .sort(documentListSort);
+}
+
+// Folders A-Z with the unfiled ones last, then the document's own order, then its title. A folder with no
+// documents is never shown by anything, because a folder here is a NAME carried by the documents in it - there is
+// no folder row to leave behind and no empty folder to render.
+function documentListSort(a, b) {
+  const aFolder = String(a.folder || "");
+  const bFolder = String(b.folder || "");
+  if (aFolder !== bFolder) {
+    if (!aFolder) return 1;
+    if (!bFolder) return -1;
+    return aFolder.toLowerCase() < bFolder.toLowerCase() ? -1 : 1;
+  }
+  if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+  return String(a.title || "").toLowerCase() < String(b.title || "").toLowerCase() ? -1 : 1;
+}
+
+// The revision a save should store. It increments only when the BODY actually changes, so renaming a document or
+// moving it between folders does not make every existing signature look stale. A signature records the revision it
+// was signed at, which is what lets the report say "signed before the latest edit".
+function documentRevisionFor(fields, existingRow) {
+  const stored = parseInt(existingRow && existingRow.content_revision, 10);
+  const current = isFinite(stored) ? stored : 0;
+  const before = existingRow && existingRow.content !== undefined && existingRow.content !== null
+    ? String(existingRow.content)
+    : "";
+  return before === fields.content ? current : current + 1;
+}
+
+// How many signatures a document has. Zero when the signatures sheet does not exist yet, which is why deleting a
+// document on a library that has never been signed needs no special case.
+function documentSignatureCount(ss, documentId) {
+  const wanted = String(documentId || "").trim();
+  if (!wanted) return 0;
+  return getSheetData(ss, "document_signatures").filter(function (row) {
+    return String(row.document_id || "").trim() === wanted;
+  }).length;
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENT SIGNATURES
+// ---------------------------------------------------------------------------
+// One row per signature: a member acknowledging a document, and (in the checklist stage) a verifier acknowledging
+// what the member did.
+//
+// The row carries BOTH identities, which is the whole reason it is shaped this way:
+//
+//   user_id            whose record this is - the member the document (or checklist) belongs to
+//   signed_by_user_id  who actually signed it - the same person for their own, the verifier's id for a
+//                      verification
+//   signature_role     'member' or 'verifier', because an officer can hold both roles in a station and the two
+//                      rows mean different things even when one person cannot hold both for the same item
+//
+// Date and revision are both recorded. The date is stamped by the SERVER (`getEasternTimestamp()`, the same
+// format the clock log and the system log use) because a signature is a record of when somebody agreed, and a
+// client-supplied date is not evidence of anything. The revision is what lets a report say "signed before the
+// latest edit" - without it, editing an SOP leaves signatures that appear to approve text nobody has read.
+
+const DOCUMENT_SIGNATURE_SHEET = "document_signatures";
+
+const DOCUMENT_SIGNATURE_HEADERS = [
+  "id",
+  "document_id",
+  "checklist_item_id",
+  "user_id",
+  "signed_by_user_id",
+  "signature_role",
+  "signed_at",
+  "content_revision"
+];
+
+const DOCUMENT_SIGNATURE_ROLES = ["member", "verifier"];
+
+function documentSignatureSheet(ss) {
+  let sheet = ss.getSheetByName(DOCUMENT_SIGNATURE_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(DOCUMENT_SIGNATURE_SHEET);
+    sheet.appendRow(DOCUMENT_SIGNATURE_HEADERS.slice());
+    return sheet;
+  }
+  ensureSheetHeaders(sheet, DOCUMENT_SIGNATURE_HEADERS);
+  return sheet;
+}
+
+function normalizeDocumentSignature(row) {
+  const source = row || {};
+  const revision = parseInt(source.content_revision, 10);
+  const role = String(source.signature_role || "member").trim().toLowerCase();
+
+  return {
+    id: String(source.id || "").trim(),
+    document_id: String(source.document_id || "").trim(),
+    checklist_item_id: String(source.checklist_item_id || "").trim(),
+    user_id: String(source.user_id || "").trim(),
+    signed_by_user_id: String(source.signed_by_user_id || "").trim(),
+    signature_role: DOCUMENT_SIGNATURE_ROLES.indexOf(role) === -1 ? "member" : role,
+    signed_at: String(source.signed_at || "").trim(),
+    content_revision: isFinite(revision) ? revision : 0
+  };
+}
+
+// Every signature on file. A missing sheet reads as none, which is what a deployment that has never signed
+// anything looks like.
+function documentSignatureRows(ss) {
+  return getSheetData(ss, DOCUMENT_SIGNATURE_SHEET)
+    .map(normalizeDocumentSignature)
+    .filter(function (signature) { return signature.id !== "" && signature.document_id !== ""; });
+}
+
+// One member's own rows: their own signatures AND the verifier rows recorded ABOUT them, because "who checked my
+// work" is theirs to see. Nobody else's rows come back - the filter is by the session's id.
+//
+// Whole-document signatures only in this stage; the checklist stage adds the per-item rows to the same response,
+// which is why the filter is on the document rather than on the row's shape.
+function documentSignaturesForUser(ss, userId) {
+  const wanted = String(userId || "").trim();
+  if (!wanted) return [];
+  return documentSignatureRows(ss)
+    .filter(function (signature) { return signature.user_id === wanted; })
+    .sort(function (a, b) { return a.signed_at < b.signed_at ? 1 : -1; });
+}
+
+// One document's signatures, for the administration report. Every member's rows, newest first.
+function documentSignaturesForDocument(ss, documentId) {
+  const wanted = String(documentId || "").trim();
+  if (!wanted) return [];
+  return documentSignatureRows(ss)
+    .filter(function (signature) { return signature.document_id === wanted; })
+    .sort(function (a, b) { return a.signed_at < b.signed_at ? 1 : -1; });
+}
+
+// Whether this member has already signed this whole document (as themselves).
+function documentSignatureFor(ss, documentId, userId) {
+  const wantedDocument = String(documentId || "").trim();
+  const wantedUser = String(userId || "").trim();
+  if (!wantedDocument || !wantedUser) return null;
+
+  const found = documentSignatureRows(ss).filter(function (signature) {
+    return signature.document_id === wantedDocument &&
+      signature.user_id === wantedUser &&
+      signature.checklist_item_id === "" &&
+      signature.signature_role === "member";
+  });
+  return found.length ? found[0] : null;
+}
+
+// Whether a signature predates the document's current revision.
+//
+// An unreadable revision on either side reads as NOT stale: a document saved before the revision column existed
+// cannot be compared with anything, and flagging every signature on it as stale would be a false alarm rather than
+// a caution. (The same direction the row_version check takes for an absent version.)
+function signatureIsStale(signature, document) {
+  const signedAt = parseInt(signature && signature.content_revision, 10);
+  const current = parseInt(document && document.content_revision, 10);
+  if (!isFinite(signedAt) || !isFinite(current)) return false;
+  return signedAt < current;
+}
+
+// ---------------------------------------------------------------------------
+// CHECKLIST ITEMS
+// ---------------------------------------------------------------------------
+// A checklist is a document whose items are signed ONE AT A TIME, and then verified one at a time by somebody with
+// can_verify_documents. Items live in their own sheet because a signature has to point at a stable id: relabeling
+// or reordering an item must never move what somebody already signed.
+//
+// Changing an item bumps the PARENT document's `content_revision`, which is what marks the signatures taken before
+// that change as stale. A checklist whose wording changed under a signature is the same problem as a document
+// whose wording changed, so it is reported the same way.
+
+const CHECKLIST_ITEM_HEADERS = ["id", "document_id", "sort_order", "section", "label"];
+const CHECKLIST_LABEL_LIMIT = 300;
+const CHECKLIST_SECTION_LIMIT = 80;
+
+function checklistItemSheet(ss) {
+  let sheet = ss.getSheetByName(DOCUMENT_ITEM_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(DOCUMENT_ITEM_SHEET);
+    sheet.appendRow(CHECKLIST_ITEM_HEADERS.slice());
+    return sheet;
+  }
+  ensureSheetHeaders(sheet, CHECKLIST_ITEM_HEADERS);
+  return sheet;
+}
+
+function checklistItemFieldsFrom(data, payload) {
+  const source = payload || {};
+  const read = function (key) {
+    return data[key] !== undefined ? data[key] : source[key];
+  };
+  const order = parseInt(read("sort_order"), 10);
+
+  return {
+    id: String(data.id || source.id || ""),
+    document_id: String(read("document_id") || "").trim(),
+    sort_order: isFinite(order) ? order : 0,
+    section: String(read("section") || "").trim().slice(0, CHECKLIST_SECTION_LIMIT),
+    label: String(read("label") || "").trim().slice(0, CHECKLIST_LABEL_LIMIT)
+  };
+}
+
+function checklistItemValidationError(fields, documentRow) {
+  if (!documentRow) return "That document no longer exists.";
+  if (String(documentRow.doc_type || "").trim().toLowerCase() !== "checklist") {
+    return "That document is not a checklist, so it has no items.";
+  }
+  if (!String(fields.label || "").trim()) return "An item needs a label.";
+  return "";
+}
+
+// One item by id, or null.
+function checklistItemById(ss, itemId) {
+  return findRowById(getSheetData(ss, DOCUMENT_ITEM_SHEET), String(itemId || "").trim());
+}
+
+// Every signature on one item of one member's checklist, by role.
+function checklistItemSignatures(ss, documentId, itemId, userId, role) {
+  const wantedDocument = String(documentId || "").trim();
+  const wantedItem = String(itemId || "").trim();
+  const wantedUser = String(userId || "").trim();
+  const wantedRole = String(role || "").trim();
+
+  return documentSignatureRows(ss).filter(function (signature) {
+    if (signature.document_id !== wantedDocument) return false;
+    if (signature.checklist_item_id !== wantedItem) return false;
+    if (signature.user_id !== wantedUser) return false;
+    if (wantedRole && signature.signature_role !== wantedRole) return false;
+    return true;
+  });
+}
+
+// Whether an item has ANY signature on it, by anybody. What stops an item being deleted out from under a record
+// of somebody signing it.
+function checklistItemIsSigned(ss, itemId) {
+  const wanted = String(itemId || "").trim();
+  if (!wanted) return false;
+  return documentSignatureRows(ss).some(function (signature) {
+    return signature.checklist_item_id === wanted;
+  });
+}
+
+// Bumps the parent document's revision, so signatures taken before an item changed are reported as stale.
+//
+// Written through the same upsert the editor uses, with only the fields it owns: everything else in the row is
+// left as it is, and the row's own `row_version` moves with it. No version is supplied, so this can never be
+// refused as a concurrent edit - an item save is not an edit of the document's text.
+function bumpDocumentRevision(ss, documentId, actorUserId) {
+  const documentRow = findRowById(getSheetData(ss, DOCUMENT_SHEET), String(documentId || "").trim());
+  if (!documentRow) return false;
+
+  const current = parseInt(documentRow.content_revision, 10);
+  const sheet = documentSheet(ss);
+  upsertSheetRowById(sheet, {
+    id: String(documentRow.id),
+    content_revision: (isFinite(current) ? current : 0) + 1,
+    updated_at: getEasternTimestamp()
+  });
+  if (actorUserId) {
+    logSystemEvent(ss, actorUserId, "ADMIN_SAVE_CHECKLIST_ITEM", "Changed the items of document " + String(documentRow.id));
+  }
+  return true;
+}
+
+// ============================================================================
 // ID MIGRATION: sequential ids -> UUIDs
 // ============================================================================
 //
@@ -5717,6 +6975,12 @@ const ID_RECORD_SHEETS = [
   "events",
   "training",
   "training_signatures",
+  // Documents. `document_checklist_items` and `document_signatures` are listed before either sheet exists in a
+  // given deployment: the migration skips a sheet it cannot find, and registering them now means neither is
+  // forgotten when they first appear.
+  "documents",
+  "document_checklist_items",
+  "document_signatures",
   "timeclock",
   "push_devices"
 ];
@@ -5749,7 +7013,7 @@ const ID_REFERENCE_TARGETS = {
 // existed. A sheet can be a reference SOURCE without being a record.
 const ID_REFERENCE_SHEETS = ID_RECORD_SHEETS.concat(["system_log", "user_settings"]);
 
-// A UUID, as Utilities.getUuid() formats one. Used to recognise a row that has already been migrated, which is
+// A UUID, as Utilities.getUuid() formats one. Used to recognize a row that has already been migrated, which is
 // what makes this function safe to run twice.
 function isUuidValue(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -6509,7 +7773,7 @@ const LOG_PAGE_SIZE_MAX = 100;
 // "the log is empty" rather than "you have not redeployed".
 const SYSTEM_LOG_API_VERSION = 2;
 
-// Whitelisted, because sorting happens here: an unrecognised value falls back to the default rather
+// Whitelisted, because sorting happens here: an unrecognized value falls back to the default rather
 // than arriving as "unsorted", which would silently render the sheet's own row order.
 const LOG_SORTS = ["timestamp_desc", "timestamp_asc", "action_asc", "member_asc"];
 const LOG_SORT_DEFAULT = "timestamp_desc";

@@ -1,5 +1,5 @@
 /**
- * Verifies the app shell's canvas and scrolling behaviour.
+ * Verifies the app shell's canvas and scrolling behavior.
  *
  * The bug this exists for: scrolling to the very bottom of the page and then a little further (a trackpad flick, a
  * touch drag) lifted the whole app up and revealed a bright white band under it. Nothing was wrong with the layout
@@ -194,7 +194,7 @@ checkIs('all of it is desktop-only', !/(?:^|\s)overflow-y-auto(?:\s|$)/.test(hel
 // The point of the change: the bookmarks are not inside the scrolling box.
 checkIs('the guide list is not inside the pane that scrolls', help.indexOf('</nav>') < help.indexOf('<article'));
 // A scrollable box the keyboard cannot reach is one a keyboard user cannot read past, and it should say what it is.
-checkIs('the pane is a labelled region with a tab stop', /role="region"/.test(help) && /tabIndex=\{0\}/.test(help) && /aria-label=\{active \?/.test(help));
+checkIs('the pane is a labeled region with a tab stop', /role="region"/.test(help) && /tabIndex=\{0\}/.test(help) && /aria-label=\{active \?/.test(help));
 
 // The heading above the card is the trap: it is a SIBLING of the Help card inside <main>, so a card asking for the
 // full height of main's content box is ~90px too tall (an h2, a paragraph and mb-8), and that overflow is exactly
@@ -203,12 +203,12 @@ checkIs('the pane is a labelled region with a tab stop', /role="region"/.test(he
 console.log('\n--- and the page heading is part of the layout ---');
 checkIs(
   'the help screen makes main a flex column, and only that screen',
-  /boundedHelpScreen \? 'md:flex md:flex-col' : ''/.test(app),
+  /boundedScreen \? 'md:flex md:flex-col' : ''/.test(app),
   'without it the card is 100% of main PLUS the heading'
 );
 checkIs(
   'which covers both audiences',
-  /const boundedHelpScreen = activeTab === 'help' \|\| \(activeTab === 'admin' && adminSubTab === 'help'\);/.test(app)
+  /const boundedScreen = activeTab === 'help' \|\| activeTab === 'documents' \|\| \(activeTab === 'admin' && adminSubTab === 'help'\);/.test(app)
 );
 // The base classes must NOT be a flex column, or every other tab's page scroll would be governed by flex rules.
 checkIs('and no other screen is affected', !/md:h-screen md:overflow-y-auto[^`]*md:flex md:flex-col(?!')/.test(app), 'the flex classes leaked into the base classes');
@@ -222,7 +222,7 @@ checkIs(
 );
 
 // A derived value in the component body may only read state that is declared ABOVE it. Getting that wrong is not a
-// broken screen, it is no app at all: `boundedHelpScreen` was first written up beside the other derived values and
+// broken screen, it is no app at all: `boundedScreen` was first written up beside the other derived values and
 // threw "Cannot access 'adminSubTab' before initialization" the moment an administrator opened that tab - which is
 // the only path that reads the second half of its `||`, so nothing else noticed.
 //
@@ -231,7 +231,7 @@ checkIs(
 console.log('\n--- and it is computed after the state it reads ---');
 // Every piece of component state the memo mentions, wherever it is mentioned in the expression - so a third state
 // read added carelessly is caught too, not just the two it happens to use today.
-const memoExpression = (/const boundedHelpScreen = ([^\n]*)/.exec(app)?.[1] || '').replace(/'[^']*'/g, '');
+const memoExpression = (/const boundedScreen = ([^\n]*)/.exec(app)?.[1] || '').replace(/'[^']*'/g, '');
 const memoReads = [...new Set([...memoExpression.matchAll(/([A-Za-z][A-Za-z0-9]*)/g)].map((match) => match[1]))].filter(
   (name) => app.includes(`const [${name},`)
 );
@@ -239,8 +239,8 @@ checkIs('the memo reads some state through names', memoReads.length >= 1, memoRe
 memoReads.forEach((name) => {
   checkIs(
     `${name} is declared before the value that reads it`,
-    app.indexOf(`const [${name},`) < app.indexOf('const boundedHelpScreen ='),
-    `declared at ${app.indexOf(`const [${name},`)}, read at ${app.indexOf('const boundedHelpScreen =')}`
+    app.indexOf(`const [${name},`) < app.indexOf('const boundedScreen ='),
+    `declared at ${app.indexOf(`const [${name},`)}, read at ${app.indexOf('const boundedScreen =')}`
   );
 });
 checkIs(
@@ -297,11 +297,11 @@ checkIs(
 // The link whose absence is invisible: without min-h-0 on the pane the column refuses to shrink, so there is no
 // overflow and nothing scrolls - the card simply grows and the bookmarks scroll away again, exactly as before.
 const withoutShrink = help.replace('md:min-h-0 md:overflow-y-auto', 'md:overflow-y-auto');
-const withoutHeadingRow = app.replace("boundedHelpScreen ? 'md:flex md:flex-col' : ''", "''");
+const withoutHeadingRow = app.replace("boundedScreen ? 'md:flex md:flex-col' : ''", "''");
 checkIs('the mutation took the heading out of the layout', withoutHeadingRow !== app);
 checkIs(
   'so the page is a flex column again and the card overflows by the heading',
-  !/boundedHelpScreen \? 'md:flex md:flex-col' : ''/.test(withoutHeadingRow)
+  !/boundedScreen \? 'md:flex md:flex-col' : ''/.test(withoutHeadingRow)
 );
 checkIs('the mutation changed the Help component', withoutShrink !== help);
 const mutatedPane = /<article[\s\S]*?className="([^"]*)"/.exec(withoutShrink)?.[1] || '';
@@ -315,7 +315,7 @@ checkIs(
   !/activeSubTab === 'help' \? 'md:h-full md:min-h-0 md:flex-1 md:flex md:flex-col' : ''/.test(withoutPanelHeight)
 );
 
-// A class name is not a class: Tailwind emits only the utilities it recognises, so a typo (or a name that is not a
+// A class name is not a class: Tailwind emits only the utilities it recognizes, so a typo (or a name that is not a
 // utility at all) produces a class attribute the browser ignores and a layout that silently does not work - while
 // every source check above passes. These three are the load-bearing ones for the pane.
 //

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, Shield, ShieldCheck, CalendarDays, Clock, BookOpen, GraduationCap } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, Shield, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap } from 'lucide-react';
 import RankIcon from './RankIcon';
 import { stationLogoUrl } from '../utils/assets';
 import AnnouncementList from './AnnouncementList';
@@ -165,6 +165,19 @@ export default function Sidebar({
                     >
                         <BookOpen className="w-5 h-5" />
                         <span>Help</span>
+                    </button>
+
+                    {/* Documents is open to everyone as well. Which documents a member may SEE is decided by the
+                        server (published, and at or above their rank), so there is nothing to gate here. */}
+                    <button
+                        onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'documents'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <BookText className="w-5 h-5" />
+                        <span>Documents</span>
                     </button>
 
                     <button

@@ -281,8 +281,8 @@ check('naming a missing column', String(approverCard).includes('can_edit_ranks')
 check('and says the is_admin column itself is missing', String(approverCard).includes('no is_admin column'));
 
 const typoCard = accessCardFor({ id: 'r9', description: 'Typo role', can_edit_schedule_template: 'TRUE' });
-check('a misspelled column is reported as unrecognised', String(typoCard).includes('can_edit_schedule_template'));
-check('and it is called out as doing nothing', String(typoCard).includes('not recognised'));
+check('a misspelled column is reported as unrecognized', String(typoCard).includes('can_edit_schedule_template'));
+check('and it is called out as doing nothing', String(typoCard).includes('not recognized'));
 
 const memberAccessCard = accessCardFor(ROLES.memberOnly);
 check('renders for a member-only role', typeof memberAccessCard === 'string', memberAccessCard.error && memberAccessCard.error.message);
@@ -358,7 +358,7 @@ check('with a nickname field in the form', String(templatesHtml).includes('Nickn
 check('and the nickname drawn on the week card', String(templatesHtml).includes('Day Shift'));
 
 console.log('\n--- the Assignments tab ---');
-// The optional icon picker is drawn from the same catalogue the ranks editor uses
+// The optional icon picker is drawn from the same catalog the ranks editor uses
 // (RANK_ICON_MAP), and the icon renders beside the description in the list.
 const assignmentsHtml = (() => {
   try {
@@ -379,10 +379,10 @@ const assignmentsHtml = (() => {
 })();
 check('renders', typeof assignmentsHtml === 'string', assignmentsHtml.error && assignmentsHtml.error.message);
 check('with the icon picker', String(assignmentsHtml).includes('-- No Icon --'));
-// The catalogue itself is the same RANK_ICON_MAP the ranks editor renders, so an option
+// The catalog itself is the same RANK_ICON_MAP the ranks editor renders, so an option
 // that exists there must exist here.
 check(
-  'and the catalogue the ranks editor uses',
+  'and the catalog the ranks editor uses',
   String(assignmentsHtml).includes('<option value="star">star</option>')
 );
 check('and the saved icon drawn in the list', String(assignmentsHtml).includes('lucide-truck'));
@@ -575,7 +575,7 @@ check(
 );
 
 console.log('\n--- the Schedule Management board ---');
-// A vacancy in this tab is labelled with its ASSIGNMENT, not the word "Open" (the vacancy
+// A vacancy in this tab is labeled with its ASSIGNMENT, not the word "Open" (the vacancy
 // styling carries that), so this renders a vacant row for a template slot in the current
 // month and checks what the pill says. The row and the template have to line up: the board
 // draws a pill on the day the row STARTS, and only into the slot whose weekday matches.
@@ -632,7 +632,7 @@ const boardHtml = (() => {
 })();
 check('the board renders', typeof boardHtml === 'string', boardHtml.error && boardHtml.error.message);
 check('a vacant pill names the assignment', String(boardHtml).includes('Firefighter 3'));
-// The word would only appear if something still labelled a vacancy with it.
+// The word would only appear if something still labeled a vacancy with it.
 check('and no longer says "Open"', !String(boardHtml).includes('Open'));
 // Still styled as a vacancy, which is now doing the work the word used to do.
 check('keeping its vacancy styling', String(boardHtml).includes('text-slate-400'));
@@ -736,7 +736,7 @@ check('and covers the modules', String(memberHelp).includes('Timeclock') && Stri
 console.log('\n--- the guide pane, as rendered ---');
 const memberHelpHtml = String(memberHelp);
 check(
-  'the pane is rendered as a labelled scroll region',
+  'the pane is rendered as a labeled scroll region',
   /role="region"/.test(memberHelpHtml) && /aria-label="[^"]*guide"/.test(memberHelpHtml),
   'no region in the markup'
 );
@@ -874,7 +874,7 @@ check('all three labels render', ['Note', 'Tip', 'Warning'].every((label) => quo
 check('with no marker text left over', !/\[!(NOTE|TIP|WARNING)\]/.test(quoteAndAlerts), true);
 
 // The admin panel must expose the new tab, and Member Availability must have moved groups.
-// Asserted on the exported nav catalogue rather than the HTML: the sub-tab labels live inside a
+// Asserted on the exported nav catalog rather than the HTML: the sub-tab labels live inside a
 // closed dropdown, so they are absent from rendered output.
 const categoryOf = (tabId) => {
   const category = ADMIN_NAV_CATEGORIES.find((entry) =>
@@ -1361,7 +1361,7 @@ check(
 // --- content width ----------------------------------------------------------------------------
 console.log('\n--- content width ---');
 // Content pages fill the viewport, except the two form/status screens listed in CENTERED_CONTENT_TABS,
-// whose content is capped and centred. The cap lives on <main> itself so the heading is centred with the
+// whose content is capped and centerd. The cap lives on <main> itself so the heading is centerd with the
 // content rather than sitting off to one side.
 //
 // This also still answers the older question of whether My Availability and the administrative
@@ -1390,7 +1390,7 @@ check('and keeps its own vertical scroll on desktop', /\bmd:overflow-y-auto\b/.t
 // A max-width here would be an unconditional cap rather than the deliberate per-tab one.
 check('the base container sets no max-width of its own', !/\bmax-w-/.test(baseMainClasses), baseMainClasses);
 
-check('the centred-content set is exported', Array.isArray(CENTERED_CONTENT_TABS), true);
+check('the centerd-content set is exported', Array.isArray(CENTERED_CONTENT_TABS), true);
 check('it covers the Timeclock/Dashboard', CENTERED_CONTENT_TABS.includes('dashboard'), true);
 check('and User Settings', CENTERED_CONTENT_TABS.includes('settings'), true);
 check('and a width is chosen for it', /^max-w-/.test(CONTENT_MAX_WIDTH), CONTENT_MAX_WIDTH);
@@ -1401,7 +1401,7 @@ check('nor the schedule board', !CENTERED_CONTENT_TABS.includes('schedule'), tru
 check('nor Administration', !CENTERED_CONTENT_TABS.includes('admin'), true);
 check('nor the Help guides', !CENTERED_CONTENT_TABS.includes('help'), true);
 check('and the cap is applied per tab, not always', /centeredContent \?/.test(mainTag), true);
-check('centring it in the panel the sidebar leaves', /\bmx-auto\b/.test(mainTag), true);
+check('centering it in the panel the sidebar leaves', /\bmx-auto\b/.test(mainTag), true);
 check('and keeping it full width below the cap', /\bw-full\b/.test(mainTag), true);
 check('using the shared width so both screens match', /CONTENT_MAX_WIDTH/.test(mainTag), true);
 
@@ -1413,7 +1413,7 @@ check('using the shared width so both screens match', /CONTENT_MAX_WIDTH/.test(m
 const centered = readFileSync('src/components/CenteredContent.jsx', 'utf8');
 check('CenteredContent is the only place a content max-width lives', /CONTENT_MAX_WIDTH/.test(centered), true);
 check('it uses the one shared width', /CONTENT_MAX_WIDTH/.test(centered) && !/max-w-3xl/.test(centered), true);
-check('and centres what it caps', /\bmx-auto\b/.test(centered), true);
+check('and centers what it caps', /\bmx-auto\b/.test(centered), true);
 check('while staying full width below the cap', /\bw-full\b/.test(centered), true);
 // Rendered, so a wrapper that failed to apply the classes would show up.
 const centeredHtml = renderToString(React.createElement(CenteredContent, { className: 'space-y-6' }, React.createElement('p', null, 'inner')));
@@ -1444,7 +1444,7 @@ const memberBranch = availabilitySource.slice(availabilitySource.indexOf(') : se
 check('the single-member grid is NOT wrapped', /<AvailabilityCalendar/.test(memberBranch) && !/<CenteredContent/.test(memberBranch.slice(0, memberBranch.indexOf('<AvailabilityCalendar'))), true);
 check('and the whole tab is not wrapped', !/^export default function[\s\S]{0,200}<CenteredContent/.test(availabilitySource), true);
 
-// The runtime behaviour, not just the presence of a class: the same expression the component evaluates, run
+// The runtime behavior, not just the presence of a class: the same expression the component evaluates, run
 // against every tab, so a tab added to the wrong side of the rule shows up here.
 //
 // NOTE: check() here is boolean-only - the third argument is a detail string, not an expected value - so
@@ -1521,7 +1521,7 @@ check('with no sound field on the add form', !String(addUserView).includes('Runn
 // Rendering "editing" means the tab has to be driven into that state, so the form is rendered
 // directly with the field it would show for an existing member.
 // One save, not two: the profile rides along with the users row. And the refresh is not awaited,
-// because doPost serialises requests behind a script lock - awaiting the whole wave left the
+// because doPost serializes requests behind a script lock - awaiting the whole wave left the
 // spinner up for the length of the queue after the write had already landed.
 const usersSource = readFileSync('src/components/admin/AdminUsersTab.jsx', 'utf8');
 check('the form loads the profile from the member row', /runner_sound_profile: user\.runner_sound_profile/.test(usersSource), true);
@@ -1542,7 +1542,7 @@ const saveHandlerSource = (() => {
 check('the save handler was found', saveHandlerSource.length > 100, true);
 // Negated: `check` passes only when its condition is TRUE, so "must not contain" has to be written
 // as !test(...). The earlier file-wide version asserted the PRESENCE of `await onDataChanged()`
-// while being labelled "is not awaited", and passed only because an unrelated handler further down
+// while being labeled "is not awaited", and passed only because an unrelated handler further down
 // the file contained it.
 check('and it does not await the refresh', !/await onDataChanged\(/.test(saveHandlerSource));
 // Not awaiting the refresh left the list holding pre-save values, so re-opening the form showed the
@@ -2008,7 +2008,7 @@ const confirmHtml = renderToStaticMarkup(
 
 check('it renders an alert dialog', /role="alertdialog"/.test(confirmHtml), true);
 check('marked modal', /aria-modal="true"/.test(confirmHtml), true);
-check('labelled by an id', /aria-labelledby="[^"]+"/.test(confirmHtml), true);
+check('labeled by an id', /aria-labelledby="[^"]+"/.test(confirmHtml), true);
 check('and described by an id', /aria-describedby="[^"]+"/.test(confirmHtml), true);
 check('the label id is a real one', confirmHtml.includes(`id="${/aria-labelledby="([^"]+)"/.exec(confirmHtml)?.[1]}"`), true);
 check('the title is a heading', /<h2[^>]*>Delete user<\/h2>/.test(confirmHtml), true);
@@ -2069,7 +2069,7 @@ check('it does not offer the administrator-only name sort', !/Member Name \(A-Z\
 check("another member's entry is absent", !/Mar 11/.test(historyText));
 check('the hours card totals only this member', /10 hrs/.test(historyText));
 check('the entries card counts only this member', /2 entries/.test(historyText));
-check('and nothing is labelled filtered when no filter is set', !/\(filtered\)/.test(historyText));
+check('and nothing is labeled filtered when no filter is set', !/\(filtered\)/.test(historyText));
 check('so there is no clear-filters link', !/Clear filters/.test(historyText));
 // Rows carry toLocaleDateString('en-US') output, so this asserts on "3/12/2026" rather than "Mar 12".
 check('the rows are newest first', historyText.indexOf('3/12/2026') < historyText.indexOf('3/10/2026'));

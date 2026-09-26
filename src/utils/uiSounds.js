@@ -31,9 +31,11 @@ import toastErrorSound from '../assets/toast_error.mp3';
 import toastNormalSound from '../assets/toast_normal.mp3';
 import toastSuccessSound from '../assets/toast_success.mp3';
 import {
-  SOUND_VOLUME,
   SOUNDS_DEFAULT,
   createPressTracker,
+  clampSoundVolume,
+  soundVolumeFor,
+  soundVolumeRows as volumeRowsFor,
 } from './soundRules';
 
 // Every sound the app can play, by name. Imported rather than referenced by path so Vite fingerprints and bundles
@@ -71,6 +73,12 @@ export {
   modalSoundFor,
   toastSoundFor,
   movedEnoughToBeADrag,
+  SOUND_VOLUME,
+  SOUND_VOLUME_MIN,
+  SOUND_VOLUME_MAX,
+  SOUND_VOLUME_STEP,
+  clampSoundVolume,
+  soundVolumeFor,
 } from './soundRules';
 
 
@@ -101,6 +109,40 @@ export const setSoundsEnabled = (enabled) => {
 const POOL_SIZE = 3;
 const pools = new Map();
 let poolCursor = 0;
+
+// The levels the Debug page's sliders have set, by sound name. In memory for the session and never written to the
+// sheet: a level is something to try, not a setting to save. Cleared when the session ends (see resetSoundVolumes).
+const volumeOverrides = new Map();
+
+const volumeFor = (name) => soundVolumeFor(name, volumeOverrides);
+
+// Sets a level for the rest of the session, and applies it to the voices that ALREADY exist.
+//
+// That second half is the whole point. A voice takes its `volume` when it is built, and a pool is built on a
+// sound's first press - so without this, moving a slider would only be heard on sounds that had not been played
+// yet, which is exactly the wrong half. Returns the level actually applied, after clamping.
+export const setSoundVolume = (name, value) => {
+  if (!SOUND_FILES[name]) return volumeFor(name);
+  const level = clampSoundVolume(value);
+  volumeOverrides.set(name, level);
+  const voices = pools.get(name);
+  if (voices) voices.forEach((voice) => { voice.volume = level; });
+  return level;
+};
+
+// Puts every level back to the shipped mix. Called when a session ends, because a level belongs to the session that
+// set it - the next person to sign in on this machine gets the app's own mix, not somebody's experiment.
+export const resetSoundVolumes = () => {
+  volumeOverrides.clear();
+  pools.forEach((voices, name) => {
+    voices.forEach((voice) => { voice.volume = volumeFor(name); });
+  });
+};
+
+// The rows the Debug page renders: the level in force for every sound, the level it ships with, and which ones have
+// been moved. Read back from the engine rather than kept in the page's own state, so a slider can never show a
+// level other than the one that will actually be played.
+export const soundVolumeRows = () => volumeRowsFor(volumeOverrides);
 
 // name -> object URL once the bytes are in hand, or null when the fetch failed. A null is REMEMBERED: an asset that
 // could not be fetched must not be re-fetched on every press.
@@ -152,7 +194,7 @@ const audioFor = (name) => {
   for (let i = 0; i < POOL_SIZE; i++) {
     const audio = new Audio(source);
     audio.preload = 'auto';
-    audio.volume = SOUND_VOLUME[name] ?? SOUND_VOLUME.default;
+    audio.volume = volumeFor(name);
     voices.push(audio);
   }
   pools.set(name, voices);
@@ -188,7 +230,7 @@ export const playSound = (name, { force = false } = {}) => {
     if (typeof Audio === 'undefined') return false;
     try {
       const oneOff = new Audio(SOUND_FILES[name]);
-      oneOff.volume = SOUND_VOLUME[name] ?? SOUND_VOLUME.default;
+      oneOff.volume = volumeFor(name);
       const started = oneOff.play();
       if (started && typeof started.catch === 'function') started.catch(() => {});
     } catch {

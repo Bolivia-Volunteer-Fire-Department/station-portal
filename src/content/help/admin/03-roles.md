@@ -42,6 +42,10 @@ Each permission grants its own tab, or its own member-facing ability. None of th
 - **Manage notification settings** — *System → Notifications*. Without *Manage system settings*, this role may write only the notification keys, so it cannot be used to change unrelated settings, and the Firebase credential card stays administrator-only.
 - **View the system log** — *System → System Log*. Read-only, but it names members and records failed sign-ins, so grant it deliberately rather than by default. The tab loads only when it is opened, so it costs nothing to someone who never looks.
 
+**Content**
+
+- **Manage documents** — *Content → Documents*: writing documents and checklists, their folders, who may read each one, their items, and the signature report.
+
 **Member abilities**
 
 These do not open Administration at all; they decide what the member can do in their own modules.
@@ -53,6 +57,7 @@ These do not open Administration at all; they decide what the member can do in t
 - **Use the timeclock** — the **Clock In**/**Clock Out** buttons and the **Clock History** module. Without it a member still sees the Timeclock module, but only the clock and the *Currently on duty* list.
 - **Sign trainings** — the **Training** module. Without it the module is not in the sidebar at all, because signing is the whole point of it.
 - **Manage trainings** — the add/edit form in the Training module. Cannot be stored without *Sign trainings*, since a role that may change a training but cannot open the module would have nowhere to do it.
+- **Verify checklists** — the **Verification** panel in the **Documents** module. It lets a member confirm other members' signed checklist items, and it deliberately does not open Administration: an officer checking a new member's truck checklist is not an administrator. Nobody can verify their own checklist.
 
 ## Dependencies
 
@@ -70,4 +75,4 @@ Someone who approves shifts needs **Approve shift requests**, and if you want th
 
 ## Reading a role at a glance
 
-The list shows how many of the permissions each role has, so a role showing *4 of 16* is obviously partial and one showing *16 of 16* is a full role without Administrator access.
+The list shows how many of the permissions each role has, so a role showing *4 of 25* is obviously partial and one showing *25 of 25* is a full role without Administrator access.

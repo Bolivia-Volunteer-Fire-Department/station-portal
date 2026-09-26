@@ -84,7 +84,11 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 // Driven from an async main() rather than at the top level: the vite-ssr build this runs through does not accept
 // top-level await.
 const main = async () => {
-  const { playSound, primeSound, setSoundsEnabled, SOUND_FILES } = await import('../src/utils/uiSounds.js');
+  const { playSound, primeSound, setSoundsEnabled, SOUND_FILES, setSoundVolume, resetSoundVolumes, soundVolumeRows } =
+    await import('../src/utils/uiSounds.js');
+  // Held onto from the section below, so the level checks can drive the SAME voices the presses did - which is the
+  // only way to show that a level reaches voices that already exist.
+  let toastSuccessPool = [];
 
   console.log('\n--- the first press of a sound ---');
   checkIs('the engine resolves a sound to a file', String(SOUND_FILES.toast_success).includes('.mp3'));
@@ -105,6 +109,7 @@ const main = async () => {
     await settle();
     // The one-off voice from the first press is first in the list; the pool the app clicks through is the tail.
     const pool = audios.slice(1);
+    toastSuccessPool = pool;
     check('from a pool of three voices, for overlapping plays', pool.length, 3);
     check('all three built from the one copy', new Set(pool.map((voice) => voice.src)).size, 1);
     checkIs('which is a copy of the file, not the file', String(pool[0].src).startsWith('blob:'));
@@ -192,6 +197,63 @@ const main = async () => {
     check('plays nothing', playSound('no_such_sound'), false);
     check('fetches nothing', fetches.length - unknown.fetches, 0);
     check('and creates no voice', audios.length - unknown.audios, 0);
+  }
+
+  console.log('\n--- the Debug page\u2019s levels ---');
+  {
+    // The crux: a voice takes its volume when it is BUILT, and toast_success already has a pool from the presses
+    // above. A slider that only affected sounds not yet played would be the wrong half of the feature.
+    const built = toastSuccessPool;
+    check('the sound already has its three voices', built.length, 3);
+    check('at the shipped level', new Set(built.map((voice) => voice.volume)).size, 1);
+    check('which is the shared default', built[0].volume, 0.4);
+
+    check('setting a level reports what it applied', setSoundVolume('toast_success', 0.9), 0.9);
+    check(
+      'and it reaches the voices that already exist',
+      built.map((voice) => voice.volume),
+      [0.9, 0.9, 0.9]
+    );
+
+    // Clamped on the way in, so a slider (or a mistake) cannot push an Audio element out of range.
+    check('a level above full is clamped to full', setSoundVolume('toast_success', 5), 1);
+    check('and the voices follow', built[0].volume, 1);
+    check('a level below nothing is clamped to nothing', setSoundVolume('toast_success', -2), 0);
+
+    // A sound with no pool yet is built at the level in force, so a slider moved before the sound is ever heard
+    // still applies.
+    const voicesBefore = audios.length;
+    setSoundVolume('click', 0.05);
+    playSound('click');
+    await settle();
+    const freshVoices = audios.slice(voicesBefore);
+    check('a sound first played after the slider moved is built at that level', freshVoices.length, 3);
+    check(
+      'all three of them',
+      freshVoices.map((voice) => voice.volume),
+      [0.05, 0.05, 0.05]
+    );
+
+    // What the page renders: the engine's own answer, so a slider cannot show a level other than the played one.
+    const rows = soundVolumeRows();
+    check('the rows cover every sound', rows.length, Object.keys(SOUND_FILES).length);
+    check(
+      'and name only the moved ones',
+      rows.filter((row) => row.overridden).map((row) => row.name).sort(),
+      ['click', 'toast_success']
+    );
+    check('showing the level in force', rows.find((row) => row.name === 'toast_success').volume, 0);
+    check('and what it ships at', rows.find((row) => row.name === 'toast_success').shipped, 0.4);
+    check('a sound nobody touched is not marked', rows.find((row) => row.name === 'notification').overridden, false);
+
+    // Signing out is what ends the experiment: every level goes back to the shipped mix, live voices included.
+    resetSoundVolumes();
+    check('resetting puts the rows back', soundVolumeRows().filter((row) => row.overridden).length, 0);
+    check('and the voices with them', built.map((voice) => voice.volume), [0.4, 0.4, 0.4]);
+    check('including the click', freshVoices.map((voice) => voice.volume), [0.15, 0.15, 0.15]);
+
+    // The page can be asked about a name that is not a sound; it must not throw, and must not invent a level.
+    check('an unknown sound has no level to set', setSoundVolume('no_such_sound', 0.5), 0.4);
   }
 
   console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

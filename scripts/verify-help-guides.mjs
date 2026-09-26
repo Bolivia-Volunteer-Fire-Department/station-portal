@@ -13,9 +13,12 @@
  *
  * Run with: npm run verify:help
  */
+import React from 'react';
+import { renderToString } from 'react-dom/server';
 import { ALERT_KINDS, markdownTitle, parseInline, parseMarkdown } from '../src/utils/markdown.js';
 import { HELP_SCOPES, hasGuideContent, helpFolderFor, helpGuides } from '../src/utils/helpGuides.js';
 import { ADMIN_PERMISSIONS, ADMIN_PERMISSIONLESS_TABS } from '../src/utils/permissions.js';
+import Markdown from '../src/components/Markdown.jsx';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -52,7 +55,7 @@ check(
   'one two three'
 );
 check('a rule', parseMarkdown('---').map((b) => b.type), ['rule']);
-check('crlf is normalised', parseMarkdown('# A\r\n\r\nB').length, 2);
+check('crlf is normalized', parseMarkdown('# A\r\n\r\nB').length, 2);
 check('empty input is no blocks', parseMarkdown(''), []);
 check('whitespace-only input is no blocks', parseMarkdown('   \n\n  \n'), []);
 
@@ -100,6 +103,49 @@ check('a bare asterisk survives', types(parseInline('a * b')), ['text']);
 check('html is text, never markup', types(parseInline('<script>alert(1)</script>')), ['text']);
 check('and keeps its characters', plain(parseInline('<b>hi</b>')), '<b>hi</b>');
 check('an empty-ish line does not throw', types(parseInline('**')), ['text']);
+
+console.log('\n--- bold and italic together ---');
+check('three asterisks are one token', types(parseInline('***both***')), ['bold']);
+check('whose child is italic', parseInline('***both***')[0].children[0].type, 'italic');
+check('with the words inside', plain(parseInline('***both***')), 'both');
+check('and it renders as both tags', renderToString(React.createElement(Markdown, { markdown: '***both***' })), '<div class="space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200"><p><strong><em>both</em></strong></p></div>');
+check('unhugged triple asterisks stay literal', types(parseInline('*** spaced ***')), ['text']);
+check('two asterisks are still bold', types(parseInline('**bold**')), ['bold']);
+
+console.log('\n--- colored marks ---');
+check('a highlight is its own token', types(parseInline('==read this==')), ['color']);
+check(
+  'carrying the tone from the table',
+  parseInline('==read this==')[0].tone,
+  'highlight'
+);
+check('with its text inside', plain(parseInline('==read this==')), 'read this');
+check(
+  'and it can hold other marks',
+  types(parseInline('==**very** important==')[0].children),
+  ['bold', 'text']
+);
+check('with the whole phrase inside', plain(parseInline('==**very** important==')), 'very important');
+check(
+  'the highlight survives rendering',
+  /<mark class="[^"]*bg-amber-200/.test(renderToString(React.createElement(Markdown, { markdown: '==read this==' }))),
+  true
+);
+check(
+  'and the delimiters are gone from what is shown',
+  !/==/.test(renderToString(React.createElement(Markdown, { markdown: '==read this==' }))),
+  true
+);
+// The same literal-preservation rule as the other delimiters: what an author types by accident stays as typed.
+check('an unhugged highlight stays literal', types(parseInline('== spaced ==')), ['text']);
+check('an unclosed one stays literal', plain(parseInline('a == b')), 'a == b');
+check('a single equals sign is just text', types(parseInline('x = y')), ['text']);
+check('and an empty pair is not a mark', types(parseInline('====')), ['text']);
+check(
+  'an unknown tone still renders as something',
+  /<mark class="/.test(renderToString(React.createElement(Markdown, { markdown: '==x==' }))),
+  true
+);
 
 console.log('\n--- titles ---');
 check('the first heading is the title', markdownTitle('# My Guide\n\ntext'), 'My Guide');
@@ -199,7 +245,7 @@ check('an unknown scope falls back to member', helpGuides('nope').length, member
 console.log('\n--- markdown alerts ---');
 const alertBlocks = (source) => parseMarkdown(source);
 
-// All five GitHub kinds are recognised, whatever the case.
+// All five GitHub kinds are recognized, whatever the case.
 for (const kind of ALERT_KINDS) {
   const parsed = alertBlocks('> [!' + kind.toUpperCase() + ']\n> Body text.');
   check(`${kind}: parsed as an alert`, [parsed[0].type, parsed[0].kind], ['alert', kind]);
@@ -222,7 +268,7 @@ check('code inside an alert is kept verbatim', withCode[0].blocks[0].value, 'kee
 const withInline = alertBlocks('> [!IMPORTANT]\n> Use **bold** and `code`.');
 check('inline emphasis inside an alert is parsed', types(withInline[0].blocks[0].children), ['text', 'bold', 'text', 'code', 'text']);
 
-// Refusals: an unrecognised kind is a QUOTE, not an alert with a wrong label - the marker text stays
+// Refusals: an unrecognized kind is a QUOTE, not an alert with a wrong label - the marker text stays
 // visible so a typo is seen rather than silently styled.
 const unknown = alertBlocks('> [!DANGER]\n> Nope.');
 check('an unsupported kind stays a quote', unknown[0].type, 'quote');
@@ -344,7 +390,7 @@ check('and the admin one', helpFolderFor('admin'), 'src/content/help/admin/');
 console.log('\n--- one guide per module and per tab ---');
 // The administrator set must cover every Administration tab this app can show, so adding a tab
 // without documenting it is caught here rather than noticed months later. Tab ids come from the
-// permission catalogue (plus the permissionless tabs), which is plain data with no React in it.
+// permission catalog (plus the permissionless tabs), which is plain data with no React in it.
 const adminSlugs = helpGuides('admin').map((g) => g.slug).join(' ');
 const requiredAdminTabs = [
   ...ADMIN_PERMISSIONS.map((permission) => permission.tab),
@@ -366,6 +412,7 @@ const requiredMemberModules = [
   'my-availability',
   'user-settings',
   'help',
+  'documents',
   'firefighter-runner',
 ];
 const undocumentedModules = requiredMemberModules.filter((module) => !memberSlugs.includes(module));

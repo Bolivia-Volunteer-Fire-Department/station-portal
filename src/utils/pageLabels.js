@@ -12,6 +12,7 @@ export const PAGE_BAR_LABELS = {
   schedule: 'My Schedule',
   availability: 'My Availability',
   training: 'Training',
+  documents: 'Documents',
   help: 'Help',
   settings: 'User Settings',
   admin: 'Administration',
@@ -36,11 +37,13 @@ export const ADMIN_BAR_LABELS = {
   clock: 'Clock Mgt',
   announcements: 'Announcements',
   training: 'Training',
+  documents: 'Documents',
   system: 'Settings',
   notifications: 'Notifications',
   // The nav id is `system-log`, not `log`: an id-based lookup has to match the navigation exactly, and a
   // test asserts every id in ADMIN_NAV_CATEGORIES has an entry here.
   'system-log': 'System Log',
+  debug: 'Debug',
   help: 'Help',
 };
 

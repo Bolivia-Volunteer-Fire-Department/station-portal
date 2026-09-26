@@ -31,12 +31,51 @@ export const REQUIRED_SOUNDS = [
 // `click_double` is the heavier sibling played for consequential, infrequent actions (see IMPACT_VERBS below): more
 // present than the everyday click, because it is confirming something that mattered, but still under the one-shots.
 export const SOUND_VOLUME = {
-  click: 0.05,
-  click_double: 0.15,
+  click: 0.15,
+  click_double: 0.25,
   sound_on: 0.4,
   sound_off: 0.4,
   default: 0.4,
 };
+
+// The range a level may take, and the step the Debug page's sliders move in. 5% is fine enough to hear the
+// difference between two positions and coarse enough to land on a round number nobody has to type.
+export const SOUND_VOLUME_MIN = 0;
+export const SOUND_VOLUME_MAX = 1;
+export const SOUND_VOLUME_STEP = 0.05;
+
+// A level from anywhere - a slider, a session override, a mistake - forced into the range every Audio element
+// accepts. A value that is not a number at all falls back to the shipped default rather than to silence: an
+// unreadable level must not be the one that turns a sound off.
+export const clampSoundVolume = (value) => {
+  const number = typeof value === 'number' ? value : Number.parseFloat(value);
+  if (!Number.isFinite(number)) return SOUND_VOLUME.default;
+  return Math.min(SOUND_VOLUME_MAX, Math.max(SOUND_VOLUME_MIN, number));
+};
+
+// The level a sound plays at: the session's override when the Debug page has set one, the shipped mix otherwise.
+// `overrides` is what utils/uiSounds holds, and is a Map there and a plain object everywhere it is tested.
+export const soundVolumeFor = (name, overrides) => {
+  const override = overrides instanceof Map ? overrides.get(name) : overrides && overrides[name];
+  if (override !== undefined && override !== null) return clampSoundVolume(override);
+  return clampSoundVolume(SOUND_VOLUME[name] ?? SOUND_VOLUME.default);
+};
+
+// One row per sound the app ships, for the Debug page's level sliders: the level in force, the level it ships with,
+// whether the two differ (so a moved sound is visible as one and can be put back on its own), and where its shipped
+// level comes from - its own entry in the table above, or the shared `default` the one-shot sounds use.
+export const soundVolumeRows = (overrides) =>
+  REQUIRED_SOUNDS.map((name) => {
+    const shipped = clampSoundVolume(SOUND_VOLUME[name] ?? SOUND_VOLUME.default);
+    const volume = soundVolumeFor(name, overrides);
+    return {
+      name,
+      volume,
+      shipped,
+      shippedFrom: SOUND_VOLUME[name] === undefined ? 'default' : name,
+      overridden: Math.abs(volume - shipped) > 0.0001,
+    };
+  });
 
 // ---------------------------------------------------------------------------
 // The setting
@@ -85,7 +124,7 @@ export const MODAL_SOUNDS = {
 
 export const MODAL_TONE_FILES = { positive: 'modal_positive', error: 'modal_error' };
 
-// Pass a tone directly for a one-off, or a modal key to look the tone up. Anything unrecognised is positive.
+// Pass a tone directly for a one-off, or a modal key to look the tone up. Anything unrecognized is positive.
 export const modalSoundFor = (modal, tone) => MODAL_TONE_FILES[tone || MODAL_SOUNDS[modal]] || 'modal_positive';
 
 // ---------------------------------------------------------------------------
@@ -131,7 +170,7 @@ export const CLICKABLE_SELECTOR = [
 ].join(', ');
 
 // What a caller can put on an element to override the default. `none` silences a subtree (the minigame), `click`
-// marks something the selector would not otherwise recognise, `click-double` promotes an action to the heavier
+// marks something the selector would not otherwise recognize, `click-double` promotes an action to the heavier
 // sound (or demotes one the rule below would have promoted, by saying `click`), and the two toggle values carry
 // the sound the toggle is ABOUT to make, so nothing has to infer it from a state the member cannot see yet.
 export const SOUND_DIRECTIVES = ['none', 'click', 'click-double', 'sound-on', 'sound-off'];
@@ -192,7 +231,7 @@ export const soundForPress = (element) => {
 // Which presses are worth the heavier sound
 // ---------------------------------------------------------------------------
 // The policy, in one sentence: an action that is CONSEQUENTIAL and INFREQUENT gets click_double. Saving, deleting,
-// editing, cancelling, exporting, printing, signing out, approving - things the member means to do, as opposed to
+// editing, canceling, exporting, printing, signing out, approving - things the member means to do, as opposed to
 // the navigation, toggles, filters and pills that make up most of a session's clicking.
 //
 // The exclusions are as deliberate as the inclusions, and the interesting ones:
@@ -295,7 +334,7 @@ export const toastSoundFor = (kind) => TOAST_SOUNDS[kind] || 'toast_normal';
 // ---------------------------------------------------------------------------
 // The press tracker
 // ---------------------------------------------------------------------------
-// The behaviour of the delegated listeners, with `play` injected - so the whole thing can be driven by fake
+// The behavior of the delegated listeners, with `play` injected - so the whole thing can be driven by fake
 // events in a test, including the awkward parts that are easy to get wrong: a tap must make ONE sound, a drag
 // must make two, and a right-click must make none.
 //
@@ -352,7 +391,7 @@ export const createPressTracker = (play) => {
     const moved = movedEnoughToBeADrag(origin, { x: event?.clientX, y: event?.clientY });
 
     if (wasTouch) {
-      // A tap: the finger went down and came up without travelling, so the sound it was owed is played now. A
+      // A tap: the finger went down and came up without traveling, so the sound it was owed is played now. A
       // finger that moved was scrolling or dragging, and makes no sound at all.
       if (!moved) play(sound, { force: isToggleSound(sound) });
       return;
@@ -363,7 +402,7 @@ export const createPressTracker = (play) => {
     if (moved && sound === 'click') play('click');
   };
 
-  // A touch that becomes a scroll is cancelled rather than released, so the pending press has to be dropped - or
+  // A touch that becomes a scroll is canceled rather than released, so the pending press has to be dropped - or
   // the next release anywhere on the screen would play the sound the scroll was owed.
   const onPointerCancel = () => {
     clearPress();

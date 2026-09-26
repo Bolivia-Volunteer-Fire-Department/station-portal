@@ -77,6 +77,11 @@ in the publish checklist below.
   toggle, `can_edit_own_availability` My Availability, and `can_use_timeclock` the
   Clock In/Out buttons and Clock History. Without the timeclock permission a member
   still sees the station clock and the *Currently on duty* card.
+- **`can_verify_documents` is a member permission on purpose.** It opens the Verification
+  panel inside the **Documents** module rather than an Administration tab, because an
+  officer confirming a new member's truck checklist is not an administrator. Documents
+  themselves need no member permission: the *server* decides what a member may see, so a
+  screen that filtered again would be a second copy of that rule.
 - **Dependencies are enforced in the editor**: *Offer to fill open shifts* and
   *See the whole crew's schedule* are locked off while *View their schedule* is off
   (`can_make_offers` / `can_view_full_schedule` cannot be stored without
@@ -94,6 +99,68 @@ in the publish checklist below.
 - **Help (System group) has no permission column either** — it is documentation in the repo,
   so it is open to anyone who can reach Administration. See the Help Guides section below;
   like User Settings, the member-facing **Help** module is open to everyone.
+- **Debug (System group) is client-only.** `can_access_debug` opens a page that fires the app's
+  own toasts, dialogs and sounds from buttons, and carries a slider for the level of every sound.
+  The sliders are a **session-only sandbox**: they live in the engine's memory
+  (`utils/uiSounds`), are never written to a sheet, and are reset on both ways a session ends
+  (`handleLogout` and `endSession`) so the next person to sign in gets the shipped mix.
+  Making a level permanent means editing `SOUND_VOLUME` in `utils/soundRules.js`. Nothing on the
+  page calls an action, so it cannot change a row; the two dialogs that normally submit are
+  previews whose buttons close instead. It needs no backend change, which is why it is the one
+  tab whose permission works against a deployment that has not been re-published.
+- **Documents (Content group) store their text in the sheet, not in the app.** `can_manage_documents`
+  opens the tab; members read the module with no permission, because the *server* decides what a
+  member may see (published, and at or above their minimum rank) from the session's own rank — the
+  screen renders what it is given rather than filtering again. Two rules keep it honest:
+  **list reads never carry a body** (the list is metadata and a document is fetched one at a time, so
+  opening the module costs the same on a shelf of a hundred as on a shelf of one), and **a signed
+  document cannot be deleted** (unpublish it instead), so nothing can erase a signature by deleting
+  what it was about. Unlike the Help guides, documents are rows in a sheet, so the module needs a
+  connection. See `verify:documents`.
+- **The editor is WYSIWYG without a WYSIWYG library.** Markdown stays the storage format, and the editing
+  surface is generated from it, so there is no second dialect to drift from what a member reads. Three
+  pieces hold that together: the parser records the **inline markdown each block was parsed from**
+  (`inlineSource`, `itemSources`, table cell sources), which is what lets the editor render a block with
+  the same `parseInline` the reader uses; `utils/richMarkdown` turns that model into editable HTML and
+  back, with a `data-block` kind on every element so the reverse direction reads the kind rather than
+  guessing from tags; and `utils/markdownStyles` holds the class tables **both** the reader and the editor
+  render with, so a heading cannot look one way while writing and another while reading. The whole engine
+  is pure — no DOM, no React — which is why `verify:rich-markdown` can drive it in node: it round-trips a
+  document using every construct through HTML and back and compares the text, then covers what a *browser*
+  does to that HTML (bare `<div>`s, `<p><br></p>`, pasted `<span>`s, a table it rewrote without a
+  `<thead>`), then every toolbar command. Block commands change the model and re-render from it; inline
+  ones wrap the selection, and the reader turns those tags back into markdown. The component is left with
+  the parts no test here can reach: a `contenteditable` div, an 180ms commit, and the toolbar. **Write is
+  the default**, with Markdown as the same document in text and Preview as the shared renderer.
+- **A callout's label is drawn, not typed.** The box's name (*Warning*) comes from the kind, so it is
+  emitted with `contenteditable="false"` and skipped by the reader — otherwise the first time an author
+  clicked inside one, "Warning" would have become part of the procedure.
+- **Signatures are add-only for members, and stamped from the session.** `SIGN_DOCUMENT` takes *both*
+  identities (`user_id`, the member the row is about, and `signed_by_user_id`, who actually signed) and
+  the date from the session, never from the payload — which is what makes "a member cannot sign
+  somebody else's checklist" a fact rather than a convention. It **refuses** a removal rather than
+  ignoring one, so a caller that asked to un-sign is told it cannot; removal is
+  `ADMIN_REMOVE_DOCUMENT_SIGNATURE`, behind `can_manage_documents`, and goes to the system log. Each
+  signature records the document's `content_revision`, so a report can say a signature predates the
+  latest edit — a signature that appears to approve text nobody read being the one way this feature
+  misleads.
+- **Checklist items are their own records, and verification is somebody else.** An item lives in
+  `document_checklist_items` so a signature can point at a stable id: editing an item's wording keeps
+  its signatures, and **a signed item cannot be deleted** (the same rule as a signed document). Changing
+  any item bumps the *parent document's* `content_revision`, so an edit under a signature reads as stale
+  exactly as an edit to the text does. Signing takes a **list** of items in one request — ticking several
+  lines and saving once is how the screen is used, and it gives the batch one timestamp, the same
+  reasoning as the training module — while an item that is already signed or belongs elsewhere is
+  *skipped and counted* rather than failing the whole batch.
+- **Verification is a member permission, not an administrative one.** `can_verify_documents` opens the
+  Verification panel inside Documents, because an officer confirming a new member's truck checklist is
+  not an administrator. Three rules make it mean something: a verification **follows the member's own
+  signature** (there is nothing to confirm about work nobody claimed), **nobody verifies their own
+  checklist** (the server refuses it and the panel never lists you), and the verifier, the timestamp and
+  the revision come from the session. `VERIFY_CHECKLIST_REMAINING` does a whole member in one call —
+  40 round trips against a script that takes seconds each would be worse than the wrong half-verified
+  list it would leave behind. `GET_DOCUMENT_SIGNATURES` carries the items alongside the signatures so
+  its two audiences (document managers, and verifiers with no other access) can both name a row.
 - **`can_edit_notification_settings` without `is_admin`** can manage the station
   defaults but not the Firebase credentials: the FCM card is disabled, and the backend
   refuses those actions. That role may only write `notify_*` keys, so the permission
@@ -231,7 +298,7 @@ every save refetching a table that grows one row per member per shift), and
 **Schedule Management** drives its own local copy — its sync effect is dirty-guarded, so a
 background refetch can never discard unsaved edits.
 
-The audit cannot prove a refresh *ran*; it proves the wiring is complete. Behavioural checks
+The audit cannot prove a refresh *ran*; it proves the wiring is complete. Behavioral checks
 live in the render harness (`npm run verify:admin-render`).
 
 ## Help Guides
@@ -250,7 +317,7 @@ so guides work offline, need no fetch, no index file and no base-path handling o
 — a glob that matched nothing would fail silently, which is why `verify:help` asserts both
 folders actually load.
 
-`verify:help` also asserts **coverage**: every tab id in the permissions catalogue has a matching
+`verify:help` also asserts **coverage**: every tab id in the permissions catalog has a matching
 guide slug, and so does every member module. Adding a tab without documenting it fails the suite
 rather than going unnoticed — which is what that check is for.
 
@@ -287,7 +354,7 @@ its first version passed on a wrapped bullet because the rule excluded list item
 "prose", which is exactly the case it needed to catch.
 
 `npm run fix:guides` is the fixer (`scripts/reflow-guides.py`): it reflows, collapses blank runs and
-normalises the file ending, leaving fenced code and alert markers alone. Run it when the lint fails.
+normalizes the file ending, leaving fenced code and alert markers alone. Run it when the lint fails.
 
 ### Markdown alerts
 
@@ -302,7 +369,7 @@ alone is not a signal everyone receives.
 
 Two deliberate refusals:
 
-- **An unrecognised marker stays a quote.** `[!DANGER]` renders as visible `[!DANGER]` text rather
+- **An unrecognized marker stays a quote.** `[!DANGER]` renders as visible `[!DANGER]` text rather
   than being styled as something it is not — a typo is seen, not guessed at. `verify:help` also fails
   on an unsupported type in a shipped guide, and on a marker with no body line under it (which would
   render an empty box).
@@ -320,7 +387,9 @@ The markdown is parsed by `src/utils/markdown.js` into a **plain data tree** tha
 `src/components/Markdown.jsx` renders as React elements. There is no `dangerouslySetInnerHTML`
 anywhere in the path, so HTML written inside a guide renders as literal text instead of being
 executed. Supported syntax: headings, paragraphs, bold/italic, inline code, fenced code, links,
-bullet and numbered lists, block quotes, `---` rules and tables.
+bullet and numbered lists, block quotes, `---` rules, tables, inline highlights (`==text==`) and
+`***bold italic***`, which is what the document editor's toolbar writes when both are pressed on one
+phrase.
 
 Emphasis deliberately hugs its content, so `snake_case`, `2 * 3 * 4` and `* not italic *` stay
 literal — the cases a guide author hits by accident, and column names appear in these guides
@@ -335,7 +404,7 @@ links.
 
 ## Users Tab: a Save Shows Immediately
 
-Because `doPost` serialises requests behind a script lock, the refresh wave a save triggers takes
+Because `doPost` serializes requests behind a script lock, the refresh wave a save triggers takes
 tens of seconds and cannot be waited on. The Users tab therefore merges the saved row into the list
 straight away (`mergeSavedUser` in `src/utils/userRow.js`, which refuses to touch a row with no id,
 never copies a password, and only writes the columns the editor owns) and shows *"Reloading the full
@@ -349,7 +418,7 @@ for the whole wave; they just do not add a second write, so it is less noticeabl
 
 `session_timeout` in `system_settings` holds a number of **minutes**. When it is usable, a member who
 neither interacts with the app nor navigates within that window is signed out. Blank or unusable
-leaves the previous behaviour in place — a 12-hour session.
+leaves the previous behavior in place — a 12-hour session.
 
 Implemented in **two halves on purpose**:
 
@@ -369,7 +438,7 @@ used afterwards, and `scripts/verify-session-timeout.mjs` asserts it by lifting 
 The obvious implementation reads the setting on every authenticated request, softened with
 `CacheService`. That costs a cache round trip on **every** request, and — worse — a cache eviction
 costs a full `system_settings` **sheet read** on the auth path of somebody's save. Since `doPost`
-serialises requests behind a script lock, that stall lands in everyone's queue.
+serializes requests behind a script lock, that stall lands in everyone's queue.
 
 So the window travels **in the session record** instead: `userId|expiry|ttlMs`. Refreshing a session
 is then one property write and two `parseInt` calls. Measured by the verifier:
@@ -465,7 +534,7 @@ per-request traffic this design removes — so it is left open on purpose.
   `refreshAdminScheduleData` already fetches internally. For an admin that was 13 backend
   executions per sign-in; it is 9 now, with the redundant offers call removed.
 - **No admin save waits on the refresh wave.** A save is one backend write; the refresh behind it is
-  nine requests (`refreshAdminData`), and Apps Script serialises them behind a script lock in `doPost`,
+  nine requests (`refreshAdminData`), and Apps Script serializes them behind a script lock in `doPost`,
   so awaiting the wave held the Save button spinning over a sheet that had already been written — the
   reason a save "takes a long time from the front end but lands on the sheet almost immediately". Every
   admin tab now starts the wave and stops waiting for it, and merges the row it just saved into app state
@@ -521,7 +590,7 @@ asset URLs resolve correctly no matter what you name the repo.
 
 The front end and the backend deploy separately, so **the app can be published while the backend is behind it**. Work through this once; it is the difference between a working deployment and a screen full of "Invalid action type".
 
-**1. Redeploy the Apps Script backend.** Paste the current `src/services/Code.gs` into the editor, Save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. A deployment is pinned to a version, so editing the file is not enough. Everything added recently is server-side: events, announcements, training, the session timeout, the System Log, the clock geofence, the write-only script lock, and the batched sign-in (`GET_BOOTSTRAP` / `ADMIN_GET_BOOTSTRAP` — see the warning above about deploying before the client).
+**1. Redeploy the Apps Script backend.** Paste the current `src/services/Code.gs` into the editor, Save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. A deployment is pinned to a version, so editing the file is not enough. Everything added recently is server-side: events, announcements, training, documents and their checklist items and signatures, the session timeout, the System Log, the clock geofence, the write-only script lock, and the batched sign-in (`GET_BOOTSTRAP` / `ADMIN_GET_BOOTSTRAP` — see the warning above about deploying before the client). A deployment that predates the checklist work answers the new actions with "not available" and the app shows that message rather than failing silently.
 
 **2. Create the sheets and columns the app expects.** A missing *column* is usually silent, not an error — the write path drops values it cannot map — so check the names rather than assuming:
 
@@ -533,7 +602,10 @@ The front end and the backend deploy separately, so **the app can be published w
 | `users` | `runner_sound_profile` and `is_change_password_on_login` (administrator-managed attributes, so they live here rather than in `user_settings`) |
 | `schedule_templates` | `nickname`, `effective_date`, `end_date` |
 | `assignments` | `color`, `icon`, `effective_date`, `end_date` |
-| `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_create_events`, `can_make_announcements`, `can_view_system_log`, the three training permissions, and the rest |
+| `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_create_events`, `can_make_announcements`, `can_view_system_log`, `can_access_debug`, `can_manage_documents`, `can_verify_documents`, the three training permissions, and the rest |
+| `documents` | nothing — the sheet **creates itself** with its headers on the first save, and grows its header row for any column the code adds later. `id, title, folder, doc_type, sort_order, content, is_published, rank_id, is_sign_required, content_revision, author_user_id, updated_at` |
+| `document_signatures` | nothing either — same self-creating sheet. `id, document_id, checklist_item_id, user_id, signed_by_user_id, signature_role, signed_at, content_revision`. The server stamps `signed_at`; `checklist_item_id` is blank for a whole-document signature and set for a checklist line. `signature_role` is `member` for the member's own signature and `verifier` for somebody else's confirmation of it |
+| `document_checklist_items` | nothing either — same self-creating sheet. `id, document_id, sort_order, section, label`. The item ids are what signatures point at, so **editing an item keeps its signatures and deleting a signed one is refused** |
 | `system_settings` | `session_timeout`, `is_sounds_active`, `required_clock_latitude`, `required_clock_longitude`, `gps_margin_of_error`, and the FCM keys |
 
 `user_settings` is the exception: it **grows its own header row**, so `notify_announcements` and the other preference columns appear by themselves. All it needs is the identity column (`user_id`).
@@ -631,7 +703,7 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
 - **Record ids are UUIDs**, so an id can never be reused after a delete: a `schedule_offers.schedule_id` could
   otherwise be handed to a different shift and an approval would fill the wrong slot. Existing data is migrated
   once with the `checkIdMigration` / `applyIdMigration` pair — see [docs/WRITE_SAFETY.md](docs/WRITE_SAFETY.md).
-- **Concurrent saves cannot corrupt or silently double-write.** Writes are serialised
+- **Concurrent saves cannot corrupt or silently double-write.** Writes are serialized
   by a script lock, and a write that cannot take it is **refused** (never run
   unlocked); a save built on a stale record is refused with the row as it now stands
   (`row_version`); a refused write is retried once by the client, because the server

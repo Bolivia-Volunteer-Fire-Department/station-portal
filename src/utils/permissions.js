@@ -105,10 +105,22 @@ export const ADMIN_PERMISSIONS = [
     description: 'Open Announcements: write, edit and delete the messages shown on the login screen, the dashboard and the sidebar, and send them as push notifications.',
   },
   {
+    key: 'can_manage_documents',
+    tab: 'documents',
+    label: 'Manage documents',
+    description: 'Open Documents: write and edit documents, their folders and checklists, set who may read each one, and see or remove signatures.',
+  },
+  {
     key: 'can_view_system_log',
     tab: 'system-log',
     label: 'View the system log',
     description: 'Read the station activity log: sign-ins and failures, changes made, and notification events.',
+  },
+  {
+    key: 'can_access_debug',
+    tab: 'debug',
+    label: 'Access the debug page',
+    description: 'Open Debug: fire test toasts, modals and sounds on demand, to check what the app shows and plays without waiting for a real event.',
   },
 ];
 
@@ -151,6 +163,14 @@ export const MEMBER_PERMISSIONS = [
     label: 'Manage trainings',
     description: 'Add and change training activities in the Training module. Requires "Sign trainings".',
     requires: 'can_sign_trainings',
+  },
+  {
+    key: 'can_verify_documents',
+    label: 'Verify checklists',
+    // Deliberately a member permission rather than an administration one: an officer checking that a new
+    // member's truck checklist was really done is not an administrator, and should not need to become one.
+    // The screen it opens lives inside Documents, which every member can already reach.
+    description: 'Open the verification panel in Documents and confirm other members\' signed checklist items. Nobody can verify their own checklist.',
   },
 ];
 
@@ -234,7 +254,7 @@ export const roleAllowsTab = (role, tabId) => {
 
   const direct = ADMIN_PERMISSIONS.find((permission) => permission.tab === tabId);
 
-  // An unrecognised tab id is refused even for an administrator: a typo should fail
+  // An unrecognized tab id is refused even for an administrator: a typo should fail
   // closed rather than silently pass for admins and fail for everyone else.
   if (!direct) return false;
 

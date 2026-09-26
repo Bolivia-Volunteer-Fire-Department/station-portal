@@ -11,6 +11,8 @@ import {
   soundsActiveFrom,
   SOUNDS_SETTING_KEY,
   SOUNDS_DEFAULT,
+  // The Debug page's per-session sound levels. Reset here because a level belongs to the session that set it.
+  resetSoundVolumes,
 } from './utils/uiSounds';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from './utils/refreshWave';
 import {
@@ -51,6 +53,7 @@ import {
 import ScheduleCalendar from './components/ScheduleCalendar';
 import MyAvailability from './components/MyAvailability';
 import HelpGuides from './components/HelpGuides';
+import DocumentsModule from './components/DocumentsModule';
 import { pageBarLabel } from './utils/pageLabels';
 import TrainingModule from './components/TrainingModule';
 import DigitalClock from './components/DigitalClock';
@@ -79,7 +82,7 @@ import FirefighterRunner from './components/FirefighterRunner/FirefighterRunner'
 // schedule and clock tables are dense, and capping them wasted the horizontal space a wide screen has.
 //
 // The exceptions are listed in utils/contentWidth, which owns the whole policy: which top-level modules get
-// a capped, centred column, and how wide it is. Screens that need the cap only in part - an administration
+// a capped, centerd column, and how wide it is. Screens that need the cap only in part - an administration
 // sub-tab, or one view inside a tab - wrap that part in components/CenteredContent instead.
 //
 // `min-w-0` on the <main> below is the load-bearing part on small screens. Main is a flex child, and a
@@ -138,7 +141,7 @@ export default function App() {
   const [reauthReason, setReauthReason] = useState(null);
   const [isClockedIn, setIsClockedIn] = useState(false);
 
-  // A clock action refused for location, awaiting the member's acknowledgement. Held here rather
+  // A clock action refused for location, awaiting the member's acknowledgment. Held here rather
   // than in the clock card so both refusal paths can raise it: the client-side geofence check and
   // the backend's own OUT_OF_RANGE refusal.
   const [clockNotice, setClockNotice] = useState(null);
@@ -227,6 +230,11 @@ export default function App() {
   const canSignTrainings = can('can_sign_trainings');
   const canEditTrainings = can('can_edit_trainings');
 
+  // Verifying checklists. A member permission rather than an administrative one: an officer confirming a new
+  // member's truck checklist is not an administrator, and the screen it opens is the Documents module they can
+  // already reach. The server re-checks it, so this flag only shapes what is offered.
+  const canVerifyDocuments = can('can_verify_documents');
+
   // Modules that render a seven-column calendar get the wider container.
   //
   // The Administration module has always been wider than the member modules, but My Availability
@@ -238,7 +246,7 @@ export default function App() {
   // the (unauthenticated) settings payload. Empty means the game uses the default sounds.
   const runnerSoundProfile = currentUser?.runner_sound_profile || '';
 
-  // Whether this screen's content is capped and centred (see CENTERED_CONTENT_TABS).
+  // Whether this screen's content is capped and centerd (see CENTERED_CONTENT_TABS).
   const centeredContent = CENTERED_CONTENT_TABS.includes(activeTab);
 
   // The mobile app bar gains the page name once the page's own heading has scrolled out of sight, so a
@@ -255,11 +263,12 @@ export default function App() {
   // The open Administration sub-tab, reported up by the panel (and used by the app bar's page name).
   const [adminSubTab, setAdminSubTab] = useState('');
 
-  // The one screen whose content is bounded to the viewport instead of scrolling the page with it: the Help
-  // screen's guide pane scrolls inside its own card (see HelpGuides). The page heading above it has to be a ROW of
-  // that layout rather than something the card sits underneath, or the card - which asks for the full height of
-  // <main>'s content box - pushes the total ~90px past the viewport and the last of the guide hides behind the
-  // page scroll. So <main> becomes a flex column for this screen, and only this screen.
+  // The screens whose content is bounded to the viewport instead of scrolling the page with it: the Help screen's
+  // guide pane, and the Documents module's list and reader, both scroll inside their own card (see HelpGuides and
+  // DocumentsModule). The page heading above them has to be a ROW of that layout rather than something the card
+  // sits underneath, or the card - which asks for the full height of <main>'s content box - pushes the total ~90px
+  // past the viewport and the last of the pane hides behind the page scroll. So <main> becomes a flex column for
+  // these screens, and only these screens.
   //
   // Both audiences' Help tabs qualify. The Administration one is why the open sub-tab is part of the test; it is
   // reported by an effect, so for one frame after opening that tab the old value is still in play and the page
@@ -269,7 +278,7 @@ export default function App() {
   // Declared HERE, below the state it reads, and not up with the other derived values: a `const` that mentions
   // `adminSubTab` before that `useState` runs is a temporal dead zone error, and it takes the whole app down
   // rather than the screen it belongs to. scripts/verify-app-shell.mjs checks the order.
-  const boundedHelpScreen = activeTab === 'help' || (activeTab === 'admin' && adminSubTab === 'help');
+  const boundedScreen = activeTab === 'help' || activeTab === 'documents' || (activeTab === 'admin' && adminSubTab === 'help');
 
   useEffect(() => {
     const heading = pageHeadingRef.current;
@@ -802,6 +811,9 @@ const getLoadingMessage = () => {
     // next person to sign in should never be greeted by someone else's message.
     setClockNotice(null);
     setStatusMessage({ type: '', text: '' });
+    // The Debug page's sound levels are a per-session experiment: the next person to sign in on this machine gets
+    // the app's own mix back, not somebody's test levels.
+    resetSoundVolumes();
   };
 
   // Ends the session with an explanation, which is the only difference from a normal sign-out.
@@ -815,9 +827,11 @@ const getLoadingMessage = () => {
     setIsSidebarOpen(false);
     setActiveTab('dashboard');
     applyIdleWarning(null);
-    // Same reasoning as handleLogout: a refusal modal must not survive the session that raised it.
+    // Same reasoning as handleLogout: a refusal modal must not survive the session that raised it - and nor should
+    // a sound level the session's Debug page set.
     setClockNotice(null);
     setStatusMessage(message ? { type: 'error', text: message } : { type: '', text: '' });
+    resetSoundVolumes();
   }, [applyIdleWarning]);
 
   // The idle timer.
@@ -1064,7 +1078,7 @@ const getLoadingMessage = () => {
 
   // Applies a just-saved user row to the in-memory list straight away.
   //
-  // The authoritative refresh still runs, but it cannot be waited on: doPost serialises every
+  // The authoritative refresh still runs, but it cannot be waited on: doPost serializes every
   // request behind a script lock, so the refresh wave takes tens of seconds, and holding the form
   // open for it is what made saving feel broken. Without this the list kept the pre-save values
   // until that wave drained, so re-opening the form right after saving showed the OLD values even
@@ -1269,10 +1283,10 @@ const getLoadingMessage = () => {
             // the document: reaching the bottom of a long tab used to lift the whole page (see index.css).
             //
             // `md:flex md:flex-col` only on the Help screen, where the heading above the guide card has to be one of
-            // the rows rather than something the card is stacked under - see boundedHelpScreen above. Every other
+            // the rows rather than something the card is stacked under - see boundedScreen above. Every other
             // tab is untouched: the page scrolls them.
             className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 ${
-              boundedHelpScreen ? 'md:flex md:flex-col' : ''
+              boundedScreen ? 'md:flex md:flex-col' : ''
             } ${
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
             }`}
@@ -1383,6 +1397,19 @@ const getLoadingMessage = () => {
             )}
 
             {activeTab === 'help' && <HelpGuides scope="member" />}
+
+            {/* Documents: open to every signed-in member, like Help. The server decides which documents a
+                member may see (published, and at or above their rank), so there is no permission to check here -
+                a screen that filtered again would be a second copy of that rule. */}
+            {activeTab === 'documents' && (
+              <DocumentsModule
+                token={authToken}
+                currentUser={currentUser}
+                timeFormat={activeTimeFormat}
+                users={users}
+                canVerify={canVerifyDocuments}
+              />
+            )}
 
             {activeTab === 'training' && canSignTrainings && (
               <TrainingModule
