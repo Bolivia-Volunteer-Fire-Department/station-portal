@@ -12,19 +12,23 @@ import {
   adminSaveDocument,
 } from '../../services/api';
 import { toast } from '../../utils/toast';
+import AdminChecklistVerification from './AdminChecklistVerification';
 import ConfirmModal from '../ConfirmModal';
 import MarkdownEditor from '../MarkdownEditor';
 import { authorLabel } from '../../utils/authorLabel';
 import { unnamedLabel } from '../../utils/displayLabel';
 import { parseRankOrder, rankLabel } from '../../utils/rankEligibility';
+import { toDateKey } from '../../utils/scheduleDate';
 import {
   DOCUMENT_TYPES,
   EMPTY_DOCUMENT_FORM,
   UNFILED_LABEL,
   documentFolders,
+  documentLifecycle,
   documentSaveProblem,
   documentToForm,
   documentUpdatedLabel,
+  documentWindowLabel,
   groupDocumentsByFolder,
   normalizeChecklistItemList,
   normalizeDocumentList,
@@ -33,6 +37,10 @@ import {
 } from '../../utils/documents';
 
 const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: 0 };
+
+// Today, once, for the window badges. The same value the schedule's own tab uses: a lifecycle label that changed
+// while a page was open would be worse than one that is a moment stale.
+const todayKeyValue = toDateKey(new Date());
 
 // Saving or removing an item writes to the ITEMS sheet, but the document row is what carries the version this
 // editor sends back - and `upsertSheetRowById` moves that version on any write, including one that only touches
@@ -56,7 +64,20 @@ const labelClass = 'block text-sm font-medium text-slate-600 dark:text-slate-300
 // goes through one action that creates or updates by id, and the list is reloaded from the server afterwards
 // rather than patched locally - the server owns `sort_order`, the revision and the author, and a locally patched
 // row would eventually disagree with all three.
-export default function AdminDocumentsTab({ token, ranks = [], users = [], timeFormat = '12', onDataChanged }) {
+export default function AdminDocumentsTab({
+  token,
+  ranks = [],
+  users = [],
+  timeFormat = '12',
+  // The signed-in admin's id, so the verification view can leave their OWN checklist off the list: the server
+  // refuses self-verification.
+  currentUserId = '',
+  // Two permissions open this tab (see roleAllowsTab). Managing documents is the editor below; verifying them is
+  // the queue at the bottom. A role may have either, or both.
+  canManageDocuments = false,
+  canVerifyDocuments = false,
+  onDataChanged,
+}) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -419,6 +440,30 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
     return map;
   }, [items]);
 
+  // A role that may VERIFY but not MANAGE gets only the verification view. There is nothing here for it to edit,
+  // and an editor whose every save the server would refuse is worse than no editor: it would look like a
+  // permission problem one save at a time. This is an early return rather than a hidden section, so the two roles'
+  // screens cannot drift apart - the same tab, two honest shapes.
+  if (!canManageDocuments) {
+    return (
+      <div className="space-y-6">
+        {canVerifyDocuments ? (
+          <AdminChecklistVerification
+            token={token}
+            documents={rows}
+            users={users}
+            currentUserId={currentUserId}
+            timeFormat={timeFormat}
+          />
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            You do not have permission to manage or verify documents.
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {loadError && (
@@ -495,6 +540,18 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
                       {!row.is_published && (
                         <span className="text-xs opacity-80" title="Not visible to members">
                           · draft
+                        </span>
+                      )}
+                      {/* A window that has closed is the one thing an administrator must be able to see at a glance,
+                          because the document is otherwise indistinguishable from a live one in this list. */}
+                      {documentLifecycle(row, todayKeyValue) === 'retired' && (
+                        <span className="text-xs opacity-80" title={documentWindowLabel(row) || 'Retired'}>
+                          · retired
+                        </span>
+                      )}
+                      {documentLifecycle(row, todayKeyValue) === 'scheduled' && (
+                        <span className="text-xs opacity-80" title={documentWindowLabel(row)}>
+                          · scheduled
                         </span>
                       )}
                     </button>
@@ -592,7 +649,7 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
               >
                 {DOCUMENT_TYPES.map((type) => (
                   <option key={type} value={type}>
-                    {type === 'checklist' ? 'Checklist' : 'Document'}
+                    {type === 'checklist' ? 'Checklist' : type === 'link' ? 'Link' : 'Document'}
                   </option>
                 ))}
               </select>
@@ -649,11 +706,67 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
           </div>
         </div>
 
-        <MarkdownEditor
-          value={form.content}
-          onChange={(value) => setField('content', value)}
-          label={form.doc_type === 'checklist' ? 'Instructions (items come in the checklist stage)' : 'Content'}
-        />
+        {/* The window. Both dates blank is "no restriction" - forever, exactly how every document behaved before
+            these columns existed. An end date in the past RETIRES the document: members stop seeing it and stop
+            being asked to sign it, while the row, its items and every signature stay exactly where they are. */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="document-effective-date" className={labelClass}>
+              Effective Date <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <input
+              id="document-effective-date"
+              type="date"
+              value={form.effective_date}
+              onChange={(event) => setField('effective_date', event.target.value)}
+              className={fieldClass}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+              Members see it from this date. Blank means it is already live.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="document-end-date" className={labelClass}>
+              End Date <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <input
+              id="document-end-date"
+              type="date"
+              value={form.end_date}
+              onChange={(event) => setField('end_date', event.target.value)}
+              className={fieldClass}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+              Retired after this date. Signatures already on it are kept.
+            </p>
+          </div>
+        </div>
+
+        {form.doc_type === 'link' ? (
+          <div>
+            <label htmlFor="document-link" className={labelClass}>
+              Address
+            </label>
+            <input
+              id="document-link"
+              type="url"
+              inputMode="url"
+              placeholder="https://example.com/policy"
+              value={form.content}
+              onChange={(event) => setField('content', event.target.value)}
+              className={fieldClass}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+              Opened in a new tab from the reader, so a member keeps their place in the app. http:// or https:// only.
+            </p>
+          </div>
+        ) : (
+          <MarkdownEditor
+            value={form.content}
+            onChange={(value) => setField('content', value)}
+            label={form.doc_type === 'checklist' ? 'Instructions (items come in the checklist stage)' : 'Content'}
+          />
+        )}
 
         {error && (
           <p className="text-sm font-medium text-red-600 dark:text-red-400" role="alert">
@@ -964,6 +1077,19 @@ export default function AdminDocumentsTab({ token, ranks = [], users = [], timeF
           confirmLabel={deleting ? 'Deleting…' : 'Delete'}
           onConfirm={handleDelete}
           onCancel={() => setPendingDelete(null)}
+        />
+      )}
+
+      {/* The verification queue, for a role that may confirm signatures as well as write documents. It sits at the
+          BOTTOM because an editor's job here is the document; a verifier who cannot manage documents gets this on
+          its own, at the top of the early return above. */}
+      {canVerifyDocuments && (
+        <AdminChecklistVerification
+          token={token}
+          documents={rows}
+          users={users}
+          currentUserId={currentUserId}
+          timeFormat={timeFormat}
         />
       )}
 

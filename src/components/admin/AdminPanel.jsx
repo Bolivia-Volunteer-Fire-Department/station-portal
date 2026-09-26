@@ -19,7 +19,7 @@ import AdminAnnouncementsTab from './AdminAnnouncementsTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
-import { allowedAdminTabs, shouldFocusApprovals } from '../../utils/permissions';
+import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
 
 // Categorical dropdown groups for the admin bar. Item ids match the sub-tabs
 // rendered below, so the active tab state stays driven by one value.
@@ -115,6 +115,9 @@ export default function AdminPanel({
   logs,
   timeFormat,
   onDataChanged,
+  // The signed-in admin's own user id: the checklist verification view uses it to leave that member's own
+  // checklist off the list, because the server refuses self-verification.
+  currentUserId = '',
   onAvailabilityChanged,
   onLogsChanged,
   onAdminDataChanged,
@@ -426,13 +429,18 @@ export default function AdminPanel({
         />
       )}
 
-      {/* Documents: gated on can_manage_documents by the nav, and enforced again by every action behind it. */}
+      {/* Documents: opens for can_manage_documents OR can_verify_documents (see roleAllowsTab - the one tab two
+          permissions open), and every action behind it is enforced again on the server. A verifier who cannot
+          manage documents sees only the verification view, never the editor. */}
       {activeSubTab === 'documents' && (
         <AdminDocumentsTab
           token={token}
           ranks={ranks}
           users={users}
           timeFormat={timeFormat}
+          currentUserId={currentUserId}
+          canManageDocuments={permissionGranted(currentRole, 'can_manage_documents')}
+          canVerifyDocuments={permissionGranted(currentRole, 'can_verify_documents')}
           onDataChanged={onDataChanged}
         />
       )}

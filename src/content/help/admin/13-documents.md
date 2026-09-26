@@ -1,7 +1,7 @@
 The station's own documents: procedures, policies and checklists, written and organized here and read by members in the **Documents** module.
 
 > [!IMPORTANT]
-> Access to this area requires the **Manage documents** role permission.
+> Access to this area requires the **Manage documents** role permission, which itself requires **View documents**. A role with **Verify checklists** also opens this tab, but sees only the verification view at the bottom of it — never the editor.
 
 Unlike the Help guides — which are files in the app's repository, written by whoever maintains it — these are written **from this screen**, by your own administrators, and stored in the station's spreadsheet. Adding one needs no code change and no new deployment.
 
@@ -11,13 +11,34 @@ Unlike the Help guides — which are files in the app's repository, written by w
 |---|---|
 | **Title** | What members see in the list. Required |
 | **Folder** | Groups documents in the list. Type a new name to make a new folder |
-| **Type** | *Document* for reading, or *Checklist* for something signed item by item |
+| **Type** | *Document* for reading, *Checklist* for something signed item by item, or *Link* for an address kept elsewhere |
 | **Order** | Position within its folder; lower first, with the title breaking ties |
 | **Minimum rank** | Who may see it. *Everyone*, or a rank and above |
+| **Effective Date** | The first date members may see it. Blank means it is live now |
+| **End Date** | The last date members may see it. After that it is **retired** — see below |
 | **Visible to members** | Untick for a draft — it stays out of every member's list, including yours |
 | **Members must sign this** | How the document appears as needing a signature |
 
 Write the text in **Write** mode — the default — and press **Preview** to see it exactly as a member will: the preview is the same renderer the Documents module uses, so there is nothing to guess at.
+
+A **Link** has no body to write. Its one field is an **Address**, which must start with `http://` or `https://` — anything else is refused, because a link that runs code rather than opening a page is the one kind of document this app must never hand to a member. The reader sees the address with an **Open in a new tab** button, so a policy kept in the county's own system can live here without being copied in.
+
+## Starting and retiring a document
+
+The two dates are optional, and **both blank means no restriction at all** — which is how every document behaved before these columns existed, so nothing written earlier had to be changed.
+
+| Dates | What members see |
+|---|---|
+| Both blank | Always in the list. The normal case |
+| Effective date only | Nothing until that date, then always |
+| End date only | In the list until that date, retired after |
+| Both | In the list from the first date to the second |
+
+A date ending **today** still counts as in force: both ends are inclusive, so an end date of 30 June is retired on 1 July.
+
+**Retiring is the alternative to deleting.** A document past its end date leaves every member's list and stops asking for signatures, but the row, its checklist items and every signature on it are kept exactly as they were. That is the point: *the 2023 SOG is superseded, and here is who signed it* is a record you can only keep if the document is still there.
+
+The document list marks what state each one is in — **· draft**, **· scheduled** (not started yet) and **· retired** — because those are exactly the documents whose behaviour is not obvious from the row. Retired documents are only visible here; a member never sees one, and cannot sign one even from a page they opened before it retired.
 
 ## The toolbar
 
@@ -80,6 +101,8 @@ New documents are **visible to members straight away**, so untick *Visible to me
 
 > [!CAUTION]
 > A document that has been signed **cannot be deleted** — the app refuses and tells you how many signatures it has. Unpublish it instead. A signature is a record that somebody read a procedure, and deleting the procedure would leave that record pointing at nothing.
+>
+> **Deleting is for mistakes; an end date is for superseding.** If a procedure is simply being replaced, give it an **End Date** rather than deleting or unpublishing it: the new one takes over the list, and the old one stays here with the record of who signed it and when.
 
 ## Signatures
 
@@ -123,9 +146,18 @@ Members tick the items they have done and save them in one go, so a forty-line c
 
 ## Verifying
 
-Verifying is somebody confirming work the member reported doing, and it is a permission of its own: **Verify checklists**, which does **not** open Administration. Give it to the officers who check a new member's truck checklist; they do not need to be administrators.
+Verifying is somebody confirming work the member reported doing, and it is a permission of its own: **Verify checklists**. Give it to the officers who check a new member's truck checklist — they do not need **Manage documents**, and they do not need to be administrators.
 
-Anyone with that permission sees a **Verification** card on every checklist they open, listing the members with signed items that nobody has confirmed yet — *3 to verify, 8 of 12 signed*. Expanding a member shows their items, with **Verify this item** on each and **Verify all 3** to do the rest in one press.
+There are two ways to do it, and they answer different questions:
+
+| Where | What it is good at |
+|---|---|
+| The **Verification** card on a checklist in the member-facing **Documents** module | An officer who is already reading the checklist |
+| **Verify checklists** at the bottom of this tab | *Who is waiting on me?* Pick the checklist, then the member |
+
+The second one is the one to use for a backlog. It lists the station's checklists, and for the one you pick it lists every member with something outstanding — *3 to verify, 8 of 12 signed* — busiest first. Expanding a member shows their signed items with **Verify** on each, and **Verify all 3** for the rest. Confirming several at once asks first, because a verification is a record that a check was made.
+
+A role with *Verify checklists* opens this tab for that panel alone: it sees no editor, no folder list and no signatures report. That is why the permission is a member permission — a verifier has nothing to edit here.
 
 | Rule | Why |
 |---|---|
@@ -134,9 +166,9 @@ Anyone with that permission sees a **Verification** card on every checklist they
 | A second verifier may confirm the same item | Two officers checking one line is two confirmations, not an error; the row records each of them |
 | Every verification is stamped by the server | Who confirmed it and when come from the session, never from the device |
 
-The **Verification** card is also the place to see verification *history* — a member's item shows **Verified** with the verifier's name once it has been confirmed.
+The **Signatures** panel on the document is also the place to see verification *history* — a member's item shows **Verified** with the verifier's name once it has been confirmed.
 
 ## Who can read a checklist
 
-Checklists follow the same rules as any other document: *Visible to members*, a minimum rank, and *Members must sign this*. The signatures are always a member's own — nobody can read another member's checklist in the Documents module. The signature report and the verification panel are the two places where one person's records are visible to another, and both are behind a permission.
+Checklists follow the same rules as any other document: *Visible to members*, a minimum rank, the two dates, and *Members must sign this*. The signatures are always a member's own — nobody can read another member's checklist in the Documents module. The signature report and the verification panels are the only places where one person's records are visible to another, and both are behind a permission.
 

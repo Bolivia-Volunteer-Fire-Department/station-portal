@@ -23,25 +23,34 @@ import { ADMIN_PERMISSIONS, allowedAdminTabs, permissionTab } from '../src/utils
 import { ADMIN_BAR_LABELS, PAGE_BAR_LABELS } from '../src/utils/pageLabels.js';
 import {
   DOCUMENT_CONTENT_LIMIT,
+  DOCUMENT_TYPES,
   UNFILED_LABEL,
   documentCharactersLeft,
   documentFolders,
+  documentIsLive,
+  documentLifecycle,
+  documentLinkProblem,
+  documentLinkUrl,
   documentSaveProblem,
   documentSignatureState,
   documentToForm,
   documentUpdatedLabel,
+  documentWindowLabel,
   filterDocuments,
   folderSummaries,
   groupDocumentsByFolder,
   isChecklist,
+  isLink,
   memberSignatureFor,
   normalizeChecklistItemList,
+  normalizeDocument,
   normalizeDocumentList,
   outstandingSignatureDocuments,
   signatureDateLabel,
   signatureIsStale,
   signedDocumentIds,
 } from '../src/utils/documents.js';
+import { isActiveOnDate } from '../src/utils/effectiveDates.js';
 import {
   UNNAMED_SECTION,
   checklistIsComplete,
@@ -499,12 +508,57 @@ readActions.forEach((name) => {
   checkIs(`${name} exists`, body.length > 0);
   checkIs(`${name} needs a session`, /getAuthContext\(ss, data\)/.test(body), 'no session check');
 });
-readActions.slice(2).forEach((name) => {
+
+// Every documents action needs can_view_documents. For the member-facing reads it is the whole gate; for the
+// administrative ones it comes with hasDocumentPermission, which refuses a role that may manage or verify but may
+// not see. That helper is the SERVER half of "view documents first" - the Roles editor is the other half, and a
+// hand-edited roles sheet has to obey it too.
+console.log('\n--- the documents permissions and their one dependency ---');
+const codeAll = readFileSync('src/services/Code.gs', 'utf8');
+checkIs(
+  'the dependency lives in exactly one helper',
+  /function hasDocumentPermission\(ss, userId, permission\) \{\n  if \(!hasRolePermission\(ss, userId, "can_view_documents"\)\) return false;\n  return hasRolePermission\(ss, userId, permission\);\n\}/.test(
+    codeAll
+  ),
+  'hasDocumentPermission does not gate on can_view_documents'
+);
+readActions.forEach((name) => {
+  const body = action(name);
+  // Either the plain permission (the member reads) or the helper that implies it (the administrative ones).
   checkIs(
-    `${name} needs can_manage_documents`,
-    /hasRolePermission\([\s\S]{0,90}can_manage_documents/.test(action(name))
+    `${name} needs can_view_documents, directly or through hasDocumentPermission`,
+    /can_view_documents/.test(body) || /hasDocumentPermission\(/.test(body),
+    'a role with no documents permission could read documents'
   );
 });
+checkIs(
+  'and the admin list opens for a verifier too, because that list is the checklist picker',
+  /can_verify_documents/.test(action('ADMIN_GET_DOCUMENTS'))
+);
+checkIs(
+  'while opening a document for editing stays manage-only',
+  !/can_verify_documents/.test(action('ADMIN_GET_DOCUMENT')),
+  'a verifier should not be able to open a document for editing'
+);
+checkIs(
+  'the member list is filtered to what is live today',
+  /documentIsLiveOn\(row, today\)/.test(codeAll),
+  'a retired document would still be listed to members'
+);
+checkIs(
+  'and so is the single read',
+  /!documentIsLiveOn\(wantedDocument, todayDateKey\(\)\)/.test(action('GET_DOCUMENT'))
+);
+checkIs(
+  'a retired document cannot be signed either',
+  /!documentIsLiveOn\(signDocumentRow, todayDateKey\(\)\)/.test(action('SIGN_DOCUMENT')),
+  'a page opened before the retirement could still sign it'
+);
+checkIs(
+  'nor can a retired checklist item be',
+  /!documentIsLiveOn\(itemSignDocument, todayDateKey\(\)\)/.test(action('SIGN_CHECKLIST_ITEM'))
+);
+
 
 const saveAction = action('ADMIN_SAVE_DOCUMENT');
 checkIs(
@@ -579,14 +633,14 @@ checkIs(
 const removeSignatureAction = action('ADMIN_REMOVE_DOCUMENT_SIGNATURE');
 checkIs(
   'removing a signature needs can_manage_documents',
-  /hasRolePermission\([\s\S]{0,90}can_manage_documents/.test(removeSignatureAction)
+  /hasDocumentPermission\([\s\S]{0,90}can_manage_documents/.test(removeSignatureAction)
 );
 checkIs('and it is logged', /logSystemEvent\([\s\S]{0,120}ADMIN_REMOVE_DOCUMENT_SIGNATURE/.test(removeSignatureAction));
 
 const signatureReportAction = action('GET_DOCUMENT_SIGNATURES');
 checkIs(
   'the report needs can_manage_documents OR can_verify_documents',
-  /hasAnyRolePermission\([\s\S]{0,120}can_manage_documents[\s\S]{0,60}can_verify_documents/.test(
+  /hasDocumentPermission\([\s\S]{0,60}can_manage_documents[\s\S]{0,200}hasDocumentPermission\([\s\S]{0,60}can_verify_documents/.test(
     signatureReportAction
   ),
   'a checklist verifier could not read what they are asked to verify'
@@ -615,7 +669,9 @@ check('pointing at the documents tab', managePermission && managePermission.tab,
 check('which is the tab id the nav uses', permissionTab('can_manage_documents'), 'documents');
 check(
   'and it opens Administration for a role that has only it',
-  allowedAdminTabs({ can_manage_documents: true })[0],
+  // The view permission is part of "only it": managing documents requires being able to see them, so a row with
+  // can_manage_documents and nothing else is a row the Roles editor will not write and the server will not honour.
+  allowedAdminTabs({ can_view_documents: true, can_manage_documents: true })[0],
   'documents'
 );
 check('the admin bar can name it', ADMIN_BAR_LABELS.documents, 'Documents');
@@ -627,10 +683,22 @@ checkIs('and renders only while its tab is open', /activeSubTab === 'documents' 
 
 const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
 checkIs('the member sidebar offers it', /setActiveTab\('documents'\)/.test(sidebarSource));
-checkIs('to everyone, with no permission gate of its own', !/canViewDocuments|canManageDocuments/.test(sidebarSource));
+checkIs(
+  'gated on can_view_documents, the permission that means "may read documents at all"',
+  /\{canViewDocuments && \([\s\S]{0,400}setActiveTab\('documents'\)/.test(sidebarSource),
+  'a role with no documents permission would still see the module offered'
+);
 
 const appSource = readFileSync('src/App.jsx', 'utf8');
-checkIs('the app renders the module', /\{activeTab === 'documents' && \(/.test(appSource));
+checkIs(
+  'the app renders the module only with that permission',
+  /\{activeTab === 'documents' && canViewDocuments && \(/.test(appSource)
+);
+checkIs(
+  'and will not stay on the tab without it',
+  /activeTab === 'documents'\n\s+\? canViewDocuments/.test(appSource),
+  'the guard does not cover documents'
+);
 checkIs(
   'and gives it the bounded screen the Help pane uses',
   /const boundedScreen = activeTab === 'help' \|\| activeTab === 'documents'/.test(appSource)
@@ -650,6 +718,70 @@ const rows = normalizeDocumentList([
 check('a row without an id is not a document', rows.length, 4);
 check('and an unknown type reads as a document', rows.find((row) => row.id === 'd').doc_type, 'markdown');
 check('a checklist is recognized', isChecklist(rows.find((row) => row.id === 'b')), true);
+
+// ---------------------------------------------------------------------------
+// A link document: `content` is an address, and only http(s) is followable.
+// ---------------------------------------------------------------------------
+console.log('\n--- link documents ---');
+check('link is one of the three types', DOCUMENT_TYPES, ['markdown', 'checklist', 'link']);
+check('a link is recognized', isLink({ id: 'l', doc_type: 'link', content: 'https://example.com' }), true);
+check('and a document is not', isLink({ id: 'm', doc_type: 'markdown' }), false);
+check('an https address is usable', documentLinkProblem('https://example.com/policy'), '');
+check('so is http', documentLinkProblem('http://example.com'), '');
+check('and it is handed over as given', documentLinkUrl({ doc_type: 'link', content: 'https://example.com' }), 'https://example.com');
+check('a bare address is refused', documentLinkProblem('example.com'), 'A link must start with http:// or https://.');
+check(
+  'and the error says what to do',
+  documentLinkProblem('example.com'),
+  'A link must start with http:// or https://.'
+);
+// The one that matters: a script URL must never reach an href.
+check('javascript: is refused', documentLinkProblem('javascript:alert(1)'), 'A link must start with http:// or https://.');
+check('so is data:', documentLinkProblem('data:text/html,<script>'), 'A link must start with http:// or https://.');
+check('and a scheme-less scheme-relative URL', documentLinkProblem('//example.com'), 'A link must start with http:// or https://.');
+check('an address with a space in it is refused', documentLinkProblem('https://example.com/a b'), 'A link cannot contain spaces.');
+check('an empty one is refused', documentLinkProblem(''), 'A link document needs an address.');
+check('and a refused address is never handed over', documentLinkUrl({ doc_type: 'link', content: 'javascript:alert(1)' }), '');
+check('nor is a non-link document', documentLinkUrl({ doc_type: 'markdown', content: 'https://example.com' }), '');
+check(
+  'the save refuses it before the request',
+  documentSaveProblem({ title: 'T', doc_type: 'link', content: 'nope' }),
+  'A link must start with http:// or https://.'
+);
+check(
+  'and a link document is not length-checked as prose',
+  documentSaveProblem({ title: 'T', doc_type: 'link', content: `https://example.com/${'a'.repeat(60000)}` }),
+  ''
+);
+
+// ---------------------------------------------------------------------------
+// The window: retiring a document without deleting it.
+// ---------------------------------------------------------------------------
+console.log('\n--- effective and end dates ---');
+const windowed = normalizeDocument({
+  id: 'w',
+  title: 'W',
+  doc_type: 'markdown',
+  effective_date: '2026-07-01',
+  end_date: '2026-12-31',
+});
+check('the dates are read onto the document', [windowed.effective_date, windowed.end_date], ['2026-07-01', '2026-12-31']);
+check('a blank pair means no restriction', documentLifecycle({ ...windowed, effective_date: '', end_date: '' }, '2026-07-01'), 'active');
+check('a blank pair is not "retired"', isActiveOnDate({ effective_date: '', end_date: '' }, '2026-07-01'), true);
+check('before the effective date it is scheduled', documentLifecycle(windowed, '2026-06-01'), 'scheduled');
+check('between the two it is active', documentLifecycle(windowed, '2026-07-15'), 'active');
+check('after the end date it is retired', documentLifecycle(windowed, '2027-01-01'), 'retired');
+check('the effective date itself is inside the window', documentLifecycle(windowed, '2026-07-01'), 'active');
+check('and so is the end date', documentLifecycle(windowed, '2026-12-31'), 'active');
+check('the window is labeled for a badge', documentWindowLabel(windowed), 'Jul 1, 2026 - Dec 31, 2026');
+check('an end date alone reads as "Until"', documentWindowLabel({ end_date: '2026-06-30' }), 'Until Jun 30, 2026');
+check('an effective date alone reads as "From"', documentWindowLabel({ effective_date: '2026-07-01' }), 'From Jul 1, 2026');
+check('no dates means no label', documentWindowLabel({}), '');
+check('a backwards window is refused', documentSaveProblem({ title: 'T', content: '', effective_date: '2026-07-01', end_date: '2026-06-30' }), 'The end date must not be before the effective date.');
+check('a save with no dates is fine', documentSaveProblem({ title: 'T', content: '', effective_date: '', end_date: '' }), '');
+check('and so is one with only an end date', documentSaveProblem({ title: 'T', content: '', end_date: '2026-06-30' }), '');
+check('documentIsLive agrees with the lifecycle', documentIsLive(windowed, '2027-01-01'), false);
+check('the window survives the round trip to the form', documentToForm(windowed).end_date, '2026-12-31');
 check('unfiled documents are shown last', documentFolders(rows), ['Apparatus', 'General', UNFILED_LABEL]);
 check(
   'and grouped with their folder',
@@ -1014,7 +1146,7 @@ itemWriteActions.forEach((name) => {
   checkIs(`${name} needs a session`, /getAuthContext\(ss, data\)/.test(body), 'no session check');
   checkIs(
     `${name} is gated on can_manage_documents`,
-    /hasRolePermission\(ss, \w+\.userId, "can_manage_documents"\)/.test(body),
+    /hasDocumentPermission\(ss, \w+\.userId, "can_manage_documents"\)/.test(body),
     'no permission check'
   );
 });
@@ -1066,7 +1198,7 @@ const verifyItemAction = action('VERIFY_CHECKLIST_ITEM');
 checkIs('VERIFY_CHECKLIST_ITEM exists', verifyItemAction.length > 0);
 checkIs(
   'it is gated on can_verify_documents',
-  /hasRolePermission\(ss, \w+\.userId, "can_verify_documents"\)/.test(verifyItemAction),
+  /hasDocumentPermission\(ss, \w+\.userId, "can_verify_documents"\)/.test(verifyItemAction),
   'verification would be open to anybody'
 );
 checkIs(
@@ -1089,7 +1221,7 @@ const verifyRemainingAction = action('VERIFY_CHECKLIST_REMAINING');
 checkIs('VERIFY_CHECKLIST_REMAINING exists', verifyRemainingAction.length > 0);
 checkIs(
   'it is gated on can_verify_documents',
-  /hasRolePermission\(ss, \w+\.userId, "can_verify_documents"\)/.test(verifyRemainingAction),
+  /hasDocumentPermission\(ss, \w+\.userId, "can_verify_documents"\)/.test(verifyRemainingAction),
   'bulk verification would be open to anybody'
 );
 checkIs(
@@ -1111,7 +1243,7 @@ checkIs(
 const signatureListAction = action('GET_DOCUMENT_SIGNATURES');
 checkIs(
   'the signature report is open to verifiers as well as document managers',
-  /hasAnyRolePermission\(ss, \w+\.userId, \["can_manage_documents", "can_verify_documents"\]\)/.test(
+  /hasDocumentPermission\(ss, signatureListAuth\.userId, "can_manage_documents"\)[\s\S]{0,160}hasDocumentPermission\(ss, signatureListAuth\.userId, "can_verify_documents"\)/.test(
     signatureListAction
   ),
   'a verifier could not read what they are asked to verify'
@@ -1128,10 +1260,31 @@ const moduleHtml = renderToString(React.createElement(DocumentsModule, { token: 
 checkIs('the module says it is loading', /Loading the documents/.test(moduleHtml), 'no loading state');
 checkIs('and names the module in its header', /Documents<\/h3>/.test(moduleHtml));
 
-const tabHtml = renderToString(React.createElement(AdminDocumentsTab, { token: 't1' }));
+const tabHtml = renderToString(React.createElement(AdminDocumentsTab, { token: 't1', canManageDocuments: true }));
 checkIs('the tab renders', tabHtml.length > 200);
 checkIs('with a way to start a document', /New document/.test(tabHtml), 'no New document button');
 checkIs('and no dialog open on arrival', !/role="alertdialog"/.test(tabHtml));
+// The window is on the editor, and it is optional: an empty effective date means "already live", which is how
+// every document written before these columns behaved.
+checkIs('the editor can set an effective date', /id="document-effective-date"/.test(tabHtml));
+checkIs('and an end date', /id="document-end-date"/.test(tabHtml));
+checkIs('and says what an end date does to signatures', /Signatures already on it are kept/.test(tabHtml));
+// Three document types now, and the third one is a link.
+checkIs('the type list offers a Link', />Link</.test(tabHtml));
+
+// A role that may VERIFY but not MANAGE gets the verification view on its own - no editor, and no list to click
+// through to one.
+const verifierTabHtml = renderToString(
+  React.createElement(AdminDocumentsTab, { token: 't1', canVerifyDocuments: true })
+);
+checkIs('a verifier gets the verification view', /Verify checklists/.test(verifierTabHtml));
+checkIs('and never the editor', !/New document/.test(verifierTabHtml), 'a verifier was offered the editor');
+checkIs(
+  'and is told why when the role can do neither',
+  /do not have permission to manage or verify documents/.test(
+    renderToString(React.createElement(AdminDocumentsTab, { token: 't1' }))
+  )
+);
 
 const editorHtml = renderToString(React.createElement(MarkdownEditor, { value: '# Hello', onChange: () => {} }));
 checkIs('the editor offers Write', />Write</.test(editorHtml));
@@ -1299,6 +1452,112 @@ checkIs(
   'and the verification panel reads its own signatures',
   /fetchDocumentSignatures\(openDocumentId, token\)/.test(moduleSource),
   'the panel has no data of its own'
+);
+
+// Ticking an item: the row itself is the control. The report was "clicking checklist items does nothing", and a
+// 16px button that only its own square responds to is exactly that - so the button is the whole row and the box is
+// drawn inside it.
+console.log('\n--- ticking an item ---');
+checkIs(
+  'the whole row is the control, not just the box',
+  /const tickable = Boolean\(onToggle\) && canTick && !state\.signed;/.test(moduleSource) &&
+    /if \(tickable\) \{[\s\S]{0,120}<button/.test(moduleSource),
+  'only the 16px box would respond, which reads as broken'
+);
+checkIs(
+  'and the box inside it is a span, not a nested button',
+  !/<button[\s\S]{0,600}?<span[\s\S]{0,200}<button/.test(moduleSource),
+  'a button inside a button is invalid and swallows the click'
+);
+checkIs(
+  'the label says which item it ticks',
+  /aria-label=\{ticked \? `Untick \$\{item\.label\}` : `Tick \$\{item\.label\}`\}/.test(moduleSource),
+  'a screen reader would hear only "button"'
+);
+checkIs(
+  'an already-signed item is not offered as a button',
+  /onToggle && state\.signed[\s\S]{0,80}Signatures cannot be removed/.test(moduleSource),
+  'a signed item would be tickable, then refused'
+);
+checkIs(
+  'a checklist that asks for no signatures says so, and says what to change',
+  /does not ask for signatures, so its items cannot be ticked/.test(moduleSource) &&
+    /switch on &ldquo;Members must sign/.test(moduleSource),
+  '"clicking does nothing" would still be the last word'
+);
+
+// A link document: there is no body to render, so the reader offers the address instead.
+console.log('\n--- a link document in the reader ---');
+checkIs(
+  'a link document opens in a new tab',
+  /target="_blank"/.test(moduleSource) && /rel="noreferrer"/.test(moduleSource),
+  'an external page could reach back into this tab'
+);
+checkIs('and the address is shown as well as linked', /\{openLinkUrl\}/.test(moduleSource));
+checkIs(
+  'an unusable address is reported, not offered',
+  /This link has no usable address/.test(moduleSource),
+  'a dead or dangerous link would still be clickable'
+);
+checkIs(
+  'and a link is marked in the listing',
+  /isLink\(item\) \? \([\s\S]{0,120}title="Opens an external link"/.test(moduleSource)
+);
+// The member module does not filter by dates itself: the server decides which documents are live and never sends a
+// retired one. What the client does with the window is LABEL it, for the administrator who can see both.
+const tabSource = readFileSync(
+  path.resolve(process.cwd(), 'src/components/admin/AdminDocumentsTab.jsx'),
+  'utf8'
+);
+checkIs(
+  'and the admin list marks a retired document',
+  /documentLifecycle\(row, todayKeyValue\) === 'retired'/.test(tabSource) &&
+    /documentLifecycle\(row, todayKeyValue\) === 'scheduled'/.test(tabSource),
+  'a retired document would be indistinguishable from a live one'
+);
+
+// Verifying from the Administration module: pick the checklist, then the member, then confirm each item.
+console.log('\n--- verifying from Administration ---');
+const verificationView = readFileSync(
+  path.resolve(process.cwd(), 'src/components/admin/AdminChecklistVerification.jsx'),
+  'utf8'
+);
+checkIs('the view exists and is rendered by the tab', /<AdminChecklistVerification/.test(tabSource));
+checkIs(
+  'it lists only the checklists',
+  /\.filter\(\(row\) => row\.doc_type === 'checklist'\)/.test(verificationView),
+  'a plain document would be offered, and would have nothing to confirm'
+);
+checkIs(
+  'it shows the members who are waiting',
+  /membersAwaitingVerification\(items, signatures, currentUserId\)/.test(verificationView),
+  'a verifier could not tell who to look at'
+);
+checkIs(
+  'and the queue for whichever member is open',
+  /verificationQueue\(items, signatures, openMemberId\)/.test(verificationView)
+);
+checkIs(
+  'each pending item is verified on its own',
+  /verifyChecklistItem\(activeListId, itemId, openMemberId, token\)/.test(verificationView),
+  'per-item verification is the whole point'
+);
+checkIs(
+  'with a bulk form that asks first',
+  /verifyChecklistRemaining\(activeListId, openMemberId, token\)/.test(verificationView) &&
+    /<ConfirmModal/.test(verificationView),
+  'a whole checklist would be confirmed by one click'
+);
+checkIs(
+  'and every reload takes the server\u2019s answer',
+  /setSignatures\(normalizeSignatureList\(result\.signatures\)\)/.test(verificationView),
+  'the screen would guess instead of reading what was written'
+);
+checkIs(
+  'the verifier is never offered their own checklist',
+  /membersAwaitingVerification\(items, signatures, currentUserId\)/.test(verificationView) &&
+    /currentUserId/.test(tabSource),
+  'the self-verification the server refuses would be offered anyway'
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

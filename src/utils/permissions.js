@@ -108,7 +108,11 @@ export const ADMIN_PERMISSIONS = [
     key: 'can_manage_documents',
     tab: 'documents',
     label: 'Manage documents',
-    description: 'Open Documents: write and edit documents, their folders and checklists, set who may read each one, and see or remove signatures.',
+    description: 'Open Documents: write and edit documents, their folders and checklists, set who may read each one, and see or remove signatures. Requires "View documents".',
+    // Managing documents you cannot see is not a thing, so seeing them is a prerequisite here as well as on the
+    // verifier's permission. The Roles editor locks this box until "View documents" is ticked, and the server
+    // applies the same rule to every action - see hasDocumentPermission in Code.gs.
+    requires: 'can_view_documents',
   },
   {
     key: 'can_view_system_log',
@@ -165,12 +169,21 @@ export const MEMBER_PERMISSIONS = [
     requires: 'can_sign_trainings',
   },
   {
+    // The floor for the Documents module: without this a member has no Documents tab, and the server refuses
+    // every documents action. It is a MEMBER permission rather than an administrative one, because reading the
+    // station's documents is a member-facing ability - and because it is what the other two rest on.
+    key: 'can_view_documents',
+    label: 'View documents',
+    description: 'Open the Documents module: read the station documents and checklists shared with this role and rank.',
+  },
+  {
     key: 'can_verify_documents',
     label: 'Verify checklists',
     // Deliberately a member permission rather than an administration one: an officer checking that a new
     // member's truck checklist was really done is not an administrator, and should not need to become one.
-    // The screen it opens lives inside Documents, which every member can already reach.
-    description: 'Open the verification panel in Documents and confirm other members\' signed checklist items. Nobody can verify their own checklist.',
+    // Verifying happens on the Documents tab, which this permission opens on its own.
+    description: 'Confirm other members\' signed checklist items, from Documents. Requires "View documents". Nobody can verify their own checklist.',
+    requires: 'can_view_documents',
   },
 ];
 
@@ -259,6 +272,22 @@ export const roleAllowsTab = (role, tabId) => {
   if (!direct) return false;
 
   if (permissionGranted(role, MASTER_PERMISSION_KEY)) return true;
+
+  // Documents is the one tab two permissions open, and deliberately so. `can_manage_documents` is the obvious
+  // one; `can_verify_documents` needs it as well, because that is where a verifier goes to confirm another
+  // member's signed items - the officer checking a new member's truck checklist should not have to be able to
+  // edit the checklist to confirm it was done.
+  //
+  // Seeing documents is the floor for both, so a role that cannot see them has no documents tab however its row
+  // was written: the Roles editor refuses to store either permission without it, and this is the same rule applied
+  // to whatever is on the sheet. Everything either permission opens behind this tab is decided again inside the
+  // tab, and again on the server.
+  if (tabId === 'documents') {
+    if (!permissionGranted(role, 'can_view_documents')) return false;
+    if (permissionGranted(role, direct.key)) return true;
+    return permissionGranted(role, 'can_verify_documents');
+  }
+
   return permissionGranted(role, direct.key);
 };
 

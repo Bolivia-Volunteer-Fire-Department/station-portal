@@ -111,6 +111,50 @@ check(
 );
 check('a permission with no dependency is never blocked', permissionBlockedByDependency(noSchedule, 'can_use_timeclock'), false);
 
+// The documents permissions: seeing documents comes first, for the manager and the verifier alike.
+console.log('\n--- the documents permissions depend on seeing documents ---');
+const documentsWithoutView = {
+  can_view_documents: false,
+  can_manage_documents: true,
+  can_verify_documents: true,
+};
+check('managing documents is blocked without the view permission', permissionBlockedByDependency(documentsWithoutView, 'can_manage_documents'), true);
+check('so is verifying them', permissionBlockedByDependency(documentsWithoutView, 'can_verify_documents'), true);
+check(
+  'and both save as FALSE',
+  [resolvePermissionValue(documentsWithoutView, 'can_manage_documents'), resolvePermissionValue(documentsWithoutView, 'can_verify_documents')],
+  [false, false]
+);
+check('seeing them is not blocked by anything', permissionBlockedByDependency({}, 'can_view_documents'), false);
+check(
+  'with the view permission granted, nothing is blocked',
+  [permissionBlockedByDependency({ can_view_documents: true }, 'can_manage_documents'), permissionBlockedByDependency({ can_view_documents: true }, 'can_verify_documents')],
+  [false, false]
+);
+// The view permission is a MEMBER permission: reading the station's documents is not an administrative act, and it
+// is what a role needs before it can be given either of the other two.
+check('viewing documents is a member permission, not a tab', permissionTab('can_view_documents'), null);
+check('and it grants no Administration access on its own', roleHasAdministration({ can_view_documents: true }), false);
+
+// The Documents TAB is the one place two permissions open the same thing, which is the whole reason a verifier can
+// reach the Administration module at all.
+console.log('\n--- the documents tab opens for either permission ---');
+check('a manager opens it', roleAllowsTab({ can_view_documents: true, can_manage_documents: true }, 'documents'), true);
+check('a verifier opens it', roleAllowsTab({ can_view_documents: true, can_verify_documents: true }, 'documents'), true);
+check(
+  'and the verifier gets exactly that one tab',
+  allowedAdminTabs({ can_view_documents: true, can_verify_documents: true }),
+  // No Help: the permissionless tabs still need Administration access, and verifying documents is not an
+  // administrative permission.
+  ['documents']
+);
+check('while the view permission alone opens no tab', allowedAdminTabs({ can_view_documents: true }), []);
+check(
+  'a verifier without the view permission opens nothing',
+  roleAllowsTab({ can_verify_documents: true }, 'documents'),
+  false
+);
+
 const withSchedule = { can_view_my_schedule: true, can_make_offers: true };
 check('with the schedule granted, offers are honored', resolvePermissionValue(withSchedule, 'can_make_offers'), true);
 check('and nothing is blocked', permissionBlockedByDependency(withSchedule, 'can_make_offers'), false);

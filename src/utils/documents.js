@@ -6,10 +6,36 @@
 // without a browser - see scripts/verify-documents.mjs.
 
 import { formatLogTimestamp } from './systemLog';
+import { dateLifecycle, dateWindowError, dateWindowLabel, effectiveDateKey } from './effectiveDates';
 
-// The two kinds of document. `markdown` is free text with formatting; `checklist` adds items signed one at a
-// time. Anything unrecognized reads as markdown rather than as an empty screen.
-export const DOCUMENT_TYPES = ['markdown', 'checklist'];
+// The three kinds of document. `markdown` is free text with formatting; `checklist` adds items signed one at a
+// time; `link` is a single address pointing at something kept elsewhere. Anything unrecognized reads as markdown
+// rather than as an empty screen.
+export const DOCUMENT_TYPES = ['markdown', 'checklist', 'link'];
+
+// A link is only offered as followable when it is an address a browser will treat as one, and only http(s) counts.
+// The server refuses to STORE anything else, so this is the second half of one rule rather than a second rule -
+// and it is what keeps a `javascript:` value out of an href if one ever reaches the client.
+export const DOCUMENT_LINK_SCHEMES = ['http://', 'https://'];
+
+export const documentLinkProblem = (content) => {
+  const url = text(content);
+  if (!url) return 'A link document needs an address.';
+  const lowered = url.toLowerCase();
+  if (!DOCUMENT_LINK_SCHEMES.some((scheme) => lowered.startsWith(scheme) && url.length > scheme.length)) {
+    return 'A link must start with http:// or https://.';
+  }
+  if (/\s/.test(url)) return 'A link cannot contain spaces.';
+  return '';
+};
+
+// The address of a link document, or '' when it is not one this app will offer. Never an href a caller can build
+// from an unvalidated cell.
+export const documentLinkUrl = (document) => {
+  const normalized = normalizeDocument(document);
+  if (normalized.doc_type !== 'link') return '';
+  return documentLinkProblem(normalized.content) ? '' : normalized.content;
+};
 
 // The sheet's own limit is 50,000 characters in a cell; the server caps a save below that and so does the form,
 // so the author is told while typing rather than by a refusal afterwards.
@@ -37,6 +63,10 @@ export const normalizeDocument = (row) => {
     is_published: source.is_published === true || text(source.is_published).toUpperCase() === 'TRUE',
     rank_id: text(source.rank_id),
     is_sign_required: source.is_sign_required === true || text(source.is_sign_required).toUpperCase() === 'TRUE',
+    // The window, read through the schedule's own date parser so a real date cell, a typed date and an ISO string
+    // all land on the same yyyy-MM-dd key. '' is "no restriction", never "retired".
+    effective_date: effectiveDateKey(source.effective_date),
+    end_date: effectiveDateKey(source.end_date),
     content_revision: Number.isFinite(revision) ? revision : 0,
     content_length: Number.isFinite(length) ? length : 0,
     author_user_id: text(source.author_user_id),
@@ -52,6 +82,20 @@ export const normalizeDocumentList = (rows) =>
   (Array.isArray(rows) ? rows : []).map(normalizeDocument).filter((document) => document.id !== '');
 
 export const isChecklist = (document) => normalizeDocument(document).doc_type === 'checklist';
+
+// A link document holds an address instead of a body, so the reader offers to open it rather than rendering text.
+export const isLink = (document) => normalizeDocument(document).doc_type === 'link';
+
+// Where a document sits in its own life - 'active', 'scheduled' or 'retired' - and the label for it. The rule is the
+// schedule's own (see utils/effectiveDates), reused rather than restated: the same two columns mean the same thing
+// on both sheets, and a document does not need a second opinion about whether a date has passed.
+export const documentLifecycle = (document, todayKey) => dateLifecycle(normalizeDocument(document), todayKey);
+
+export const documentWindowLabel = (document) => dateWindowLabel(normalizeDocument(document));
+
+// Whether members can see it today. The server decides this for the list it returns; the client asks the same
+// question so that a document which retires while the module is open stops being offered as something to sign.
+export const documentIsLive = (document, todayKey) => documentLifecycle(document, todayKey) === 'active';
 
 // The folder a document is shown under.
 export const documentFolder = (document) => normalizeDocument(document).folder || UNFILED_LABEL;
@@ -151,6 +195,11 @@ export const EMPTY_DOCUMENT_FORM = {
   is_published: true,
   rank_id: '',
   is_sign_required: false,
+  // The window, from the same two columns the schedule uses: to start a document on a date and retire it on a date
+  // without deleting it. Blank means no restriction, so every document written before these fields existed is live
+  // forever, exactly as it behaved before.
+  effective_date: '',
+  end_date: '',
 };
 
 // The form's view of a saved document.
@@ -167,6 +216,8 @@ export const documentToForm = (document) => {
     is_published: normalized.is_published,
     rank_id: normalized.rank_id,
     is_sign_required: normalized.is_sign_required,
+    effective_date: normalized.effective_date,
+    end_date: normalized.end_date,
     // Read-only, for the "Created by" and "Updated" lines: never sent back by a save.
     author_user_id: normalized.author_user_id,
     updated_at: normalized.updated_at,
@@ -177,11 +228,23 @@ export const documentToForm = (document) => {
 // afterwards. The server checks the same things and is the authority; this only saves the round trip.
 export const documentSaveProblem = (form) => {
   if (!text(form?.title)) return 'A title is required.';
-  if (String(form?.content ?? '').length > DOCUMENT_CONTENT_LIMIT) {
+
+  // A link is an address and nothing else. Checked here as well as on the server: the server is what makes it
+  // true, and this is what tells the author before they press Save.
+  if (form?.doc_type === 'link') {
+    const linkProblem = documentLinkProblem(form?.content);
+    if (linkProblem) return linkProblem;
+  } else if (String(form?.content ?? '').length > DOCUMENT_CONTENT_LIMIT) {
     return `This document is longer than the sheet can hold (the limit is ${DOCUMENT_CONTENT_LIMIT.toLocaleString(
       'en-US'
     )} characters). Split it into two documents.`;
   }
+
+  // The same rules the server applies, from the same helper the schedule uses, so a refusal here and a refusal
+  // there cannot disagree about what a readable date is.
+  const dateProblem = dateWindowError(form?.effective_date, form?.end_date);
+  if (dateProblem) return dateProblem;
+
   return '';
 };
 

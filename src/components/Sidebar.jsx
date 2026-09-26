@@ -18,6 +18,7 @@ export default function Sidebar({
     canEditAvailability,
     canUseTimeclock,
     canSignTrainings,
+    canViewDocuments,
     ranks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
@@ -154,8 +155,12 @@ export default function Sidebar({
                     </button>
                     )}
 
-                    {/* Documents is open to everyone as well. Which documents a member may SEE is decided by the
-                        server (published, and at or above their rank), so there is nothing to gate here. */}
+                    {/* Documents is gated on can_view_documents - the permission that means "may read documents at
+                        all". Which documents are INSIDE the module is still decided by the server (published, live
+                        on today's date, and at or above the member's rank); this only decides whether the module is
+                        offered. The other two documents permissions both require this one, so a role that manages or
+                        verifies documents always has it. */}
+                    {canViewDocuments && (
                     <button
                         onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'documents'
@@ -166,6 +171,7 @@ export default function Sidebar({
                         <BookText className="w-5 h-5" />
                         <span>Documents</span>
                     </button>
+                    )}
 
                     {/* Help is open to everyone, like User Settings - no permission gates
                         it, and the guides it lists are the member-facing ones. */}

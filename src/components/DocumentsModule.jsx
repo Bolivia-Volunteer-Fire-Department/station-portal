@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   BookText,
   CheckCircle2,
+  ExternalLink,
   FileText,
   Folder,
   ListChecks,
@@ -27,12 +28,14 @@ import ConfirmModal from './ConfirmModal';
 import Markdown from './Markdown';
 import {
   documentFolder,
+  documentLinkUrl,
   documentSignatureState,
   documentUpdatedLabel,
   documentsInFolder,
   filterDocuments,
   folderSummaries,
   isChecklist,
+  isLink,
   normalizeChecklistItemList,
   normalizeDocument,
   normalizeDocumentList,
@@ -65,31 +68,26 @@ import { unnamedLabel, userLabel } from '../utils/displayLabel';
 // Extracted rather than inlined because the row carries four states at once - unticked, ticked, signed, verified
 // - and the verification panel needs the same label rendering without the tick box. A row that had to be kept in
 // step by hand in two places is how the two screens would end up disagreeing about what "verified" looks like.
+//
+// The WHOLE ROW is the button, not just the box. A 16px square is a fiddly target on a phone, and a row whose text
+// swallows a tap reads as broken - which is exactly how it was reported: "clicking checklist items does nothing".
+// The box is drawn as a span inside the button because a button inside a button is not valid and would swallow the
+// click; the icon is what marks it, so nothing is lost by it not being one.
 function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer }) {
   const marked = state.signed || ticked;
+  const tickable = Boolean(onToggle) && canTick && !state.signed;
 
-  return (
-    <li className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2">
+  const body = (
+    <>
       {onToggle && (
-        <button
-          type="button"
-          onClick={() => onToggle(item, state)}
-          disabled={!canTick || state.signed}
-          aria-pressed={Boolean(marked)}
-          aria-label={state.signed ? 'Already signed' : ticked ? 'Untick this item' : 'Tick this item'}
-          title={
-            !canTick
-              ? 'This checklist does not ask for signatures'
-              : state.signed
-                ? 'You signed this item. Signatures cannot be removed.'
-                : undefined
-          }
+        <span
+          aria-hidden="true"
           className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
             marked ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 dark:border-slate-600'
-          } ${!canTick || state.signed ? 'opacity-70 cursor-default' : 'hover:border-emerald-500'}`}
+          } ${tickable ? 'group-hover:border-emerald-500' : 'opacity-70'}`}
         >
           {marked && <CheckCircle2 className="h-3.5 w-3.5" />}
-        </button>
+        </span>
       )}
 
       <div className="min-w-0 flex-1">
@@ -112,6 +110,35 @@ function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer }) {
           <span className="text-slate-500 dark:text-slate-400">Awaiting verification</span>
         ) : null}
       </div>
+    </>
+  );
+
+  if (tickable) {
+    return (
+      <li>
+        <button
+          type="button"
+          onClick={() => onToggle(item, state)}
+          aria-pressed={Boolean(marked)}
+          aria-label={ticked ? `Untick ${item.label}` : `Tick ${item.label}`}
+          className="group flex w-full items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/20"
+        >
+          {body}
+        </button>
+      </li>
+    );
+  }
+
+  return (
+    <li
+      className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2"
+      title={
+        onToggle && state.signed
+          ? 'You signed this item. Signatures cannot be removed.'
+          : undefined
+      }
+    >
+      {body}
     </li>
   );
 }
@@ -263,6 +290,10 @@ export default function DocumentsModule({
 
   const documentIsChecklist = isChecklist(openDocument || {});
   const openDocumentId = openDocument?.id || '';
+
+  // The address of an open link document, or '' when it is not usable as one. Empty is what makes the reader show
+  // the "no usable address" note instead of an href built from whatever the cell happens to contain.
+  const openLinkUrl = useMemo(() => documentLinkUrl(openDocument || {}), [openDocument]);
 
   // The verification panel's data: read when a checklist is open and the reader may verify, and cleared
   // otherwise so a stale list can never be shown against another document.
@@ -649,9 +680,12 @@ export default function DocumentsModule({
                           <span className="flex items-center gap-2">
                             {/* A checklist is worth marking in the list: it is not read and put down, it is worked
                                 through a line at a time, and that is the difference a member needs to see before
-                                opening it. */}
+                                opening it. A link is marked for the same reason in reverse: nothing is stored here
+                                to read, the row is a way out of the app, and that should not be a surprise. */}
                             {checklist ? (
                               <ListChecks className="w-4 h-4 shrink-0" title="Checklist" />
+                            ) : isLink(item) ? (
+                              <ExternalLink className="w-4 h-4 shrink-0" title="Opens an external link" />
                             ) : (
                               <FileText className="w-4 h-4 shrink-0" />
                             )}
@@ -723,11 +757,42 @@ export default function DocumentsModule({
                       ? ` · ${documentUpdatedLabel(openDocument, timeFormat)}`
                       : ''}
                     {isChecklist(openDocument) ? ' · Checklist' : ''}
+                    {isLink(openDocument) ? ' · Link' : ''}
                   </p>
 
-                  <div className="mt-4">
-                    <Markdown markdown={openDocument.content} />
-                  </div>
+                  {/* A link document has no body to render: its content IS an address, and the useful thing to do
+                      with it is open it. The address is shown as well as linked, because a reader has to be able to
+                      see where a click will take them. `rel="noreferrer"` and `target="_blank"` together are what
+                      keep the external page from reaching back into this tab. */}
+                  {isLink(openDocument) ? (
+                    <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4">
+                      {openLinkUrl ? (
+                        <>
+                          <a
+                            href={openLinkUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Open in a new tab
+                          </a>
+                          <p className="mt-3 break-all text-xs text-slate-500 dark:text-slate-400">{openLinkUrl}</p>
+                        </>
+                      ) : (
+                        /* A document whose address is not one this app will follow is reported as such rather than
+                           offered as a dead or dangerous link. */
+                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                          This link has no usable address. An administrator needs to give it one that starts with
+                          http:// or https://.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-4">
+                      <Markdown markdown={openDocument.content} />
+                    </div>
+                  )}
 
                   {/* The signature block: what this document asks of the reader, and the answer already on file.
                       A signed document does not offer to sign again - signatures are not a toggle, and the button
@@ -821,10 +886,17 @@ export default function DocumentsModule({
                         ))
                       )}
 
+                      {/* A checklist that asks for no signatures still shows its items - but a reader who taps one
+                          and sees nothing happen has been told nothing. This says what the state is and what the
+                          fix is, rather than leaving "clicking does nothing" as the last word. */}
                       {!openDocument.is_sign_required && openDocument.items.length > 0 && (
-                        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                          This checklist does not ask for signatures, so the items are a list to read.
-                        </p>
+                        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                          <p className="font-medium">This checklist does not ask for signatures, so its items cannot be ticked.</p>
+                          <p className="mt-0.5">
+                            The lines below are a list to read. An administrator can switch on &ldquo;Members must sign
+                            this&rdquo; on the document to make each item tickable and verifiable.
+                          </p>
+                        </div>
                       )}
 
                       {openDocument.is_sign_required && pendingItemCount > 0 && (
@@ -836,10 +908,11 @@ export default function DocumentsModule({
                     </div>
                   )}
 
-                  {/* The verification panel: for somebody whose role verifies checklists, and only once a
-                      checklist is open. It lives here rather than in the administration tab because verifying is
-                      not an administrative act - an officer checking a new member's truck checklist should not
-                      need the Administration module to do it.
+                  {/* The verification panel, for somebody whose role verifies checklists. It is here for the case
+                      it is good at - the verifier is already reading this checklist - and the same job is offered
+                      from the Administration module's Documents tab, where a verifier can pick the checklist and
+                      then the member, which is the shape that answers "who is waiting on me". Both call the same
+                      actions and the same pure helpers, so they cannot disagree about what is still outstanding.
 
                       The reader's OWN checklist is never offered: the server refuses self-verification, so listing
                       it would be listing a button that always fails. */}

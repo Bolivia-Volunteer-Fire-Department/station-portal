@@ -77,15 +77,28 @@ in the publish checklist below.
   toggle, `can_edit_own_availability` My Availability, and `can_use_timeclock` the
   Clock In/Out buttons and Clock History. Without the timeclock permission a member
   still sees the station clock and the *Currently on duty* card.
-- **`can_verify_documents` is a member permission on purpose.** It opens the Verification
-  panel inside the **Documents** module rather than an Administration tab, because an
-  officer confirming a new member's truck checklist is not an administrator. Documents
-  themselves need no member permission: the *server* decides what a member may see, so a
-  screen that filtered again would be a second copy of that rule.
-- **Dependencies are enforced in the editor**: *Offer to fill open shifts* and
-  *See the whole crew's schedule* are locked off while *View their schedule* is off
+- **Reading documents is a permission: `can_view_documents`.** Without it the **Documents**
+  module is not in the sidebar, the app will not stay on its tab, and every documents action
+  on the server refuses. Which documents are *inside* the module is still the server's
+  decision (published, live on today's date, at or above the member's rank), so the client
+  does not filter again — a screen that repeated that rule would be a second copy of it.
+- **`can_verify_documents` is a member permission on purpose.** Verifying is not an
+  administrative act: an officer confirming a new member's truck checklist should not have to
+  become an administrator, nor be able to edit the checklist. It opens the **Verify
+  checklists** panel on the *Documents* tab in Administration (pick the checklist, then the
+  member — the shape that answers "who is waiting on me") and the verification card in the
+  member-facing module. The Documents tab is therefore the one tab **two** permissions open —
+  see `roleAllowsTab` — and a role with only the verifying permission sees just that panel:
+  no editor, no folders, no signature report.
+- **Dependencies are enforced in the editor and on the server**: *Offer to fill open shifts*
+  and *See the whole crew's schedule* are locked off while *View their schedule* is off
   (`can_make_offers` / `can_view_full_schedule` cannot be stored without
-  `can_view_my_schedule`).
+  `can_view_my_schedule`), and both document permissions that are more than reading —
+  `can_manage_documents` and `can_verify_documents` — cannot be stored without
+  `can_view_documents`, because managing or verifying documents you cannot see is not a thing.
+  `hasDocumentPermission(ss, userId, permission)` is the server half of that rule, in one
+  place, so a roles sheet edited by hand cannot produce a role that manages documents it
+  cannot read.
 - **Enforcement is server-side, not just in the UI.** Every admin action checks its own
   column through `hasRolePermission(ss, userId, 'can_...')` (which treats `is_admin` as
   granting everything), so hiding a button is a convenience rather than the control.
@@ -114,6 +127,25 @@ in the publish checklist below.
   becomes a row of chips and reading a document replaces the list, with a back arrow in the card's own header.
   The folder counts come from `folderSummaries` in `utils/documents` rather than from the component, because a
   folder showing "2" must contain the two documents the next column lists.
+- **A checklist item's whole ROW is the control.** The report that started this was "clicking checklist items does
+  nothing", and a 16px square that only its own pixels respond to is exactly that: the label swallowed the tap.
+  The row is now a single `<button>` with the tick drawn as a `<span>` inside it — a button inside a button is
+  invalid and would swallow the click — and a row that cannot be ticked (signed, or a checklist that asks for no
+  signatures) is not a button at all. A checklist with items that asks for no signatures says so *and* what to
+  change, because "nothing happens" is not an explanation.
+- **A document can start on a date and retire on one, and retiring is not deleting.** `effective_date` and
+  `end_date` are read through the *same* helper the schedule uses (`utils/effectiveDates`), with the same rule:
+  a blank cell means no restriction, so every document written before these columns behaves exactly as it did.
+  A retired document leaves every member's list and refuses a signature — `GET_DOCUMENT` reports it as missing and
+  `SIGN_DOCUMENT` refuses it, which covers a page opened before the retirement — while the row, its items and every
+  signature stay put, and administrators still see it marked **· retired**. `documentIsLiveOn` on the server and
+  `documentLifecycle` on the client are the two halves; the server decides, the client labels.
+- **A third document type, `link`, stores an address instead of a body.** Its `content` is validated to start with
+  `http://` or `https://` — on the server, so it cannot be *stored*, and again on the client so the author hears
+  before the request — which is what keeps a `javascript:` value out of an `href` in a table anybody can edit. The
+  reader shows the address next to an **Open in a new tab** button (`target="_blank"` with `rel="noreferrer"`), and
+  an unusable address is reported rather than offered. `documentLinkUrl` returns `''` for anything it will not
+  follow, so no component builds an href from a raw cell.
 - **A Tailwind arbitrary value is space-separated, not comma-separated.** A comma inside one still *builds* — into a
   `grid-template-columns` declaration with the comma left in it, which is invalid, so the browser drops the
   declaration and the layout falls back to one column with nothing to show for it. This exact mistake made the
@@ -172,15 +204,20 @@ in the publish checklist below.
   is what made the feature look missing. They are held in `stagedItems`, shown as *not saved*, and each
   one is then written through the ordinary item action — which counts what landed rather than assuming,
   because a checklist that arrives with nine of ten lines would be missing a line nobody thinks to sign.
-- **Verification is a member permission, not an administrative one.** `can_verify_documents` opens the
-  Verification panel inside Documents, because an officer confirming a new member's truck checklist is
-  not an administrator. Three rules make it mean something: a verification **follows the member's own
-  signature** (there is nothing to confirm about work nobody claimed), **nobody verifies their own
-  checklist** (the server refuses it and the panel never lists you), and the verifier, the timestamp and
-  the revision come from the session. `VERIFY_CHECKLIST_REMAINING` does a whole member in one call —
-  40 round trips against a script that takes seconds each would be worse than the wrong half-verified
-  list it would leave behind. `GET_DOCUMENT_SIGNATURES` carries the items alongside the signatures so
-  its two audiences (document managers, and verifiers with no other access) can both name a row.
+- **Verification is a member permission, not an administrative one.** `can_verify_documents` opens the verification
+  panel inside Documents and the **Verify checklists** panel on the Documents tab in Administration, because an
+  officer confirming a new member's truck checklist is not an administrator. It is offered from two places on
+  purpose: the member module answers it for the checklist you are reading, and the Administration panel answers
+  "who is waiting on me" by listing the station's checklists and, for the chosen one, the members busiest first.
+  Both call the same actions and the same pure helpers in `utils/checklists`, so they cannot disagree about what is
+  outstanding. Three rules make a verification mean something: it **follows the member's own signature** (there is
+  nothing to confirm about work nobody claimed), **nobody verifies their own checklist** (the server refuses it, and
+  both panels leave you off the list by passing your own id in), and the verifier, the timestamp and the revision
+  come from the session. `VERIFY_CHECKLIST_REMAINING` does a whole member in one call — 40 round trips against a
+  script that takes seconds each would be worse than the wrong half-verified list it would leave behind — and it
+  asks first, because a verification is a record that a check was made. `GET_DOCUMENT_SIGNATURES` carries the items
+  alongside the signatures so its two audiences (document managers, and verifiers with no other access) can both
+  name a row.
 - **`can_edit_notification_settings` without `is_admin`** can manage the station
   defaults but not the Firebase credentials: the FCM card is disabled, and the backend
   refuses those actions. That role may only write `notify_*` keys, so the permission
@@ -622,7 +659,7 @@ The front end and the backend deploy separately, so **the app can be published w
 | `users` | `runner_sound_profile` and `is_change_password_on_login` (administrator-managed attributes, so they live here rather than in `user_settings`) |
 | `schedule_templates` | `nickname`, `effective_date`, `end_date` |
 | `assignments` | `color`, `icon`, `effective_date`, `end_date` |
-| `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_create_events`, `can_make_announcements`, `can_view_system_log`, `can_access_debug`, `can_manage_documents`, `can_verify_documents`, the three training permissions, and the rest |
+| `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_view_documents`, `can_manage_documents`, `can_verify_documents`, `can_create_events`, `can_make_announcements`, `can_view_system_log`, `can_access_debug`, the three training permissions, and the rest |
 | `documents` | nothing — the sheet **creates itself** with its headers on the first save, and grows its header row for any column the code adds later. `id, title, folder, doc_type, sort_order, content, is_published, rank_id, is_sign_required, content_revision, author_user_id, updated_at` |
 | `document_signatures` | nothing either — same self-creating sheet. `id, document_id, checklist_item_id, user_id, signed_by_user_id, signature_role, signed_at, content_revision`. The server stamps `signed_at`; `checklist_item_id` is blank for a whole-document signature and set for a checklist line. `signature_role` is `member` for the member's own signature and `verifier` for somebody else's confirmation of it |
 | `document_checklist_items` | nothing either — same self-creating sheet. `id, document_id, sort_order, section, label`. The item ids are what signatures point at, so **editing an item keeps its signatures and deleting a signed one is refused** |

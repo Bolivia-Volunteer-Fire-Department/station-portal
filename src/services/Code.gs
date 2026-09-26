@@ -635,6 +635,11 @@ function doPost(e) {
           responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
           break;
         }
+        // The module itself is behind a permission now, so this is the first thing every member action asks.
+        if (!hasDocumentPermission(ss, docAuth.userId, "can_view_documents")) {
+          responseData = { success: false, message: "Reading documents requires the 'View documents' permission." };
+          break;
+        }
         responseData = {
           success: true,
           documents: memberDocumentRows(ss, docAuth.user, getSheetData(ss, "ranks")),
@@ -651,15 +656,21 @@ function doPost(e) {
           responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
           break;
         }
+        if (!hasDocumentPermission(ss, docOneAuth.userId, "can_view_documents")) {
+          responseData = { success: false, message: "Reading documents requires the 'View documents' permission." };
+          break;
+        }
         const wantedDocumentId = String(data.id || payload.id || "").trim();
         const documentRanks = getSheetData(ss, "ranks");
         const wantedDocument = findRowById(getSheetData(ss, DOCUMENT_SHEET), wantedDocumentId);
 
         // A document the member may not see is reported as MISSING rather than as forbidden. Telling a member
         // that a document exists but is above their rank is itself a disclosure, and the practical difference
-        // for the reader is nothing.
+        // for the reader is nothing. A RETIRED document is reported the same way: it is out of circulation, which
+        // for a reader is the same as not being there.
         if (!wantedDocument ||
             !isTruthyValue(wantedDocument.is_published) ||
+            !documentIsLiveOn(wantedDocument, todayDateKey()) ||
             !documentMeetsRank(documentRanks, docOneAuth.user && docOneAuth.user.rank_id, wantedDocument.rank_id)) {
           responseData = { success: false, message: "That document is not available." };
           break;
@@ -681,7 +692,14 @@ function doPost(e) {
 
       case "ADMIN_GET_DOCUMENTS": {
         const docListAuth = getAuthContext(ss, data);
-        if (!docListAuth || !hasRolePermission(ss, docListAuth.userId, "can_manage_documents")) {
+        // Manage OR verify: the verification view on this tab is a picker of checklists, so a verifier needs the
+        // same list - and the ROW here is deliberately a summary (no body, no items), which is all a verifier
+        // needs to choose one. Opening a document for editing is still can_manage_documents alone.
+        if (
+          !docListAuth ||
+          (!hasDocumentPermission(ss, docListAuth.userId, "can_manage_documents") &&
+            !hasDocumentPermission(ss, docListAuth.userId, "can_verify_documents"))
+        ) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -696,7 +714,7 @@ function doPost(e) {
 
       case "ADMIN_GET_DOCUMENT": {
         const docOneAdmin = getAuthContext(ss, data);
-        if (!docOneAdmin || !hasRolePermission(ss, docOneAdmin.userId, "can_manage_documents")) {
+        if (!docOneAdmin || !hasDocumentPermission(ss, docOneAdmin.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -711,13 +729,18 @@ function doPost(e) {
 
       case "ADMIN_SAVE_DOCUMENT": {
         const docSaveAuth = getAuthContext(ss, data);
-        if (!docSaveAuth || !hasRolePermission(ss, docSaveAuth.userId, "can_manage_documents")) {
+        if (!docSaveAuth || !hasDocumentPermission(ss, docSaveAuth.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
 
         const documentFields = documentFieldsFrom(data, payload);
-        const documentProblem = documentValidationError(documentFields, getSheetData(ss, "ranks"));
+        // The RAW dates go along for validation: once normalized, an empty cell and a typo look identical, and only
+        // one of them should be an error.
+        const documentProblem = documentValidationError(documentFields, getSheetData(ss, "ranks"), {
+          effective_date: data.effective_date !== undefined ? data.effective_date : payload.effective_date,
+          end_date: data.end_date !== undefined ? data.end_date : payload.end_date
+        });
         if (documentProblem) {
           responseData = { success: false, message: documentProblem };
           break;
@@ -761,7 +784,7 @@ function doPost(e) {
 
       case "ADMIN_DELETE_DOCUMENT": {
         const docDeleteAuth = getAuthContext(ss, data);
-        if (!docDeleteAuth || !hasRolePermission(ss, docDeleteAuth.userId, "can_manage_documents")) {
+        if (!docDeleteAuth || !hasDocumentPermission(ss, docDeleteAuth.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -800,7 +823,7 @@ function doPost(e) {
 
       case "ADMIN_RENAME_DOCUMENT_FOLDER": {
         const docFolderAuth = getAuthContext(ss, data);
-        if (!docFolderAuth || !hasRolePermission(ss, docFolderAuth.userId, "can_manage_documents")) {
+        if (!docFolderAuth || !hasDocumentPermission(ss, docFolderAuth.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -880,11 +903,17 @@ function doPost(e) {
         const signDocumentRow = findRowById(getSheetData(ss, DOCUMENT_SHEET), signDocumentId);
 
         // The same answer GET_DOCUMENT gives: what the member may not see is reported as MISSING rather than as
-        // forbidden, so a crafted request learns nothing about what exists above their rank.
+        // forbidden, so a crafted request learns nothing about what exists above their rank. A RETIRED document
+        // cannot be signed either - which matters because a page opened before it was retired is still open.
         if (!signDocumentRow ||
             !isTruthyValue(signDocumentRow.is_published) ||
+            !documentIsLiveOn(signDocumentRow, todayDateKey()) ||
             !documentMeetsRank(getSheetData(ss, "ranks"), signAuth.user && signAuth.user.rank_id, signDocumentRow.rank_id)) {
           responseData = { success: false, message: "That document is not available." };
+          break;
+        }
+        if (!hasDocumentPermission(ss, signAuth.userId, "can_view_documents")) {
+          responseData = { success: false, message: "Signing documents requires the 'View documents' permission." };
           break;
         }
         if (!isTruthyValue(signDocumentRow.is_sign_required)) {
@@ -941,7 +970,11 @@ function doPost(e) {
         const signatureListAuth = getAuthContext(ss, data);
         // Administrators who manage documents, and the officers who verify checklists: verifying somebody's
         // checklist does not make you an administrator, and it is not a job that should require one.
-        if (!signatureListAuth || !hasAnyRolePermission(ss, signatureListAuth.userId, ["can_manage_documents", "can_verify_documents"])) {
+        if (
+          !signatureListAuth ||
+          (!hasDocumentPermission(ss, signatureListAuth.userId, "can_manage_documents") &&
+            !hasDocumentPermission(ss, signatureListAuth.userId, "can_verify_documents"))
+        ) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -976,7 +1009,7 @@ function doPost(e) {
 
       case "ADMIN_REMOVE_DOCUMENT_SIGNATURE": {
         const signatureRemoveAuth = getAuthContext(ss, data);
-        if (!signatureRemoveAuth || !hasRolePermission(ss, signatureRemoveAuth.userId, "can_manage_documents")) {
+        if (!signatureRemoveAuth || !hasDocumentPermission(ss, signatureRemoveAuth.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -1009,7 +1042,7 @@ function doPost(e) {
 
       case "ADMIN_SAVE_CHECKLIST_ITEM": {
         const itemAuth = getAuthContext(ss, data);
-        if (!itemAuth || !hasRolePermission(ss, itemAuth.userId, "can_manage_documents")) {
+        if (!itemAuth || !hasDocumentPermission(ss, itemAuth.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -1057,7 +1090,7 @@ function doPost(e) {
 
       case "ADMIN_DELETE_CHECKLIST_ITEM": {
         const itemDeleteAuth = getAuthContext(ss, data);
-        if (!itemDeleteAuth || !hasRolePermission(ss, itemDeleteAuth.userId, "can_manage_documents")) {
+        if (!itemDeleteAuth || !hasDocumentPermission(ss, itemDeleteAuth.userId, "can_manage_documents")) {
           responseData = { success: false, message: "Unauthorized." };
           break;
         }
@@ -1127,10 +1160,15 @@ function doPost(e) {
         // The same answer GET_DOCUMENT gives: what the member may not see is reported as unavailable to sign.
         if (!itemSignDocument ||
             !isTruthyValue(itemSignDocument.is_published) ||
+            !documentIsLiveOn(itemSignDocument, todayDateKey()) ||
             String(itemSignDocument.doc_type || "").trim().toLowerCase() !== "checklist" ||
             !isTruthyValue(itemSignDocument.is_sign_required) ||
             !documentMeetsRank(getSheetData(ss, "ranks"), itemSignAuth.user && itemSignAuth.user.rank_id, itemSignDocument.rank_id)) {
           responseData = { success: false, message: "That checklist is not available to sign." };
+          break;
+        }
+        if (!hasDocumentPermission(ss, itemSignAuth.userId, "can_view_documents")) {
+          responseData = { success: false, message: "Signing documents requires the 'View documents' permission." };
           break;
         }
 
@@ -1211,7 +1249,7 @@ function doPost(e) {
 
       case "VERIFY_CHECKLIST_ITEM": {
         const verifyAuth = getAuthContext(ss, data);
-        if (!verifyAuth || !hasRolePermission(ss, verifyAuth.userId, "can_verify_documents")) {
+        if (!verifyAuth || !hasDocumentPermission(ss, verifyAuth.userId, "can_verify_documents")) {
           responseData = { success: false, message: "Your role does not verify checklists." };
           break;
         }
@@ -1301,7 +1339,7 @@ function doPost(e) {
       // showing a half-verified list with no way to tell which half. One call, one log entry, one answer.
       case "VERIFY_CHECKLIST_REMAINING": {
         const bulkAuth = getAuthContext(ss, data);
-        if (!bulkAuth || !hasRolePermission(ss, bulkAuth.userId, "can_verify_documents")) {
+        if (!bulkAuth || !hasDocumentPermission(ss, bulkAuth.userId, "can_verify_documents")) {
           responseData = { success: false, message: "Your role does not verify checklists." };
           break;
         }
@@ -6491,15 +6529,23 @@ const DOCUMENT_HEADERS = [
   "is_published",
   "rank_id",
   "is_sign_required",
+  "effective_date",
+  "end_date",
   "content_revision",
   "author_user_id",
   "updated_at"
 ];
 
-// `markdown` is free text with formatting; `checklist` adds items signed one at a time. Anything unrecognized
-// reads as markdown rather than as an empty screen.
-const DOCUMENT_TYPES = ["markdown", "checklist"];
+// `markdown` is free text with formatting; `checklist` adds items signed one at a time; `link` is a single address
+// pointing at something kept elsewhere. Anything unrecognized reads as markdown rather than as an empty screen.
+const DOCUMENT_TYPES = ["markdown", "checklist", "link"];
 const DOCUMENT_CONTENT_LIMIT = 45000;
+
+// A link document's `content` is an address, and only these two schemes are allowed. Everything else - `javascript:`
+// above all - is refused rather than stored and rendered as a clickable link to it. The check is here AND in
+// utils/documents on the client, because a refusal has to happen where the value is stored: a document written
+// before the check existed would otherwise still be a live link.
+const DOCUMENT_LINK_SCHEMES = ["http://", "https://"];
 const DOCUMENT_TITLE_LIMIT = 200;
 const DOCUMENT_FOLDER_LIMIT = 80;
 
@@ -6556,24 +6602,75 @@ function documentFieldsFrom(data, payload) {
     folder: String(read("folder") || "").trim().slice(0, DOCUMENT_FOLDER_LIMIT),
     doc_type: DOCUMENT_TYPES.indexOf(requestedType) === -1 ? "markdown" : requestedType,
     sort_order: isFinite(requestedOrder) ? requestedOrder : 0,
-    content: String(read("content") === undefined || read("content") === null ? "" : read("content")),
+    // A link document's address is stored like any other content and trimmed, because a pasted address arrives
+    // with whatever whitespace the clipboard carried.
+    content: String(read("content") === undefined || read("content") === null ? "" : read("content")).trim(),
     // New documents are published by default: hiding one is a deliberate act ("not finished yet"), and a first
     // save nobody can see would be the confusing default.
     is_published: read("is_published") === undefined ? true : isTruthyValue(read("is_published")),
     rank_id: String(read("rank_id") || "").trim(),
-    is_sign_required: isTruthyValue(read("is_sign_required"))
+    is_sign_required: isTruthyValue(read("is_sign_required")),
+    // The window, from the same two columns the schedule has used for the same reason: to start a record on a date
+    // and retire it on a date without deleting it. Blank means no restriction, so every document that existed
+    // before these columns keeps behaving exactly as it did.
+    effective_date: toDateKeyValue(read("effective_date")),
+    end_date: toDateKeyValue(read("end_date"))
   };
 }
 
-function documentValidationError(fields, ranks) {
+// A link is only usable if it is an address a browser will follow, and only http(s) is allowed.
+function documentLinkProblem(address) {
+  const url = String(address || "").trim();
+  if (!url) return "A link document needs an address.";
+  const lowered = url.toLowerCase();
+  const allowed = DOCUMENT_LINK_SCHEMES.some(function (scheme) {
+    return lowered.indexOf(scheme) === 0 && url.length > scheme.length;
+  });
+  if (!allowed) return "A link must start with http:// or https://.";
+  // Whitespace inside an address is a paste accident, and one that produces a link that goes somewhere else.
+  if (/\s/.test(url)) return "A link cannot contain spaces.";
+  return "";
+}
+
+// Whether a document is inside its dates on a given day. Called with the station's own date, so a document retires
+// for everybody at the same moment rather than at each reader's midnight.
+function documentIsLiveOn(row, todayKey) {
+  const key = String(todayKey || "").trim();
+  if (!key) return true;
+  const from = toDateKeyValue(row && row.effective_date);
+  const to = toDateKeyValue(row && row.end_date);
+  if (from && key < from) return false;
+  if (to && key > to) return false;
+  return true;
+}
+
+// `rawDates` is what the caller was SENT, before normalization, because the normalized value cannot tell an empty
+// cell from a typo: both arrive here as ''. A typo has to be an error rather than a silent blank, since dropping it
+// would quietly put the document back to being live forever - which is the opposite of what "retire this" means.
+function documentValidationError(fields, ranks, rawDates) {
   if (!String(fields.title || "").trim()) return "A title is required.";
-  if (fields.content.length > DOCUMENT_CONTENT_LIMIT) {
+
+  if (fields.doc_type === "link") {
+    const linkProblem = documentLinkProblem(fields.content);
+    if (linkProblem) return linkProblem;
+  } else if (fields.content.length > DOCUMENT_CONTENT_LIMIT) {
     return "This document is longer than the sheet can hold (the limit is " +
       DOCUMENT_CONTENT_LIMIT.toLocaleString("en-US") + " characters). Split it into two documents.";
   }
+
   if (fields.rank_id && !findRowById(ranks || [], fields.rank_id)) {
     return "The minimum rank on this document no longer exists. Choose another, or clear it.";
   }
+
+  const sent = rawDates || {};
+  const sentFrom = String(sent.effective_date === undefined || sent.effective_date === null ? "" : sent.effective_date).trim();
+  const sentTo = String(sent.end_date === undefined || sent.end_date === null ? "" : sent.end_date).trim();
+  if (sentFrom && !fields.effective_date) return "The effective date is not a readable date.";
+  if (sentTo && !fields.end_date) return "The end date is not a readable date.";
+  if (fields.effective_date && fields.end_date && fields.effective_date > fields.end_date) {
+    return "The end date must not be before the effective date.";
+  }
+
   return "";
 }
 
@@ -6619,11 +6716,21 @@ function documentListRow(row) {
     is_published: isTruthyValue(source.is_published),
     rank_id: String(source.rank_id || "").trim(),
     is_sign_required: isTruthyValue(source.is_sign_required),
+    // The window travels with every row, including a member's: a document that is live now can retire tonight, and
+    // the client is the side that has to decide whether to offer it as something to sign.
+    effective_date: toDateKeyValue(source.effective_date),
+    end_date: toDateKeyValue(source.end_date),
     content_revision: isFinite(revision) ? revision : 0,
     content_length: String(content).length,
     author_user_id: String(source.author_user_id || "").trim(),
     updated_at: String(source.updated_at || "").trim()
   };
+}
+
+// Today, as the yyyy-MM-dd key the date columns are stored in. Eastern, like every other stamp the server writes, so
+// a document does not retire at a different moment depending on who is asking.
+function todayDateKey() {
+  return String(getEasternTimestamp() || "").slice(0, 10);
 }
 
 // The checklist items of one document, in order. Empty when the sheet does not exist, which is the honest answer
@@ -6663,11 +6770,28 @@ function documentFullRow(ss, row) {
 // Documents a member may read: published, and at or above their rank. A draft is invisible to them - it is visible
 // to anyone who can manage documents, which is what makes a draft a draft.
 function memberDocumentRows(ss, user, ranks) {
+  const today = todayDateKey();
+
   return getSheetData(ss, DOCUMENT_SHEET)
     .filter(function (row) { return isTruthyValue(row.is_published); })
     .filter(function (row) { return documentMeetsRank(ranks, user && user.rank_id, row.rank_id); })
+    // A document outside its dates is RETIRED (or not yet started), so a member stops seeing it - and stops being
+    // asked to sign it. Nothing is deleted: the row stays, its signatures stay attached to it, and administrators
+    // still see it in the tab with its window on it. That is what makes retiring a document safe.
+    .filter(function (row) { return documentIsLiveOn(row, today); })
     .map(documentListRow)
     .sort(documentListSort);
+}
+
+// The one place the dependency between the documents permissions lives, on the server.
+//
+// Seeing documents is the floor for the other two: a role that may manage or verify them but may not see them is a
+// role that cannot do either, and the Roles editor refuses to store that combination. This is the other half of the
+// rule, so a roles sheet edited by hand cannot produce it either. It also answers the plain question "may this role
+// view documents at all", which every member-facing action asks first.
+function hasDocumentPermission(ss, userId, permission) {
+  if (!hasRolePermission(ss, userId, "can_view_documents")) return false;
+  return hasRolePermission(ss, userId, permission);
 }
 
 // Folders A-Z with the unfiled ones last, then the document's own order, then its title. A folder with no

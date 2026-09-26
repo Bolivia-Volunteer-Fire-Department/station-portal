@@ -231,9 +231,15 @@ export default function App() {
   const canEditTrainings = can('can_edit_trainings');
 
   // Verifying checklists. A member permission rather than an administrative one: an officer confirming a new
-  // member's truck checklist is not an administrator, and the screen it opens is the Documents module they can
-  // already reach. The server re-checks it, so this flag only shapes what is offered.
+  // member's truck checklist is not an administrator. The server re-checks it, so this flag only shapes what is
+  // offered. Verifying happens on the Documents tab (see AdminPanel) as well as in the member module.
   const canVerifyDocuments = can('can_verify_documents');
+
+  // Reading documents at all. Without this the module has no sidebar entry and the app will not open it - and the
+  // server refuses every documents action, which is where the rule actually lives. The other two documents
+  // permissions both require this one (see utils/permissions).
+  const canViewDocuments = can('can_view_documents');
+  const canManageDocuments = can('can_manage_documents');
 
   // Modules that render a seven-column calendar get the wider container.
   //
@@ -787,7 +793,9 @@ const getLoadingMessage = () => {
               ? canUseTimeclock
               : activeTab === 'training'
                 ? canSignTrainings
-                : true; // the dashboard, help, settings and the easter egg are always open
+                : activeTab === 'documents'
+                  ? canViewDocuments
+                  : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
     activeTab,
@@ -797,6 +805,7 @@ const getLoadingMessage = () => {
     canEditOwnAvailability,
     canUseTimeclock,
     canSignTrainings,
+    canViewDocuments,
   ]);
 
   const handleLogout = () => {
@@ -1275,6 +1284,7 @@ const getLoadingMessage = () => {
             canEditAvailability={canEditOwnAvailability}
             canUseTimeclock={canUseTimeclock}
             canSignTrainings={canSignTrainings}
+            canViewDocuments={canViewDocuments}
             ranks={ranks}
           />
 
@@ -1401,7 +1411,7 @@ const getLoadingMessage = () => {
             {/* Documents: open to every signed-in member, like Help. The server decides which documents a
                 member may see (published, and at or above their rank), so there is no permission to check here -
                 a screen that filtered again would be a second copy of that rule. */}
-            {activeTab === 'documents' && (
+            {activeTab === 'documents' && canViewDocuments && (
               <DocumentsModule
                 token={authToken}
                 currentUser={currentUser}
@@ -1443,6 +1453,7 @@ const getLoadingMessage = () => {
                 onActiveSubTabChange={setAdminSubTab}
                 currentRole={currentUserRole}
                 isAdmin={isAdmin}
+                currentUserId={String(currentUser?.id ?? '')}
                 users={users}
                 roles={roles}
                 ranks={ranks}
