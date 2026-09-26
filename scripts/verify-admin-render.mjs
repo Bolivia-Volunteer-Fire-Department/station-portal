@@ -12,6 +12,10 @@ import { renderToString } from 'react-dom/server';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from '../src/utils/contentWidth.js';
 import { ADMIN_BAR_LABELS, PAGE_BAR_LABELS, adminBarLabel, pageBarLabel } from '../src/utils/pageLabels.js';
 import CenteredContent from '../src/components/CenteredContent.jsx';
+// The whole app, so the shell itself can be rendered. Everything below is a component in isolation; a mistake in
+// App's own body - a derived value that reads state declared further down, for instance - was invisible to all of
+// it and to every source check, and took the entire app down in the browser.
+import App from '../src/App.jsx';
 import AdminPanel, { ADMIN_NAV_CATEGORIES } from '../src/components/admin/AdminPanel.jsx';
 import Sidebar from '../src/components/Sidebar.jsx';
 import AdminRolesTab from '../src/components/admin/AdminRolesTab.jsx';
@@ -45,6 +49,35 @@ const check = (label, condition, detail) => {
   if (!condition) failures++;
   console.log(`${condition ? 'ok  ' : 'FAIL'} ${label}${condition || detail === undefined ? '' : ` -> ${detail}`}`);
 };
+
+// ---------------------------------------------------------------------------
+// The whole app renders
+// ---------------------------------------------------------------------------
+// Everything below renders one component at a time with hand-made props, which leaves App's own body - its state,
+// and every derived value computed from it on every render - untested. Rendering it here executes that body, so a
+// crash in it is reported as a failed check instead of a blank page.
+//
+// What this does NOT reach: effects do not run during a server render, so there is no data path here, and the state
+// it renders in is the one a fresh app has - the loading screen. A mistake that only happens on a signed-in screen,
+// or on one branch of an expression that short-circuits on the initial render, can still get past it: the
+// `Cannot access 'adminSubTab' before initialization` bug was exactly that shape, and is covered by the source
+// order check in scripts/verify-app-shell.mjs instead. It is deliberately the FIRST check either way, so a failure
+// in the shell itself is the first thing reported.
+console.log('\n--- the whole app ---');
+const appRender = (() => {
+  try {
+    return { html: renderToString(React.createElement(App)) };
+  } catch (error) {
+    return { error };
+  }
+})();
+check(
+  'App renders without throwing',
+  typeof appRender.html === 'string',
+  appRender.error && `${appRender.error.name}: ${appRender.error.message}`
+);
+check('and gets as far as the loading screen', String(appRender.html || '').includes('animate-spin'));
+check('with nothing from the signed-in shell in it', !String(appRender.html || '').includes('My Schedule'));
 
 // The role shapes that matter: full access, one tab only, member-only, and a role
 // that has been granted nothing at all.
@@ -1166,9 +1199,12 @@ check('and spans the width above the content', /justify-between/.test(headerClas
 
 // The page title deliberately does NOT stick: only the bar is fixed, so a heading scrolls out of the
 // way as you read. Pinned here so it does not creep back in.
+//
+// Extra classes on it are fine - it carries a `md:shrink-0` guard so the bounded Help screen shrinks the guide
+// rather than squashing the title - so this matches the intent (not sticky) rather than an exact attribute.
 check(
   'the page title scrolls with the page',
-  /<div[^>]*className="mb-8">/.test(shellSource) && !/<div className="sticky/.test(shellSource),
+  /<div[^>]*className="mb-8[^"]*"/.test(shellSource) && !/<div className="sticky/.test(shellSource),
   true
 );
 

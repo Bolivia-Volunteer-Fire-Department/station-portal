@@ -1,4 +1,31 @@
-// ── Hold-to-swap ─────────────────────────────────────────────────────────────
+// What a drag hovering a slot should do next: hold for the swap, leave the hold it already has, or cancel it.
+//
+// This exists because deciding it from what the board DRAWS rather than from the rows caused a swap to cancel
+// itself the instant it appeared. With the two pills drawn exchanged, the slot under the pointer looks like the
+// row being dragged - the hover handler read that as "back over my own shift", cancelled, and the next hover
+// re-armed the countdown, so the board swapped and reverted about every second and a half, indefinitely.
+//
+// So the caller passes the REAL occupant (slotOccupant), never the preview's.
+export const planSwapHover = ({
+  draggedKey = null,
+  entry = null,
+  occupant = null,
+  slotKey = '',
+  dwellSlotKey = '',
+  previewSlotKey = '',
+} = {}) => {
+  if (!draggedKey || !entry) return { action: 'cancel' };
+  // Already counted down and already shown for this slot: keep it. Nothing to re-arm - and above all nothing to
+  // cancel, which is what the loop above was.
+  if (previewSlotKey && previewSlotKey === slotKey) return { action: 'keep' };
+  // A free slot, or the row being dragged (its own pill): there is nothing to swap with.
+  if (!occupant || occupant._key === entry._key) return { action: 'cancel' };
+  // Already counting down for this slot: let the timer be. Restarting it on every dragover - they fire
+  // continuously while the pointer sits still - would mean the swap never arrived.
+  if (dwellSlotKey && dwellSlotKey === slotKey) return { action: 'keep' };
+  return { action: 'hold' };
+};
+
 //
 // Two members whose shifts are both filled can change places: hold the dragged pill over the other one, and after
 // SWAP_DWELL_MS the board shows them exchanged. Letting go there confirms it; moving out before that, or dropping
@@ -7,6 +34,7 @@
 // The dwell exists because a plain drop onto a filled slot is ambiguous - it might mean "put this member here"
 // (leaving the other shift vacant), "swap them", or a slip - and none of those should happen on a gesture nobody
 // has been taught. Holding is a second, deliberate signal, and the blinking pill is what makes it discoverable.
+// ── Hold-to-swap ─────────────────────────────────────────────────────────────
 export const SWAP_DWELL_MS = 1500;
 
 // How long the exchange (and its reversal) is animated for. The stylesheet's swapPop keyframe is the same length;

@@ -209,9 +209,14 @@ export default function AdminPanel({
     // container has to HAVE a height to give (percentage heights against an auto-height parent resolve to auto,
     // and the chain would silently break - the card would grow and the bookmarks would scroll away as before).
     // Every other tab is left exactly as it was: the page scrolls them.
+    //
+    // `md:flex-1` and `md:h-full` both appear because <main> becomes a flex column on this screen (see
+    // boundedHelpScreen in App.jsx) and a block otherwise: flex-1 is what gives this container the height LEFT OVER
+    // after the page heading - which is the whole point, since h-full alone asks for the heading's height as well
+    // and pushes the last ~90px of the guide below the fold.
     <div
       className={`space-y-6 ${
-        activeSubTab === 'help' ? 'md:h-full md:min-h-0 md:flex md:flex-col' : ''
+        activeSubTab === 'help' ? 'md:h-full md:min-h-0 md:flex-1 md:flex md:flex-col' : ''
       }`}
     >
       {visibleCategories.length === 0 && (

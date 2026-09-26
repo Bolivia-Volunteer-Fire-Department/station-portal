@@ -255,7 +255,24 @@ export default function App() {
   const pageHeadingRef = useRef(null);
   const [showPageLabel, setShowPageLabel] = useState(false);
   // The open Administration sub-tab, reported up by AdminPanel so the bar can say "Admin: Schedule Mgt".
+  // The open Administration sub-tab, reported up by the panel (and used by the app bar's page name).
   const [adminSubTab, setAdminSubTab] = useState('');
+
+  // The one screen whose content is bounded to the viewport instead of scrolling the page with it: the Help
+  // screen's guide pane scrolls inside its own card (see HelpGuides). The page heading above it has to be a ROW of
+  // that layout rather than something the card sits underneath, or the card - which asks for the full height of
+  // <main>'s content box - pushes the total ~90px past the viewport and the last of the guide hides behind the
+  // page scroll. So <main> becomes a flex column for this screen, and only this screen.
+  //
+  // Both audiences' Help tabs qualify. The Administration one is why the open sub-tab is part of the test; it is
+  // reported by an effect, so for one frame after opening that tab the old value is still in play and the page
+  // behaves as it did before. That is a single frame of a layout that was correct yesterday, and it corrects
+  // itself - which is a better trade than reaching into the panel for it.
+  //
+  // Declared HERE, below the state it reads, and not up with the other derived values: a `const` that mentions
+  // `adminSubTab` before that `useState` runs is a temporal dead zone error, and it takes the whole app down
+  // rather than the screen it belongs to. scripts/verify-app-shell.mjs checks the order.
+  const boundedHelpScreen = activeTab === 'help' || (activeTab === 'admin' && adminSubTab === 'help');
 
   useEffect(() => {
     const heading = pageHeadingRef.current;
@@ -1301,13 +1318,21 @@ const getLoadingMessage = () => {
           <main
             // `overscroll-y-contain` stops the desktop layout's inner scroll area from chaining its overscroll to
             // the document: reaching the bottom of a long tab used to lift the whole page (see index.css).
+            //
+            // `md:flex md:flex-col` only on the Help screen, where the heading above the guide card has to be one of
+            // the rows rather than something the card is stacked under - see boundedHelpScreen above. Every other
+            // tab is untouched: the page scrolls them.
             className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 ${
+              boundedHelpScreen ? 'md:flex md:flex-col' : ''
+            } ${
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
             }`}
           >
             {/* The page title scrolls with the content: only the app bar above is pinned, so the heading
-                moves out of the way as you read. Once it has, the app bar says which page this is. */}
-            <div ref={pageHeadingRef} className="mb-8">
+                moves out of the way as you read. Once it has, the app bar says which page this is.
+                On the Help screen it does NOT scroll (there is nothing to scroll) and must keep its height, or a
+                short window would squash the title instead of the guide: hence `md:shrink-0`. */}
+            <div ref={pageHeadingRef} className="mb-8 md:shrink-0">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
                 {activeTab === 'clock-history' && 'My Clock History'}

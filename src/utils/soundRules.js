@@ -35,7 +35,7 @@ export const SOUND_VOLUME = {
   click_double: 0.15,
   sound_on: 0.4,
   sound_off: 0.4,
-  default: 0.5,
+  default: 0.4,
 };
 
 // ---------------------------------------------------------------------------

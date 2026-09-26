@@ -58,11 +58,12 @@ export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
     //   `md:grid-rows-1`          cannot shrink has nothing to scroll - it just grows. grid-rows-1 makes the row
     //                             exactly the height left over (`minmax(0, 1fr)`) so the pane's overflow is real.
     //
-    // The root carries `md:h-full` AND `md:flex-1` because it has two parents to fit: <main> in the member module
-    // (a block with a definite height, where h-full applies and flex-1 is inert) and the Administration panel's
-    // column (where flex-1 wins the height and h-full is overridden). Either way it ends up with the height it was
-    // given rather than its content's, which is the one thing the pane needs. Both callers are checked by
-    // scripts/verify-app-shell.mjs, since a wrapper added between them would silently undo all of this.
+    // The root carries `md:h-full` AND `md:flex-1` because it has two parents to fit: on the Help screens <main>
+    // (and the Administration panel inside it) is a flex column, where flex-1 wins the height and h-full is
+    // overridden; anywhere else the parent is a block with a definite height, where h-full applies and flex-1 is
+    // inert. Either way it ends up with the height it was given rather than its content's, which is the one thing
+    // the pane needs. Both callers are checked by scripts/verify-app-shell.mjs, since a wrapper added between them
+    // would silently undo all of this.
     <div className="space-y-4 md:h-full md:min-h-0 md:flex-1">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden md:h-full md:flex md:flex-col">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">

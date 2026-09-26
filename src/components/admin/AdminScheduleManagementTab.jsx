@@ -16,7 +16,7 @@ import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { isAvailableForSlot } from '../../utils/availability';
-import { planShiftDrop, planShiftSwap, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
+import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
 // The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
 import { toast } from '../../utils/toast';
 import {
@@ -653,7 +653,7 @@ export default function AdminScheduleManagementTab({
 
   // A drop is asked for a verdict before it changes anything, so a refusal can explain itself instead of doing
   // nothing at all. See utils/scheduleDrop for what each refusal means and for the hold-to-swap above.
-  const handleSlotDrop = (e, slot, occupant = null) => {
+  const handleSlotDrop = (e, slot) => {
     e.preventDefault();
     e.stopPropagation();
     setHoverSlot(null);
@@ -670,6 +670,9 @@ export default function AdminScheduleManagementTab({
     }
     const sourceDate = dragSourceDate;
     const entry = key ? working.find((r) => r._key === key) : null;
+    // The real occupant, not what the board is drawing: the same rule as the hover above. (With no offer on
+    // screen the two are identical; with one, the drawn pill is A and the row in the data is B.)
+    const occupant = slotOccupant(slot);
 
     // A release while the swap is being offered IS the confirmation, and it has already been shown - so this
     // commits what the board is displaying and stops.
@@ -688,7 +691,7 @@ export default function AdminScheduleManagementTab({
       entry,
       targetDate: slot.dateKey,
       targetKind: 'slot',
-      targetOccupant: occupant || slotOccupant(slot),
+      targetOccupant: occupant,
       targetName: occupant ? occupantLabel(occupant, slot.template) : '',
       todayKey,
     });
@@ -795,22 +798,34 @@ export default function AdminScheduleManagementTab({
   // accept the drop first - a slot that refuses the drag at this point shows a no-entry cursor and says nothing,
   // which is exactly the silence this replaced.
   //
-  // It is also where the hold-to-swap starts counting: `occupant` is whoever is drawn in the slot, and holding
-  // over a FILLED one is the only thing that arms the timer.
-  const handleSlotDragOver = (e, slot, occupant = null) => {
+  // It is also where the hold-to-swap is driven from, and the one thing that must not be read here is what the
+  // board is DRAWING: with the two pills shown exchanged, the slot under the pointer looks like the row being
+  // dragged, and reading that cancelled the swap the instant it appeared - then re-armed it, forever. The real
+  // occupant is the source of truth; the verdict logic is in planSwapHover.
+  const handleSlotDragOver = (e, slot) => {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
     setHoverSlot(slot.slotKey);
 
     const entry = dragKeyRef.current ? working.find((r) => r._key === dragKeyRef.current) : null;
-    if (!entry) return;
-    // Back over the slot the drag started from, or over a free one: no swap to offer.
-    if (!occupant || occupant._key === entry._key) {
+    const occupant = slotOccupant(slot);
+    const verdict = planSwapHover({
+      draggedKey: dragKeyRef.current,
+      entry,
+      occupant,
+      slotKey: slot.slotKey,
+      dwellSlotKey: swapDwell?.slotKey || '',
+      previewSlotKey: swapPreview?.slotKey || '',
+    });
+
+    if (verdict.action === 'cancel') {
       cancelSwapDwell();
       cancelSwapPreview();
-      return;
+    } else if (verdict.action === 'hold') {
+      beginSwapDwell(slot, occupant, entry);
     }
-    beginSwapDwell(slot, occupant, entry);
+    // 'keep': the hold or the offer is already right for this slot, so nothing at all happens - which is what
+    // makes the swap stay on screen once it appears.
   };
 
   const handleSlotDragLeave = (slot) => {
@@ -1892,10 +1907,11 @@ export default function AdminScheduleManagementTab({
                         // A pill is a drop target as well as a drag source. Without these three a pill accepted
                         // no drops at all - silently, which is why an OPEN shift (a vacancy row) could never take
                         // a dragged shift while a genuinely empty slot beside it could. The refusal is explained
-                        // in handleSlotDrop.
-                        onDragOver={(e) => handleSlotDragOver(e, slot, occupant)}
+                        // in handleSlotDrop, and the occupant it needs is looked up from the rows, not passed in
+                        // from what this render happens to be drawing.
+                        onDragOver={(e) => handleSlotDragOver(e, slot)}
                         onDragLeave={() => handleSlotDragLeave(slot)}
-                        onDrop={(e) => handleSlotDrop(e, slot, occupant)}
+                        onDrop={(e) => handleSlotDrop(e, slot)}
                         title={`${occupantLabel(occupant, slot.template)} · ${timeRangeOf(slot.template)}${
                           occurred
                             ? ' (past — locked)'

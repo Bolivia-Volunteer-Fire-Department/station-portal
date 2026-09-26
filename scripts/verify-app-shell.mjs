@@ -166,11 +166,6 @@ checkIs('and the root takes the height it is given', /\bmd:h-full\b/.test(helpRo
 // Each caller has to give it one. The member module renders it straight into <main> (asserted above: md:h-screen),
 // and the Administration panel's own wrapper is auto-height unless it cooperates - which is the trap this catches.
 const panel = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
-checkIs(
-  'the Administration panel hands it a height, for the Help tab only',
-  /activeSubTab === 'help' \? 'md:h-full md:min-h-0 md:flex md:flex-col' : ''/.test(panel),
-  'the panel root is auto-height, so h-full would resolve to auto and nothing would scroll'
-);
 // A wrapper between the two would undo the whole chain, so both call sites are pinned as a bare render with no
 // element around it. Not a style preference: `<div className="..."><HelpGuides/></div>` would make the parent
 // auto-height again, `h-full` would resolve to auto, the card would grow and the bookmarks would scroll away -
@@ -200,6 +195,59 @@ checkIs('all of it is desktop-only', !/(?:^|\s)overflow-y-auto(?:\s|$)/.test(hel
 checkIs('the guide list is not inside the pane that scrolls', help.indexOf('</nav>') < help.indexOf('<article'));
 // A scrollable box the keyboard cannot reach is one a keyboard user cannot read past, and it should say what it is.
 checkIs('the pane is a labelled region with a tab stop', /role="region"/.test(help) && /tabIndex=\{0\}/.test(help) && /aria-label=\{active \?/.test(help));
+
+// The heading above the card is the trap: it is a SIBLING of the Help card inside <main>, so a card asking for the
+// full height of main's content box is ~90px too tall (an h2, a paragraph and mb-8), and that overflow is exactly
+// the bit of the guide that used to hide behind the page scroll. The fix is for <main> to become a flex column on
+// this screen, so the heading is a row of the layout and the card takes what is left.
+console.log('\n--- and the page heading is part of the layout ---');
+checkIs(
+  'the help screen makes main a flex column, and only that screen',
+  /boundedHelpScreen \? 'md:flex md:flex-col' : ''/.test(app),
+  'without it the card is 100% of main PLUS the heading'
+);
+checkIs(
+  'which covers both audiences',
+  /const boundedHelpScreen = activeTab === 'help' \|\| \(activeTab === 'admin' && adminSubTab === 'help'\);/.test(app)
+);
+// The base classes must NOT be a flex column, or every other tab's page scroll would be governed by flex rules.
+checkIs('and no other screen is affected', !/md:h-screen md:overflow-y-auto[^`]*md:flex md:flex-col(?!')/.test(app), 'the flex classes leaked into the base classes');
+// The heading keeps its height when the window is short, so the guide shrinks instead of the title being squashed.
+checkIs('the heading cannot be squashed by a short window', /className="mb-8 md:shrink-0"/.test(app), 'no md:shrink-0 on the heading');
+// The panel's own column must take the height LEFT OVER, not 100% of main - which is the same bug one level down.
+checkIs(
+  'the Administration panel takes the leftover height too',
+  /activeSubTab === 'help' \? 'md:h-full md:min-h-0 md:flex-1 md:flex md:flex-col' : ''/.test(panel),
+  'md:h-full alone asks for the heading\'s height as well'
+);
+
+// A derived value in the component body may only read state that is declared ABOVE it. Getting that wrong is not a
+// broken screen, it is no app at all: `boundedHelpScreen` was first written up beside the other derived values and
+// threw "Cannot access 'adminSubTab' before initialization" the moment an administrator opened that tab - which is
+// the only path that reads the second half of its `||`, so nothing else noticed.
+//
+// Checked as source order, because nothing else can: the expression short-circuits on the initial render, so even
+// rendering App whole (verify-admin-render does) never reaches it.
+console.log('\n--- and it is computed after the state it reads ---');
+// Every piece of component state the memo mentions, wherever it is mentioned in the expression - so a third state
+// read added carelessly is caught too, not just the two it happens to use today.
+const memoExpression = (/const boundedHelpScreen = ([^\n]*)/.exec(app)?.[1] || '').replace(/'[^']*'/g, '');
+const memoReads = [...new Set([...memoExpression.matchAll(/([A-Za-z][A-Za-z0-9]*)/g)].map((match) => match[1]))].filter(
+  (name) => app.includes(`const [${name},`)
+);
+checkIs('the memo reads some state through names', memoReads.length >= 1, memoReads.join(', '));
+memoReads.forEach((name) => {
+  checkIs(
+    `${name} is declared before the value that reads it`,
+    app.indexOf(`const [${name},`) < app.indexOf('const boundedHelpScreen ='),
+    `declared at ${app.indexOf(`const [${name},`)}, read at ${app.indexOf('const boundedHelpScreen =')}`
+  );
+});
+checkIs(
+  'and it reads exactly the two the layout depends on',
+  memoReads.sort().join(','),
+  'activeTab,adminSubTab'
+);
 
 // Opening a guide starts at the top of it, or a long guide scrolled to its end leaves the next one open half way
 // down - and now that the pane scrolls itself, nothing else moves it.
@@ -249,16 +297,22 @@ checkIs(
 // The link whose absence is invisible: without min-h-0 on the pane the column refuses to shrink, so there is no
 // overflow and nothing scrolls - the card simply grows and the bookmarks scroll away again, exactly as before.
 const withoutShrink = help.replace('md:min-h-0 md:overflow-y-auto', 'md:overflow-y-auto');
+const withoutHeadingRow = app.replace("boundedHelpScreen ? 'md:flex md:flex-col' : ''", "''");
+checkIs('the mutation took the heading out of the layout', withoutHeadingRow !== app);
+checkIs(
+  'so the page is a flex column again and the card overflows by the heading',
+  !/boundedHelpScreen \? 'md:flex md:flex-col' : ''/.test(withoutHeadingRow)
+);
 checkIs('the mutation changed the Help component', withoutShrink !== help);
 const mutatedPane = /<article[\s\S]*?className="([^"]*)"/.exec(withoutShrink)?.[1] || '';
 checkIs('and the pane is stripped of its ability to shrink', !/\bmd:min-h-0\b/.test(mutatedPane), mutatedPane);
 // The other half of the same failure: the panel stops handing down a height, so the member module keeps working
 // and the Administration one quietly goes back to scrolling the whole page.
-const withoutPanelHeight = panel.replace("activeSubTab === 'help' ? 'md:h-full md:min-h-0 md:flex md:flex-col' : ''", "''");
+const withoutPanelHeight = panel.replace("activeSubTab === 'help' ? 'md:h-full md:min-h-0 md:flex-1 md:flex md:flex-col' : ''", "''");
 checkIs('the mutation removed the panel\'s height', withoutPanelHeight !== panel);
 checkIs(
   'and the panel-cooperation check fails without it',
-  !/activeSubTab === 'help' \? 'md:h-full md:min-h-0 md:flex md:flex-col' : ''/.test(withoutPanelHeight)
+  !/activeSubTab === 'help' \? 'md:h-full md:min-h-0 md:flex-1 md:flex md:flex-col' : ''/.test(withoutPanelHeight)
 );
 
 // A class name is not a class: Tailwind emits only the utilities it recognises, so a typo (or a name that is not a
@@ -280,12 +334,20 @@ if (!builtCss) {
   console.log('\n--- (no build in dist/, so the generated utilities were not checked) ---');
 } else {
   console.log('\n--- and the classes the layout relies on are real utilities ---');
+  // Selectors, not declarations: several of these declarations exist for other variants too, so only the escaped
+  // class selector proves the utility was GENERATED. Tailwind emits nothing for a class name it does not know,
+  // which is how a typo becomes a layout that silently does not work.
   [
-    ['md:grid-rows-1', 'grid-template-rows:repeat(1,minmax(0,1fr))'],
-    ['md:min-h-0', 'min-height:0'],
-    ['overscroll-y-contain', 'overscroll-behavior-y:contain'],
-  ].forEach(([className, declaration]) => {
-    checkIs(`Tailwind emits ${className}`, builtCss.includes(declaration), declaration);
+    'md:h-full',
+    'md:flex-1',
+    'md:min-h-0',
+    'md:flex-col',
+    'md:shrink-0',
+    'md:grid-rows-1',
+    'md:overflow-y-auto',
+    'overscroll-y-contain',
+  ].forEach((className) => {
+    checkIs(`Tailwind emits ${className}`, builtCss.includes(`.${className.replace(':', '\\:')}`), `no .${className} selector`);
   });
 }
 

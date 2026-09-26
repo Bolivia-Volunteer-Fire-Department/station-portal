@@ -12,7 +12,7 @@
  * Run with: npm run verify:schedule-drop
  */
 import { readFileSync } from 'node:fs';
-import { planShiftDrop, planShiftSwap, swapSlotFields, dropMessage, DROP_MESSAGES, DROP_NOTICES, SWAP_DWELL_MS, SWAP_POP_MS, SWAP_SLOT_FIELDS } from '../src/utils/scheduleDrop.js';
+import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, dropMessage, DROP_MESSAGES, DROP_NOTICES, SWAP_DWELL_MS, SWAP_POP_MS, SWAP_SLOT_FIELDS } from '../src/utils/scheduleDrop.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -269,13 +269,52 @@ checkIs(
 );
 
 // ---------------------------------------------------------------------------
+// 6c. Hovering a slot, with and without a swap on screen
+// ---------------------------------------------------------------------------
+// The bug these cover: the verdict used to be read from what the board DRAWS. Once the two pills were shown
+// exchanged, the slot under the pointer looked like the row being dragged, so the next hover cancelled the swap -
+// and the one after that re-armed the countdown. The board swapped and reverted every second and a half, for as
+// long as the pointer stayed over the slot.
+console.log('\n--- hovering a slot, with and without a swap on screen ---');
+const SLOT = 'slot-2026-03-17-t1';
+const hoverArgs = { draggedKey: 'db-1', entry: mine, occupant: theirsOnSlot, slotKey: SLOT, dwellSlotKey: '', previewSlotKey: '' };
+check('a filled slot starts the hold', planSwapHover(hoverArgs).action, 'hold');
+check('holding on the same slot does not restart it', planSwapHover({ ...hoverArgs, dwellSlotKey: SLOT }).action, 'keep');
+// THE regression: continuing to hover the slot whose swap is already shown must leave it alone. This is the case
+// that cancelled, because by then the slot was drawing the dragged row.
+check('and the slot already showing the swap keeps it', planSwapHover({ ...hoverArgs, previewSlotKey: SLOT }).action, 'keep');
+check('a free slot has nothing to swap with', planSwapHover({ ...hoverArgs, occupant: null }).action, 'cancel');
+check('nor does your own pill', planSwapHover({ ...hoverArgs, occupant: mine }).action, 'cancel');
+check('a hover with no drag in flight cancels', planSwapHover({ ...hoverArgs, draggedKey: null }).action, 'cancel');
+check('and one whose row has gone', planSwapHover({ ...hoverArgs, entry: null }).action, 'cancel');
+// Moving to a different filled slot starts that slot's own hold...
+check('another filled slot starts a new hold', planSwapHover({ ...hoverArgs, slotKey: 'other', dwellSlotKey: SLOT }).action, 'hold');
+// ...and an offer belonging to a different slot does not protect this one.
+check('and an offer on another slot does not keep this one', planSwapHover({ ...hoverArgs, slotKey: 'other', previewSlotKey: SLOT }).action, 'hold');
+
+console.log('\n--- and the board hands it the rows, not the drawing ---');
+checkIs('the hover handler takes no occupant from the render', board.includes('const handleSlotDragOver = (e, slot) =>'));
+checkIs('it looks the real occupant up itself', board.includes('const occupant = slotOccupant(slot);'));
+checkIs('and asks the verdict what to do', board.includes('const verdict = planSwapHover({'));
+checkIs('the drop handler reads the rows the same way', board.includes('const handleSlotDrop = (e, slot) =>'));
+checkIs(
+  'so neither call site passes the drawn pill',
+  !board.includes('handleSlotDragOver(e, slot, occupant)') && !board.includes('handleSlotDrop(e, slot, occupant)')
+);
+// Teeth: inject the old wiring and confirm that check notices. The shape is easy to reintroduce because passing a
+// pill LOOKS like handing the handler more information rather than the bug it was.
+const withDrawnOccupant = board.replace('onDragOver={(e) => handleSlotDragOver(e, slot)}', 'onDragOver={(e) => handleSlotDragOver(e, slot, occupant)}');
+checkIs('the mutation restored the old wiring', withDrawnOccupant !== board);
+checkIs('and the check would catch it', withDrawnOccupant.includes('handleSlotDragOver(e, slot, occupant)'));
+
+// ---------------------------------------------------------------------------
 // 7. The wiring, which is where the bug actually lived
 // ---------------------------------------------------------------------------
 // The decision above is only reached if a drop on an occupied slot is DELIVERED. That was the fix: the pill had no
 // drop handler at all, so no verdict was ever asked for and nothing could be said.
 console.log('\n--- the board asks for a verdict ---');
 checkIs('the occupant pill arms the drop', /onDragOver=\{\(e\) => handleSlotDragOver\(e, slot\)\}/.test(board));
-checkIs('and accepts it, naming the occupant', /onDrop=\{\(e\) => handleSlotDrop\(e, slot, occupant\)\}/.test(board));
+checkIs('and accepts it', /onDrop=\{\(e\) => handleSlotDrop\(e, slot\)\}/.test(board));
 checkIs('and forgets the highlight when the pointer leaves', /onDragLeave=\{\(\) => handleSlotDragLeave\(slot\)\}/.test(board));
 checkIs('the free slot arms and accepts it too', /onDrop=\{\(e\) => handleSlotDrop\(e, slot\)\}/.test(board));
 // The old shape: both handlers were conditional, so a past day was not a drop target at all and said nothing.
@@ -309,9 +348,9 @@ checkIs('and the board slot names its own kind', /targetKind: 'slot'/.test(board
 // Teeth: those are string matches, so remove what each describes and confirm the check fails. The pill's drop
 // handler is the one that was missing, so it is the one worth proving.
 console.log('\n--- and the wiring checks would notice ---');
-const withoutPillDrop = board.replace('onDrop={(e) => handleSlotDrop(e, slot, occupant)}', '/* removed */');
+const withoutPillDrop = board.split('onDrop={(e) => handleSlotDrop(e, slot)}').join('/* removed */');
 checkIs('the mutation changed the source', withoutPillDrop !== board);
-checkIs('the pill drop check fails without it', !/onDrop=\{\(e\) => handleSlotDrop\(e, slot, occupant\)\}/.test(withoutPillDrop));
+checkIs('the pill drop check fails without it', !/onDrop=\{\(e\) => handleSlotDrop\(e, slot\)\}/.test(withoutPillDrop));
 const withConditionalDrop = board.replace(
   'onDrop={(e) => handleSlotDrop(e, slot)}',
   'onDrop={droppable ? (e) => handleSlotDrop(e, slot) : undefined}'
@@ -329,7 +368,8 @@ const styles = readFileSync('src/index.css', 'utf8');
 checkIs('the dwell is armed as a slot is hovered', /beginSwapDwell\(slot, occupant, entry\)/.test(board));
 checkIs('and only the dragged row can arm it', /dragKeyRef\.current \? working\.find\(\(r\) => r\._key === dragKeyRef\.current\) : null/.test(board));
 checkIs('the dragged key is readable during the drag, not only on drop', /dragKeyRef\.current = entry\._key/.test(board) && /const dragKeyRef = useRef\(null\)/.test(board));
-checkIs('the drag-over carries the occupant, or there is nothing to swap with', /onDragOver=\{\(e\) => handleSlotDragOver\(e, slot, occupant\)\}/.test(board));
+checkIs('the drag-over takes no occupant from the render, so the drawing cannot decide it',
+  board.includes('const handleSlotDragOver = (e, slot) =>'));
 // The timer must NOT restart on every dragover: those fire continuously while the pointer sits still, so the swap
 // would never arrive. This guard is the difference between working and never firing.
 checkIs('and the countdown is not restarted while the pointer stays put', /if \(swapDwell\?\.slotKey === slot\.slotKey\) return;/.test(board));
