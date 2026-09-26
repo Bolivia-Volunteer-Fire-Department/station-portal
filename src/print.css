@@ -34,7 +34,7 @@
     color: #000 !important;
   }
 
-  /* Assignment colours are information, so keep them: browsers drop backgrounds by
+  /* Assignment colors are information, so keep them: browsers drop backgrounds by
      default to save ink. */
   .print-sheet * {
     -webkit-print-color-adjust: exact;

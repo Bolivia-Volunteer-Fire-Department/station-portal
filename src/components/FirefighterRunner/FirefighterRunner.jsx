@@ -745,6 +745,10 @@ export default function FirefighterRunner({
   return (
     <div
       className="ffr"
+      // Opts the whole minigame out of the app-wide UI click sound (see utils/uiSounds). Its own jump/die/point
+      // audio is deliberately untouched and stays exactly as it was; this only stops a UI click being layered
+      // over it, since the whole cabinet is one big pointer surface with its own voice.
+      data-sound="none"
       style={{
         "--ffr-width": `${width}px`,
         "--ffr-height": `${height}px`,

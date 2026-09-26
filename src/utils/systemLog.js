@@ -174,7 +174,7 @@ export const clampLogPage = (page, total, pageSize = LOG_PAGE_SIZE) => clampPage
 export const logPageRangeLabel = (total, page, pageSize = LOG_PAGE_SIZE) =>
   pageRangeLabel(total, page, pageSize);
 
-// A colour hint for the action badge, so a failure stands out from an ordinary event without reading
+// A color hint for the action badge, so a failure stands out from an ordinary event without reading
 // every word. Deliberately coarse: three tones.
 //
 // Matched on TOKENS rather than substrings: a plain /LOCK/ test flags CLOCK_IN as an alert, because

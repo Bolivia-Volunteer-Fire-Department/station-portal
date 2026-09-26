@@ -17,7 +17,7 @@ export const ANNOUNCEMENT_LOCATIONS = [
 // until it says otherwise, and a bare callout reads as a layout bug.
 export const ANNOUNCEMENT_ICON_FALLBACK = 'triangle-alert';
 
-// Colour variants, matching the help guides' callouts (components/Markdown.jsx) so a Caution announcement
+// Color variants, matching the help guides' callouts (components/Markdown.jsx) so a Caution announcement
 // looks like a Caution alert in a guide. `info` is the default because it promises nothing.
 export const ANNOUNCEMENT_VARIANTS = {
   info: {

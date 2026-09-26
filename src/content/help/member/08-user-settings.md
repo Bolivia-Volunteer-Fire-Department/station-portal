@@ -24,6 +24,16 @@ On an iPhone or iPad the app must be **added to the Home Screen** and opened fro
 
 **Stopping notifications.** Press **Turn off** on the device you want to stop. *Sign out* is a separate thing and does **not** unregister a device — signing out on your phone leaves it receiving pushes (see above), so use **Turn off** when you actually want a device silenced. Although unlikely to cause an issue, we recommend not enabling notifications on a shared device used by other members.
 
+## Sound Effects
+
+**Sound Effects** sits with the other preferences in the settings card. With it on, every press on a control clicks — and actions with consequences (saving, deleting, exporting, signing out) use a **heavier click**, so you can hear the difference between moving around the app and changing something in it.
+
+Turning it **off** silences the *interface* and nothing else:
+
+- **The Firefighter Runner keeps its own sound effects**, on or off.
+- **Your device's own notification banner still sounds.** A push notification is delivered by the operating system, and the app cannot silence that.
+- The station sets the default; until you change it the switch says which way the station has it, and after that your own choice wins. If sounds are missing on this device but work for a colleague, check here first.
+
 ## Change Password
 
 Enter a new password twice. Two rules:

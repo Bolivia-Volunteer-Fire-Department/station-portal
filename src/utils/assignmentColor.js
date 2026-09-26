@@ -1,4 +1,4 @@
-// Colour for an assignment.
+// Color for an assignment.
 //
 // There are two sources, in priority order:
 //
@@ -7,9 +7,9 @@
 //      here, so a hand-edited or half-typed value falls back instead of painting
 //      something unreadable.
 //   2. The original deterministic hue, derived from the assignment id, used when
-//      no colour has been chosen. This keeps every existing assignment looking
-//      exactly as it did before the column existed - a blank colour is not the
-//      same as "no colour", it means "keep the automatic one".
+//      no color has been chosen. This keeps every existing assignment looking
+//      exactly as it did before the column existed - a blank color is not the
+//      same as "no color", it means "keep the automatic one".
 //
 // Pass whichever assignment rows the caller has: admins hold the full sheet
 // (`assignments`), and members receive the same shape from GET_SCHEDULE.
@@ -20,8 +20,8 @@
 
 const HEX_COLOR = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
-// Returns "#rrggbb" for a usable hex colour, or null. Mirrors normalizeHexColor
-// on the backend so both ends agree on what counts as a colour.
+// Returns "#rrggbb" for a usable hex color, or null. Mirrors normalizeHexColor
+// on the backend so both ends agree on what counts as a color.
 export const parseHexColor = (value) => {
   const raw = String(value ?? '').trim();
   if (raw === '') return null;
@@ -38,7 +38,7 @@ export const configuredAssignmentColor = (id, assignments) => {
   return found ? parseHexColor(found.color) : null;
 };
 
-// HSL -> "#rrggbb". Needed because the automatic colour is chosen as a hue but
+// HSL -> "#rrggbb". Needed because the automatic color is chosen as a hue but
 // every consumer wants a hex: <input type="color"> rejects anything else, and a
 // single format keeps the picker, the swatch and the stored value comparable.
 const hslToHex = (h, s, l) => {
@@ -71,6 +71,6 @@ export function assignmentColor(id, assignments) {
   }
   const hue = Math.round((hash * 137.50776) % 360); // golden angle
   // Same hue, saturation and lightness this app has always derived (medium-dark,
-  // so white text on a coloured pill stays readable) - only now expressed as hex.
+  // so white text on a colored pill stays readable) - only now expressed as hex.
   return hslToHex(hue, 70, 45);
 }

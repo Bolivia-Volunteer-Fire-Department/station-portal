@@ -14,8 +14,8 @@ const HEADING_CLASSES = {
   3: 'text-sm font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300',
 };
 
-// The five alert types, styled like GitHub's: a coloured left rule, the type's icon, and its name -
-// the label matters because colour alone is not a signal everyone receives.
+// The five alert types, styled like GitHub's: a colored left rule, the type's icon, and its name -
+// the label matters because color alone is not a signal everyone receives.
 const ALERTS = {
   note: {
     label: 'Note',

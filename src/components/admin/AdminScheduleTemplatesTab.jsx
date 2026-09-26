@@ -496,6 +496,9 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
                       <div
                         key={s.c.key + (s.isTail ? '-tail' : '')}
                         draggable={!savingMoveId && !deletingId}
+                        // A div pill: the selector knows it by its draggable attribute, and this keeps the click
+                        // audible while it is temporarily not draggable. See utils/uiSounds.
+                        data-sound="click"
                         onDragStart={(e) => handleDragStart(e, s.c.template)}
                         onDragEnd={handleDragEnd}
                         onClick={() => handleEdit(s.c.template)}

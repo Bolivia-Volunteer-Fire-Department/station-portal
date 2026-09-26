@@ -1,12 +1,12 @@
-// Verifies the assignment colour rules (utils/assignmentColor).
+// Verifies the assignment color rules (utils/assignmentColor).
 //
 // Two things matter here and neither is obvious from reading the code:
 //
-//   1. An assignment with NO colour configured must keep exactly the colour it
-//      has always had. The automatic colour used to be emitted as `hsl(...)` and
+//   1. An assignment with NO color configured must keep exactly the color it
+//      has always had. The automatic color used to be emitted as `hsl(...)` and
 //      is now a hex string, so this checks the hue is unchanged - otherwise every
-//      uncoloured assignment would silently change colour the moment this shipped.
-//   2. Every colour returned must be a valid hex, because the admin picker is an
+//      uncolored assignment would silently change color the moment this shipped.
+//   2. Every color returned must be a valid hex, because the admin picker is an
 //      <input type="color"> and silently rejects anything else (falling back to
 //      black), and because the stored value and the swatch must be comparable.
 //
@@ -31,7 +31,7 @@ const assert = (label, condition, detail) => {
 };
 
 // The hue function exactly as it shipped before the `color` column existed. Used
-// only as an oracle: the derived colour must still resolve to this hue.
+// only as an oracle: the derived color must still resolve to this hue.
 const legacyHue = (id) => {
   const str = String(id ?? '');
   let hash = 2166136261;
@@ -62,26 +62,26 @@ const hexToHsl = (hex) => {
 
 const HEX6 = /^#[0-9a-f]{6}$/;
 
-console.log('--- a configured colour is used as-is ---');
+console.log('--- a configured color is used as-is ---');
 const configured = [{ id: '3', color: '#ef4444' }];
 check('stored hex wins', assignmentColor('3', configured), '#ef4444');
 check('id types are compared as strings', assignmentColor(3, configured), '#ef4444');
 check('longer ids too', assignmentColor('a-12', [{ id: 'a-12', color: '#0a2a5b' }]), '#0a2a5b');
 
-console.log('\n--- colours are normalized on the way in ---');
+console.log('\n--- colors are normalized on the way in ---');
 check('uppercase becomes lowercase', assignmentColor('1', [{ id: '1', color: '#ABCDEF' }]), '#abcdef');
 check('a missing # is added', assignmentColor('1', [{ id: '1', color: 'abc123' }]), '#abc123');
 check('3-digit shorthand expands', assignmentColor('1', [{ id: '1', color: '#f00' }]), '#ff0000');
 check('surrounding whitespace is ignored', assignmentColor('1', [{ id: '1', color: '  #abcdef  ' }]), '#abcdef');
 
-console.log('\n--- anything unusable falls back to the automatic colour ---');
+console.log('\n--- anything unusable falls back to the automatic color ---');
 const automatic = assignmentColor('3');
 [
   ['empty', ''],
   ['whitespace', '   '],
   ['null', null],
   ['undefined', undefined],
-  ['a css colour name', 'red'],
+  ['a css color name', 'red'],
   ['a bad hex', '#12345'],
   ['a too-long hex', '#1234567']
 ].forEach(([label, color]) => {
@@ -91,7 +91,7 @@ check('an assignment with no row at all falls back', assignmentColor('99', confi
 check('a missing assignments array is safe', assignmentColor('3', undefined), automatic);
 check('configuredAssignmentColor reports nothing to use', configuredAssignmentColor('3', [{ id: '3', color: '' }]), null);
 
-console.log('\n--- the automatic colour is the same colour as before ---');
+console.log('\n--- the automatic color is the same color as before ---');
 ['1', '2', '3', '7', 'am-7', 'assignment-42', 'x'].forEach((id) => {
   const derived = assignmentColor(id);
   const hsl = hexToHsl(derived);
@@ -100,7 +100,7 @@ console.log('\n--- the automatic colour is the same colour as before ---');
   assert(`hue preserved for id ${id} (${derived})`, delta <= 1.5, { got: hsl.h, expected: expectedHue });
 });
 
-console.log('\n--- every returned colour is a valid hex (the picker requires this) ---');
+console.log('\n--- every returned color is a valid hex (the picker requires this) ---');
 const inputs = [
   ['1', []],
   ['2', [{ id: '2', color: '#123456' }]],
@@ -116,14 +116,14 @@ assert(
   inputs.map(([id, list]) => assignmentColor(id, list))
 );
 assert(
-  'parseHexColor accepts every rendered colour',
+  'parseHexColor accepts every rendered color',
   inputs.every(([id, list]) => parseHexColor(assignmentColor(id, list)) !== null)
 );
 
 console.log('\n--- determinism and spread ---');
 check('repeated calls agree', assignmentColor('5'), assignmentColor('5'));
 const ids = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
-assert('consecutive ids get spread-out colours', new Set(ids.map((id) => assignmentColor(id))).size > 5);
+assert('consecutive ids get spread-out colors', new Set(ids.map((id) => assignmentColor(id))).size > 5);
 assert('ids differing only in case are different assignments', assignmentColor('ab') !== assignmentColor('AB'));
 
 console.log('\n--- parseHexColor boundaries ---');

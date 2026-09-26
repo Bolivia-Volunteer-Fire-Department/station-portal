@@ -24,6 +24,11 @@
     <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
     <meta name="theme-color" content="#0A2A5B" />
+    <!-- Standalone display, declared twice on purpose: iOS Safari only honors the apple-prefixed name, and Chrome
+         only honors the standard one - and says so in the console ("apple-mobile-web-app-capable is deprecated")
+         when it finds the prefixed name alone. Browsers that read neither use the manifest's `display: standalone`,
+         which is the modern declaration and is what actually installs the app on Android. Keep the pair together. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="BFD Station Portal" />

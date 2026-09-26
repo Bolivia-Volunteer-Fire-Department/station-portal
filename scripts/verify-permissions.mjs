@@ -112,7 +112,7 @@ check(
 check('a permission with no dependency is never blocked', permissionBlockedByDependency(noSchedule, 'can_use_timeclock'), false);
 
 const withSchedule = { can_view_my_schedule: true, can_make_offers: true };
-check('with the schedule granted, offers are honoured', resolvePermissionValue(withSchedule, 'can_make_offers'), true);
+check('with the schedule granted, offers are honored', resolvePermissionValue(withSchedule, 'can_make_offers'), true);
 check('and nothing is blocked', permissionBlockedByDependency(withSchedule, 'can_make_offers'), false);
 
 console.log('\n--- the master switch locks the other boxes on, and forces them TRUE ---');

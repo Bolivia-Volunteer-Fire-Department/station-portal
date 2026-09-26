@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldAlert, AlertCircle, Loader2, LogOut } from 'lucide-react';
+import { playSound, modalSoundFor } from '../utils/uiSounds';
 
 /**
  * Full-screen reauthentication gate rendered on top of the app UI.
@@ -12,6 +13,12 @@ export default function ReauthModal({ username = '', reason = null, onReauth, on
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // An interruption the member did not ask for - the session was refused - so it opens on the error tone. Once
+  // per mount: the modal stays up while they type, and re-rendering must not replay it.
+  useEffect(() => {
+    playSound(modalSoundFor('reauth'));
+  }, []);
 
   // What was refused, in the terms of the person reading it: which request, how long the session had lasted, and
   // which token the server turned down. Without this the prompt is indistinguishable from a session that was

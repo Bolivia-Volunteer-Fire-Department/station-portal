@@ -2,6 +2,36 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The canvas behind the app.
+//
+// The shell paints its own background (App.jsx: `bg-slate-100 dark:bg-slate-900`), and that div is as tall as the
+// document - so on a normal scroll there is nothing to see behind it. Overscroll is the exception: at the end of
+// the page a trackpad or a touch drag rubber-bands the WHOLE document, which lifts the app and shows whatever the
+// browser painted underneath. With nothing set on <html>, that is the user agent's default: white. Hence "the app
+// lifts up and there is a bright white band".
+//
+// Two things fix it, and both are needed. Painting the canvas in the shell's own colors makes the reveal
+// invisible; `overscroll-behavior` stops the reveal happening at all. The color is the one that has to be there
+// for older Safari, which ignores overscroll-behavior on the viewport.
+//
+// `color-scheme` goes with it: it tells the browser the app is dark, so its own surfaces (scrollbars, the
+// overscroll area, form controls) are dark too rather than a bright strip at the bottom of a dark app.
+//
+// The colors and the shell's classes are checked against each other by scripts/verify-app-shell.mjs - the symptom
+// is a flash only some devices show, so it is exactly the kind of thing that would drift unnoticed. */
+html {
+  background-color: var(--color-slate-100);
+  color-scheme: light;
+  /* No bounce past the end of the page, and no pull-to-refresh: the app refreshes itself in its own time, so
+     dragging the top of the page down should do nothing. */
+  overscroll-behavior-y: none;
+}
+
+html.dark {
+  background-color: var(--color-slate-900);
+  color-scheme: dark;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -9,4 +39,45 @@
 
 .animate-fadeIn {
   animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Hold-to-swap on the schedule board (see utils/scheduleDrop and AdminScheduleManagementTab).
+//
+// `swapDwell` blinks while a dragged shift is held over a filled slot, saying "keep holding and these two will
+// change places". It loops, because the dwell is a countdown of unknown-to-the-eye length: the blinking IS the
+// feedback that the gesture is being read.
+//
+// `swapPop` is the exchange itself, and its reversal. Short on purpose - the pills have already changed places by
+// the time it runs, so it is the eye being caught, not an animation being watched. */
+@keyframes swapDwell {
+  0%, 100% { box-shadow: 0 0 0 2px rgb(59 130 246 / 0.9); }
+  50% { box-shadow: 0 0 0 2px rgb(59 130 246 / 0.15); }
+}
+
+.animate-swapDwell {
+  animation: swapDwell 0.6s ease-in-out infinite;
+}
+
+@keyframes swapPop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.animate-swapPop {
+  animation: swapPop 0.22s ease-out;
+}
+
+/* Reduced motion: keep the MEANING and drop the movement. The dwell still has to say "this spot will swap", so it
+// becomes a solid outline instead of a blink - a flashing ring is exactly what this preference is about - and the
+// pop is removed, since the pills have already changed places by then. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-swapDwell {
+    animation: none;
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 0.9);
+  }
+
+  .animate-swapPop {
+    animation: none;
+  }
 }

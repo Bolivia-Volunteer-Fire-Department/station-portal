@@ -70,6 +70,21 @@ Setting this very low — a minute or two — will sign members out while they a
 
 Both are **defaults, not overrides**: each member can set their own in User Settings, and their choice wins. Change these to set what a new member gets, not to force a change on existing ones.
 
+## Sound Settings
+
+| Setting | Effect |
+|---|---|
+| **Sound Effects** | The station default for interface sounds — clicks, popups, toasts and the chime for a push that lands while the app is open |
+
+Like the display settings, this is a **default, not an override**: a member can turn sounds off for themselves in User Settings and their choice wins. It starts **on**, so a station that never touches this card has a fully audible interface.
+
+Two things it deliberately does **not** reach:
+
+- **The Firefighter Runner** keeps its own sound effects either way. The switch is about the interface, not the minigame.
+- **A push notification's own alert** is played by the member's device, so nobody can silence it from here — turning sounds off only stops the *in-app* chime.
+
+Worth knowing if a member reports "the app has gone quiet": a member who has never changed the switch follows this card, so turning it off here silences every one of them who has not made their own choice.
+
 ## Loading Messages
 
 The rotating messages shown on the loading screen while the app fetches data. Ten of them, and you can edit any or all. Short works best — they are read in passing during a wait of a few seconds.

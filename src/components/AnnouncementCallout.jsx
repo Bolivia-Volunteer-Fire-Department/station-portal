@@ -9,9 +9,9 @@ import {
 /**
  * One announcement, drawn as a callout.
  *
- * Styled to match the help guides' alerts (components/Markdown.jsx): a coloured left rule, the type's
+ * Styled to match the help guides' alerts (components/Markdown.jsx): a colored left rule, the type's
  * label, and an icon. The heading is the announcement's own title rather than the variant's name, so a
- * reader sees what it is about; the variant is carried by the colour and the icon.
+ * reader sees what it is about; the variant is carried by the color and the icon.
  *
  * Compact by default, because the sidebar and dashboard placements sit among other content rather than
  * owning the page.

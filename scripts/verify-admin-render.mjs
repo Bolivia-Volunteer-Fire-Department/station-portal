@@ -257,6 +257,42 @@ check('with their station modules listed', String(memberAccessCard).includes('St
 // use for.
 check('and no administration noise', !String(memberAccessCard).includes('Roles sheet check'));
 
+// The Sound Effects switch is the one control in the app that carries the sound it is about to make as a
+// data-sound directive, which is how the delegated listener knows to play sound_on/sound_off instead of a click
+// - and how it manages to be heard while turning sounds back ON. Rendered here because the value depends on the
+// resolution ladder (member row, then station default, then on), and the directive flips with it.
+console.log('\n--- the User Settings sound switch ---');
+const soundSwitchHtml = ({ userRow, systemRow }) => {
+  try {
+    return renderToString(
+      React.createElement(UserSettings, {
+        ...userSettingsProps,
+        currentRole: ROLES.memberOnly,
+        userSettings: userRow ? [{ id: currentUser.id, ...userRow }] : [],
+        systemSettings: systemRow || {},
+      })
+    );
+  } catch (error) {
+    return { error };
+  }
+};
+const switchDirective = (html) => (/data-sound="(sound-o(?:n|ff))"/.exec(String(html)) || [])[1] || null;
+
+check('the switch is rendered', String(soundSwitchHtml({})).includes('Sound Effects'));
+// Nothing set anywhere: on, so pressing it will turn them off.
+check('with nothing configured it is on, so the switch offers to turn them off', switchDirective(soundSwitchHtml({})), 'sound-off');
+// The member's own FALSE wins: off, so pressing it will turn them on.
+check('a member who turned sounds off is offered to turn them on', switchDirective(soundSwitchHtml({ userRow: { is_sounds_active: 'FALSE' } })), 'sound-on');
+// Inheriting the station default, both ways round - the case that would silently do nothing if the ladder were
+// only reading the member's own row.
+check('a blank cell inherits a station default of off', switchDirective(soundSwitchHtml({ systemRow: { is_sounds_active: 'FALSE' } })), 'sound-on');
+check('and a blank cell inherits a station default of on', switchDirective(soundSwitchHtml({ systemRow: { is_sounds_active: 'TRUE' } })), 'sound-off');
+check('the member still wins over the station', switchDirective(soundSwitchHtml({ userRow: { is_sounds_active: 'TRUE' }, systemRow: { is_sounds_active: 'FALSE' } })), 'sound-off');
+check('and the card says when the station default is what applies', String(soundSwitchHtml({ systemRow: { is_sounds_active: 'FALSE' } })).includes('station default'));
+// Every other switch in the app clicks, so only this one may carry a directive.
+check('no other switch carries a directive', (String(soundSwitchHtml({})).match(/data-sound=/g) || []).length, 1);
+
+
 console.log('\n--- the Schedule Templates tab ---');
 // The form gained an optional nickname field and the week cards draw it, so a broken
 // declaration here would only surface in the browser.
@@ -559,6 +595,11 @@ check(
   'and its loading state before the fetch resolves',
   String(runnerHtml).includes('CHECKING THE BOARD')
 );
+// The minigame is opted out of the app-wide UI click sound (utils/uiSounds): its own audio is untouched, and a UI
+// click must not layer over it. Asserted on the RENDERED markup, because that is what the delegated listener
+// actually queries - a React attribute that never reaches the DOM would pass a source check and fail in practice.
+check('and opts the whole game out of the app click sound', String(runnerHtml).includes('data-sound="none"'));
+check('rather than the app click being its default', !/data-sound="click"/.test(String(runnerHtml)));
 
 const runnerWithSession = (() => {
   try {
@@ -611,6 +652,31 @@ check('the member Help module renders', typeof memberHelp === 'string', memberHe
 check('and lists the member guides', String(memberHelp).includes('Help guides'));
 check('with a guide title from the folder', String(memberHelp).includes('Getting started'));
 check('and covers the modules', String(memberHelp).includes('Timeclock') && String(memberHelp).includes('My Availability'));
+
+// The guide pane is bounded and scrolls on desktop (see the note in HelpGuides). Asserted on the RENDERED markup,
+// because that is what the browser lays out: a class that never reaches the DOM would pass a source check and then
+// silently leave the whole page scrolling again.
+console.log('\n--- the guide pane, as rendered ---');
+const memberHelpHtml = String(memberHelp);
+check(
+  'the pane is rendered as a labelled scroll region',
+  /role="region"/.test(memberHelpHtml) && /aria-label="[^"]*guide"/.test(memberHelpHtml),
+  'no region in the markup'
+);
+check('with a tab stop, so the keyboard can scroll it', /tabindex="0"/.test(memberHelpHtml));
+check(
+  'bounded on desktop, so it scrolls instead of growing',
+  /md:h-full/.test(memberHelpHtml) && /md:flex-1/.test(memberHelpHtml) && /md:grid-rows-1/.test(memberHelpHtml)
+);
+check(
+  'and scrolling only on desktop',
+  /md:overflow-y-auto/.test(memberHelpHtml) && !/class="[^"]*(?:^|\s)overflow-y-auto(?:\s|")/.test(memberHelpHtml)
+);
+// The bookmarks are a sibling of the pane, not inside it: that is what keeps them in place while the guide moves.
+check(
+  'with the guide list outside the scrolling element',
+  memberHelpHtml.indexOf('</nav>') < memberHelpHtml.indexOf('<article')
+);
 
 // An empty guide file is still listed, and explains itself instead of rendering a blank pane.
 // There is no empty guide in the repository right now (the Training placeholder has been filled
@@ -995,8 +1061,8 @@ check(
 );
 check('while an administrator always can', roleAllowsTab({ is_admin: 'TRUE' }, 'announcements'), true);
 
-console.log('\n--- rank colour and icon on the All Members list ---');
-// Each name carries its rank: the rank's colour, and its icon. The roster gets `ranks` from the
+console.log('\n--- rank color and icon on the All Members list ---');
+// Each name carries its rank: the rank's color, and its icon. The roster gets `ranks` from the
 // tab, and each member's rank_id comes from utils/availability.js, so the two are checked here.
 // The roster opens on the CURRENT month (its viewDate is internal state), so the fixture has to
 // land in that month or the list legitimately shows nothing. The first Monday of this month it is.
@@ -1037,8 +1103,8 @@ const rosterView = (props) => {
 };
 
 // The chip markup for one member, from its opening tag through to the member's name. Used for
-// "this chip has the emerald styling / has no colour of its own" - a window before the name would
-// also catch the PREVIOUS member's chip and its colour.
+// "this chip has the emerald styling / has no color of its own" - a window before the name would
+// also catch the PREVIOUS member's chip and its color.
 const chipFor = (html, name) => {
   const idx = String(html).indexOf(name);
   if (idx === -1) return '';
@@ -1049,16 +1115,16 @@ const roster = rosterView({});
 check('the roster renders', typeof roster === 'string', roster.error && roster.error.message);
 check('listing the members', String(roster).includes('Member 1') && String(roster).includes('Member 2'));
 
-// The colours come from the ranks, applied to the name and to the icon.
-check('a rank colour is applied', String(roster).includes('color:#227dc3'), true);
+// The colors come from the ranks, applied to the name and to the icon.
+check('a rank color is applied', String(roster).includes('color:#227dc3'), true);
 check('and a second rank keeps its own', String(roster).includes('color:#c3223b'), true);
 check('the icon is drawn for a ranked member', String(roster).includes('lucide-truck') && String(roster).includes('lucide-shield-check'), true);
 check('the rank name is available as a tooltip', /title="Member 1 — Driver\/Operator"/.test(String(roster)), true);
-// Two inline colours for one member: the icon and the name.
-check('the name carries the rank colour', String(roster).includes('<span style="color:#227dc3">Member 1</span>'), true);
-check('the icon is coloured with it too', /<svg[^>]*style="color:#227dc3"/.test(String(roster)), true);
+// Two inline colors for one member: the icon and the name.
+check('the name carries the rank color', String(roster).includes('<span style="color:#227dc3">Member 1</span>'), true);
+check('the icon is colored with it too', /<svg[^>]*style="color:#227dc3"/.test(String(roster)), true);
 check('and exactly those two, not more', (String(roster).match(/color:#227dc3/g) || []).length, 2);
-check('a second member gets their own colour', String(roster).includes('<span style="color:#c3223b">Member 2</span>'), true);
+check('a second member gets their own color', String(roster).includes('<span style="color:#c3223b">Member 2</span>'), true);
 
 // An unranked member must not break or silently borrow someone else's rank.
 check('an unranked member still appears', String(roster).includes('No Rank Member'));
@@ -1066,20 +1132,20 @@ check('and keeps the plain chip', /bg-emerald-50/.test(chipFor(roster, 'No Rank 
 check('with an unstyled name', String(roster).includes('<span>No Rank Member</span>'), true);
 check('and no rank icon', !/lucide-user[^>]*style="color:/.test(String(roster)), true);
 
-// A rank with no colour set must not paint a blank.
-const noColour = rosterView({
-  users: [{ id: 'u1', name: 'Colourless', rank_id: 'r9' }],
+// A rank with no color set must not paint a blank.
+const noColor = rosterView({
+  users: [{ id: 'u1', name: 'Colorless', rank_id: 'r9' }],
   ranks: [{ id: 'r9', description: 'Unpainted', color: '', icon: 'star' }],
 });
-check('a rank without a colour renders its name plainly', String(noColour).includes('Colourless'), true);
-check('and sets no inline colour on it', !/color:#/.test(String(noColour)), true);
-check('but still shows the rank icon', String(noColour).includes('lucide-star'), true);
+check('a rank without a color renders its name plainly', String(noColor).includes('Colorless'), true);
+check('and sets no inline color on it', !/color:#/.test(String(noColor)), true);
+check('but still shows the rank icon', String(noColor).includes('lucide-star'), true);
 
 const noRanks = rosterView({ ranks: [] });
 check('with no ranks at all the list still renders', typeof noRanks === 'string' && String(noRanks).includes('Member 1'), true);
-check('and no rank colour is applied', !/color:#/.test(String(noRanks)), true);
+check('and no rank color is applied', !/color:#/.test(String(noRanks)), true);
 
-// The tab must actually pass ranks through: without it the roster cannot colour anything.
+// The tab must actually pass ranks through: without it the roster cannot color anything.
 const tabSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
 check('the tab forwards ranks to the roster', /<AdminAvailabilityRoster[\s\S]{0,300}?ranks=\{ranks\}/.test(tabSource), true);
 
@@ -1228,7 +1294,10 @@ const appShellSource = readFileSync('src/App.jsx', 'utf8');
 // which comes first in the file and matches with an empty body. Anchoring on the attribute skips it.
 // And not the className's backtick body either: that template literal contains a NESTED one for the
 // conditional, so a backtick-to-backtick match would stop at the wrong place.
-const mainTag = /<main\s+className=\{[\s\S]*?\}\s*>/.exec(appShellSource)?.[0] || '';
+//
+// `//` comments between the tag and its className are allowed for: a note about what a class is doing belongs
+// right there, and without this the whole match came back empty the first time one was added.
+const mainTag = /<main\s+(?:\/\/[^\n]*\n\s*)*className=\{[\s\S]*?\}\s*>/.exec(appShellSource)?.[0] || '';
 check('the main container was found', mainTag.length > 0, true);
 // Everything before the first ${ is unconditional, so these classes apply to every page.
 const baseMainClasses = mainTag.split('${')[0];

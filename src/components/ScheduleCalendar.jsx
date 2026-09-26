@@ -281,7 +281,7 @@ export default function ScheduleCalendar({
     return '';
   };
 
-  // The event row behind a tapped pill. A segment carries one day's slice of an event (the times, the colour)
+  // The event row behind a tapped pill. A segment carries one day's slice of an event (the times, the color)
   // and its id, but the popup also has to answer "does this repeat?" - which only the row knows.
   const eventFor = (segment) =>
     normalizedEvents.find((event) => String(event.id) === String(segment?.eventId)) || null;
@@ -555,7 +555,7 @@ export default function ScheduleCalendar({
                   </span>
 
                   {/* Events first: they are context for the day, and rendering them above the shifts keeps
-                      them from being mistaken for one. Coloured by the event's own colour, with no offer
+                      them from being mistaken for one. Colored by the event's own color, with no offer
                       machinery anywhere near them. */}
                   {(eventSegmentsByDate.get(key) || []).map((segment) => (
                     <EventPill
@@ -569,7 +569,7 @@ export default function ScheduleCalendar({
                   {dayAssignments.map((a) => {
                     const offerState = a.isOpen ? offerStateFor(a) : '';
                     // Filled pills are solid (member name, or the assignment in
-                    // the personal view). Open shifts are dashed and coloured by
+                    // the personal view). Open shifts are dashed and colored by
                     // assignment; once the member offers they turn amber while
                     // pending, or rose when declined (and offerable again).
                     const line1 = a.isOpen
@@ -593,7 +593,7 @@ export default function ScheduleCalendar({
                         {line2 && (
                           <span className="block truncate text-[9px] font-normal opacity-90">
                             {/* Assignment icon (Administration → Assignments). Inherits
-                                the pill's text colour so an arbitrary assignment colour
+                                the pill's text color so an arbitrary assignment color
                                 can never make it unreadable. */}
                             {a.icon && <RankIcon name={a.icon} className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]" />}
                             {line2}
@@ -639,8 +639,8 @@ export default function ScheduleCalendar({
                                 ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-pointer hover:ring-1 hover:ring-rose-400/70'
                                 : 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-pointer hover:ring-1 hover:ring-slate-400/70'
                         }`}
-                        // Open pills carry the assignment colour; pending/declined
-                        // pills use their state colours instead.
+                        // Open pills carry the assignment color; pending/declined
+                        // pills use their state colors instead.
                         style={offerState === '' ? { borderColor: a.color, color: a.color } : undefined}
                       >
                         {lines}

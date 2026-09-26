@@ -11,7 +11,9 @@ import {
 } from '../../utils/shiftOfferRow';
 import { assignmentColor } from '../../utils/assignmentColor';
 import RankIcon from '../RankIcon';
-import { toast } from 'sonner';
+// From our own wrapper, not from sonner: it plays the sound for each toast kind and then delegates. Importing
+// 'sonner' directly here would silence every toast on this screen (the verifier fails on that import).
+import { toast } from '../../utils/toast';
 
 export default function AdminPendingApprovalsTab({ token, offers = [], onOffersChanged, users = [], assignments = [], schedule = [], scheduleTemplates = [], timeFormat = '12', onAdminDataChanged }) {
   const [pendingOffers, setPendingOffers] = useState([]);

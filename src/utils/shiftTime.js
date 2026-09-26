@@ -42,7 +42,7 @@ export const prettyTime = (t) => {
   return `${hour12}:${String(m ?? 0).padStart(2, '0')} ${period}`;
 };
 
-// Formats an "HH:MM" station wall-clock value honouring a 12h/24h preference.
+// Formats an "HH:MM" station wall-clock value honoring a 12h/24h preference.
 //
 // Template and row times are already station-local ("08:00"), so this is pure
 // string work - no Date or timezone conversion, which would otherwise shift the

@@ -127,7 +127,7 @@ export const eventItemDetails = (event, segment, { timeFormat = '12', todayKey =
     title: text(source.title) || 'Event',
     subtitle: source.isRecurring ? 'Event · repeats' : 'Event',
     rows,
-    // The segment's colour is the event's, normalised, and is what the pill was drawn with.
+    // The segment's color is the event's, normalised, and is what the pill was drawn with.
     color: text(segment?.color) || text(source.color),
   };
 };

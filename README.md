@@ -288,7 +288,7 @@ tagged quote into an `alert` block (`{ type: 'alert', kind, blocks }`) whose **b
 markdown**, so an alert holds paragraphs, lists, emphasis and code like any other block; a blank `>`
 line separates its paragraphs.
 
-`Markdown.jsx` renders it as a coloured callout with the type's icon **and its name**, because colour
+`Markdown.jsx` renders it as a colored callout with the type's icon **and its name**, because color
 alone is not a signal everyone receives.
 
 Two deliberate refusals:
@@ -525,7 +525,7 @@ The front end and the backend deploy separately, so **the app can be published w
 | `schedule_templates` | `nickname`, `effective_date`, `end_date` |
 | `assignments` | `color`, `icon`, `effective_date`, `end_date` |
 | `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_create_events`, `can_make_announcements`, `can_view_system_log`, the three training permissions, and the rest |
-| `system_settings` | `session_timeout`, `required_clock_latitude`, `required_clock_longitude`, `gps_margin_of_error`, and the FCM keys |
+| `system_settings` | `session_timeout`, `is_sounds_active`, `required_clock_latitude`, `required_clock_longitude`, `gps_margin_of_error`, and the FCM keys |
 
 `user_settings` is the exception: it **grows its own header row**, so `notify_announcements` and the other preference columns appear by themselves. All it needs is the identity column (`user_id`).
 
@@ -557,7 +557,7 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   referenced from `index.html`. **The manifest is what makes iOS treat the app as
   installable**, which is a prerequisite for push there — see
   [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md#7-members-opt-in-on-each-device).
-- Brand colours come from the patch: `theme_color` and `background_color` are the
+- Brand colors come from the patch: `theme_color` and `background_color` are the
   patch's navy `#0A2A5B`, matching the icon background so install and launch look
   seamless.
 - `public/badge.png` is the Android notification badge. Android draws badges from
@@ -628,6 +628,39 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   (`row_version`); a refused write is retried once by the client, because the server
   guarantees it wrote nothing. See
   [docs/WRITE_SAFETY.md](docs/WRITE_SAFETY.md).
+- **The page cannot be overscrolled into a white band.** The app paints its background on a shell `<div>`,
+  so everything below it was the browser's default canvas — white — and a trackpad flick or touch drag
+  at the end of the page lifted the whole app to reveal it. The canvas is now painted in the shell's own
+  colors, `overscroll-behavior-y: none` stops the reveal happening at all, and the desktop layout's
+  inner scroll column contains its own overscroll so a long tab cannot drag the document up. See the
+  note in `src/index.css` and `npm run verify:app-shell`, which fails if the canvas colors and the
+  shell's classes drift apart.
+- **A long help guide scrolls inside its own card.** The guide pane is bounded on desktop and
+  scrolls, so the bookmark list (and the card header) stay where they are however long a guide is,
+  rather than being carried off the top of the page. It needs the whole height chain to hold — the
+  card bounded, the columns taking the height left over it, `min-h-0` so a column may shrink below its
+  content, and a definite row — so `npm run verify:app-shell` checks every link, both call sites
+  (including that the Administration panel hands down a height, and that neither caller wraps the
+  component in an auto-height element). Opening a guide also starts at the top of it.
+- **A refused drag on the schedule board always explains itself.** Losing a pill used to do nothing at
+  all in four different situations — dropping onto an open shift, onto a past day, back where it
+  started, or on a day's empty space — and "nothing happens" is indistinguishable from a broken app.
+  Every drop now gets a verdict from one pure planner (`utils/scheduleDrop`), which either moves the
+  row, fills a vacancy, or refuses *with a reason*. Dropping a pill onto somebody else's shift is a
+  refusal too, and it says so: the way to exchange two shifts is to **hold** the pill there for a
+  moment, which blinks while the hold is read and then shows the two exchanged — letting go keeps it,
+  moving out puts them back.
+- **The interface has sounds, and one switch to silence them.** A click for every press
+  on a control, a heavier one for consequential actions (save, delete, edit, cancel,
+  export, print, sign out), a tone for each modal, one for each toast kind, and the
+  notification sound for a push that lands while the app is open. All of it comes from
+  **one delegated listener** rather than ~130 call sites, so a new button is audible
+  without being told to be — including whether it is an *action*, decided from the
+  control's own label or icon. The member's switch is `user_settings.is_sounds_active`,
+  which inherits the station default from `system_settings` and defaults to on. The
+  Firefighter Runner keeps its own audio and is excluded from the click. See
+  [docs/SOUNDS.md](docs/SOUNDS.md), including the list of places that are deliberately
+  silent.
 - **Sign-in is throttled.** Five failed attempts locks a username out for 60 s,
   doubling to a 15-minute cap; a global cap of 200 failures per 15 minutes
   refuses every sign-in regardless of username. Counters live in `CacheService`,

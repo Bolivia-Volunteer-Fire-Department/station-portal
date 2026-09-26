@@ -36,7 +36,7 @@ export const ADMIN_PERMISSIONS = [
     key: 'can_edit_ranks',
     tab: 'ranks',
     label: 'Manage ranks',
-    description: 'Add and edit ranks, including their order, colour and icon.',
+    description: 'Add and edit ranks, including their order, color and icon.',
   },
   {
     key: 'can_edit_schedule_templates',
@@ -48,7 +48,7 @@ export const ADMIN_PERMISSIONS = [
     key: 'can_edit_assignments',
     tab: 'assignments',
     label: 'Manage assignments',
-    description: 'Add and edit assignments, their minimum rank and colour.',
+    description: 'Add and edit assignments, their minimum rank and color.',
   },
   {
     key: 'can_edit_schedule',

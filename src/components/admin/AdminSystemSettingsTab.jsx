@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff } from 'lucide-react';
+import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2 } from 'lucide-react';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
@@ -20,6 +20,7 @@ const KNOWN_KEYS = [
   'department_name',
   'time_format',
   'is_dark_mode',
+  'is_sounds_active',
   'required_clock_latitude',
   'required_clock_longitude',
   'gps_margin_of_error',
@@ -40,6 +41,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <ClockLocationCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <CustomSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
     </CenteredContent>
@@ -449,6 +451,87 @@ function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save Session Timeout
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SoundSettingsCard({ token, systemSettings, onDataChanged }) {
+  const [soundsActive, setSoundsActive] = useState(
+    isTruthySetting(getSettingValue(systemSettings, 'is_sounds_active', 'true'))
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Keep the local form in sync if settings are reloaded from the sheet
+  useEffect(() => {
+    setSoundsActive(isTruthySetting(getSettingValue(systemSettings, 'is_sounds_active', 'true')));
+  }, [systemSettings]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await adminSaveSystemSetting('is_sounds_active', String(soundsActive), token);
+      if (!result?.success) throw new Error(result?.message || 'Failed to save sound settings.');
+
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save sound settings.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <Volume2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Sound Settings</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Station-wide default for interface sounds.</p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <ToggleSwitch
+          label="Sound Effects"
+          description="Clicks, toasts and notifications make a sound. Members can turn this off for themselves, and a member who has never changed it follows this."
+          enabled={soundsActive}
+          onChange={setSoundsActive}
+        />
+
+        {/* Says out loud what this setting does NOT reach, because "sounds off" reads like it covers everything.
+            The minigame's effects are its own, and a push notification's OS banner is the device's. */}
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          The Firefighter Runner keeps its own sound effects, and this does not silence a device's own notification
+          banner.
+        </p>
+
+        <div className="flex justify-end items-center gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/80 mt-2">
+          {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Sound Settings
           </button>
         </div>
       </form>

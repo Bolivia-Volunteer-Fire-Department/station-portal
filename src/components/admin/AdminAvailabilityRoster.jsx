@@ -17,9 +17,9 @@ import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalize
 // because an uncovered shift is exactly what an administrator needs to spot; members who
 // said nothing are simply absent, which is the point of the view.
 //
-// Each name carries its rank - the rank's colour and icon - so a glance down a shift shows
+// Each name carries its rank - the rank's color and icon - so a glance down a shift shows
 // who is senior enough to lead it without opening anything. Members with no rank (or a rank
-// with no colour set) keep the plain chip, which also keeps a misconfigured ranks sheet
+// with no color set) keep the plain chip, which also keeps a misconfigured ranks sheet
 // visible rather than rendering everyone identically by accident.
 export default function AdminAvailabilityRoster({
   scheduleTemplates = [],
@@ -179,8 +179,8 @@ export default function AdminAvailabilityRoster({
                               return (
                                 <span
                                   key={member.id}
-                                  // Neutral chip when a rank supplies the colour, so the rank's
-                                  // colour is what stands out; the plain emerald chip otherwise, so
+                                  // Neutral chip when a rank supplies the color, so the rank's
+                                  // color is what stands out; the plain emerald chip otherwise, so
                                   // an unranked member still reads as "available".
                                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border ${
                                     rank
@@ -193,7 +193,7 @@ export default function AdminAvailabilityRoster({
                                     <RankIcon
                                       name={rank.icon}
                                       className="w-3 h-3 shrink-0"
-                                      // Inline style, matching how ranks are coloured on the
+                                      // Inline style, matching how ranks are colored on the
                                       // dashboard's on-duty card.
                                       style={rankColor ? { color: rankColor } : undefined}
                                     />

@@ -34,7 +34,7 @@ Supported formatting: headings, paragraphs, bold and italic, inline and fenced c
 > Closing the tab with unsaved ticks loses them.
 ```
 
-The five types are `NOTE`, `TIP`, `IMPORTANT`, `WARNING` and `CAUTION`. Each renders as a coloured callout with its own icon and the type name, so the meaning survives for someone who cannot see the colour. The body is markdown like anywhere else — paragraphs, lists, emphasis and code all work inside one, and a blank `>` line separates paragraphs.
+The five types are `NOTE`, `TIP`, `IMPORTANT`, `WARNING` and `CAUTION`. Each renders as a colored callout with its own icon and the type name, so the meaning survives for someone who cannot see the color. The body is markdown like anywhere else — paragraphs, lists, emphasis and code all work inside one, and a blank `>` line separates paragraphs.
 
 A marker that is not one of the five (`[!DANGER]`) is left as an ordinary quote, so a typo shows up as visible `[!DANGER]` text rather than being quietly styled as something it is not. `verify:help` fails on an unsupported type, so it will not reach a reader either.
 

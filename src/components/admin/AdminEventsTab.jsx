@@ -274,8 +274,8 @@ export default function AdminEventsTab({
       title: event.title,
       date_from: toInputValue(event.startsAt, false),
       date_to: toInputValue(event.endsAt, false),
-      // The stored colour is always resolved, so "no explicit colour" has to be recovered by comparing
-      // against the default - otherwise the form would present gray as a chosen colour.
+      // The stored color is always resolved, so "no explicit color" has to be recovered by comparing
+      // against the default - otherwise the form would present gray as a chosen color.
       color: event.color === EVENT_DEFAULT_COLOR ? '' : event.color,
       role_id: event.role_id,
       rank_id: event.rank_id,

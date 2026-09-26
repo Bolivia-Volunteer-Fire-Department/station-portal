@@ -289,7 +289,7 @@ function doPost(e) {
         responseData = {
           schedule: getSheetData(ss, "schedule"),
           // Reference data the member calendar needs: assignment names for the
-          // pill labels, the admin-chosen colour, and the minimum rank so open
+          // pill labels, the admin-chosen color, and the minimum rank so open
           // shifts the member may not fill are not offered to them. See
           // memberAssignmentRows for what is (and is not) projected.
           assignments: memberAssignmentRows(ss),
@@ -940,6 +940,14 @@ function doPost(e) {
           settingsValues.is_dark_mode = String(payload.is_dark_mode);
         }
 
+        // Sound effects. Stored as TRUE/FALSE like the other switches, and normalised here rather than trusted:
+        // a row a member can write is a row anybody can post to, and this one decides whether the app makes a
+        // noise, so it should never hold "maybe".
+        if (payload.is_sounds_active !== undefined && payload.is_sounds_active !== null) {
+          settingsValues.is_sounds_active =
+            String(payload.is_sounds_active).trim().toUpperCase() === "FALSE" ? "FALSE" : "TRUE";
+        }
+
         // Notification opt-ins. Unlike time_format, an empty string is
         // meaningful here: it means "inherit the station default".
         //
@@ -1561,15 +1569,15 @@ function doPost(e) {
             : (Number.isFinite(parsedRankRequired) ? parsedRankRequired : trimmedRankRequired);
         }
 
-        // Optional colour (the `color` column) used to render this assignment
+        // Optional color (the `color` column) used to render this assignment
         // everywhere it appears. Only written when supplied, so an older client
-        // can't blank an existing colour; an empty string explicitly clears it and
-        // hands the assignment back to the automatic derived colour.
+        // can't blank an existing color; an empty string explicitly clears it and
+        // hands the assignment back to the automatic derived color.
         const rawColor = data.color !== undefined ? data.color : payload.color;
         if (rawColor !== undefined) {
           const normalizedColor = normalizeHexColor(rawColor);
           if (normalizedColor === null) {
-            responseData = { success: false, message: "Colour must be a hex value like #ef4444." };
+            responseData = { success: false, message: "Color must be a hex value like #ef4444." };
             break;
           }
           assignmentFields.color = normalizedColor;
@@ -2507,9 +2515,9 @@ function normalizeScheduleEntry(raw, includeTimes) {
   return fields;
 }
 
-// Normalizes an admin-entered colour to "#rrggbb". Returns "" for a blank value
-// (meaning "no colour chosen") and null for anything that isn't a usable hex
-// colour, so callers can reject it rather than store something no browser can
+// Normalizes an admin-entered color to "#rrggbb". Returns "" for a blank value
+// (meaning "no color chosen") and null for anything that isn't a usable hex
+// color, so callers can reject it rather than store something no browser can
 // render. Accepts 3- or 6-digit hex, with or without the leading '#'.
 function normalizeHexColor(value) {
   const raw = String(value == null ? "" : value).trim();
@@ -2524,7 +2532,7 @@ function normalizeHexColor(value) {
 }
 
 // Member-visible projection of the assignments sheet, used by GET_SCHEDULE so a
-// signed-in member can render assignment names and colours and filter the open
+// signed-in member can render assignment names and colors and filter the open
 // shifts their rank actually qualifies for. Projected explicitly (rather than
 // returning the whole row) so a future internal column on the assignments sheet
 // is not exposed by accident.
@@ -4842,7 +4850,7 @@ function shiftOfferPushCopy(event, payload) {
   return null;
 }
 
-// Delivers a shift-offer event to its recipients, honouring each member's
+// Delivers a shift-offer event to its recipients, honoring each member's
 // opt-in and skipping anyone who has never registered a device.
 function sendShiftOfferPush(ss, event, payload) {
   const config = fcmConfig(ss);

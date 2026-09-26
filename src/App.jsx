@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Clock, Shield, Menu, X } from 'lucide-react';
-// Also hosts the in-app copy of push notifications (see the service-worker
-// message listener below).
-import { Toaster, toast } from 'sonner';
+// Toasts come from our own wrapper, not from sonner: it plays the sound mapped to each toast kind and then
+// delegates, so every toast in the app is audible without its call site knowing about sounds. The Toaster host
+// itself is still sonner's.
+import { Toaster } from 'sonner';
+import { toast, notificationToast } from './utils/toast';
+import {
+  installUiSoundListeners,
+  setSoundsEnabled,
+  soundsActiveFrom,
+  SOUNDS_SETTING_KEY,
+  SOUNDS_DEFAULT,
+} from './utils/uiSounds';
 import {
   fetchInitialData,
   fetchTimeclockLogs,
@@ -312,6 +321,27 @@ const getLoadingMessage = () => {
     document.documentElement.classList.toggle('dark', isDarkMode);
   }, [isDarkMode]);
 
+  // Sounds.
+  //
+  // The listeners are installed once, for the life of the app, and are deliberately NOT gated on being signed in:
+  // the login screen is full of buttons, and a click that is silent before you sign in and audible after reads as
+  // broken rather than as a setting.
+  //
+  // One delegated listener rather than a sound per control: see utils/uiSounds, which also carries the rules for
+  // which press makes which noise, the modal tone table, and the reason the Firefighter Runner is excluded.
+  useEffect(() => installUiSoundListeners(), []);
+
+  // Which setting wins is the usual ladder - the member's own choice, else the station default, else on - and it
+  // is resolved here so the rest of the app only ever asks "are sounds on". Before sign-in, and for a member who
+  // has never touched the switch, that is the station default, which is why the login screen has sounds at all.
+  const soundsActive = soundsActiveFrom(
+    currentUserSettings?.[SOUNDS_SETTING_KEY],
+    systemSettings.find((s) => String(s?.key ?? '').trim() === SOUNDS_SETTING_KEY)?.value ?? SOUNDS_DEFAULT
+  );
+  useEffect(() => {
+    setSoundsEnabled(soundsActive);
+  }, [soundsActive]);
+
   // Push notifications are also surfaced in-app. The service worker broadcasts
   // every message it displays, so a member looking at the app gets a toast in
   // addition to the OS notification - which matters on desktop systems that
@@ -330,7 +360,11 @@ const getLoadingMessage = () => {
       // Hidden tabs would just swallow the toast; the OS notification has it covered.
       if (document.visibilityState !== 'visible') return;
 
-      toast(message.title || 'Station Portal', { description: message.body || '' });
+      // A push that arrives while the member is looking at the app: the OS notification is drawn by the
+      // service worker either way, and this is the in-app copy of it. It gets the NOTIFICATION sound rather
+      // than a toast sound - the two mean different things, and a member who has just been told about a shift
+      // offer should hear the same earcon on both channels.
+      notificationToast(message.title || 'Station Portal', { description: message.body || '' });
     };
 
     navigator.serviceWorker.addEventListener('message', handlePushMessage);
@@ -660,7 +694,7 @@ const getLoadingMessage = () => {
         return;
       }
       if (data && data.schedule) setSchedule(data.schedule);
-      // GET_SCHEDULE also returns the assignment reference data (name, colour,
+      // GET_SCHEDULE also returns the assignment reference data (name, color,
       // minimum rank). Admins already hold the FULL assignment rows from their own
       // endpoint, and this payload is a four-column projection of them, so it is
       // only applied for members - otherwise an admin's richer copy could be
@@ -1028,6 +1062,9 @@ const getLoadingMessage = () => {
           [
             'time_format',
             'is_dark_mode',
+            // Missing from this list means the optimistic merge drops it, so the switch would appear not to stick
+            // until the refresh wave reconciled the row seconds later.
+            'is_sounds_active',
             'fcm_token',
             'notify_new_offer',
             'notify_offer_approved',
@@ -1262,7 +1299,9 @@ const getLoadingMessage = () => {
           />
 
           <main
-            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto p-4 sm:p-6 lg:p-8 ${
+            // `overscroll-y-contain` stops the desktop layout's inner scroll area from chaining its overscroll to
+            // the document: reaching the bottom of a long tab used to lift the whole page (see index.css).
+            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 ${
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
             }`}
           >
@@ -1333,7 +1372,7 @@ const getLoadingMessage = () => {
                 users={nameDirectory}
                 offers={offers}
                 token={authToken}
-                // Role permissions the calendar itself has to honour: who may offer
+                // Role permissions the calendar itself has to honor: who may offer
                 // to fill an open shift, and who may look at the whole crew.
                 canMakeOffers={canMakeOffers}
                 canViewFullSchedule={canViewFullSchedule}

@@ -104,7 +104,7 @@ check('a bad value is null', eventInstant('next tuesday'), null);
 check('an empty value is null', eventInstant(''), null);
 check('a 24:00-ish hour is not a time', eventInstant('2026-03-14 24:30'), null);
 
-console.log('\n--- colours ---');
+console.log('\n--- colors ---');
 check('a short hex expands', normalizeEventColor('#abc'), '#aabbcc');
 check('case is normalised', normalizeEventColor('#AABBCC'), '#aabbcc');
 check('a bad value falls back to gray', eventColor('cornflowerblue'), EVENT_DEFAULT_COLOR);
@@ -651,7 +651,7 @@ const twentyFourHourCalendar = renderToString(
     timeFormat: '24',
   })
 );
-check('and honours a 24-hour preference', pillBody(twentyFourHourCalendar, 'Weekly training').includes('17:30 – 21:30'), true);
+check('and honors a 24-hour preference', pillBody(twentyFourHourCalendar, 'Weekly training').includes('17:30 – 21:30'), true);
 // An all-day event has no time to show, so the pill carries its title alone. The tooltip legitimately still
 // says "All day", which is why this too is asserted on the pill rather than the page.
 const allDayCalendar = renderToString(
@@ -914,15 +914,15 @@ check('and one continuing from before arrow-heads', eventSegmentLines({ ...timed
 check('the title still carries the marks', eventSegmentLines({ ...timedSegment, title: 'Conference', continuesAfter: true }, '12').title, 'Conference …');
 check('and a null segment is empty rather than a crash', eventSegmentLines(null, '12').time, '');
 
-// The pill must adopt the colour without being a solid block: shifts are solid with white text, so an event
+// The pill must adopt the color without being a solid block: shifts are solid with white text, so an event
 // is drawn as a tinted, outlined chip instead. This is the difference that keeps the two apart at a glance.
 const bluePill = eventPillStyle('#227dc3');
-check('the pill borders itself in its colour', bluePill.borderColor, '#227dc3');
+check('the pill borders itself in its color', bluePill.borderColor, '#227dc3');
 check('and writes in it', bluePill.color, '#227dc3');
 check('with a translucent wash', bluePill.backgroundColor, '#227dc333');
 check('the wash is not opaque', /^#[0-9a-f]{6}[0-9a-f]{2}$/.test(bluePill.backgroundColor) && bluePill.backgroundColor.slice(-2) !== 'ff', true);
 const greyPill = eventPillStyle('');
-check('a blank colour falls back to the default grey', greyPill.color, EVENT_DEFAULT_COLOR);
+check('a blank color falls back to the default grey', greyPill.color, EVENT_DEFAULT_COLOR);
 check('and still washes', greyPill.backgroundColor, `${EVENT_DEFAULT_COLOR}33`);
 // A solid pill would mean white text on a saturated fill - the shift treatment, which events must not take.
 check('the pill never writes white', /text-white/.test(pillCode), false);
@@ -930,7 +930,7 @@ check('the pill is a div when nothing happens on a tap', /if \(!onClick\) return
 // My Schedule DOES want a tap, and a tap target should be a button for a keyboard and a screen reader - so
 // the pill becomes one only when it is handed a handler.
 check('and a button when it is', /<button[\s\S]{0,120}?onClick=\{onClick\}/.test(pillCode), true);
-// It takes its colour from the shared helper rather than hard-coding a fill, which is what keeps the wash
+// It takes its color from the shared helper rather than hard-coding a fill, which is what keeps the wash
 // translucent on both themes and identical across the three calendars.
 check('and takes the shared treatment', /eventPillStyle\(segment\.color\)/.test(pillCode), true);
 
@@ -1124,7 +1124,7 @@ check('it shows the shift', rosterText.includes('Firefighter 3'), true);
 check('and the day\'s event', rosterText.includes('Conference'), true);
 check('and counts the month\'s events', rosterText.includes('1 event this month'), true);
 // An event must stay visually distinct from a shift: a colored DOT rather than a shift pill. The default gray
-// proves the dot rendered with the event's resolved colour.
+// proves the dot rendered with the event's resolved color.
 check('the event shows as a colored dot', renderedRoster.includes('background-color:#64748b'), true);
 
 console.log('\n--- a repeating event is described by its TIMES, not a phantom date ---');

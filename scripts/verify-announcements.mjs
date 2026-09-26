@@ -208,7 +208,7 @@ check('the five variants', ANNOUNCEMENT_VARIANT_KEYS, ['info', 'tip', 'important
 check('an unknown variant falls back to info', announcementVariant('nonsense').label, 'Info');
 check('so does a blank one', announcementVariant('').label, 'Info');
 check('a variant is matched case-insensitively', announcementVariant('CAUTION').label, 'Caution');
-check('every variant carries its own colours', ANNOUNCEMENT_VARIANT_KEYS.every((key) => announcementVariant(key).box && announcementVariant(key).head), true);
+check('every variant carries its own colors', ANNOUNCEMENT_VARIANT_KEYS.every((key) => announcementVariant(key).box && announcementVariant(key).head), true);
 check('the audience label for everyone', announcementAudienceLabel(announcement(), {}), 'Everyone');
 check('for one member', announcementAudienceLabel(announcement({ user_id: '100' }), { users: [{ id: '100', name: 'Member 1' }] }), 'Only Member 1');
 check('for a rank', announcementAudienceLabel(announcement({ rank_id: '10' }), { ranks: [{ id: '10', description: 'Lieutenant' }] }), 'Lieutenant rank');

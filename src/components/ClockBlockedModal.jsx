@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AlertTriangle, MapPinOff, ShieldAlert, X, Ruler } from 'lucide-react';
+import { playSound, modalSoundFor } from '../utils/uiSounds';
 
 /**
  * Why a clock in/out was refused, shown as a modal.
@@ -23,6 +24,11 @@ const ICONS = {
 };
 
 export default function ClockBlockedModal({ notice, onDismiss }) {
+  // A refusal, so it opens on the error tone - and before the early return, because a hook cannot follow one.
+  useEffect(() => {
+    playSound(modalSoundFor('clockBlocked'));
+  }, []);
+
   if (!notice) return null;
 
   const Icon = ICONS[notice.kind] || ShieldAlert;

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { HandHelping, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
+import { playSound, modalSoundFor } from '../utils/uiSounds';
 
 /**
  * Confirmation modal for offering to fill an open shift (My Schedule).
@@ -10,6 +11,12 @@ import { HandHelping, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react
 export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // A positive tone: this is a modal the member opened by pressing the pill. Played once per mount, which is one
+  // per open - see MODAL_SOUNDS in utils/uiSounds.
+  useEffect(() => {
+    playSound(modalSoundFor('shiftOffer'));
+  }, []);
 
   if (!shift) return null;
 

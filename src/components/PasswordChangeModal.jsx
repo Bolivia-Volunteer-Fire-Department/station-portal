@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { KeyRound, AlertCircle, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { passwordChangeCopy, passwordChangeProblem } from '../utils/passwordPolicy';
+import { playSound, modalSoundFor } from '../utils/uiSounds';
 
 /**
  * The forced password change.
@@ -20,6 +21,11 @@ export default function PasswordChangeModal({ username = '', onPasswordChange, o
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const copy = passwordChangeCopy();
+
+  // An interruption - the member is being made to act before they can do anything else - so the error tone.
+  useEffect(() => {
+    playSound(modalSoundFor('passwordChange'));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { CalendarDays, CalendarClock, X } from 'lucide-react';
 import RankIcon from './RankIcon';
+// Which tone a modal opens with is decided in one table - see MODAL_SOUNDS in utils/uiSounds.
+import { playSound, modalSoundFor } from '../utils/uiSounds';
 
 /**
  * Read-only detail popup for one calendar item: a shift, or an event.
@@ -13,6 +15,12 @@ import RankIcon from './RankIcon';
  * Mounted only while an item is selected, so there is no state to reset.
  */
 export default function ScheduleItemModal({ details, icon, onClose }) {
+  // Before the early return: a hook cannot sit after a conditional exit. The sound is played once per mount, and
+  // the modal is only mounted while an item is selected.
+  useEffect(() => {
+    playSound(modalSoundFor('scheduleItem'));
+  }, []);
+
   if (!details) return null;
 
   const HeaderIcon = icon === 'event' ? CalendarClock : CalendarDays;
@@ -31,7 +39,7 @@ export default function ScheduleItemModal({ details, icon, onClose }) {
             <HeaderIcon className="w-7 h-7 text-slate-500 dark:text-slate-400" />
           </div>
           <div className="min-w-0 flex-1">
-            {/* A colour bar rather than a filled header: an assignment can be any colour, and white text on
+            {/* A color bar rather than a filled header: an assignment can be any color, and white text on
                 an arbitrary one is unreadable. */}
             <div className="flex items-center gap-2">
               {details.color && (

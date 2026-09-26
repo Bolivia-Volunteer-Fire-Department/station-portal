@@ -82,10 +82,10 @@ export const eventInstant = (value) => {
   return { dateKey, minutes: minutes === null ? 0 : minutes };
 };
 
-// --- colour ------------------------------------------------------------------
+// --- color ------------------------------------------------------------------
 
-// Normalises a hex colour, or null when the value is not usable. Mirrors
-// utils/assignmentColor so an admin typing a colour gets the same treatment in both places.
+// Normalises a hex color, or null when the value is not usable. Mirrors
+// utils/assignmentColor so an admin typing a color gets the same treatment in both places.
 export const normalizeEventColor = (value) => {
   const raw = text(value).toLowerCase();
   if (!raw) return null;
@@ -730,11 +730,11 @@ export const eventSegmentTitle = (segment) =>
 // The shared look for an event pill, so every calendar draws events the same way.
 //
 // Shifts are SOLID pills with white text, so an event must never be drawn that way - it is "hollow": a
-// thin border and a tinted wash in the event's own colour, with the text in that colour too. That is the
+// thin border and a tinted wash in the event's own color, with the text in that color too. That is the
 // treatment the pending and declined shift states use, which is what makes an event read as information
 // rather than as something to act on.
 //
-// The wash is the colour plus an alpha suffix (`#RRGGBB` + `33` is 20%). One value works on both themes -
+// The wash is the color plus an alpha suffix (`#RRGGBB` + `33` is 20%). One value works on both themes -
 // it tints on white and washes over the dark navy - so no per-theme branching is needed, and 8-digit hex
 // is supported by every browser that can run this PWA.
 export const EVENT_PILL_CLASS =

@@ -16,6 +16,9 @@ import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { isAvailableForSlot } from '../../utils/availability';
+import { planShiftDrop, planShiftSwap, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
+// The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
+import { toast } from '../../utils/toast';
 import {
   eligibilityFor as classifyEligibility,
   isTruthyFlag,
@@ -75,7 +78,7 @@ const normalizeRows = (rows) =>
 
 const FIELD_LIST = ['schedule_template_id', 'date_from', 'date_to', 'start_time', 'end_time', 'apparatus_id', 'assignment_id', 'user_id'];
 
-// Pill shapes for the calendar. A STAFFED shift is a solid, colour-filled pill; an
+// Pill shapes for the calendar. A STAFFED shift is a solid, color-filled pill; an
 // UNFILLED one is drawn like an empty template slot - thin muted border, muted
 // text, no fill - so a vacancy never reads as a staffed shift at a glance.
 const FILLED_PILL_CLASS = 'rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white truncate';
@@ -155,6 +158,15 @@ export default function AdminScheduleManagementTab({
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const quickAddRef = useRef(null);
   const tmpCounter = useRef(0);
+  // The dragged row's key, readable during a drag. The state is right for rendering, but a dragover can arrive
+  // before React has re-rendered with it - and `dataTransfer.getData` is not readable during a drag, only on drop -
+  // so the hold-to-swap has nothing else to identify the dragged row with. Maintained in handlePillDragStart and
+  // cleared in handleDragEndPill, alongside the state it mirrors.
+  const dragKeyRef = useRef(null);
+  // The hold-to-swap countdown and the revert flash. Refs rather than state: nothing renders from them, and the
+  // pill's blinking is driven by the dwell state they are paired with.
+  const swapDwellTimer = useRef(null);
+  const swapRevertTimer = useRef(null);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -518,20 +530,136 @@ export default function AdminScheduleManagementTab({
       return;
     }
     setDragKey(entry._key);
+    // Also in a ref: a dragover can arrive before React re-renders with the state above, and the hold-to-swap needs
+    // to know which row is being dragged from the very first one.
+    dragKeyRef.current = entry._key;
     setDragSourceDate(dateKey);
     e.dataTransfer?.setData('text/plain', entry._key);
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragEndPill = () => {
+    // The drag is over wherever it ended: stop counting, and drop any swap that was only being offered. Letting go
+    // anywhere but on the slot means the answer was no, and the pills go back to where they were.
+    cancelSwapDwell();
+    cancelSwapPreview();
+    dragKeyRef.current = null;
     setDragKey(null);
     setDragSourceDate(null);
     setHoverSlot(null);
   };
 
-  const handleSlotDrop = (e, slot) => {
+  // ---- Hold-to-swap ----
+  //
+  // Holding a dragged pill over a FILLED slot for SWAP_DWELL_MS offers to exchange the two shifts. The offer is
+  // shown, not made: `swapPreview` is display-only, so letting go commits it and moving out simply stops showing
+  // it. That is why the release is invisible - by then the board already looks swapped - and why a cancellation
+  // cannot leave half a swap behind.
+  //
+  // The dwell timer is deliberately NOT restarted by every dragover event: those fire continuously while the
+  // pointer sits still, and re-arming on each one would mean the swap never arrived.
+  const [swapDwell, setSwapDwell] = useState(null);
+  const [swapPreview, setSwapPreview] = useState(null);
+  // Kept for a moment after a swap is taken back, so the pills get the same quick pop on the way back as they got
+  // on the way out. Without it the revert is an invisible jump.
+  const [swapRevert, setSwapRevert] = useState(null);
+
+  const cancelSwapDwell = () => {
+    if (swapDwellTimer.current) {
+      clearTimeout(swapDwellTimer.current);
+      swapDwellTimer.current = null;
+    }
+    setSwapDwell((current) => (current ? null : current));
+  };
+
+  const beginSwapDwell = (slot, occupant, entry) => {
+    if (!entry || !occupant) return;
+    if (swapDwell?.slotKey === slot.slotKey) return; // already counting down for this slot
+
+    const verdict = planShiftSwap({
+      draggedKey: entry._key,
+      entry,
+      targetOccupant: occupant,
+      targetKind: 'slot',
+      targetDate: slot.dateKey,
+      todayKey,
+    });
+    if (verdict.action !== 'swap') return;
+
+    cancelSwapDwell();
+    setSwapPreview(null);
+    // Coming back to a spot whose swap was just taken back: the timer starts again from scratch, because the hold
+    // has to be continuous to mean anything.
+    setSwapRevert(null);
+    setSwapDwell({ slotKey: slot.slotKey, targetKey: occupant._key });
+    swapDwellTimer.current = setTimeout(() => {
+      swapDwellTimer.current = null;
+      setSwapDwell(null);
+      setSwapPreview({ slotKey: slot.slotKey, aKey: entry._key, bKey: occupant._key });
+    }, SWAP_DWELL_MS);
+  };
+
+  const cancelSwapPreview = () => {
+    // Read from this render's state rather than inside an updater: the revert has to schedule a timer, and a side
+    // effect in an updater runs twice under StrictMode.
+    const current = swapPreview;
+    if (!current) return;
+    setSwapPreview(null);
+    // The exchange was on screen, so its reversal gets the same treatment: a short pop where each pill returns to,
+    // rather than the pills silently changing their minds.
+    setSwapRevert({ aKey: current.aKey, bKey: current.bKey });
+    if (swapRevertTimer.current) clearTimeout(swapRevertTimer.current);
+    swapRevertTimer.current = setTimeout(() => {
+      swapRevertTimer.current = null;
+      setSwapRevert(null);
+    }, SWAP_POP_MS);
+  };
+
+
+  // What a slot should DRAW. With a swap offered, the two rows are drawn in each other's places - which is the
+  // whole feedback for the gesture, and what makes the release appear to do nothing at all.
+  const displayOccupant = (slot) => {
+    const occupant = slotOccupant(slot);
+    if (!swapPreview || !occupant) return occupant;
+    if (occupant._key === swapPreview.aKey) return working.find((r) => r._key === swapPreview.bKey) || occupant;
+    if (occupant._key === swapPreview.bKey) return working.find((r) => r._key === swapPreview.aKey) || occupant;
+    return occupant;
+  };
+
+  // Letting go while a swap is offered is the confirmation.
+  const commitSwap = (preview) => {
+    setWorking((prev) => {
+      const a = prev.find((r) => r._key === preview.aKey);
+      const b = prev.find((r) => r._key === preview.bKey);
+      if (!a || !b) return prev;
+      const [nextA, nextB] = swapSlotFields(a, b);
+      return prev.map((r) => (r._key === a._key ? nextA : r._key === b._key ? nextB : r));
+    });
+    setSwapPreview(null);
+    setSwapRevert(null);
+    setDirty(true);
+    setError(null);
+    setNotice(DROP_NOTICES.swapped);
+  };
+
+  // Both timers outlive a drag, so they have to be cleared if the tab goes away mid-gesture.
+  useEffect(
+    () => () => {
+      if (swapDwellTimer.current) clearTimeout(swapDwellTimer.current);
+      if (swapRevertTimer.current) clearTimeout(swapRevertTimer.current);
+    },
+    []
+  );
+
+  // A drop is asked for a verdict before it changes anything, so a refusal can explain itself instead of doing
+  // nothing at all. See utils/scheduleDrop for what each refusal means and for the hold-to-swap above.
+  const handleSlotDrop = (e, slot, occupant = null) => {
     e.preventDefault();
+    e.stopPropagation();
     setHoverSlot(null);
+
+    // The drag state first, then the dataTransfer as a fallback: an HTML5 drag can lose its React state to a
+    // re-render, and the transfer text is what the browser guarantees.
     let key = dragKey;
     if (!key) {
       try {
@@ -541,31 +669,157 @@ export default function AdminScheduleManagementTab({
       }
     }
     const sourceDate = dragSourceDate;
+    const entry = key ? working.find((r) => r._key === key) : null;
+
+    // A release while the swap is being offered IS the confirmation, and it has already been shown - so this
+    // commits what the board is displaying and stops.
+    const armed = swapPreview && swapPreview.slotKey === slot.slotKey ? swapPreview : null;
+    cancelSwapDwell();
     setDragKey(null);
     setDragSourceDate(null);
-    const entry = working.find((r) => r._key === key);
-    if (!entry || isOccurred(entry) || !sourceDate) return;
+    if (armed) {
+      commitSwap(armed);
+      return;
+    }
+
+    const verdict = planShiftDrop({
+      draggedKey: key,
+      sourceDate,
+      entry,
+      targetDate: slot.dateKey,
+      targetKind: 'slot',
+      targetOccupant: occupant || slotOccupant(slot),
+      targetName: occupant ? occupantLabel(occupant, slot.template) : '',
+      todayKey,
+    });
+
+    setDragKey(null);
+    setDragSourceDate(null);
+
+    if (verdict.action !== 'move') {
+      toast.error(verdict.message);
+      return;
+    }
 
     const delta = daysBetween(sourceDate, slot.dateKey);
     setWorking((prev) =>
-      prev.map((r) =>
-        r._key === key
-          ? {
-              ...r,
-              schedule_template_id: slot.template.id,
-              assignment_id: slot.template.assignment_id,
-              apparatus_id: slot.template.apparatus_id ?? '',
-              date_from: shiftDays(r._from || r.date_from, delta),
-              date_to: shiftDays(r._to || r.date_to, delta),
-              _from: shiftDays(r._from || r.date_from, delta),
-              _to: shiftDays(r._to || r.date_to, delta),
-            }
-          : r
-      )
+      prev
+        .map((r) =>
+          r._key === key
+            ? {
+                ...r,
+                schedule_template_id: slot.template.id,
+                assignment_id: slot.template.assignment_id,
+                apparatus_id: slot.template.apparatus_id ?? '',
+                date_from: shiftDays(r._from || r.date_from, delta),
+                date_to: shiftDays(r._to || r.date_to, delta),
+                _from: shiftDays(r._from || r.date_from, delta),
+                _to: shiftDays(r._to || r.date_to, delta),
+              }
+            : r
+        )
+        // The open shift this move replaced goes with it, in the same write. The moved row now holds that slot,
+        // and two rows on one slot would leave the board drawing whichever it happened to find first.
+        .filter((r) => !verdict.displace || r._key !== verdict.displace)
     );
     setDirty(true);
     setError(null);
+    // Only when the move did more than move: the open shift it replaced is gone, and the administrator should
+    // know that before they Save.
+    if (verdict.message) setNotice(verdict.message);
   };
+
+  // Dropped on a shift that is not a board slot (a custom shift, or one whose template has gone). It has no slot
+  // for a moved row to adopt, so this can only ever be explained - but it has to be explained rather than ignored.
+  const handlePillDrop = (e, entry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setHoverSlot(null);
+
+    let key = dragKey;
+    if (!key) {
+      try {
+        key = e.dataTransfer?.getData('text/plain') || null;
+      } catch {
+        key = null;
+      }
+    }
+
+    const verdict = planShiftDrop({
+      draggedKey: key,
+      sourceDate: dragSourceDate,
+      entry: key ? working.find((r) => r._key === key) : null,
+      targetDate: entry._from || '',
+      targetKind: 'pill',
+      targetOccupant: entry,
+      targetName: occupantLabel(entry, entryTemplate(entry)),
+      todayKey,
+    });
+
+    setDragKey(null);
+    setDragSourceDate(null);
+    if (verdict.action !== 'move') toast.error(verdict.message);
+  };
+
+  // Dropped on the empty space of a day. There is no slot under it, so this too can only be explained - which is
+  // the point: it used to do nothing at all, and read as a broken board.
+  const handleDayDrop = (e, dateKey) => {
+    e.preventDefault();
+    setHoverSlot(null);
+
+    let key = dragKey;
+    if (!key) {
+      try {
+        key = e.dataTransfer?.getData('text/plain') || null;
+      } catch {
+        key = null;
+      }
+    }
+
+    const verdict = planShiftDrop({
+      draggedKey: key,
+      sourceDate: dragSourceDate,
+      entry: key ? working.find((r) => r._key === key) : null,
+      targetDate: dateKey,
+      targetKind: 'day',
+      todayKey,
+    });
+
+    setDragKey(null);
+    setDragSourceDate(null);
+    if (verdict.action !== 'move') toast.error(verdict.message);
+  };
+
+
+  // Arms a slot so the browser will deliver the drop at all. Everything that wants to explain a refusal has to
+  // accept the drop first - a slot that refuses the drag at this point shows a no-entry cursor and says nothing,
+  // which is exactly the silence this replaced.
+  //
+  // It is also where the hold-to-swap starts counting: `occupant` is whoever is drawn in the slot, and holding
+  // over a FILLED one is the only thing that arms the timer.
+  const handleSlotDragOver = (e, slot, occupant = null) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    setHoverSlot(slot.slotKey);
+
+    const entry = dragKeyRef.current ? working.find((r) => r._key === dragKeyRef.current) : null;
+    if (!entry) return;
+    // Back over the slot the drag started from, or over a free one: no swap to offer.
+    if (!occupant || occupant._key === entry._key) {
+      cancelSwapDwell();
+      cancelSwapPreview();
+      return;
+    }
+    beginSwapDwell(slot, occupant, entry);
+  };
+
+  const handleSlotDragLeave = (slot) => {
+    setHoverSlot((cur) => (cur === slot.slotKey ? null : cur));
+    // Moving out of the slot is the cancellation: stop counting, and stop showing the exchange.
+    cancelSwapDwell();
+    cancelSwapPreview();
+  };
+
 
   // ---- Inline member picker (click a pill or an empty slot) ----
 
@@ -1580,6 +1834,11 @@ export default function AdminScheduleManagementTab({
             return (
               <div
                 key={dateKey}
+                // A drop anywhere in the day is answered, even where there is no slot under the pointer: the cell
+                // is the last surface a pill can land on, and saying nothing there is what made the board look
+                // broken. See handleDayDrop.
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => handleDayDrop(e, dateKey)}
                 className={`min-h-[124px] rounded-lg border p-1.5 flex flex-col gap-1 ${
                   isToday
                     ? 'border-red-300 dark:border-red-800 bg-red-50/30 dark:bg-red-950/20'
@@ -1601,12 +1860,21 @@ export default function AdminScheduleManagementTab({
                 ))}
 
                 {daySlots.map((slot) => {
-                  const occupant = slotOccupant(slot);
+                  // displayOccupant, not slotOccupant: with a swap being offered the two rows are drawn in each
+                  // other's places. See the hold-to-swap block above.
+                  const occupant = displayOccupant(slot);
                   if (occupant) {
                     const occurred = isOccurred(occupant);
                     // An unfilled row is a VACANCY, so it borrows the empty slot's
-                    // look instead of the solid colour fill a staffed shift uses.
+                    // look instead of the solid color fill a staffed shift uses.
                     const vacant = String(occupant.user_id ?? '').trim() === '';
+                    // The hold-to-swap feedback: blinking while the timer runs, and a quick pop once the two
+                    // shifts have changed places (or changed back). Both live in index.css.
+                    const dwelling = swapDwell?.slotKey === slot.slotKey;
+                    // The pop runs while the two rows are shown exchanged, and again (briefly) as they go back.
+                    const exchanged =
+                      (!!swapPreview && (swapPreview.aKey === occupant._key || swapPreview.bKey === occupant._key)) ||
+                      (!!swapRevert && (swapRevert.aKey === occupant._key || swapRevert.bKey === occupant._key));
                     // The slot's template names the shift; the tooltip below still
                     // spells out the window.
                     const pillTime = shiftTimeLabel(slot.template, timeRangeOf(slot.template));
@@ -1614,19 +1882,38 @@ export default function AdminScheduleManagementTab({
                       <div
                         key={slot.slotKey}
                         draggable={!occurred}
+                        // data-sound because a pill is a div, and once a shift has occurred it is no longer
+                        // draggable - without this, clicking a locked pill would be the one silent control on the
+                        // board. See utils/uiSounds.
+                        data-sound="click"
                         onDragStart={(e) => handlePillDragStart(e, occupant, dateKey)}
                         onDragEnd={handleDragEndPill}
                         onClick={(e) => openEntryPopover(e, occupant)}
+                        // A pill is a drop target as well as a drag source. Without these three a pill accepted
+                        // no drops at all - silently, which is why an OPEN shift (a vacancy row) could never take
+                        // a dragged shift while a genuinely empty slot beside it could. The refusal is explained
+                        // in handleSlotDrop.
+                        onDragOver={(e) => handleSlotDragOver(e, slot, occupant)}
+                        onDragLeave={() => handleSlotDragLeave(slot)}
+                        onDrop={(e) => handleSlotDrop(e, slot, occupant)}
                         title={`${occupantLabel(occupant, slot.template)} · ${timeRangeOf(slot.template)}${
-                          occurred ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'
+                          occurred
+                            ? ' (past — locked)'
+                            : dwelling
+                              ? ' — hold to swap these two shifts'
+                              : vacant
+                                ? ' — click to assign a member'
+                                : ' — click to change member, or hold to swap'
                         }`}
                         className={`${vacant ? VACANT_PILL_CLASS : FILLED_PILL_CLASS} cursor-grab active:cursor-grabbing transition ${
                           occurred ? 'opacity-40 saturate-50' : ''
-                        } ${selectedKey === occupant._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''}`}
+                        } ${dwelling ? 'animate-swapDwell' : ''} ${exchanged ? 'animate-swapPop' : ''} ${
+                          selectedKey === occupant._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''
+                        }`}
                         style={vacant ? undefined : { backgroundColor: assignmentColor(occupant.assignment_id, assignments) }}
                       >
-                        {/* Assignment icon, inheriting the pill's text colour so an
-                            arbitrary assignment colour can't make it unreadable. */}
+                        {/* Assignment icon, inheriting the pill's text color so an
+                            arbitrary assignment color can't make it unreadable. */}
                         {assignmentIcon(occupant.assignment_id) && (
                           <RankIcon name={assignmentIcon(occupant.assignment_id)} className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]" />
                         )}
@@ -1641,6 +1928,9 @@ export default function AdminScheduleManagementTab({
                   return (
                     <div
                       key={slot.slotKey}
+                      // An empty slot is a control - it opens the assignment popover, or takes a quick-add -
+                      // and a div with no role is invisible to the click selector. See utils/uiSounds.
+                      data-sound="click"
                       onClick={droppable ? (e) => (quickAddUser ? quickAssignToSlot(slot) : openSlotPopover(e, slot)) : undefined}
                       title={
                         isPast
@@ -1651,17 +1941,9 @@ export default function AdminScheduleManagementTab({
                               ? `Assign ${quickAddUser.name} to ${slotLabelText(slot)}`
                               : `Assign a member to ${slotLabelText(slot)}`
                       }
-                      onDragOver={
-                        droppable
-                          ? (e) => {
-                              e.preventDefault();
-                              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-                              setHoverSlot(slot.slotKey);
-                            }
-                          : undefined
-                      }
-                      onDragLeave={droppable ? () => setHoverSlot((cur) => (cur === slot.slotKey ? null : cur)) : undefined}
-                      onDrop={droppable ? (e) => handleSlotDrop(e, slot) : undefined}
+                      onDragOver={(e) => handleSlotDragOver(e, slot)}
+                      onDragLeave={() => handleSlotDragLeave(slot)}
+                      onDrop={(e) => handleSlotDrop(e, slot)}
                       className={`rounded-md border px-1 py-0.5 text-[10px] leading-tight truncate transition-colors relative ${
                         hoverSlot === slot.slotKey
                           ? 'bg-red-100 dark:bg-red-900/40 border-red-400 ring-1 ring-red-400 text-red-700 dark:text-red-300'
@@ -1692,7 +1974,7 @@ export default function AdminScheduleManagementTab({
                 {extraPills.map((e) => {
                   // Same rule as the occupant branch above: an unfilled row is a
                   // vacancy, so it is drawn like an empty slot rather than a
-                  // colour-filled shift.
+                  // color-filled shift.
                   const vacant = String(e.user_id ?? '').trim() === '';
                   // A row that still points at a template borrows that template's
                   // nickname; a custom shift has none, so it shows its own times.
@@ -1701,9 +1983,15 @@ export default function AdminScheduleManagementTab({
                   <div
                     key={e._key}
                     draggable={!isOccurred(e)}
+                    // Same reason as the shift pill above: a past event is not draggable but is still clickable.
+                    data-sound="click"
                     onDragStart={(e2) => handlePillDragStart(e2, e, dateKey)}
                     onDragEnd={handleDragEndPill}
                     onClick={(ev) => openEntryPopover(ev, e)}
+                    // A custom shift accepts the drag so it can say why it will not take it: it is not a board
+                    // slot, so there is no slot for the moved shift to adopt.
+                    onDragOver={(e2) => e2.preventDefault()}
+                    onDrop={(e2) => handlePillDrop(e2, e)}
                     title={`${occupantLabel(e, entryTemplate(e))} · ${assignmentById(e.assignment_id)?.description || 'No assignment'}${entryTimeRangeOf(e) ? ` · ${entryTimeRangeOf(e)}` : ''}${isOccurred(e) ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'}`}
                     className={`${vacant ? VACANT_PILL_CLASS : FILLED_PILL_CLASS} cursor-grab active:cursor-grabbing ${
                       isOccurred(e) ? 'opacity-40 saturate-50' : ''

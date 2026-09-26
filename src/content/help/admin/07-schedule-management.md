@@ -43,6 +43,26 @@ An empty slot always belongs to a template, so filling it does not create a row 
 
 **Drag a pill onto another day** to move it. The drop position sets the new day, and the time is kept.
 
+Where a pill can land, and what happens when it doesn't:
+
+| Dropped on | Result |
+|---|---|
+| **An empty slot** | The shift moves there, taking that slot's assignment and apparatus |
+| **A vacant pill** (an open shift) | The shift moves there and **fills it** — the open row it replaced is removed, because the moved shift now occupies that slot |
+| **A pill with somebody on it**, tapped and released | Refused, and told who is already on it — with a reminder that holding swaps the two |
+| **A pill with somebody on it**, held there for about a second and a half | **The two shifts change places.** The pill blinks while the hold is being read, then the two are shown exchanged; letting go keeps it, and moving out before letting go puts them back |
+| **The same spot it came from** | Refused — nothing to do |
+| **A past day** | Refused: past days are locked |
+| **The empty space of a day**, or a **custom shift's** pill | Refused, with a note on where to aim instead |
+
+A refused drop always says why, in a message at the top right — it never just does nothing. Nothing is written until you **Save**, so a move or a swap you did not mean can be undone with **Discard**, and the message after filling a vacant slot or swapping two shifts reminds you that it happened.
+
+> [!NOTE]
+> **The hold is what makes a swap deliberate.** Releasing a pill on somebody else's shift without holding is only ever a message — there is no chance of swapping two people's shifts by accident, in either direction.
+
+> [!NOTE]
+> **Drag and drop is for moving a shift, not for filling one.** To put a member on a vacancy without touching anybody else's shifts, click the vacant pill and pick them — that is the assignment dialog, and it leaves the shift where it is.
+
 ## Member availability
 
 The warning on a shift means nobody rostered on it has marked that shift available. It is **informational and never blocks saving** — the schedule is yours to set, and availability is a guide, not a permission.

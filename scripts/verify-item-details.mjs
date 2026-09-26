@@ -61,7 +61,7 @@ check('the assignment is named', rowValue(mineDetails, 'Assignment'), 'Engine 1'
 check('the nickname is spelled out separately', rowValue(mineDetails, 'Shown as'), 'Day Shift');
 check('and the status is plain', rowValue(mineDetails, 'Status'), 'Scheduled');
 check('the assignment icon rides along', mineDetails.rows[2].icon, 'truck');
-check('the assignment colour rides along', mineDetails.color, '#dc2626');
+check('the assignment color rides along', mineDetails.color, '#dc2626');
 
 console.log('--- somebody else, in the crew view ---');
 const theirs = { ...mine, isMine: false, name: 'Ana', label: 'Rescue' };
@@ -150,7 +150,7 @@ check('the rows are Date, Time, Visible to', rowLabels(timedDetails), ['Date', '
 check('the tapped day is the date', rowValue(timedDetails, 'Date'), 'Tue, Sep 15, 2026');
 check('and the time is its window', rowValue(timedDetails, 'Time'), '6:00 PM – 8:00 PM');
 check('an untargeted event is for everyone', rowValue(timedDetails, 'Visible to'), 'Everyone');
-check('the event colour rides along', timedDetails.color, '#227dc3');
+check('the event color rides along', timedDetails.color, '#227dc3');
 check('a one-off event says nothing about repeating', rowLabels(timedDetails).includes('Repeats'), false);
 check('nor about a span', rowLabels(timedDetails).includes('Span'), false);
 
@@ -252,10 +252,10 @@ check(
   true
 );
 check('the assignment icon is drawn', html.includes('lucide-truck'), true);
-// The colour is a dot, never a fill or a text colour: an assignment can be an arbitrary colour, and white text
+// The color is a dot, never a fill or a text color: an assignment can be an arbitrary color, and white text
 // on an arbitrary fill - which the shift pills get away with because an admin picks from a palette - is exactly
 // what this modal must avoid.
-check('the colour is drawn as a dot', /class="h-3 w-3[^"]*" style="background-color:#dc2626"/.test(html), true);
+check('the color is drawn as a dot', /class="h-3 w-3[^"]*" style="background-color:#dc2626"/.test(html), true);
 check(
   'and never as a fill or text',
   html.replace(/background-color:#dc2626/g, '').includes('#dc2626'),

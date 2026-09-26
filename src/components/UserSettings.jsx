@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Save, CheckCircle, AlertCircle, Loader2, User, KeyRound, Bell, Smartphone, ShieldCheck } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
+import { soundsActiveFrom } from '../utils/uiSounds';
 import { visibleNotificationTypes } from '../utils/notificationPrefs';
 import { rolePermissionAudit, roleColumnValue, ADMIN_PERMISSIONS } from '../utils/permissions';
 import {
@@ -42,6 +43,9 @@ export default function UserSettings({
         ? existingUserSetting.is_dark_mode
         : (systemSettings?.is_dark_mode !== undefined ? systemSettings.is_dark_mode : true)
     ),
+    // Same ladder, resolved by the shared rule rather than re-implemented here: the member's own value, else the
+    // station default, else on. A blank cell is "inherit", not "off".
+    is_sounds_active: soundsActiveFrom(existingUserSetting?.is_sounds_active, systemSettings?.is_sounds_active),
   });
 
   const [saving, setSaving] = useState(false);
@@ -54,6 +58,11 @@ export default function UserSettings({
       is_dark_mode: existingUserSetting?.is_dark_mode !== undefined && existingUserSetting?.is_dark_mode !== ''
         ? isTruthySetting(existingUserSetting.is_dark_mode)
         : prev.is_dark_mode,
+      // A saved FALSE has to survive this sync, so the cell is checked for emptiness rather than truthiness.
+      is_sounds_active:
+        existingUserSetting?.is_sounds_active !== undefined && existingUserSetting?.is_sounds_active !== ''
+          ? isTruthySetting(existingUserSetting.is_sounds_active)
+          : prev.is_sounds_active,
     }));
   }, [existingUserSetting]);
 
@@ -66,6 +75,9 @@ export default function UserSettings({
       id: currentUser.id,
       time_format: String(formData.time_format),
       is_dark_mode: String(formData.is_dark_mode),
+      // Always sent, never omitted: an empty string would mean "inherit the station default" on the backend, and
+      // this switch is a decision either way. The member's own answer always wins.
+      is_sounds_active: String(formData.is_sounds_active),
     };
 
     try {
@@ -83,6 +95,10 @@ export default function UserSettings({
 
   const isSystemDefault = !existingUserSetting?.time_format;
   const systemDefaultValue = systemSettings?.time_format || '12';
+  // Mirrors the resolver: an empty cell in the member's own row is what "using the station default" means.
+  const isUsingSystemSoundsDefault =
+    existingUserSetting?.is_sounds_active === undefined || existingUserSetting?.is_sounds_active === '';
+  const systemSoundsDefault = soundsActiveFrom('', systemSettings?.is_sounds_active);
 
   return (
     <div className="space-y-6">
@@ -188,6 +204,26 @@ export default function UserSettings({
               enabled={formData.is_dark_mode}
               onChange={(value) => setFormData({ ...formData, is_dark_mode: value })}
             />
+          </div>
+
+          {/* Sound Effects. The switch that controls sounds is the one switch that has to be audible while
+              turning itself on, hence feedbackSound: see the note on ToggleSwitch. */}
+          <div className="border-t border-slate-200 dark:border-slate-700/80 pt-4">
+            <ToggleSwitch
+              label="Sound Effects"
+              description={
+                isUsingSystemSoundsDefault
+                  ? `Clicks, toasts and notifications play sounds. Currently using the station default (${systemSoundsDefault ? 'on' : 'off'}).`
+                  : 'Clicks, toasts and notifications play sounds.'
+              }
+              enabled={formData.is_sounds_active}
+              onChange={(value) => setFormData({ ...formData, is_sounds_active: value })}
+              feedbackSound="onOff"
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400 pt-2">
+              The Firefighter Runner keeps its own sound effects either way, and alarm sounds from your device are
+              not affected.
+            </p>
           </div>
 
           {/* Form Actions */}

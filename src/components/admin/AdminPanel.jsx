@@ -204,7 +204,16 @@ export default function AdminPanel({
   };
 
   return (
-    <div className="space-y-6">
+    // `space-y-6` for the stack of cards. The height classes apply only to the Help tab, and only because that
+    // screen scrolls INSIDE its card: the guide pane fills the height left over from this container, so this
+    // container has to HAVE a height to give (percentage heights against an auto-height parent resolve to auto,
+    // and the chain would silently break - the card would grow and the bookmarks would scroll away as before).
+    // Every other tab is left exactly as it was: the page scrolls them.
+    <div
+      className={`space-y-6 ${
+        activeSubTab === 'help' ? 'md:h-full md:min-h-0 md:flex md:flex-col' : ''
+      }`}
+    >
       {visibleCategories.length === 0 && (
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Your role does not include access to any Administration tabs.

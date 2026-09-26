@@ -13,7 +13,7 @@
 //   * It stops producing shifts through its own templates, the same way a retired template does.
 //   * It does NOT stop existing scheduled shifts from being drawn. A row on the schedule sheet is a real
 //     shift that was worked or is planned, and hiding it would strand the people on it and any offers
-//     against it. The pill keeps its assignment's colour, icon and name.
+//     against it. The pill keeps its assignment's color, icon and name.
 
 import {
   dateKeyText,

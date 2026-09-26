@@ -60,7 +60,7 @@ check(
   'Sat, Mar 14 2026 · 8:05 AM'
 );
 check(
-  'and honours the 24-hour preference',
+  'and honors the 24-hour preference',
   formatLogTimestamp('2026-03-14 18:45:00', '24'),
   'Sat, Mar 14 2026 · 18:45'
 );

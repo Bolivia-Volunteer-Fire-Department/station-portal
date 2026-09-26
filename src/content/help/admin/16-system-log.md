@@ -15,7 +15,7 @@ The tab is fetched **only when you open it**. If your role has the permission bu
 
 ## Reading it
 
-Entries are **newest first** by default, twenty to a page. The badge colour on an action is a rough hint rather than a severity rating:
+Entries are **newest first** by default, twenty to a page. The badge color on an action is a rough hint rather than a severity rating:
 
 - **Red** — something failed, was denied, or was removed (`LOGIN_FAILED`, `...DECLINED`).
 - **Green** — something completed (`USER_LOGIN`, `...APPROVED`).

@@ -216,7 +216,7 @@ const serverTtlFor = (settingValue, cache = makeCache()) => {
 
 check('a configured timeout becomes the session window', serverTtlFor('30'), 30 * MINUTE);
 check('and the server floors it just as the client does', serverTtlFor('2.7'), 2 * MINUTE);
-check('the minimum is honoured', serverTtlFor('1'), MINUTE);
+check('the minimum is honored', serverTtlFor('1'), MINUTE);
 check(
   'an unusable value falls back to the default rather than expiring everyone',
   serverTtlFor('half an hour'),

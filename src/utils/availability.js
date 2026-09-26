@@ -55,7 +55,7 @@ export const availabilityRowsFor = (availability, userId) => {
 // Rows pointing at a member missing from `users` still appear, labelled by id: silently
 // dropping someone the sheet says is available would be worse than showing an id.
 //
-// `rank_id` travels with each member so the roster can colour the name and show the rank's icon.
+// `rank_id` travels with each member so the roster can color the name and show the rank's icon.
 // It comes from the member record rather than the availability row, which does not carry one.
 export const availableMembersForSlot = (availability, slot, users = []) => {
   const templateId = String(slot?.templateId ?? '').trim();

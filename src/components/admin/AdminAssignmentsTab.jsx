@@ -51,8 +51,8 @@ export default function AdminAssignmentsTab({
     (r) => !Number.isFinite(parseInt(r.rank_order, 10))
   );
 
-  // The colour this assignment currently renders with: the stored one when set,
-  // otherwise the automatic colour derived from its id. Seeds the colour picker
+  // The color this assignment currently renders with: the stored one when set,
+  // otherwise the automatic color derived from its id. Seeds the color picker
   // (which only accepts a hex value) and shows admins what "blank" resolves to.
   const autoColor = assignmentColor(formData.id, assignments);
 
@@ -67,8 +67,8 @@ export default function AdminAssignmentsTab({
         assignment.rank_order_required === undefined || assignment.rank_order_required === null
           ? ''
           : String(assignment.rank_order_required),
-      // Blank means "keep the automatic colour", which is the state every
-      // assignment starts in - the picker still shows the derived colour.
+      // Blank means "keep the automatic color", which is the state every
+      // assignment starts in - the picker still shows the derived color.
       color: parseHexColor(assignment.color) || '',
       icon: String(assignment.icon ?? '').trim(),
       // An <input type="date"> takes yyyy-MM-dd, so the sheet's date cell is normalized here just as
@@ -173,8 +173,8 @@ export default function AdminAssignmentsTab({
               )}
             </div>
 
-            {/* Colour used for this assignment everywhere it is drawn. Left blank,
-                the automatic colour derived from the id is kept - so existing
+            {/* Color used for this assignment everywhere it is drawn. Left blank,
+                the automatic color derived from the id is kept - so existing
                 assignments look unchanged until an admin picks something. */}
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Color</label>

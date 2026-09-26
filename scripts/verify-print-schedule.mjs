@@ -4,7 +4,7 @@
  * Printing is hard to eyeball, so the data is built by pure functions and tested here - the grid, which
  * day a shift lands on, whose shifts are listed, and what each line says. What cannot be checked without
  * a printer is the ink, so the CSS is asserted for the rules that make the sheet printable at all: the
- * app is hidden, the sheet is shown, and colours are kept.
+ * app is hidden, the sheet is shown, and colors are kept.
  *
  * The trap this guards: a sheet that includes the app around it, or one that is hidden because the rule
  * hides its ancestor. Both produce a blank page, and neither is obvious from the code.
@@ -85,7 +85,7 @@ const memberLines = printLinesForDate({
 check('a member sees their own shift', memberLines.length, 1);
 check('labelled with the time and assignment', memberLines[0].text, '8:00 AM – 6:00 PM · Engine 1');
 check('and no member name, since it is their own sheet', /Member 1/.test(memberLines[0].text), false);
-check('with the automatic assignment colour', typeof memberLines[0].color === 'string' && /^#[0-9a-f]{6}$/.test(memberLines[0].color), true);
+check('with the automatic assignment color', typeof memberLines[0].color === 'string' && /^#[0-9a-f]{6}$/.test(memberLines[0].color), true);
 
 check(
   "another member's shift is not on their sheet",
@@ -205,7 +205,7 @@ check('and shown on paper', /\.print-sheet\s*\{\s*display:\s*block\s*!important/
 // stylesheet's own comment mentions #root and a bare /#root/ would match the prose.
 check('the app is hidden by a body-level rule', /body\s*>\s*\*:not\(\.print-sheet\)\s*\{\s*display:\s*none\s*!important/.test(css), true);
 check('not by a #root rule', /#root\s*[>{]/.test(css), false);
-check('assignment colours are preserved', /print-color-adjust:\s*exact/.test(css), true);
+check('assignment colors are preserved', /print-color-adjust:\s*exact/.test(css), true);
 check('a page size is declared', /@page\s*\{[\s\S]{0,80}size:\s*letter portrait/.test(css), true);
 check('a week is not split across pages', /\.print-week\s*\{\s*break-inside:\s*avoid/.test(css), true);
 

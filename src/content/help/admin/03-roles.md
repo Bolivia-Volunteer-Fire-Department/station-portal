@@ -27,7 +27,7 @@ Each permission grants its own tab, or its own member-facing ability. None of th
 **Scheduling**
 
 - **Manage schedule templates** — the recurring weekly pattern.
-- **Manage assignments** — what a shift is (its minimum rank, colour and icon).
+- **Manage assignments** — what a shift is (its minimum rank, color and icon).
 - **Manage the schedule** — placing templates on real dates, and custom shifts.
 - **Manage member availability** — *Scheduling → Member Availability*: seeing who has marked themselves available, and editing it on any member's behalf.
 - **Approve shift requests** — *Scheduling → Pending Approvals*, plus the *New shift requests* notification switch in User Settings.

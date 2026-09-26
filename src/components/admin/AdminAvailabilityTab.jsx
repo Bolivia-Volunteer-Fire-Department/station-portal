@@ -95,7 +95,7 @@ export default function AdminAvailabilityTab({
             availability={availability}
             users={users}
             assignments={assignments}
-            // Ranks colour each name and supply its icon in the All Members list.
+            // Ranks color each name and supply its icon in the All Members list.
             ranks={ranks}
             timeFormat={timeFormat}
             // Non-shift entries, listed once per day so an administrator can see what is happening on a day
