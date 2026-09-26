@@ -828,7 +828,7 @@ check(
 // guide - the same way the Training guide is checked below.
 const importantGuideView = (() => {
   try {
-    return renderToString(React.createElement(HelpGuides, { scope: 'admin', initialSlug: '14-system-settings' }));
+    return renderToString(React.createElement(HelpGuides, { scope: 'admin', initialSlug: '15-system-settings' }));
   } catch (error) {
     return { error };
   }
@@ -837,9 +837,18 @@ check('an Important alert renders', /<span>Important<\/span>/.test(String(import
 
 // The Help guide documents the alert syntax in a fenced block. That example must stay INERT: one real
 // alert on the page (its own Note) and the sample visible as code, not rendered as a second callout.
+//
+// The slugs are filenames, so the two checks below name them. Asserting they still EXIST first keeps a renamed
+// guide from turning into a puzzling "the callout did not render" - the panel would fall back to the first guide
+// and the failure would point at the wrong thing.
+check(
+  'the guides these checks open still exist',
+  ['15-system-settings', '19-help'].filter((slug) => helpGuides('admin').some((guide) => guide.slug === slug)),
+  ['15-system-settings', '19-help']
+);
 const helpAboutHelpView = (() => {
   try {
-    return renderToString(React.createElement(HelpGuides, { scope: 'admin', initialSlug: '17-help' }));
+    return renderToString(React.createElement(HelpGuides, { scope: 'admin', initialSlug: '19-help' }));
   } catch (error) {
     return { error };
   }

@@ -342,8 +342,8 @@ rather than going unnoticed — which is what that check is for.
 
 | Set | Order |
 |---|---|
-| `admin/` | The overview first, then the flattened `ADMIN_NAV_CATEGORIES` order — People, Scheduling, Timeclock, Training, System |
-| `member/` | The overview first, then the sidebar order — Timeclock, Clock History, My Schedule, My Availability, Training, Help, User Settings |
+| `admin/` | The overview first, then the flattened `ADMIN_NAV_CATEGORIES` order — People, Scheduling, Timeclock, Content, System |
+| `member/` | The overview first, then the sidebar order — Timeclock, Clock History, My Schedule, My Availability, Training, Documents, Help, User Settings |
 
 So a `system-log` guide sits between the notifications and help guides, because that is where the tab
 sits. The hidden game comes last in the member set, since it is not in the navigation at all.
