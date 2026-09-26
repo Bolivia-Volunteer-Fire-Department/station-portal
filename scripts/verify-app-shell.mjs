@@ -366,5 +366,32 @@ checkIs(
   new RegExp('<meta\\s+name="apple-mobile-web-app-capable"\\s+content="([^"]*)"').exec(withoutApple)?.[1] !== 'yes'
 );
 
+console.log('\n--- an arbitrary value is space-separated, never comma ---');
+// The failure this catches is SILENT, which is why it needs a check at all. A comma inside a Tailwind arbitrary
+// value is still GENERATED - as a `grid-template-columns` declaration with the comma left in it - and a comma is not
+// valid there, so the browser drops the declaration and the layout quietly collapses to a single column. It cost a
+// real bug: the Documents module's list and reader stacked on top of each other instead of sitting side by side, and
+// nothing anywhere said why.
+//
+// The scan is over sources, so it runs without a build, and it looks for the SHAPE of the mistake - a utility, an
+// arbitrary value, and a comma inside it - rather than for any one class. That is also why the broken value is not
+// written out here: Tailwind reads every file that is not ignored, comments included, so naming a class in prose
+// generates it in the next build.
+const sourceFiles = (function walk(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return walk(path);
+    return /\.(jsx|js)$/.test(entry.name) ? [path] : [];
+  });
+})('src');
+
+const commaValues = [];
+sourceFiles.forEach((file) => {
+  const pattern = /[a-z][a-z0-9-]*-\[[^\]\s'"]*,[^\]\s'"]*\]/g;
+  (readFileSync(file, 'utf8').match(pattern) || []).forEach((value) => commaValues.push(`${file}: ${value}`));
+});
+check('no utility carries a comma in its arbitrary value', commaValues, []);
+checkIs('and the scan looked at the sources', sourceFiles.length > 20, `only ${sourceFiles.length} files`);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

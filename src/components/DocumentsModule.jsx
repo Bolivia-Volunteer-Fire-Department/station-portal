@@ -1,5 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BadgeCheck, BookText, CheckCircle2, FileText, Loader2, PenLine, Save, Search, ShieldCheck } from 'lucide-react';
+import {
+  ArrowLeft,
+  BadgeCheck,
+  BookText,
+  CheckCircle2,
+  FileText,
+  Folder,
+  ListChecks,
+  Loader2,
+  PenLine,
+  Save,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
 import {
   fetchDocument,
   fetchDocumentSignatures,
@@ -13,10 +26,12 @@ import { toast } from '../utils/toast';
 import ConfirmModal from './ConfirmModal';
 import Markdown from './Markdown';
 import {
+  documentFolder,
   documentSignatureState,
   documentUpdatedLabel,
+  documentsInFolder,
   filterDocuments,
-  groupDocumentsByFolder,
+  folderSummaries,
   isChecklist,
   normalizeChecklistItemList,
   normalizeDocument,
@@ -101,6 +116,53 @@ function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer }) {
   );
 }
 
+// One folder in the browser: its name, how many documents are in it, and how many of those are waiting on THIS
+// member. The second number is why the column is worth having - a folder you did not mean to open is exactly where
+// the thing you have to sign is hiding.
+//
+// `compact` is the chip form for widths that do not get a folder column (below `lg`), so the same choice is one
+// component rather than two lists that could drift apart.
+function FolderOption({ entry, active, compact = false, onClick }) {
+  const shape = compact
+    ? 'shrink-0 rounded-full border px-3 py-1.5 text-xs'
+    : 'w-full rounded-xl border px-3 py-2 text-sm';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      role={compact ? 'tab' : undefined}
+      aria-selected={compact ? active : undefined}
+      aria-current={compact ? undefined : active ? 'true' : undefined}
+      className={`flex items-center gap-2 transition ${shape} ${
+        active
+          ? 'border-red-600 bg-red-600 font-semibold text-white'
+          : 'border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+      }`}
+    >
+      <Folder className="w-4 h-4 shrink-0" />
+      <span className="min-w-0 truncate">{entry.folder}</span>
+      <span
+        className={`ml-auto shrink-0 text-[10px] tabular-nums ${
+          active ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'
+        }`}
+      >
+        {entry.count}
+      </span>
+      {entry.outstanding > 0 && (
+        <span
+          className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+            active ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+          }`}
+          title={`${entry.outstanding} waiting on your signature`}
+        >
+          {entry.outstanding}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function DocumentsModule({
   token,
   currentUser,
@@ -114,6 +176,9 @@ export default function DocumentsModule({
   const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
   const [onlyOutstanding, setOnlyOutstanding] = useState(false);
+  // The folder the browser is showing. Empty means "not chosen yet", which resolves to the first folder that has
+  // anything in it - so the module never opens on an empty column.
+  const [folder, setFolder] = useState('');
   const [openId, setOpenId] = useState('');
   const [openDocument, setOpenDocument] = useState(null);
   const [opening, setOpening] = useState(false);
@@ -391,17 +456,64 @@ export default function DocumentsModule({
     [documents, signatures, userId]
   );
   const visible = onlyOutstanding ? outstanding : documents;
-  const groups = useMemo(
-    () => groupDocumentsByFolder(filterDocuments(visible, query)),
-    [visible, query]
+
+  // A filter spans the whole library: searching, or asking for what needs signing, is a question about EVERY folder,
+  // so while one is on the folder column stops deciding what the second column lists.
+  const filtering = query.trim() !== '' || onlyOutstanding;
+  const folders = useMemo(
+    () => folderSummaries(visible, signatures, userId),
+    [visible, signatures, userId]
   );
+  const activeFolder = useMemo(() => {
+    if (filtering) return '';
+    if (folder && folders.some((entry) => entry.folder === folder)) return folder;
+    return folders.length > 0 ? folders[0].folder : '';
+  }, [filtering, folder, folders]);
+  const listed = useMemo(
+    () => (filtering ? filterDocuments(visible, query) : documentsInFolder(visible, activeFolder)),
+    [filtering, visible, query, activeFolder]
+  );
+
   const listIsEmpty = !loading && !loadError && documents.length === 0;
-  const filterFoundNothing = !loading && !loadError && documents.length > 0 && groups.length === 0;
+  const filterFoundNothing = !loading && !loadError && documents.length > 0 && listed.length === 0;
+
+  // Closing the document puts the browser back the way it was: no selection, and no half-ticked checklist items
+  // left over from a document the member is no longer looking at.
+  const closeDocument = useCallback(() => {
+    setOpenId('');
+    setOpenDocument(null);
+    setOpenError('');
+    setPendingItemIds(new Set());
+  }, []);
+
+  // Choosing a folder is a deliberate move between shelves, so it also lets go of whatever was open - otherwise the
+  // reader would keep showing a document from a folder the browser no longer has selected.
+  const chooseFolder = useCallback(
+    (name) => {
+      setFolder(name);
+      closeDocument();
+    },
+    [closeDocument]
+  );
 
   return (
     <div className="space-y-4 md:h-full md:min-h-0 md:flex-1">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden md:h-full md:flex md:flex-col">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+          {/* The way back. Reading a document replaces the browser on a narrow screen, and on a wide one it is still
+              the fastest way to drop what you are reading - so it lives in the card's own header, where it is
+              reachable at every width, rather than at the top of the document it would scroll away from. */}
+          {openId && (
+            <button
+              type="button"
+              onClick={closeDocument}
+              aria-label="Back to the list"
+              title="Back to the list"
+              className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
           <BookText className="w-4 h-4 text-red-500 shrink-0" />
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Documents</h3>
           {/* The one thing on this screen that is asking the member for something, so it is the one thing that
@@ -452,9 +564,33 @@ export default function DocumentsModule({
         )}
 
         {!loading && !loadError && documents.length > 0 && (
-          <div className="md:flex-1 md:min-h-0 md:grid md:grid-rows-1 md:grid-cols-[18rem,1fr]">
-            {/* The list. It scrolls on its own on desktop; below `md` the panes stack and the page scrolls. */}
-            <div className="border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-700 md:overflow-y-auto">
+          <div className="md:flex-1 md:min-h-0 md:grid md:grid-rows-1 md:grid-cols-[18rem_1fr] lg:grid-cols-[15rem_16rem_1fr]">
+            {/* Column 1: the folders, with what is in each one. Hidden below `lg`, where the same choice is a row of
+                chips above the document list - so a narrow screen shows one column at a time rather than three
+                cramped ones. */}
+            <div className="hidden lg:block border-r border-slate-200 dark:border-slate-700 lg:overflow-y-auto">
+              <h4 className="px-3 pt-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Folders
+              </h4>
+              <div className="p-2 space-y-1">
+                {folders.map((entry) => (
+                  <FolderOption
+                    key={entry.folder}
+                    entry={entry}
+                    active={!filtering && entry.folder === activeFolder}
+                    onClick={() => chooseFolder(entry.folder)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Column 2: the documents in the chosen folder - or the matches, when a filter is on. On a narrow screen
+                this is the first column, and reading a document replaces it. */}
+            <div
+              className={`border-b border-slate-200 dark:border-slate-700 lg:border-b-0 lg:border-r lg:overflow-y-auto ${
+                openId ? 'hidden lg:block' : ''
+              }`}
+            >
               <div className="p-3">
                 <label className="relative block">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -468,56 +604,92 @@ export default function DocumentsModule({
                   />
                 </label>
 
+                {/* The folder choice again, as chips, for the widths that do not get a folder column. */}
+                <div className="mt-3 flex gap-1 overflow-x-auto pb-1 lg:hidden" role="tablist" aria-label="Folders">
+                  {folders.map((entry) => (
+                    <FolderOption
+                      key={entry.folder}
+                      entry={entry}
+                      compact
+                      active={!filtering && entry.folder === activeFolder}
+                      onClick={() => chooseFolder(entry.folder)}
+                    />
+                  ))}
+                </div>
+
+                <h4 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  {filtering ? 'All folders' : activeFolder}
+                </h4>
+
                 {filterFoundNothing ? (
                   <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-                    No document matches &ldquo;{query}&rdquo;.
+                    {query.trim() ? (
+                      <>No document matches &ldquo;{query}&rdquo;.</>
+                    ) : (
+                      <>Nothing in the library is waiting on you.</>
+                    )}
                   </p>
                 ) : (
-                  groups.map((group) => (
-                    <div key={group.folder} className="mt-4 first:mt-3">
-                      <h4 className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        {group.folder}
-                      </h4>
-                      <div className="mt-1.5 space-y-1">
-                        {group.documents.map((item) => {
-                          const selected = item.id === openId;
-                          const state = documentSignatureState(item, signatures, userId);
-                          return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() => openDocumentById(item.id)}
-                              className={`w-full text-left px-3 py-2 rounded-xl text-sm transition ${
-                                selected
-                                  ? 'bg-red-600 text-white'
-                                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                              }`}
-                            >
-                              <span className="flex items-center gap-2">
-                                <FileText className="w-4 h-4 shrink-0" />
-                                <span className="min-w-0 truncate font-medium">{item.title}</span>
-                                {state === 'signed' && (
-                                  <CheckCircle2
-                                    className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-white' : 'text-emerald-500'}`}
-                                    title="Signed"
-                                  />
-                                )}
-                                {state === 'outstanding' && (
-                                  <span
-                                    className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                                      selected ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                    }`}
-                                  >
-                                    to sign
-                                  </span>
-                                )}
+                  <div className="mt-1.5 space-y-1">
+                    {listed.map((item) => {
+                      const selected = item.id === openId;
+                      const state = documentSignatureState(item, signatures, userId);
+                      const checklist = isChecklist(item);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => openDocumentById(item.id)}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-sm transition ${
+                            selected
+                              ? 'bg-red-600 text-white'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            {/* A checklist is worth marking in the list: it is not read and put down, it is worked
+                                through a line at a time, and that is the difference a member needs to see before
+                                opening it. */}
+                            {checklist ? (
+                              <ListChecks className="w-4 h-4 shrink-0" title="Checklist" />
+                            ) : (
+                              <FileText className="w-4 h-4 shrink-0" />
+                            )}
+                            <span className="min-w-0 truncate font-medium">{item.title}</span>
+                            {/* When a filter is on, the list spans every folder - so each row says which one. */}
+                            {filtering && (
+                              <span
+                                className={`shrink-0 truncate text-[10px] ${
+                                  selected ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'
+                                }`}
+                              >
+                                {documentFolder(item)}
                               </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))
+                            )}
+                            {state === 'signed' && (
+                              <CheckCircle2
+                                className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-white' : 'text-emerald-500'}`}
+                                title="Signed"
+                              />
+                            )}
+                            {state === 'outstanding' && (
+                              <span
+                                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                  filtering ? '' : 'ml-auto'
+                                } ${
+                                  selected
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                }`}
+                              >
+                                to sign
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>

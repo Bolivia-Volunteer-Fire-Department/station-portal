@@ -923,7 +923,7 @@ function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
         )}
 
         {loadingMessages.map((msg) => (
-          <div key={msg.id} className="grid grid-cols-[auto,1fr_auto] items-start gap-3">
+          <div key={msg.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3">
             <div className="flex items-center gap-3 min-w-[240px]">
               <input
                 type="text"

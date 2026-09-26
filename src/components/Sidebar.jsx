@@ -154,19 +154,6 @@ export default function Sidebar({
                     </button>
                     )}
 
-                    {/* Help is open to everyone, like User Settings - no permission gates
-                        it, and the guides it lists are the member-facing ones. */}
-                    <button
-                        onClick={() => { setActiveTab('help'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'help'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                    >
-                        <BookOpen className="w-5 h-5" />
-                        <span>Help</span>
-                    </button>
-
                     {/* Documents is open to everyone as well. Which documents a member may SEE is decided by the
                         server (published, and at or above their rank), so there is nothing to gate here. */}
                     <button
@@ -178,6 +165,19 @@ export default function Sidebar({
                     >
                         <BookText className="w-5 h-5" />
                         <span>Documents</span>
+                    </button>
+
+                    {/* Help is open to everyone, like User Settings - no permission gates
+                        it, and the guides it lists are the member-facing ones. */}
+                    <button
+                        onClick={() => { setActiveTab('help'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'help'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <BookOpen className="w-5 h-5" />
+                        <span>Help</span>
                     </button>
 
                     <button

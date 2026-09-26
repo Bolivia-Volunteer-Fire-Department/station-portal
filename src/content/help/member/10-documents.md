@@ -2,13 +2,25 @@ The station's documents: procedures, policies and checklists, kept in one place 
 
 ## What you will see
 
-Documents are listed down the left, grouped into folders, with the one you are reading beside them. Use the search box above the list to narrow it down by title or folder.
+The module is a browser with three parts, left to right:
+
+| Where | What it is |
+|---|---|
+| **Folders** | Every folder you can see, with how many documents it holds and, in amber, how many are waiting on your signature |
+| **Documents** | What is in the folder you picked. A **checklist** is marked with its own icon |
+| **The document** | Whatever you opened, beside the list |
+
+Pick a folder and its documents appear; pick a document and it opens. A document that needs your signature says **to sign**, whether you found it by scrolling or by using the amber **to sign** button in the header.
+
+On a narrower screen the three parts become one column at a time: the folders turn into a row of chips above the list, and opening a document replaces the list. The **left arrow beside "Documents"** at the top of the card brings you back — it is always there while you are reading something.
+
+The search box narrows the list by title or folder, and it searches **every folder** rather than the one you are in, so a result also tells you which folder it came from. The same is true of the **to sign** filter.
 
 **You only see the documents that are yours to see.** Each one can be limited to a minimum rank, and a draft is not published at all — so a document that is not in your list is one that is not aimed at you, rather than one that is missing. Nobody has to be told they cannot read something.
 
 ## Reading a document
 
-Click a document in the list and it opens beside it. Long documents scroll inside their own pane, so the list stays where it is.
+Click a document and it opens beside the list. Long documents scroll inside their own pane, so the browser stays where it is.
 
 The line under the title says which folder it is in and when it was last changed, so you can tell a procedure that was updated last week from one that has not been touched in three years.
 

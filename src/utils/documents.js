@@ -77,6 +77,23 @@ export const groupDocumentsByFolder = (documents) =>
     .map((folder) => ({ folder, documents: documentsInFolder(documents, folder) }))
     .filter((group) => group.documents.length > 0);
 
+// The folder column of the module's browser: every folder in the list, in the order the list shows them, with the
+// two numbers that make the column worth having - how many documents are in it, and how many of those are waiting
+// on THIS member's signature.
+//
+// Derived here rather than in the component because both numbers are rules, not layout: the count is of the
+// documents the member was given (the server already filtered by rank and publication), and an outstanding
+// signature is the same `documentSignatureState` the rows use. A folder that shows "2" must contain the same two
+// documents the second column lists, or the browser is lying about its own contents.
+export const folderSummaries = (documents, signatures, userId) =>
+  groupDocumentsByFolder(documents).map((group) => ({
+    folder: group.folder,
+    count: group.documents.length,
+    outstanding: group.documents.filter(
+      (document) => documentSignatureState(document, signatures, userId) === 'outstanding'
+    ).length,
+  }));
+
 // A free-text filter over the title and the folder. Deliberately not over the body: the list does not carry it
 // (that is what keeps opening the module cheap), so promising to search it would be a lie.
 export const filterDocuments = (documents, query) => {

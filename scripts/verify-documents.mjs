@@ -31,6 +31,7 @@ import {
   documentToForm,
   documentUpdatedLabel,
   filterDocuments,
+  folderSummaries,
   groupDocumentsByFolder,
   isChecklist,
   memberSignatureFor,
@@ -659,6 +660,48 @@ check(
     [UNFILED_LABEL, ['b']],
   ]
 );
+
+// The folder column's two numbers. They have to agree with the second column, so they come from the same helpers -
+// which is the point of them living here rather than in the component.
+const folderRows = normalizeDocumentList([
+  { id: 'g1', title: 'One', folder: 'General', is_sign_required: true },
+  { id: 'g2', title: 'Two', folder: 'General' },
+  { id: 'g3', title: 'Three', folder: 'General', is_sign_required: true },
+  { id: 'u1', title: 'Loose', folder: '' },
+]);
+check(
+  'a folder is summarized with how many documents it holds',
+  folderSummaries(folderRows, [], 'user-ff').map((entry) => [entry.folder, entry.count]),
+  [
+    ['General', 3],
+    [UNFILED_LABEL, 1],
+  ]
+);
+check(
+  'and how many are waiting on this member',
+  folderSummaries(folderRows, [], 'user-ff').map((entry) => entry.outstanding),
+  [2, 0]
+);
+check(
+  'their own signature clears one',
+  folderSummaries(
+    folderRows,
+    [{ id: 's1', document_id: 'g1', checklist_item_id: '', user_id: 'user-ff', signature_role: 'member' }],
+    'user-ff'
+  ).map((entry) => entry.outstanding),
+  [1, 0]
+);
+check(
+  'and somebody else\u2019s does not',
+  folderSummaries(
+    folderRows,
+    [{ id: 's2', document_id: 'g1', checklist_item_id: '', user_id: 'user-other', signature_role: 'member' }],
+    'user-ff'
+  ).map((entry) => entry.outstanding),
+  [2, 0]
+);
+check('a document that asks for no signature is never outstanding', folderSummaries([folderRows[1]], [], 'user-ff')[0].outstanding, 0);
+check('and an empty library has no folders to show', folderSummaries([], [], 'user-ff'), []);
 check(
   'searching covers the title and the folder',
   filterDocuments(rows, 'appar').map((row) => row.id),
@@ -1145,6 +1188,64 @@ checkIs(
   'the next document save would be refused as a concurrent edit'
 );
 const moduleSource = readFileSync(path.resolve(process.cwd(), 'src/components/DocumentsModule.jsx'), 'utf8');
+
+console.log('\n--- the browser: folders, then documents, then the reader ---');
+checkIs('there is a folder column', /Folders\s*</.test(moduleSource) && /FolderOption/.test(moduleSource), 'no folder column');
+checkIs(
+  'three columns on a wide screen, and the document column first below that',
+  /lg:grid-cols-\[15rem_16rem_1fr\]/.test(moduleSource) && /md:grid-cols-\[18rem_1fr\]/.test(moduleSource),
+  'the grid columns are not the shape the browser needs'
+);
+checkIs(
+  'the folder choice becomes chips where the column is hidden',
+  /lg:hidden/.test(moduleSource) && /role="tablist"/.test(moduleSource),
+  'a narrow screen would have no way to choose a folder'
+);
+checkIs('a folder says how many documents it holds', /entry\.count/.test(moduleSource), 'no count on a folder');
+checkIs(
+  'and how many are waiting to be signed',
+  /entry\.outstanding/.test(moduleSource),
+  'the folder column would not show what needs signing'
+);
+checkIs(
+  'choosing a folder lets go of the open document',
+  /setFolder\(name\);[\s\S]{0,80}closeDocument\(\)/.test(moduleSource),
+  'the reader would keep showing a document from another folder'
+);
+checkIs(
+  'a filter spans every folder',
+  /const filtering = query\.trim\(\) !== '' \|\| onlyOutstanding/.test(moduleSource),
+  'a search would only cover the chosen folder'
+);
+checkIs(
+  'and its rows name their folder',
+  /filtering && \(/.test(moduleSource),
+  'a row would not say which folder it came from'
+);
+checkIs(
+  'a checklist is marked in the listing',
+  /<ListChecks className="w-4 h-4 shrink-0" title="Checklist" \/>/.test(moduleSource),
+  'a checklist looks like any other document in the list'
+);
+
+// The way back, which is the bug this browser was rebuilt for: reading a document replaces the list on a narrow
+// screen, so without a control in the card's header the member has to leave the module and come back to it.
+checkIs('there is a way back from a document', /aria-label="Back to the list"/.test(moduleSource), 'no back control');
+checkIs(
+  'and it sits in the card header, above the columns',
+  moduleSource.indexOf('Back to the list') < moduleSource.indexOf('Folders'),
+  'the back control is below the browser it returns to'
+);
+checkIs(
+  'it is only offered while a document is open',
+  /\{openId && \(/.test(moduleSource),
+  'the back control is always on screen'
+);
+checkIs(
+  'and reading a document hides the list below lg',
+  /openId \? 'hidden lg:block'/.test(moduleSource),
+  'a narrow screen would show the list above the document it is reading'
+);
 checkIs(
   'signing checklist items is collected and saved once',
   /signChecklistItems\(documentId, itemIds, token\)/.test(moduleSource),

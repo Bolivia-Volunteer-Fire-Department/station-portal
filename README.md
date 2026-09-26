@@ -108,6 +108,21 @@ in the publish checklist below.
   page calls an action, so it cannot change a row; the two dialogs that normally submit are
   previews whose buttons close instead. It needs no backend change, which is why it is the one
   tab whose permission works against a deployment that has not been re-published.
+- **The Documents module is a three-part browser**: folders (with how many documents each holds, and how many are
+  waiting on *this* member's signature), the documents in the chosen folder, and the document itself. A filter —
+  a search, or the **to sign** button — spans every folder, so its rows name theirs. Below `lg` the folder column
+  becomes a row of chips and reading a document replaces the list, with a back arrow in the card's own header.
+  The folder counts come from `folderSummaries` in `utils/documents` rather than from the component, because a
+  folder showing "2" must contain the two documents the next column lists.
+- **A Tailwind arbitrary value is space-separated, not comma-separated.** A comma inside one still *builds* — into a
+  `grid-template-columns` declaration with the comma left in it, which is invalid, so the browser drops the
+  declaration and the layout falls back to one column with nothing to show for it. This exact mistake made the
+  Documents browser stack its panes instead of sitting side by side; `verify:app-shell` now scans the sources for
+  the shape of it, because the failure is otherwise silent.
+- **Tailwind reads every file that is not ignored — comments and documentation included.** A class written in a
+  comment or in this README is a class in the next build: while writing the note above, naming the broken utility
+  kept generating it. Worth knowing both ways round — it means a stray example can ship CSS nobody asked for, and it
+  is also why the note you are reading does not spell the broken value out.
 - **Documents (Content group) store their text in the sheet, not in the app.** `can_manage_documents`
   opens the tab; members read the module with no permission, because the *server* decides what a
   member may see (published, and at or above their minimum rank) from the session's own rank — the
