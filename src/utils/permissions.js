@@ -185,11 +185,14 @@ export const MEMBER_PERMISSIONS = [
     requires: 'can_sign_trainings',
   },
   {
-    key: 'can_view_certifications',
-    label: 'View their certifications',
-    description: 'Open the Certifications module and see the certifications recorded for them, with their dates and where each one stands.',
-  },
-  {
+    // There is deliberately no `can_view_certifications`.
+    // It existed for one deploy and did exactly what a permission with no column yet does: it hid the member's
+    // own certifications from EVERY member, because the roles sheet had not been given the column (the Roles
+    // editor writes only columns that already exist, see upsertSheetRowById). A screen whose whole content is
+    // "what the station has recorded about you" is not a management act, so it is open to everybody - like Help
+    // - and the two permissions that remain are about RECORDING (can_manage_certifications) and DEFINING
+    // (can_manage_certification_setup), which are.
+    //
     // The floor for the Documents module: without this a member has no Documents tab, and the server refuses
     // every documents action. It is a MEMBER permission rather than an administrative one, because reading the
     // station's documents is a member-facing ability - and because it is what the other two rest on.

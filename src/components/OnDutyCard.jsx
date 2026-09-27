@@ -1,6 +1,7 @@
 import React from 'react';
 import { Users, User } from 'lucide-react';
 import RankIcon from './RankIcon';
+import MemberName from './MemberName';
 
 export default function OnDutyCard({ onDutyUsers = [], ranks = [] }) {
   const rankFor = (rankId) => ranks.find((r) => String(r.id) === String(rankId));
@@ -36,7 +37,7 @@ export default function OnDutyCard({ onDutyUsers = [], ranks = [] }) {
                   )}
                 </div>
                 <div className="overflow-hidden">
-                  <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{user.name}</p>
+                  <p className="font-semibold text-sm text-slate-900 dark:text-white truncate"><MemberName user={user} nameClassName="truncate" /></p>
                   {rank && (
                     <p className="text-xs truncate" style={{ color: rank.color || undefined }}>{rank.description}</p>
                   )}

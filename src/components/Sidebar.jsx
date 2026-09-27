@@ -20,7 +20,6 @@ export default function Sidebar({
     canUseTimeclock,
     canSignTrainings,
     canViewDocuments,
-    canViewCertifications,
     ranks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
@@ -160,9 +159,9 @@ export default function Sidebar({
                     </button>
                     )}
 
-                    {/* My Certifications: the member's own records. Gated on can_view_certifications, so a
-                        station that does not track certifications can leave the module out of every role. */}
-                    {canViewCertifications && (
+                    {/* My Certifications: the member's own records, shown to everyone rather than gated on a
+                        permission - it is their own paperwork, and a permission whose column did not exist yet
+                        would hide it from the very people it is about. See the note in utils/permissions. */}
                     <button
                         onClick={() => { setActiveTab('certifications'); setIsSidebarOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'certifications'
@@ -174,7 +173,6 @@ export default function Sidebar({
                         <span>My Certifications</span>
                         <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5 text-current opacity-80" />
                     </button>
-                    )}
 
                     {/* Documents is gated on can_view_documents - the permission that means "may read documents at
                         all". Which documents are INSIDE the module is still decided by the server (published, live

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Music, KeyRound } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
+import MemberName from '../MemberName';
 import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
@@ -301,7 +302,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             {users.map((user) => (
               <tr key={user.id} className="text-slate-700 dark:text-slate-200">
                 <td className="px-4 py-3 font-mono text-slate-500 dark:text-slate-400">{user.user_name}</td>
-                <td className="px-4 py-3 font-medium">{user.name}</td>
+                <td className="px-4 py-3 font-medium"><MemberName user={user} /></td>
                 <td className="px-4 py-3 capitalize">{user.status}</td>
                 <td className="px-4 py-3">{roleLabel(user.role_id)}</td>
                 <td className="px-4 py-3">{rankLabel(user.rank_id)}</td>

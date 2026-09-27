@@ -8,6 +8,7 @@ import { templateTimeText, formatClockRange, shiftTimeLabel } from '../../utils/
 import { availabilityRosterForMonth } from '../../utils/availability';
 import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { useMonthSlide } from '../../utils/motion';
+import MemberName from '../MemberName';
 
 // "All Members" availability: every template occurrence in the month, with the members
 // who marked themselves available for it.
@@ -203,7 +204,7 @@ export default function AdminAvailabilityRoster({
                                     />
                                   )}
                                   <span style={rankColor ? { color: rankColor } : undefined}>
-                                    {member.name}
+                                    <MemberName user={member} />
                                   </span>
                                 </span>
                               );

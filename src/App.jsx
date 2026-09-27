@@ -248,10 +248,6 @@ export default function App() {
   // server refuses every documents action, which is where the rule actually lives. The other two documents
   // permissions both require this one (see utils/permissions).
   const canViewDocuments = can('can_view_documents');
-  // The member's own certifications. A member permission rather than an administrative one: seeing your own
-  // licence dates is not a management act, and it is gated so a station that does not use this feature can turn
-  // the module off for everybody.
-  const canViewCertifications = can('can_view_certifications');
   const canManageDocuments = can('can_manage_documents');
 
   // Modules that render a seven-column calendar get the wider container.
@@ -1342,7 +1338,6 @@ const getLoadingMessage = () => {
             canUseTimeclock={canUseTimeclock}
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
-            canViewCertifications={canViewCertifications}
             ranks={ranks}
           />
 
@@ -1495,7 +1490,7 @@ const getLoadingMessage = () => {
               />
             )}
 
-            {activeTab === 'certifications' && canViewCertifications && (
+            {activeTab === 'certifications' && (
               <CertificationsModule token={authToken} />
             )}
 

@@ -1206,16 +1206,19 @@ check('a rank color is applied', String(roster).includes('color:#227dc3'), true)
 check('and a second rank keeps its own', String(roster).includes('color:#c3223b'), true);
 check('the icon is drawn for a ranked member', String(roster).includes('lucide-truck') && String(roster).includes('lucide-shield-check'), true);
 check('the rank name is available as a tooltip', /title="Member 1 — Driver\/Operator"/.test(String(roster)), true);
-// Two inline colors for one member: the icon and the name.
-check('the name carries the rank color', String(roster).includes('<span style="color:#227dc3">Member 1</span>'), true);
+// Two inline colors for one member: the icon and the name. The name is rendered through MemberName, which
+// wraps it (and any certification icons) in its own spans, so these look for the name INSIDE the colored span
+// rather than requiring the span to contain nothing else - the contract is where the color lands, not that the
+// name is the only thing there.
+check('the name carries the rank color', /<span style="color:#227dc3">[\s\S]{0,200}Member 1/.test(String(roster)), true);
 check('the icon is colored with it too', /<svg[^>]*style="color:#227dc3"/.test(String(roster)), true);
 check('and exactly those two, not more', (String(roster).match(/color:#227dc3/g) || []).length, 2);
-check('a second member gets their own color', String(roster).includes('<span style="color:#c3223b">Member 2</span>'), true);
+check('a second member gets their own color', /<span style="color:#c3223b">[\s\S]{0,200}Member 2/.test(String(roster)), true);
 
 // An unranked member must not break or silently borrow someone else's rank.
 check('an unranked member still appears', String(roster).includes('No Rank Member'));
 check('and keeps the plain chip', /bg-emerald-50/.test(chipFor(roster, 'No Rank Member')), true);
-check('with an unstyled name', String(roster).includes('<span>No Rank Member</span>'), true);
+check('with an unstyled name', !/style="color:#[^"]*"[^<]*No Rank Member/.test(String(roster)), true);
 check('and no rank icon', !/lucide-user[^>]*style="color:/.test(String(roster)), true);
 
 // A rank with no color set must not paint a blank.

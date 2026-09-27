@@ -6,6 +6,7 @@ import {
 import { adminSaveSystemSetting, adminFetchPushStatus, adminSendTestPush, adminFetchFcmStatus, adminSetPushDisabled } from '../../services/api';
 import CenteredContent from '../CenteredContent';
 import ConfirmModal from '../ConfirmModal';
+import MemberName from '../MemberName';
 import ToggleSwitch from '../ToggleSwitch';
 
 // Every value on this tab is a `system_settings` row (key/value sheet), the same
@@ -603,7 +604,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
             ) : (
               users.map((user) => (
                 <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{userLabel(user)}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-white"><MemberName user={user} /></td>
                   <td className="px-4 py-3">
                     {/* A member switched off by an administrator is not the same as one who never set a
                         device up: the first needs this table to change, the second needs that member. */}

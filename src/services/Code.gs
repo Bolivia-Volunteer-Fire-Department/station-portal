@@ -6897,18 +6897,26 @@ function certificationRecords(ss) {
         id: String(row.id === undefined || row.id === null ? "" : row.id).trim(),
         user_id: String(row.user_id || "").trim(),
         certification_id: String(row.certification_id || "").trim(),
-        effective_date: String(row.effective_date || "").trim(),
-        end_date: String(row.end_date || "").trim(),
+        // Normalized through toDateKeyValue, not stringified.
+        //
+        // Google Sheets coerces a date-like string written to a general-formatted cell into a real DATE value,
+        // so what comes back out of these columns is a Date object as often as it is text. `String(...)` turns
+        // that into "Fri Aug 28 2026 00:00:00 GMT-0400", and comparing THAT against "2026-09-27" compares "F"
+        // with "2" - so a certification that started this summer reported as "Not yet effective". The whole file
+        // compares date keys as strings, which only works if every path normalizes first.
+        effective_date: toDateKeyValue(row.effective_date),
+        end_date: toDateKeyValue(row.end_date),
         notes: String(row.notes || "").trim(),
         updated_at: String(row.updated_at || "").trim()
       };
     });
 }
 
-// Today as the dates in this sheet are written (YYYY-MM-DD) - which is how every other date in the app is
-// stored, so these columns can be typed in the spreadsheet without a format to remember.
+// Today as the dates in these sheets are written (YYYY-MM-DD), in the station's timezone - the same key every
+// other date in the app is compared as. `todayDateKey` already does exactly this, so this is an alias rather
+// than a second implementation that could drift an hour either side of midnight.
 function certificationTodayKey() {
-  return String(getEasternTimestamp()).slice(0, 10);
+  return todayDateKey();
 }
 
 // Calendar days between two date keys, or null when either is unusable.
