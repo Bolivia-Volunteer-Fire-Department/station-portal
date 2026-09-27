@@ -24,7 +24,12 @@ This card controls push notifications to your devices. There are up to four swit
 
 On an iPhone or iPad the app must be **added to the Home Screen** and opened from that icon before notifications can be enabled at all — a plain Safari tab cannot receive them.
 
-**Installed, it behaves like an app.** Opened from a Home Screen icon, the portal runs without browser chrome and fills the screen, keeps its content clear of the notch and the home indicator, and takes away the gestures that give a web page away: no pinch-zoom, no double-tap zoom, and no selection menu when you press and hold a button. In an ordinary browser tab **pinch-zoom still works**, which is deliberate — a member who needs larger text is never stuck with text they cannot enlarge.
+**Installed, it behaves like an app.** Opened from a Home Screen icon, the portal runs without browser chrome and fills the screen, keeps its content clear of the notch and the home indicator, and takes away the gestures that give a web page away: no pinch-zoom, no double-tap zoom, and no selection menu when you press and hold a button. On an Android device it opens **full-screen**, with the status and navigation bars hidden until you swipe for them. On an iPhone the app draws its own navy band behind the clock, so the clock sits *inside* the app rather than in a grey strip above it — in both light and dark themes, because the clock is drawn in white there.
+
+> [!NOTE]
+> The iPhone status-bar setting is fixed when the app is **added to the Home Screen**, so an icon added before this change keeps the old grey band. Remove the icon and add it again to pick up the new look — nothing else about the app is affected.
+
+In an ordinary browser tab **pinch-zoom still works**, which is deliberate — a member who needs larger text is never stuck with text they cannot enlarge.
 
 **Stopping notifications.** Press **Turn off** on the device you want to stop. *Sign out* is a separate thing and does **not** unregister a device — signing out on your phone leaves it receiving pushes (see above), so use **Turn off** when you actually want a device silenced. If the device is another member's, the button reads **Turn off here** and the app tells you whose notifications have stopped; it also records it, because the owner cannot see it from their own side. On a shared computer, prefer **Turn off here** when you finish rather than leaving it set up for you.
 

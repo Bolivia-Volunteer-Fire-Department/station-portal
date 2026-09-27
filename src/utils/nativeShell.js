@@ -45,3 +45,16 @@ export function lockGesturesWhenInstalled() {
   );
   return true;
 }
+
+// The status bar is deliberately NOT handled here, and that is a finding rather than an omission.
+//
+// `apple-mobile-web-app-status-bar-style: black-translucent` is what paints an installed app UNDER the
+// status bar. The obvious refinement - use it in the dark theme, where its forced-white clock is
+// readable, and fall back to `default` in the light one - does not work: iOS caches this meta when the
+// app is added to the Home Screen and ignores later changes, including a different value served by a
+// reload. Reported consistently (Apple's own developer forum, and a StackOverflow question doing exactly
+// this for exactly this reason), and it matches the one workaround that does work, which is removing and
+// re-adding the icon. So the value is static in index.html, and the legibility it needs in BOTH themes is
+// provided by the navy strip the shell paints under it (App.jsx) - which is what makes a fixed
+// `black-translucent` safe rather than a bet on the theme a member happens to be using.
+

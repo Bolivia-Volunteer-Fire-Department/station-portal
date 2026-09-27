@@ -114,6 +114,19 @@ try {
   manifest = '';
 }
 checkIs('and the manifest declares a standalone display', /"display":\s*"standalone"/.test(manifest), 'no display mode in the manifest');
+// The fuller window is asked for through `display_override`, never by changing `display`: iOS requires
+// `display: standalone` before it will deliver push notifications to an installed app, and it ignores
+// `display_override` outright. So the two lines do different jobs and both have to stay.
+checkIs(
+  'and asks for a full-screen window alongside it',
+  /"display_override":\s*\[\s*"fullscreen"/.test(manifest),
+  'Android would keep its status bar'
+);
+checkIs(
+  'without touching the display mode iOS reads',
+  /"display":\s*"standalone"/.test(manifest) && !/"display":\s*"fullscreen"/.test(manifest),
+  'iOS push needs display: standalone'
+);
 // One place to change the navy, so the browser chrome cannot drift from the launch screen.
 check(
   'the theme color matches the manifest',
@@ -444,6 +457,25 @@ checkIs('with the installed modes enumerated once', /INSTALLED_WINDOWS\s*=\s*\[[
 checkIs("iOS's older spelling is honored too", /navigator\?\.standalone === true/.test(native));
 checkIs('the cover fit survives the lock', /viewport-fit=cover/.test(native));
 checkIs('and it runs before the first paint', /lockGesturesWhenInstalled\(\)/.test(readFileSync('src/main.jsx', 'utf8')));
+// The status bar, which has one trap: iOS caches `apple-mobile-web-app-status-bar-style` when the app is
+// added to the Home Screen and ignores every later change, so a scripted or theme-aware value is a
+// placebo. It has to be static in the head, and the white clock it forces has to be legible in both
+// themes - which is the strip's job, not the meta's.
+check('the translucent status bar is asked for', headMeta('apple-mobile-web-app-status-bar-style'), 'black-translucent');
+// The check is over CODE lines: this file explains the finding in prose, and prose is not a value being set.
+const statusBarCode = native
+  .split('\n')
+  .filter((line) => /status-bar-style/.test(line) && !/^\s*(\/\/|\*|\/\*)/.test(line));
+check('and nothing tries to change it at runtime', statusBarCode, []);
+const statusStrip = /className="md:hidden fixed inset-x-0 top-0 z-\d+ h-\[env\(safe-area-inset-top\)\] bg-\[(#[0-9A-Fa-f]{6})\]"/.exec(app);
+checkIs('the app paints under the clock', !!statusStrip, 'no strip behind the status bar');
+// It must be the SAME navy as the manifest's theme_color: a white clock on this strip is only legible
+// because the strip is dark, and one place to change the navy is the point of tying them together.
+check('and that strip is the manifest theme color', statusStrip?.[1]?.toUpperCase(), (/"theme_color":\s*"([^"]*)"/.exec(manifest)?.[1] ?? '').toUpperCase());
+checkIs('the strip is fixed, so a scrolled app bar cannot slide white under the clock', /fixed inset-x-0 top-0/.test(statusStrip?.[0] || ''));
+// Teeth: as a static `default` the app would simply lose the full-bleed look on iOS, which is what this
+// change was for - and in the light theme a translucent bar without a dark strip would be unreadable.
+checkIs('the static value is the translucent one', !/apple-mobile-web-app-status-bar-style"\s+content="default"/.test(html));
 // Teeth: the same failure mode as the metas above - a line quietly removed, or moved somewhere it would
 // apply to a tab as well. This is the mutation that would do it, and it has to fail the tab check.
 const lockedEverywhere = viewportMeta.replace('initial-scale=1.0', 'maximum-scale=1, user-scalable=no');

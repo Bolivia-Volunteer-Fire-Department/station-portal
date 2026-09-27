@@ -40,10 +40,31 @@
     <!-- Standalone display, declared twice on purpose: iOS Safari only honors the apple-prefixed name, and Chrome
          only honors the standard one - and says so in the console ("apple-mobile-web-app-capable is deprecated")
          when it finds the prefixed name alone. Browsers that read neither use the manifest's `display: standalone`,
-         which is the modern declaration and is what actually installs the app on Android. Keep the pair together. -->
+         which is the modern declaration and is what actually installs the app on Android. Keep the pair together.
+
+         `display: standalone` in the manifest is also what iOS requires before it will deliver push notifications
+         to an installed app, so it is NOT the value to change when the window should be fuller: the manifest's
+         `display_override` asks for `fullscreen` first (no status or navigation bar at all on Android), and iOS
+         ignores `display_override` entirely and keeps reading `display`. Changing that one line would trade the
+         whole notification feature for a taller window. -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- `black-translucent` paints an installed app UNDER the status bar, so the area behind the clock is
+         ours instead of a separate grey band - most of the difference between an app and a page in a frame.
+
+         It is a STATIC value on purpose, and that is a finding, not an oversight. iOS caches this meta
+         when the app is added to the Home Screen and ignores later changes - including a fresh value
+         served on reload, and the same value set by JavaScript (reported consistently on Apple's developer
+         forum and on Stack Overflow, in both cases by people trying to switch it with a dark-mode toggle,
+         which is exactly what this would have been). The only thing that updates it is removing the Home
+         Screen icon and adding it again.
+
+         So it cannot follow the theme, and instead the theme cannot matter: iOS draws this bar's clock and
+         icons WHITE whatever is behind them, and the shell paints a navy strip under them in both themes
+         (App.jsx). That navy is the same one the manifest and theme-color declare.
+
+         A tab is unaffected: this meta is only read by an installed iOS web app. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="BFD Station Portal" />
 
     <title>BFD Station Portal</title>

@@ -1239,6 +1239,27 @@ const getLoadingMessage = () => {
         <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} announcements={loginAnnouncements} />
       ) : (
         <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
+          {/* The strip the iOS status bar sits on.
+          //
+          // index.html asks for `black-translucent`, which paints the app UNDER the status bar - so the
+          // area behind the clock belongs to us, and iOS draws the clock and its icons WHITE whatever we
+          // put there. That is free in the dark theme and invisible in the light one, and iOS will not
+          // reconsider (it caches the meta when the app is added to the Home Screen - see the note in
+          // utils/nativeShell.js). So instead of asking which theme we are in, something dark is painted
+          // there in BOTH: the navy the manifest and theme-color already declare, which is the color every
+          // other platform uses for its own chrome around this app.
+          //
+          // `fixed` rather than part of the app bar, because the bar is sticky: the moment the page
+          // scrolls, the bar slides up under this area, and a strip that had scrolled away would leave
+          // white clock text on a white bar in the light theme. `z-20` clears the bar (z-10) and stays
+          // under the sidebar's backdrop (z-20) and drawer (z-30), so opening the menu still dims it.
+          //
+          // It is 0-height wherever there is no inset - every browser tab, every notchless phone, and a
+          // full-screen Android window - so it costs nothing anywhere it is not needed. */}
+          <div
+            aria-hidden="true"
+            className="md:hidden fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top)] bg-[#0A2A5B]"
+          />
           {/* `min-h-dvh` (not `min-h-screen`) is the viewport the member can actually SEE: on a phone in a
               browser tab `100vh` is measured with the URL bar hidden, so a short screen left a strip of
               canvas at the bottom and a scrolling one overshot it by the height of the bar. `dvh` follows

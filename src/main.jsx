@@ -5,7 +5,8 @@ import App from './App.jsx'
 import { lockGesturesWhenInstalled } from './utils/nativeShell.js'
 
 // Before the first paint, so the window never lays out at one viewport and then changes its mind: an
-// installed app gets pinch-zoom turned off, a browser tab keeps it (see utils/nativeShell.js).
+// installed app gets pinch-zoom turned off, a browser tab keeps it (see utils/nativeShell.js, which also
+// records why the status bar is NOT adjusted here).
 lockGesturesWhenInstalled();
 
 // Register the push-notification service worker up front so a device is ready
