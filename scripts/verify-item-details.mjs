@@ -336,7 +336,9 @@ check(
 );
 check('and carry no block content', !/<button[\s\S]{0,900}?<p className="flex items-center/.test(calendar), true);
 check('the modal centers on a backdrop', /fixed inset-0 z-\[60\] flex items-center justify-center/.test(modal), true);
-check('which closes it', /onClick=\{onClose\}/.test(modal), true);
+check('which closes it', /onClick=\{dismiss\}/.test(modal), true);
+// ...and through the exit animation, rather than vanishing in one frame (see verify:motion).
+check('and dismisses it through its exit', /useDismissAnimation\(onClose\)/.test(modal), true);
 check('while clicks inside it do not', /onClick=\{\(e\) => e\.stopPropagation\(\)\}/.test(modal), true);
 // The calendar still renders with everything omitted, which is what a caller that forgets a prop gets.
 check(

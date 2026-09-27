@@ -61,10 +61,25 @@ const sourceOf = (file) => readFileSync(file, 'utf8');
 // against a deliberately broken copy. A check that passes because it is looking at the wrong thing looks
 // exactly like a check that passes because the code is right.
 
-// Animation classes DEFINED in index.css: an `@keyframes` name with a matching `.animate-*` rule.
-const definedAnimations = (source) => {
-  const names = [...source.matchAll(/\.(animate-[a-zA-Z]+)\s*\{/g)].map((match) => match[1]);
-  return [...new Set(names)].sort();
+// Every rule in index.css that sets an animation which actually RUNS, as { selector, declarations }.
+//
+// Collected by shape rather than by class name, because the page transition is a DESCENDANT rule
+// (`.page-enter > *`) and would be invisible to a scan for `.animate-*` classes. Anything that animates has
+// to face the reduced-motion question below, whatever its selector looks like.
+//
+// `animation: none` rules are the reduced-motion overrides themselves, so they are excluded: they are the
+// answer, not the question.
+const animationRules = (source) => {
+  const rules = [];
+  const pattern = /(?:^|\n)([^\n{}]+?)\s*\{([^{}]*)\}/g;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    const declarations = match[2];
+    if (!/animation:/.test(declarations)) continue;
+    if (/animation:\s*none/.test(declarations)) continue;
+    rules.push({ selector: match[1].trim(), declarations });
+  }
+  return rules;
 };
 
 // The reduced-motion block, as text. Found by brace-matching rather than by taking the tail of the file, so
@@ -83,16 +98,12 @@ const reducedMotionBlock = (source) => {
   return source.slice(start);
 };
 
-// Animations the reduced-motion block does NOT silence.
+// Animating rules the reduced-motion block does NOT silence.
 const unpreferredAnimations = (source) => {
   const block = reducedMotionBlock(source);
-  return definedAnimations(source).filter((name) => !block.includes(`.${name}`));
-};
-
-// The declarations of one `.animate-*` rule, so a duration can be read out of it.
-const animationDeclarations = (source, name) => {
-  const match = new RegExp(`\\.${name}\\s*\\{([^}]*)\\}`).exec(source);
-  return match ? match[1] : '';
+  return animationRules(source)
+    .map((rule) => rule.selector)
+    .filter((selector) => !block.includes(selector));
 };
 
 // A custom property of the motion vocabulary, in milliseconds.
@@ -122,30 +133,43 @@ const linesWith = (files, needle) =>
 const offenders = (rows, predicate) =>
   rows.filter((row) => !predicate(row.text)).map(({ file, line }) => `${file}:${line}`);
 
-console.log('\n--- the vocabulary, and how fast it is ---');
+console.log('\n--- the vocabularies, and how fast they are ---');
 const quick = motionValueMs(css, 'motion-quick');
 const base = motionValueMs(css, 'motion-base');
 checkIs('the fast speed is defined', typeof quick === 'number', 'no --motion-quick');
 checkIs('and is swift', quick !== null && quick <= 150, `${quick}ms`);
 checkIs('the base speed is defined', typeof base === 'number', 'no --motion-base');
-// 200ms is the ceiling. The whole point of this work was to stay feeling instant, and this is the number that
-// decides it: a transition that needs longer than this is a transition that is in the way.
+// 200ms is the ceiling for anything that decorates a STATE CHANGE. The whole point of this work was to stay
+// feeling instant, and this is the number that decides it: a transition that needs longer is in the way.
 checkIs('and still reads as instant', base !== null && base <= 200, `${base}ms`);
 checkIs('the settle curve is defined', /--motion-settle:\s*cubic-bezier\(/.test(css));
-// Everything added for this takes its duration from the vocabulary rather than naming its own.
-['animate-pageIn', 'animate-modalIn', 'animate-popoverIn'].forEach((name) => {
-  checkIs(`${name} uses the vocabulary`, /var\(--motion-(?:quick|base)\)/.test(animationDeclarations(css, name)));
-});
+// One longer value, for the one thing that is navigation rather than a state change: the calendars' month
+// slide, which has to read as travel. It is spent twice (out, then in), so the ceiling here is what a member
+// waits for a month change: 400ms is the point at which it would be faster to press the arrow again.
+const slide = motionValueMs(css, 'motion-slide');
+checkIs('the month slide is defined', typeof slide === 'number', 'no --motion-slide');
+checkIs('and a month change stays under a third of a second', slide !== null && slide * 2 <= 350, `${slide * 2}ms for both phases`);
+checkIs('the page rule is a descendant rule, so new children animate by themselves', /(?:^|\n)\.page-enter > \* \{/.test(css));
 // Nothing loops. An entrance animation that never ends is a spinner.
 check(
   'the only looping animation is the swap dwell',
-  definedAnimations(css).filter((name) => /infinite/.test(animationDeclarations(css, name))),
-  ['animate-swapDwell']
+  animationRules(css).filter(({ declarations }) => /infinite/.test(declarations)).map(({ selector }) => selector),
+  ['.animate-swapDwell']
+);
+// Every animation takes its duration from the vocabulary rather than naming its own, so "how fast is this
+// app" has one answer - except the swap animations, which predate it and are about a gesture in progress.
+check(
+  'the durations all come from the vocabulary',
+  animationRules(css)
+    .filter(({ declarations }) => !/var\(--motion-/.test(declarations))
+    .map(({ selector }) => selector),
+  ['.animate-swapDwell', '.animate-swapPop']
 );
 
 console.log('\n--- every animation honors prefers-reduced-motion ---');
-// Collected, not listed: a new animation class in index.css fails this until it is added to the block.
-checkIs('the animations were found', definedAnimations(css).length >= 5, JSON.stringify(definedAnimations(css)));
+// Collected, not listed: a new animation in index.css fails this until it is added to the block, whatever
+// shape its selector takes.
+checkIs('the animating rules were found', animationRules(css).length >= 6, JSON.stringify(animationRules(css).map((r) => r.selector)));
 check('all of them are silenced when motion is not wanted', unpreferredAnimations(css), []);
 checkIs('and the block really is a reduced-motion block', /@media \(prefers-reduced-motion: reduce\)/.test(reducedMotionBlock(css)));
 // The press scale is movement too, and it is the one the block has to disable by hand - there is no animation
@@ -188,18 +212,66 @@ check('each one is positioned off its control', offenders(popovers, (text) => /\
 // than opening downwards from the button that was pressed.
 check('and each grows from the edge it is anchored to', offenders(popovers, (text) => /origin-(?:top|top-left|top-right)\b/.test(text)), []);
 
-console.log('\n--- the page transition, replayed in place ---');
-checkIs('the module area carries it', /md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 animate-pageIn/.test(app));
-checkIs('and replays it when the module changes', /useReplayAnimation\(activeTab\)/.test(app));
-// Admin sub-tabs swap inside the same container, and that state belongs to the panel rather than to App.
+console.log('\n--- the page transition, on elements that are new by construction ---');
+// The first attempt animated the CONTAINER and restarted it from JavaScript on every tab change, and it
+// reported nothing on the real thing - a replay that fails is invisible, and there is no DOM harness here to
+// catch it. So the mechanism changed rather than the numbers: the animation now lives on the CHILDREN of the
+// container, which a tab switch replaces, so the browser starts it by itself and cannot fail to.
+checkIs('the module area is marked as a page', /overscroll-y-contain p-4 sm:p-6 lg:p-8 page-enter/.test(app));
+checkIs('the admin sub-tabs are too', /space-y-6 page-enter/.test(panel));
+checkIs('and nothing replays it by hand any more', !/useReplayAnimation/.test(app) && !/useReplayAnimation/.test(panel));
+
+console.log('\n--- a dialog can be dismissed through its exit ---');
+// The entry was animated and the exit was one frame, so every dismissal snapped. CSS cannot do this one alone:
+// the parent unmounts the dialog the moment its state changes, so the class has to go on and the callback has
+// to wait for it - see useDismissAnimation.
+checkIs('the exit targets the panel the entry class is on', /\.animate-overlayOut \.animate-modalIn \{/.test(css));
+checkIs('and takes no clicks while it leaves', /\.animate-overlayOut \{[\s\S]{0,200}pointer-events: none/.test(css));
+checkIs('the hook exists', /export function useDismissAnimation/.test(motion));
+// Every dialog a member can dismiss uses it; Confirm is the one that deliberately does not (a dialog that
+// lingers before acting reads as hesitation).
+['ConfirmModal', 'ShiftOfferModal', 'ScheduleItemModal'].forEach((name) => {
+  const source = readFileSync(`src/components/${name}.jsx`, 'utf8');
+  checkIs(`${name} dismisses through the animation`, /useDismissAnimation\(/.test(source));
+  checkIs(`and routes its own close controls through it`, /onClick=\{dismiss\}/.test(source));
+});
+checkIs('the event is the clock, not a guessed duration', /addEventListener\('animationend', finish\)/.test(motion));
+// A dialog that never closes is worse than one that closes abruptly, so the animation is not the last word.
+checkIs('with a fallback if the event never arrives', /setTimeout\(finish, \d+\)/.test(motion));
+checkIs('and no wait at all when motion is not wanted', /if \(!node \|\| prefersReducedMotion\(\)\)/.test(motion));
+
+console.log('\n--- the calendars travel ---');
+// Two phases, because only one month is ever rendered: the old one leaves, the swap happens off the edge, and
+// the new one arrives on its own animation. Direction is what makes it read as movement rather than a redraw.
+['Left', 'Right'].forEach((side) => {
+  checkIs(`the month can leave to the ${side.toLowerCase()}`, new RegExp(`\\.animate-monthOut${side} \\{`).test(css));
+  checkIs(`and arrive from the ${side.toLowerCase()}`, new RegExp(`\\.animate-monthIn${side} \\{`).test(css));
+});
+checkIs('the hook exists', /export function useMonthSlide/.test(motion));
+checkIs('the phases advance on the animation, not a timer', /onAnimationEnd/.test(motion));
+// Every screen with month arrows slides, so a month change is not a different experience per screen.
+['ScheduleCalendar', 'AvailabilityCalendar'].forEach((name) => {
+  const source = readFileSync(`src/components/${name}.jsx`, 'utf8');
+  checkIs(`${name} slides its days`, /useMonthSlide\(viewDate, setViewDate\)/.test(source) && /onAnimationEnd=\{onAnimationEnd\}/.test(source));
+});
 checkIs(
-  'the admin sub-tabs replay it too',
-  /useReplayAnimation\(activeSubTab\)/.test(panel) && /space-y-6 animate-pageIn/.test(panel)
+  'and so does the administrator roster',
+  /useMonthSlide\(viewDate, setViewDate\)/.test(readFileSync('src/components/admin/AdminAvailabilityRoster.jsx', 'utf8'))
 );
-// The two decisions in the hook that a later tidy-up would get wrong.
-checkIs('the hook winds the animation back rather than re-keying the element', /getAnimations\(\)/.test(motion));
-checkIs('before the browser paints, or the destination flashes first', /useLayoutEffect/.test(motion));
-checkIs('and it is a no-op where the browser cannot answer', /typeof node\.getAnimations !== 'function'/.test(motion));
+// Reduced motion gets the month, not the wait: the phases are skipped rather than run invisibly.
+checkIs('a member who asked for less movement skips to the month', /if \(reduced\.current\) \{[\s\S]{0,80}setViewDate\(next\)/.test(motion));
+
+console.log('\n--- the fixed popovers cannot be moved by an ancestor ---');
+// The regression this exists for: those popovers are `fixed` and positioned from a getBoundingClientRect, and a
+// transformed ancestor becomes their containing block - so the page transition relocated them. Portaling them
+// into document.body is the fix, and it is exactly the kind of fix a later tidy-up would remove.
+const schedule = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+check(
+  'every viewport-positioned popover is portaled',
+  [...schedule.matchAll(/className="fixed z-\d+ [^"]*animate-popoverIn"/g)].length,
+  [...schedule.matchAll(/createPortal\(/g)].length
+);
+checkIs('and the portal target is the body', /document\.body/.test(schedule));
 
 console.log('\n--- teeth: the failures this would actually catch ---');
 // 1. A new dialog panel that forgets the animation. This is the realistic regression: the next modal is copied
@@ -211,7 +283,7 @@ check('and a panel with it is not', panelsWithoutEntrance(panelCopy.replace('p-6
 check(
   'an animation missing from the reduced-motion block is detected',
   unpreferredAnimations(`${css}\n.animate-newThing { animation: newThing var(--motion-base) both; }`),
-  ['animate-newThing']
+  ['.animate-newThing']
 );
 // 3. The press scale left on for a member who asked for less movement.
 const withoutPressOff = css.replace(/\n  button:not\(:disabled\):active,\n  \[role='button'\]:not\(\[aria-disabled='true'\]\):active \{\n    transform: none;\n  \}/, '');

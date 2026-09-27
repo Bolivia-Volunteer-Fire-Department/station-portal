@@ -14,6 +14,7 @@ import EventPill from './EventPill';
 import { eventSegmentsByDay, normalizeEventList } from '../utils/events';
 import { mergeDayItems } from '../utils/dayOrder';
 import ViewToggle from './ViewToggle';
+import { useMonthSlide } from '../utils/motion';
 
 // Month navigation, shared by the member editor and the administrator's roster view so
 // the two always move the same way.
@@ -210,9 +211,13 @@ export default function AvailabilityCalendar({
   for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const goPrev = () => setViewDate(new Date(year, month - 1, 1));
-  const goNext = () => setViewDate(new Date(year, month + 1, 1));
-  const goToday = () => setViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  // Month movement goes through the slide (see utils/motion), so the day grid travels out to one side and
+  // the new month arrives from the other - the weekday row and the month label stay put, as they do in a
+  // native calendar. The arrows above are the most-used navigation in this screen.
+  const { gridClass, onAnimationEnd, goBy, goTo } = useMonthSlide(viewDate, setViewDate);
+  const goPrev = () => goBy(-1);
+  const goNext = () => goBy(1);
+  const goToday = () => goTo(now);
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -268,7 +273,10 @@ export default function AvailabilityCalendar({
           ))}
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
+        <div
+          className={`grid grid-cols-7 gap-1 ${gridClass}`}
+          onAnimationEnd={onAnimationEnd}
+        >
           {cells.map((day, index) => {
             if (!day) return <div key={`blank-${index}`} className="min-h-[76px]" />;
             const dateKey = toDateKey(day);

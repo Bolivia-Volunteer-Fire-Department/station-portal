@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 // The tone table, so this dialog sounds like every other modal (see MODAL_SOUNDS in utils/soundRules).
 import { playSound, modalSoundFor } from '../utils/uiSounds';
+import { useDismissAnimation } from '../utils/motion';
 
 /**
  * A confirmation dialog, for actions that cannot be undone.
@@ -32,6 +33,11 @@ export default function ConfirmModal({
   const messageId = useId();
   const cancelRef = useRef(null);
 
+  // Escape, the backdrop and Cancel all leave through the exit animation; Confirm does not, because the
+  // member asked for something to happen and a dialog that lingers first reads as hesitation. See
+  // useDismissAnimation - the two paths are deliberately different.
+  const { ref: overlayRef, dismiss } = useDismissAnimation(onCancel);
+
   // The modal is mounted when it opens (see the callers), so this is once per confirmation - which is also what the
   // sound layer expects: one tone per open, not per re-render.
   useEffect(() => {
@@ -49,19 +55,22 @@ export default function ConfirmModal({
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onCancel?.();
+        dismiss();
       }
     };
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [onCancel]);
+  }, [dismiss]);
 
   const danger = tone !== 'default';
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+    <div
+      ref={overlayRef}
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-fadeIn"
+    >
       {/* Clicking away is a cancel, not a trap: this dialog asks a question the member can decline. */}
-      <div className="absolute inset-0" onClick={onCancel} aria-hidden="true" />
+      <div className="absolute inset-0" onClick={dismiss} aria-hidden="true" />
 
       <div
         role="alertdialog"
@@ -97,7 +106,7 @@ export default function ConfirmModal({
           <button
             ref={cancelRef}
             type="button"
-            onClick={onCancel}
+            onClick={dismiss}
             className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
           >
             {cancelLabel}

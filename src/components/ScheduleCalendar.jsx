@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Printer, Users } from 'lucide-react';
 import { toDateKey, parseSheetDateKey } from '../utils/scheduleDate';
 import { assignmentColor } from '../utils/assignmentColor';
+import { useMonthSlide } from '../utils/motion';
 import RankIcon from './RankIcon';
 import { rowTimeText, templateTimeText, timeToMinutes, prettyRange, shiftTimeLabel } from '../utils/shiftTime';
 import { WEEKDAYS, MONTHS, DAY_ORDER } from '../utils/calendarConstants';
@@ -383,9 +384,14 @@ export default function ScheduleCalendar({
     return `${short(fromLabel)}, ${fy} – ${short(toLabel)}, ${ty}`;
   };
 
-  const goPrev = () => setViewDate(new Date(year, month - 1, 1));
-  const goNext = () => setViewDate(new Date(year, month + 1, 1));
-  const goToday = () => setViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  // Month movement goes through the slide (see utils/motion): the arrows are the most-used navigation in
+  // this screen, and a month that simply appears gives no sense of which way it just moved. The day grid
+  // below is what travels - the weekday row and the month label stay where they are, as they do in a
+  // native calendar.
+  const { gridClass, onAnimationEnd, goBy, goTo } = useMonthSlide(viewDate, setViewDate);
+  const goPrev = () => goBy(-1);
+  const goNext = () => goBy(1);
+  const goToday = () => goTo(now);
 
   return (
     <div className="space-y-6">
@@ -506,7 +512,10 @@ export default function ScheduleCalendar({
               </div>
             ))}
           </div>
-<div className="grid grid-cols-7 gap-1">
+<div
+              className={`grid grid-cols-7 gap-1 ${gridClass}`}
+              onAnimationEnd={onAnimationEnd}
+            >
             {cells.map((day, i) => {
               if (!day) {
                 return (

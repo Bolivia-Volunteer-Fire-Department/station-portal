@@ -14,7 +14,6 @@ import AdminNotificationsTab from './AdminNotificationsTab';
 import AdminSystemLogTab from './AdminSystemLogTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
-import { useReplayAnimation } from '../../utils/motion';
 import AdminTrainingTab from './AdminTrainingTab';
 import AdminAnnouncementsTab from './AdminAnnouncementsTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
@@ -167,14 +166,6 @@ export default function AdminPanel({
   const activeSubTab =
     requestedSubTab && allowedTabs.includes(requestedSubTab) ? requestedSubTab : allowedTabs[0] ?? null;
 
-  // The sub-tab transition: the same animation as a module change (see index.css), replayed here rather than
-  // in App, because this panel owns the sub-tab state and <main> above it cannot see the change.
-  //
-  // Below the derived value rather than beside the other hooks on purpose: `activeSubTab` is computed from
-  // the request and the role, and a hook that read it earlier in the body would be reading a binding that
-  // does not exist yet.
-  const subTabRef = useReplayAnimation(activeSubTab);
-
   // The pending count the last auto-focus was based on. Only an INCREASE moves the
   // user to approvals, so opening another tab stays put while an offer is still
   // waiting - see shouldFocusApprovals for why that matters.
@@ -233,8 +224,7 @@ export default function AdminPanel({
     // after the page heading - which is the whole point, since h-full alone asks for the heading's height as well
     // and pushes the last ~90px of the guide below the fold.
     <div
-      ref={subTabRef}
-      className={`space-y-6 animate-pageIn ${
+      className={`space-y-6 page-enter ${
         activeSubTab === 'help' ? 'md:h-full md:min-h-0 md:flex-1 md:flex md:flex-col' : ''
       }`}
     >

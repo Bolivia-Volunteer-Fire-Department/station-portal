@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { HandHelping, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
+import { useDismissAnimation } from '../utils/motion';
 
 /**
  * Confirmation modal for offering to fill an open shift (My Schedule).
@@ -10,6 +11,9 @@ import { playSound, modalSoundFor } from '../utils/uiSounds';
  */
 export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Every way out of this dialog is a dismissal (the X, Cancel, the backdrop), so all of them leave through
+  // the exit animation - see useDismissAnimation.
+  const { ref: overlayRef, dismiss } = useDismissAnimation(onClose);
   const [error, setError] = useState('');
 
   // A positive tone: this is a modal the member opened by pressing the pill. Played once per mount, which is one
@@ -49,8 +53,9 @@ export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm 
 
   return (
     <div
+      ref={overlayRef}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300 animate-fadeIn"
-      onClick={isSubmitting ? undefined : onClose}
+      onClick={isSubmitting ? undefined : dismiss}
     >
       <div
         className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6 animate-modalIn"
@@ -68,7 +73,7 @@ export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm 
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={dismiss}
             disabled={isSubmitting}
             aria-label="Close"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
@@ -103,7 +108,7 @@ export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm 
         <div className="mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
           <button
             type="button"
-            onClick={onClose}
+            onClick={dismiss}
             disabled={isSubmitting}
             className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 transition"
           >

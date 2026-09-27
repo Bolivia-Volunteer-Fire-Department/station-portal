@@ -164,12 +164,17 @@ const modalSource = readFileSync('src/components/ConfirmModal.jsx', 'utf8');
 const announcesItself = (s) => /role="alertdialog"/.test(s) && /aria-modal="true"/.test(s);
 const namesItself = (s) =>
   /aria-labelledby=\{titleId\}/.test(s) && /aria-describedby=\{message \? messageId : undefined\}/.test(s);
+// Escape, the backdrop and Cancel all reach the DISMISS callback, which is the exit-animation wrapper around
+// onCancel (see utils/motion). The dialog still cancels - which is the contract asserted here - and now the
+// cancellation can be seen happening rather than snapping shut in one frame.
+const dismissesThrough = (s) => /\{ ref: overlayRef, dismiss \} = useDismissAnimation\(onCancel\)/.test(s);
 const escapesOnEscape = (s) =>
-  /event\.key === 'Escape'[\s\S]{0,160}?onCancel\?\.\(\)/.test(s) &&
+  dismissesThrough(s) &&
+  /event\.key === 'Escape'[\s\S]{0,160}?dismiss\(\)/.test(s) &&
   /document\.addEventListener\('keydown', onKeyDown, true\)/.test(s);
-const cancelsOutside = (s) => /onClick=\{onCancel\} aria-hidden="true"/.test(s);
+const cancelsOutside = (s) => /onClick=\{dismiss\} aria-hidden="true"/.test(s);
 const focusesTheSafeAnswer = (s) =>
-  /cancelRef\.current\?\.focus\(\)/.test(s) && /ref=\{cancelRef\}[\s\S]{0,240}?onClick=\{onCancel\}/.test(s);
+  /cancelRef\.current\?\.focus\(\)/.test(s) && /ref=\{cancelRef\}[\s\S]{0,240}?onClick=\{dismiss\}/.test(s);
 const dangerByDefault = (s) =>
   /tone = 'danger'/.test(s) && /const danger = tone !== 'default';/.test(s) && /bg-red-600 hover:bg-red-500/.test(s);
 const soundsOnceOnOpen = (s) => /playSound\(modalSoundFor\('confirm'\)\);\n  \}, \[\]\)/.test(s);
@@ -231,7 +236,7 @@ const MUTATIONS = [
     label: 'a dialog that traps Escape',
     source: modalSource,
     passes: escapesOnEscape,
-    breakIt: (s) => s.replace('        onCancel?.();\n', ''),
+    breakIt: (s) => s.replace('        dismiss();\n', ''),
   },
   {
     label: 'a dialog that is not announced',
@@ -243,7 +248,7 @@ const MUTATIONS = [
     label: 'a click outside that does nothing',
     source: modalSource,
     passes: cancelsOutside,
-    breakIt: (s) => s.replace('onClick={onCancel} aria-hidden="true"', 'aria-hidden="true"'),
+    breakIt: (s) => s.replace('onClick={dismiss} aria-hidden="true"', 'aria-hidden="true"'),
   },
   {
     label: 'focus on the destructive button',

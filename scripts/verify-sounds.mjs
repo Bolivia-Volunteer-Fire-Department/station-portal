@@ -919,8 +919,10 @@ checkIs(
 // nothing to attach it to. Listed here so the decision is visible, and so a later one can be seen for what it is.
 console.log('\n--- deliberate silence ---');
 const silentBackdrops = [
-  ['src/components/ScheduleItemModal.jsx', 'onClick={onClose}'],
-  ['src/components/ShiftOfferModal.jsx', 'onClick={onClose}'],
+  // These two now dismiss THROUGH the exit animation (`dismiss` from utils/motion, which adds the class and
+  // then calls the callback) rather than straight to onClose - still silent, still a backdrop.
+  ['src/components/ScheduleItemModal.jsx', 'onClick={dismiss}'],
+  ['src/components/ShiftOfferModal.jsx', 'onClick={dismiss}'],
   ['src/components/Sidebar.jsx', 'setIsSidebarOpen(false)'],
   ['src/components/admin/AdminScheduleManagementTab.jsx', 'onClick={closePopover}'],
 ];

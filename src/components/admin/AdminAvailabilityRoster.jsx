@@ -7,6 +7,7 @@ import { displayDate, toDateKey } from '../../utils/scheduleDate';
 import { templateTimeText, formatClockRange, shiftTimeLabel } from '../../utils/shiftTime';
 import { availabilityRosterForMonth } from '../../utils/availability';
 import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from '../../utils/events';
+import { useMonthSlide } from '../../utils/motion';
 
 // "All Members" availability: every template occurrence in the month, with the members
 // who marked themselves available for it.
@@ -40,6 +41,9 @@ export default function AdminAvailabilityRoster({
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+  // The same month slide as the calendars themselves, since this roster hangs off the same MonthNav and a
+  // month change should not behave differently depending on which screen is asking for it (see utils/motion).
+  const { gridClass, onAnimationEnd, goBy, goTo } = useMonthSlide(viewDate, setViewDate);
 
   const days = availabilityRosterForMonth({
     year,
@@ -84,9 +88,9 @@ export default function AdminAvailabilityRoster({
       <MonthNav
         year={year}
         month={month}
-        onPrev={() => setViewDate(new Date(year, month - 1, 1))}
-        onNext={() => setViewDate(new Date(year, month + 1, 1))}
-        onToday={() => setViewDate(new Date(now.getFullYear(), now.getMonth(), 1))}
+        onPrev={() => goBy(-1)}
+        onNext={() => goBy(1)}
+        onToday={() => goTo(now)}
         isCurrentMonth={isCurrentMonth}
       />
 
@@ -116,7 +120,7 @@ export default function AdminAvailabilityRoster({
             No shift templates are configured for {MONTHS[month]} {year}.
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className={`space-y-2 ${gridClass}`} onAnimationEnd={onAnimationEnd}>
             {days.map(({ dateKey, slots }) => (
               <div
                 key={dateKey}

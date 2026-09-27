@@ -105,7 +105,7 @@ select,
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.2s ease-out forwards;
+  animation: fadeIn var(--motion-base) var(--motion-settle) forwards;
 }
 
 /* Hold-to-swap on the schedule board (see utils/scheduleDrop and AdminScheduleManagementTab).
@@ -150,29 +150,42 @@ select,
 :root {
   --motion-quick: 0.11s;
   --motion-base: 0.16s;
+  /* One longer value, for one thing: the calendars' month-to-month slide, which is a deliberate
+     NAVIGATION rather than a state change, and needs long enough to read as travel. It is spent twice
+     (out, then in), so a month change costs ~0.34s in total - roughly what iOS takes for the same move. */
+  --motion-slide: 0.17s;
   --motion-settle: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* A module change. Applied to <main>, and RESTARTED in place by utils/motion (see useReplayAnimation -
-// re-keying the element is the obvious way to replay an animation and would also throw away its scroll
-// position, which is shared across modules and belongs to the document on a phone).
+/* A module change. Applied to the CONTAINER, and passed down to its children (`.page-enter > *`), which is
+// what makes it replay: a tab switch replaces those children, so the browser runs the animation on the new
+// ones by itself.
 //
-// Opacity does the work; the 6px rise is what stops it reading as a flicker. `both` fill mode is
-// load-bearing: the element starts at the first keyframe rather than at its final state, so a replay does
-// not flash the destination before travelling to it.
+// The first attempt at this animated the container and restarted the animation from JavaScript when the tab
+// changed (getAnimations / currentTime = 0). It reported nothing, on the real thing: a replay is invisible
+// when it fails, and there is no DOM harness here to catch it. Animating elements that are KNOWN to be new
+// cannot fail that way, and it deleted the hook along with the doubt.
 //
-// One caveat, accepted deliberately: for the 160ms it runs, a transform on <main> makes it a containing
-// block, so a `position: fixed` descendant would anchor to it rather than to the viewport. The only fixed
-// things inside a module are the schedule board's popovers (which are positioned from a click, and a click
-// cannot land inside this window on the same gesture that changed the tab), and the alternative - fading
-// only, no movement - gives up the rise that makes the change read as a change. */
+// Opacity does the work; the rise is what stops it reading as a flicker. The second tier (the module itself,
+// under the page heading) is held back a beat, so the eye reads heading-then-content rather than one slab
+// appearing. `both` fill mode is load-bearing: a child starts at the first keyframe rather than at its final
+// state.
+//
+// One caveat, accepted deliberately: while it runs, a transform here makes the container a containing block,
+// so a `position: fixed` descendant would anchor to it rather than to the viewport. The two things in the app
+// that are positioned that way (the schedule board's member popovers) are rendered into document.body for
+// exactly this reason - see AdminScheduleManagementTab. */
 @keyframes pageIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
 
-.animate-pageIn {
+.page-enter > * {
   animation: pageIn var(--motion-base) var(--motion-settle) both;
+}
+
+.page-enter > :nth-child(n + 2) {
+  animation-delay: 40ms;
 }
 
 /* A dialog arriving. The backdrops already fade (animate-fadeIn), so this is the panel catching up with
@@ -189,6 +202,32 @@ select,
   animation: modalIn var(--motion-base) var(--motion-settle) both;
 }
 
+/* A dialog leaving, which is the half that was missing: the entry was animated and the exit was one frame,
+// so every dismissal snapped. The class goes on the OVERLAY (added by utils/motion just before the callback
+// that unmounts it), and the panel it contains is targeted by the class the entry put on it.
+//
+// Exits are quicker than entries and this one is also ease-in: the member has already decided, so the
+// dialog should get out of the way rather than perform, and the accelerate-away reads as the app moving on.
+//
+// `forwards` rather than `both`: there is no backwards fill to apply - the dialog is already on screen. */
+@keyframes overlayOut {
+  to { opacity: 0; }
+}
+
+@keyframes modalOut {
+  to { opacity: 0; transform: translateY(6px) scale(0.99); }
+}
+
+.animate-overlayOut {
+  animation: overlayOut var(--motion-quick) ease-in forwards;
+  /* Two clicks must not both land while it leaves, and a dialog on its way out is not a target. */
+  pointer-events: none;
+}
+
+.animate-overlayOut .animate-modalIn {
+  animation: modalOut var(--motion-quick) ease-in forwards;
+}
+
 /* A menu, dropdown or popover. Quicker than a dialog by design - it hangs off a control the member just
 // pressed, so it has to feel like it was already there - and it grows FROM that control: pair this with
 // Tailwind's `origin-top-right` / `origin-top-left` on the panel, which is what turns the scale into
@@ -200,6 +239,51 @@ select,
 
 .animate-popoverIn {
   animation: popoverIn var(--motion-quick) var(--motion-settle) both;
+}
+
+/* The calendars' month-to-month move, and the one place in this file that does real travel: the old month
+// slides out of the card and the new one slides in from the other side.
+//
+// It is two animations rather than one because only one month is ever rendered - keeping both on screen for
+// a cross-slide would mean extracting the grid into its own component just to mount it twice. So the month
+// leaves, and the swap happens while it is off the edge: `out-left` ends fully out of view, the next month
+// is painted already at `in-right`'s starting position, and the eye sees one continuous slide. The
+// overflow-hidden wrapper on the grid is what makes "out of view" true (see utils/motion).
+//
+// Direction is the point: forward slides left, back slides right, so the gesture matches the arrow that was
+// pressed. */
+@keyframes monthOutLeft {
+  to { opacity: 0; transform: translateX(-100%); }
+}
+
+@keyframes monthOutRight {
+  to { opacity: 0; transform: translateX(100%); }
+}
+
+@keyframes monthInRight {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes monthInLeft {
+  from { opacity: 0; transform: translateX(-100%); }
+  to { opacity: 1; transform: none; }
+}
+
+.animate-monthOutLeft {
+  animation: monthOutLeft var(--motion-slide) ease-in both;
+}
+
+.animate-monthOutRight {
+  animation: monthOutRight var(--motion-slide) ease-in both;
+}
+
+.animate-monthInRight {
+  animation: monthInRight var(--motion-slide) var(--motion-settle) both;
+}
+
+.animate-monthInLeft {
+  animation: monthInLeft var(--motion-slide) var(--motion-settle) both;
 }
 
 /* Press feedback on controls.
@@ -235,13 +319,22 @@ button:not(:disabled):active,
      change that has already happened by the time the animation would run, so the app simply returns to the
      instant behavior it had before any of this existed.
      //
-     // This is also the only place the page transition is silenced - useReplayAnimation restarts whatever
-     // animations the element has, and with `animation: none` there are none to restart, so the preference
-     // is honored without the hook having to know about it. */
-  .animate-pageIn,
+     // The page transition is in here as a DESCENDANT rule rather than a class, which is why this block is
+     // checked by collecting every rule in the file that animates and requiring its selector to appear here
+     // (see verify:motion) - the check cannot be fooled by a new name or a new shape. */
+  .page-enter > *,
+  .page-enter > :nth-child(n + 2),
   .animate-modalIn,
+  .animate-fadeIn,
   .animate-popoverIn,
-  .animate-fadeIn {
+  /* A month change has no animation to show and no reason to wait: utils/motion skips the two phases
+     entirely when this preference is set, so the month simply changes. */
+  .animate-monthOutLeft,
+  .animate-monthOutRight,
+  .animate-monthInLeft,
+  .animate-monthInRight,
+  .animate-overlayOut,
+  .animate-overlayOut .animate-modalIn {
     animation: none;
   }
 
