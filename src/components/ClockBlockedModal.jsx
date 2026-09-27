@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { AlertTriangle, MapPinOff, ShieldAlert, X, Ruler } from 'lucide-react';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
+import { renderInViewport } from '../utils/viewportLayer';
 
 /**
  * Why a clock in/out was refused, shown as a modal.
@@ -34,7 +35,7 @@ export default function ClockBlockedModal({ notice, onDismiss }) {
   const Icon = ICONS[notice.kind] || ShieldAlert;
   const hasNumbers = Number.isFinite(notice.distanceFeet) || Number.isFinite(notice.limitFeet);
 
-  return (
+  return renderInViewport(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300 animate-fadeIn"
       role="dialog"

@@ -261,17 +261,39 @@ checkIs(
 // Reduced motion gets the month, not the wait: the phases are skipped rather than run invisibly.
 checkIs('a member who asked for less movement skips to the month', /if \(reduced\.current\) \{[\s\S]{0,80}setViewDate\(next\)/.test(motion));
 
-console.log('\n--- the fixed popovers cannot be moved by an ancestor ---');
-// The regression this exists for: those popovers are `fixed` and positioned from a getBoundingClientRect, and a
-// transformed ancestor becomes their containing block - so the page transition relocated them. Portaling them
-// into document.body is the fix, and it is exactly the kind of fix a later tidy-up would remove.
-const schedule = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+console.log('\n--- a dialog belongs to the window, not to the card it came from ---');
+// The bug this exists for: the calendar item popup came up in the MIDDLE OF THE CALENDAR CARD, with its
+// shade confined to that card. A `position: fixed` overlay is positioned against its nearest transformed
+// ancestor and clipped by any `overflow: hidden` one - and the page transition had put a transform on the
+// module's container while every card is a rounded panel with overflow hidden. So the two things asserted
+// here are the two halves of the fix, and both are the kind a later tidy-up would undo.
+const declarationsFor = (source, selector) =>
+  (animationRules(source).find((rule) => rule.selector === selector) || {}).declarations || '';
+['.page-enter > *', '.animate-modalIn'].forEach((selector) => {
+  const declarations = declarationsFor(css, selector);
+  checkIs(`${selector} lets its transform go when it ends`, /backwards/.test(declarations) && !/\bboth\b/.test(declarations), declarations.trim());
+});
+// And the guarantee, for the 160ms the capture is still real and for any future transform: every dialog is
+// rendered into document.body, where nothing between it and the viewport can reach it.
+const viewportLayer = readFileSync('src/utils/viewportLayer.js', 'utf8');
+checkIs('the viewport layer exists', /export function renderInViewport\(node\)/.test(viewportLayer));
+checkIs('and keeps the markup visible without a DOM', /typeof document === 'undefined' \|\| !document\.body\) return node/.test(viewportLayer), 'portals emit nothing in a DOM-less render, so every markup assertion would pass vacuously');
+const dialogs = componentFiles.filter((file) => /bg-slate-950\/\d+[^>]*backdrop-blur/.test(sourceOf(file)));
+checkIs('the dialogs were found', dialogs.length >= 6, `${dialogs.length} found`);
 check(
-  'every viewport-positioned popover is portaled',
-  [...schedule.matchAll(/className="fixed z-\d+ [^"]*animate-popoverIn"/g)].length,
-  [...schedule.matchAll(/createPortal\(/g)].length
+  'every one of them is handed to the window',
+  dialogs.filter((file) => !/renderInViewport\(/.test(sourceOf(file))).map((file) => file),
+  []
 );
-checkIs('and the portal target is the body', /document\.body/.test(schedule));
+const schedule = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+checkIs('and so are the viewport-positioned popovers', /renderInViewport\(/.test(schedule) && !/createPortal/.test(schedule));
+
+console.log('\n--- the help guides ---');
+// Switching guides swapped the pane's contents between two frames, which read as abrupt for the same reason
+// everything else did. Keyed on the guide, so the new one animates in and the pane (and its scroll) stay put.
+const help = readFileSync('src/components/HelpGuides.jsx', 'utf8');
+checkIs('the guide content is keyed on the guide', /<div key=\{activeSlug\} className="page-enter">/.test(help));
+checkIs('and the pane itself is not remounted', /<article[\s\S]{0,200}?ref=\{paneRef\}/.test(help));
 
 console.log('\n--- teeth: the failures this would actually catch ---');
 // 1. A new dialog panel that forgets the animation. This is the realistic regression: the next modal is copied

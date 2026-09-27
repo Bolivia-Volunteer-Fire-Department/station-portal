@@ -128,7 +128,10 @@ export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
               className="p-4 min-w-0 md:min-h-0 md:overflow-y-auto overscroll-y-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500/60"
             >
               {active && (
-                <>
+                // Keyed on the guide, so switching guides animates the new one in (see .page-enter in
+                // index.css) - the bookmark list and the pane itself stay put, and the pane's scroll
+                // position is handled by the effect above rather than by a remount.
+                <div key={activeSlug} className="page-enter">
                   <h2 className="mb-3 text-base font-bold text-slate-900 dark:text-white">
                     {active.title}
                   </h2>
@@ -145,7 +148,7 @@ export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
                       and it will appear here.
                     </p>
                   )}
-                </>
+                </div>
               )}
             </article>
           </div>

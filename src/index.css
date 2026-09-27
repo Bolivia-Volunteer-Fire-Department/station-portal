@@ -168,8 +168,15 @@ select,
 //
 // Opacity does the work; the rise is what stops it reading as a flicker. The second tier (the module itself,
 // under the page heading) is held back a beat, so the eye reads heading-then-content rather than one slab
-// appearing. `both` fill mode is load-bearing: a child starts at the first keyframe rather than at its final
-// state.
+// appearing.
+//
+// `backwards`, deliberately, NOT `both` or `forwards`. The ending keyframe is the element's natural state
+// (`opacity: 1; transform: none`), so filling forwards adds nothing visually - but it does keep the transform
+// APPLIED, and an element with a transform is the containing block for every `position: fixed` descendant.
+// That is a dialog: with `both`, a modal opened inside a module anchored to the module's box instead of the
+// viewport, and any card with `overflow: hidden` between the two clipped it - so a dialog could come up
+// confined to the card it was opened from. `backwards` holds the first keyframe (which the stagger needs) and
+// lets the transform go when the animation ends.
 //
 // One caveat, accepted deliberately: while it runs, a transform here makes the container a containing block,
 // so a `position: fixed` descendant would anchor to it rather than to the viewport. The two things in the app
@@ -181,7 +188,7 @@ select,
 }
 
 .page-enter > * {
-  animation: pageIn var(--motion-base) var(--motion-settle) both;
+  animation: pageIn var(--motion-base) var(--motion-settle) backwards;
 }
 
 .page-enter > :nth-child(n + 2) {
@@ -199,7 +206,10 @@ select,
 }
 
 .animate-modalIn {
-  animation: modalIn var(--motion-base) var(--motion-settle) both;
+  /* `backwards` for the same reason as pageIn above: the ending keyframe is the natural state, so filling
+     forwards only serves to keep a transform applied - and a dialog is exactly the kind of box that contains
+     `position: fixed` children. */
+  animation: modalIn var(--motion-base) var(--motion-settle) backwards;
 }
 
 /* A dialog leaving, which is the half that was missing: the entry was animated and the exit was one frame,
@@ -238,7 +248,7 @@ select,
 }
 
 .animate-popoverIn {
-  animation: popoverIn var(--motion-quick) var(--motion-settle) both;
+  animation: popoverIn var(--motion-quick) var(--motion-settle) backwards;
 }
 
 /* The calendars' month-to-month move, and the one place in this file that does real travel: the old month
@@ -279,11 +289,11 @@ select,
 }
 
 .animate-monthInRight {
-  animation: monthInRight var(--motion-slide) var(--motion-settle) both;
+  animation: monthInRight var(--motion-slide) var(--motion-settle) backwards;
 }
 
 .animate-monthInLeft {
-  animation: monthInLeft var(--motion-slide) var(--motion-settle) both;
+  animation: monthInLeft var(--motion-slide) var(--motion-settle) backwards;
 }
 
 /* Press feedback on controls.

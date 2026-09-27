@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldAlert, AlertCircle, Loader2, LogOut } from 'lucide-react';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
+import { renderInViewport } from '../utils/viewportLayer';
 
 /**
  * Full-screen reauthentication gate rendered on top of the app UI.
@@ -53,7 +54,7 @@ export default function ReauthModal({ username = '', reason = null, onReauth, on
     }
   };
 
-  return (
+  return renderInViewport(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300 animate-fadeIn">
       <div className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8 animate-modalIn">
         <div className="flex flex-col items-center mb-6 text-center">

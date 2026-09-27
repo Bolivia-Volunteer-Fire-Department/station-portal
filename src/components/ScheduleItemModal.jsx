@@ -4,6 +4,7 @@ import RankIcon from './RankIcon';
 // Which tone a modal opens with is decided in one table - see MODAL_SOUNDS in utils/uiSounds.
 import { playSound, modalSoundFor } from '../utils/uiSounds';
 import { useDismissAnimation } from '../utils/motion';
+import { renderInViewport } from '../utils/viewportLayer';
 
 /**
  * Read-only detail popup for one calendar item: a shift, or an event.
@@ -30,7 +31,7 @@ export default function ScheduleItemModal({ details, icon, onClose }) {
 
   const HeaderIcon = icon === 'event' ? CalendarClock : CalendarDays;
 
-  return (
+  return renderInViewport(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300 animate-fadeIn"

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { KeyRound, AlertCircle, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { passwordChangeCopy, passwordChangeProblem } from '../utils/passwordPolicy';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
+import { renderInViewport } from '../utils/viewportLayer';
 
 /**
  * The forced password change.
@@ -52,7 +53,7 @@ export default function PasswordChangeModal({ username = '', onPasswordChange, o
     }
   };
 
-  return (
+  return renderInViewport(
     <div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-950/85 backdrop-blur-sm animate-fadeIn">
       <div className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8 animate-modalIn">
         <div className="flex flex-col items-center mb-6 text-center">

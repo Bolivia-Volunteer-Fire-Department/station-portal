@@ -632,7 +632,12 @@ per-request traffic this design removes — so it is left open on purpose.
   fail to replay it (the first attempt restarted a container animation from JavaScript, and a replay that
   silently does nothing is exactly what that looks like); and the dialogs' dismissals are sequenced in
   JavaScript (`utils/motion`) because CSS can animate an element arriving but not one the parent is about
-  to unmount.
+  to unmount. Two rules that are easy to get wrong and are therefore asserted:
+  **every dialog is rendered into `document.body`** (`utils/viewportLayer`), because a `position: fixed`
+  overlay is positioned against its nearest transformed ancestor and clipped by any `overflow: hidden` one —
+  a calendar popup was coming up in the middle of the calendar card for exactly that reason — and the entry
+  animations fill `backwards` rather than `both`, so a finished animation lets its transform go instead of
+  keeping a containing block alive for the rest of the session.
 - **Batched backend writes**: `ADMIN_BULK_SAVE_SCHEDULE` reads the `schedule` sheet
   once, applies each row update with a single `setValues`, appends all new rows in
   one call, and removes deleted rows in a single bottom-up pass

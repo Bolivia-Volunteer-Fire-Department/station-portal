@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 // The tone table, so this dialog sounds like every other modal (see MODAL_SOUNDS in utils/soundRules).
 import { playSound, modalSoundFor } from '../utils/uiSounds';
 import { useDismissAnimation } from '../utils/motion';
+import { renderInViewport } from '../utils/viewportLayer';
 
 /**
  * A confirmation dialog, for actions that cannot be undone.
@@ -64,7 +65,7 @@ export default function ConfirmModal({
 
   const danger = tone !== 'default';
 
-  return (
+  return renderInViewport(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-fadeIn"

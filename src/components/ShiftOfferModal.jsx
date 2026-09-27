@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { HandHelping, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
 import { useDismissAnimation } from '../utils/motion';
+import { renderInViewport } from '../utils/viewportLayer';
 
 /**
  * Confirmation modal for offering to fill an open shift (My Schedule).
@@ -51,7 +52,7 @@ export default function ShiftOfferModal({ shift, assignment, onClose, onConfirm 
     },
   ];
 
-  return (
+  return renderInViewport(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300 animate-fadeIn"

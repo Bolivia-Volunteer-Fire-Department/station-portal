@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import { renderInViewport } from '../../utils/viewportLayer';
 import {
   AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight,
     Loader2, Plus, RotateCcw, Save, Trash2, UserPlus, UserMinus, X, CheckCircle2, XCircle, Printer, Eye
@@ -1636,17 +1636,12 @@ export default function AdminScheduleManagementTab({
             const slot = popover.slot;
             const slotOffer = popover.pending[0];
             const offerUser = slotOffer ? userById(slotOffer.user_id) : null;
-            // Both popovers below are `fixed` and positioned from the trigger's getBoundingClientRect, i.e.
-            // in VIEWPORT coordinates - but a `fixed` element is positioned against its nearest ancestor
-            // that has a transform, filter or backdrop-filter, not against the viewport. The page and
-            // sub-tab transitions put a transform on the containers this tab lives inside, and a transform
-            // animation that has finished still applies its final value... which stopped the popovers
-            // landing where they were measured and moved both of them to the wrong part of the page.
-            //
-            // So they are rendered into document.body, which is what position:fixed has always meant: no
-            // ancestor of a portal is in its positioning chain, so any animation anywhere in the module is
-            // free to use a transform without silently relocating them.
-            return createPortal(
+            // Both popovers below are `fixed` and positioned from the trigger's getBoundingClientRect, i.e. in
+            // VIEWPORT coordinates - so they are handed to document.body, which is what position:fixed has
+            // always meant (see utils/viewportLayer). Otherwise a transformed or clipping ancestor anywhere
+            // above them decides where they land, and the page transition puts a transform on exactly that
+            // ancestor.
+            return renderInViewport(
               <>
                 <div className="fixed inset-0 z-40" onClick={closePopover} />
                 <div
@@ -1716,8 +1711,7 @@ export default function AdminScheduleManagementTab({
                     </button>
                   </div>
                 </div>
-              </>,
-              document.body
+              </>
             );
           }
 
@@ -1756,7 +1750,7 @@ export default function AdminScheduleManagementTab({
               ].filter(Boolean).join(' · ')
             : slotLabelText(popover.slot);
 
-          return createPortal(
+          return renderInViewport(
             <>
               <div className="fixed inset-0 z-40" onClick={closePopover} />
               <div
@@ -1830,8 +1824,7 @@ export default function AdminScheduleManagementTab({
                   </button>
                 )}
               </div>
-            </>,
-            document.body
+            </>
           );
         })()}
       </div>
