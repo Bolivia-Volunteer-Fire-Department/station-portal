@@ -79,7 +79,7 @@ If your role has the **Verify checklists** permission, the top of the module has
 
 It is a reader, not a way to act as somebody else:
 
-- The documents listed are still the ones **you** may see; the box changes whose records are shown, not what exists.
+- It shows the documents **as they see them** — the server applies *their* rank, so the list and its badges (how many are waiting on them, which folders) are their records, not yours.
 - Nothing can be ticked or signed while you are looking at another member's — those are theirs to do from their own sign-in, and the panel says so.
 - The card says **Viewing Jane Doe's records — read only** at the top of the document, in amber, so the mode is never a guess. Choose **Myself** to go back.
 

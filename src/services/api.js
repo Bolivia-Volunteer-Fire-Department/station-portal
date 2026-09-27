@@ -522,6 +522,12 @@ export const signDocument = async (id, token) => appScriptFetch({ action: 'SIGN_
 
 // The signature report for one document: administrators who manage documents, and the officers who verify
 // checklists. Named for what it returns rather than for who calls it - a verifier is not an administrator.
+// Another member's records, for a verifier looking at them. The mirror of `fetchDocuments`: same shape, same
+// rules, applied by the server to the NAMED member's rank rather than the caller's. Gated on
+// can_verify_documents, which is the permission that means "I read other people's paperwork to confirm it".
+export const fetchMemberDocumentRecords = async (userId, token) =>
+  appScriptFetch({ action: 'GET_MEMBER_DOCUMENT_RECORDS', token, user_id: userId });
+
 export const fetchDocumentSignatures = async (id, token) =>
   appScriptFetch({ action: 'GET_DOCUMENT_SIGNATURES', token, id });
 

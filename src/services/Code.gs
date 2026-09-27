@@ -1076,6 +1076,37 @@ function doPost(e) {
         break;
       }
 
+      case "GET_MEMBER_DOCUMENT_RECORDS": {
+        const recordsAuth = getAuthContext(ss, data);
+        // A verifier's read of one member's records - the same shape GET_DOCUMENTS returns for the caller, aimed at
+        // somebody else. Gated on can_verify_documents (which itself requires can_view_documents), because what it
+        // hands over is a person's signatures, and that is exactly what verifying is for. Reads are not logged:
+        // nothing was changed, and a log of who looked at whose paperwork is a different decision than this one.
+        if (!recordsAuth || !hasDocumentPermission(ss, recordsAuth.userId, "can_verify_documents")) {
+          responseData = { success: false, message: "Viewing another member's records requires the 'Verify checklists' permission." };
+          break;
+        }
+
+        const recordsUserId = String(data.user_id || payload.user_id || "").trim();
+        const recordsUser = findRowById(getSheetData(ss, "users"), recordsUserId);
+        if (!recordsUser) {
+          responseData = { success: false, message: "That member no longer exists." };
+          break;
+        }
+
+        responseData = {
+          success: true,
+          // The documents AS THAT MEMBER SEES THEM - the server's own rules, applied to their rank rather than the
+          // verifier's, so the list and its badges describe the records being looked at. The bodies are not here:
+          // a document is still opened through GET_DOCUMENT, which answers to the CALLER's rank.
+          documents: memberDocumentRows(ss, recordsUser, getSheetData(ss, "ranks")),
+          // Their signature rows, and the verifier rows recorded about them. Never anybody else's, and never the
+          // caller's own - this action is only ever about the member it names.
+          signatures: documentSignaturesForUser(ss, recordsUserId)
+        };
+        break;
+      }
+
       case "ADMIN_REMOVE_DOCUMENT_SIGNATURE": {
         const signatureRemoveAuth = getAuthContext(ss, data);
         if (!signatureRemoveAuth || !hasDocumentPermission(ss, signatureRemoveAuth.userId, "can_manage_documents")) {

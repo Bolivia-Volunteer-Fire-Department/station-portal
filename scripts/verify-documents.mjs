@@ -1734,9 +1734,60 @@ check(
   1
 );
 
-console.log('\n--- reading somebody else\'s records ---');
+console.log('\n--- reading somebody\'s records switches the WHOLE card ---');
 checkIs(
-  'the dropdown is offered only to a role that may verify',
+  'the server has one action for it',
+  action('GET_MEMBER_DOCUMENT_RECORDS').length > 0,
+  'the list could not follow the member'
+);
+checkIs(
+  'gated on can_verify_documents',
+  /hasDocumentPermission\(ss, recordsAuth\.userId, "can_verify_documents"\)/.test(
+    action('GET_MEMBER_DOCUMENT_RECORDS')
+  ),
+  'any member could read anybody\'s records'
+);
+checkIs(
+  'it names the member and refuses an unknown one',
+  /const recordsUser = findRowById\(getSheetData\(ss, "users"\), recordsUserId\);\n\s+if \(!recordsUser\) \{/.test(
+    action('GET_MEMBER_DOCUMENT_RECORDS')
+  )
+);
+checkIs(
+  'and reads their documents through the SAME rule as their own list',
+  /documents: memberDocumentRows\(ss, recordsUser, getSheetData\(ss, "ranks"\)\),/.test(
+    action('GET_MEMBER_DOCUMENT_RECORDS')
+  ) &&
+    /signatures: documentSignaturesForUser\(ss, recordsUserId\)/.test(action('GET_MEMBER_DOCUMENT_RECORDS')),
+  'the badges would describe the verifier and not the member'
+);
+checkIs(
+  'the client asks for the member\'s records, in one request',
+  /fetchMemberDocumentRecords\(viewAsMember\.id, token\)/.test(moduleSource) &&
+    /setViewerDocuments\(normalizeDocumentList\(result\.documents\)\)/.test(moduleSource),
+  'the list would keep describing the verifier - which is the bug this replaced'
+);
+checkIs(
+  'and the list, the counts and the rows all read the record data',
+  /outstandingSignatureDocuments\(recordDocuments, recordSignatures, recordUserId\)/.test(moduleSource) &&
+    /folderSummaries\(visible, recordSignatures, recordUserId\)/.test(moduleSource) &&
+    /documentSignatureState\(item, recordSignatures, recordUserId\)/.test(moduleSource)
+);
+checkIs(
+  'including what "there are no documents" means',
+  /const listIsEmpty = !recordsLoading && !loadError && !viewerError && recordDocuments\.length === 0;/.test(
+    moduleSource
+  ) &&
+    /\{\(loading \|\| viewerLoading\) && \(/.test(moduleSource),
+  'an empty list would be shown while their records were still loading'
+);
+checkIs(
+  'two members are never mixed: switching re-runs the read',
+  /\[viewingSomeoneElse, viewAsMember, token\]/.test(moduleSource),
+  'choosing a second member would leave the first one\'s records on screen'
+);
+checkIs(
+  'and the dropdown is offered only to a role that may verify',
   /\{canVerify && viewableMembers\.length > 0 && \(/.test(moduleSource),
   'every member would be offered the signature report'
 );
@@ -1746,8 +1797,9 @@ checkIs(
   'viewing yourself as somebody else is not a thing'
 );
 checkIs(
-  'the whole reader follows one "whose records" value',
-  /const recordUserId = viewAsMember \? viewAsMember\.id : userId;/.test(moduleSource) &&
+  'the whole card follows one "whose records" triple',
+  /const recordUserId = viewingSomeoneElse \? viewAsMember\.id : userId;/.test(moduleSource) &&
+    /const recordDocuments = viewingSomeoneElse \? viewerDocuments : documents;/.test(moduleSource) &&
     /const recordSignatures = viewingSomeoneElse \? viewerSignatures : signatures;/.test(moduleSource),
   'half the screen could show one member and half another'
 );
@@ -1767,8 +1819,8 @@ checkIs(
   'a tap on somebody else\'s item would do nothing and say nothing'
 );
 checkIs(
-  'their signature is read from the report rather than assumed',
-  /memberSignatureFor\(viewerSignatures, openDocumentId, recordUserId\)/.test(moduleSource),
+  'their signature is read from their own records rather than assumed',
+  /memberSignatureFor\(recordSignatures, openDocumentId, recordUserId\)/.test(moduleSource),
   'the reader would show the wrong member\'s signature'
 );
 checkIs(

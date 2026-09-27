@@ -18,6 +18,7 @@ import {
   fetchDocument,
   fetchDocumentSignatures,
   fetchDocuments,
+  fetchMemberDocumentRecords,
   signChecklistItems,
   signDocument,
   verifyChecklistItem,
@@ -261,12 +262,12 @@ export default function DocumentsModule({
   const [panelItems, setPanelItems] = useState([]);
   const [panelSignatures, setPanelSignatures] = useState([]);
   const [panelLoading, setPanelLoading] = useState(false);
-  // "View as": a verifier looking at somebody else's records. The documents themselves are the ones THIS reader
-  // may see - which documents exist is not what is being asked - so the only thing that changes is whose signature
-  // and whose item ticks are shown. Nothing about it is writable: the reader's own items are not ticked, signing
-  // is not offered, and the server would refuse both anyway because every member-facing action works on the
-  // caller's own id from the session.
+  // "View as": a verifier looking at somebody else's records. Everything the card shows - the list and its badges,
+  // whose ticks are on the items, whose signature is on the document - follows this one choice, so nothing can be
+  // half-updated. It is read-only: the reader's own actions are keyed to the session's id on the server, and the
+  // screens do not offer them here.
   const [viewAsMemberId, setViewAsMemberId] = useState('');
+  const [viewerDocuments, setViewerDocuments] = useState([]);
   const [viewerSignatures, setViewerSignatures] = useState([]);
   const [viewerLoading, setViewerLoading] = useState(false);
   const [viewerError, setViewerError] = useState('');
@@ -358,17 +359,21 @@ export default function DocumentsModule({
   }, [canVerify, users, userId]);
 
   const viewAsMember = viewableMembers.find((member) => member.id === viewAsMemberId) || null;
-
-  // Whose records the reader is showing: the signed-in member's own, unless a verifier has asked for somebody
-  // else's. This one value is what every "is this mine?" question below tests, so the two modes cannot half-apply.
-  const recordUserId = viewAsMember ? viewAsMember.id : userId;
   const viewingSomeoneElse = Boolean(viewAsMember);
 
-  // The verifier's read of one document's signatures, which is what makes somebody else's item states available.
-  // It is the SAME action the verification panel uses, gated on can_verify_documents on the server, so looking at
-  // another member's records is not a new way in - it is the report that already exists, scoped to one person.
+  // Whose records the card is showing: the signed-in member's own, unless a verifier has asked for somebody
+  // else's. Every "whose is this?" question below reads these three and nothing else, so the list, the folder
+  // counts, the "to sign" filter, the item ticks and the signature block are always describing the same person.
+  const recordUserId = viewingSomeoneElse ? viewAsMember.id : userId;
+  const recordDocuments = viewingSomeoneElse ? viewerDocuments : documents;
+  const recordSignatures = viewingSomeoneElse ? viewerSignatures : signatures;
+
+  // Somebody else's records, in one request: their documents (as THEY see them - the server applies their rank, not
+  // the verifier's) and their signature rows. The same action a verifier's permission already covers, aimed at a
+  // named member, so this is the report that exists rather than a new way in.
   useEffect(() => {
-    if (!viewingSomeoneElse || !openDocumentId) {
+    if (!viewingSomeoneElse) {
+      setViewerDocuments([]);
       setViewerSignatures([]);
       setViewerError('');
       setViewerLoading(false);
@@ -378,14 +383,16 @@ export default function DocumentsModule({
     let canceled = false;
     setViewerLoading(true);
     setViewerError('');
-    fetchDocumentSignatures(openDocumentId, token)
+    fetchMemberDocumentRecords(viewAsMember.id, token)
       .then((result) => {
         if (canceled) return;
         if (!result?.success) throw new Error(result?.message || 'Could not load those records.');
+        setViewerDocuments(normalizeDocumentList(result.documents));
         setViewerSignatures(normalizeSignatureList(result.signatures));
       })
       .catch((err) => {
         if (!canceled) {
+          setViewerDocuments([]);
           setViewerSignatures([]);
           setViewerError(err?.message || 'Could not load those records.');
         }
@@ -397,26 +404,24 @@ export default function DocumentsModule({
     return () => {
       canceled = true;
     };
-  }, [viewingSomeoneElse, openDocumentId, token]);
+  }, [viewingSomeoneElse, viewAsMember, token]);
 
-  // The document-level signature of whoever is being looked at, and whether it predates the last edit. In the
-  // member's own mode these come from the document read itself (the server sends the caller's own row); in the
-  // viewing mode they are picked out of the records just read.
+  // The document being read is fetched for THIS reader whichever mode is on - opening a body answers to the
+  // caller's own rank, which is the server's decision and not something this screen can change. Whose signature
+  // and ticks are shown over it comes from the records above.
   const shownSignature = useMemo(() => {
     if (!viewingSomeoneElse) return openDocument?.signature || null;
     if (!openDocumentId) return null;
-    return memberSignatureFor(viewerSignatures, openDocumentId, recordUserId);
-  }, [viewingSomeoneElse, openDocument, openDocumentId, viewerSignatures, recordUserId]);
+    return memberSignatureFor(recordSignatures, openDocumentId, recordUserId);
+  }, [viewingSomeoneElse, openDocument, openDocumentId, recordSignatures, recordUserId]);
 
   const shownSignatureStale = useMemo(() => {
     if (!viewingSomeoneElse) return openDocument?.signature_stale === true;
     return signatureIsStale(shownSignature, openDocument || {});
   }, [viewingSomeoneElse, openDocument, shownSignature]);
 
-  // Whose signatures the reader reasons about, and whether this reader may TICK anything. Looking at another
-  // member's records is read-only in the strongest sense: their ticks belong to them, and only they can produce
-  // one, from their own sign-in.
-  const recordSignatures = viewingSomeoneElse ? viewerSignatures : signatures;
+  // Whether the reader may TICK anything. Looking at another member's records is read-only in the strongest sense:
+  // their ticks belong to them, and only they can produce one, from their own sign-in.
   const canTickItems = itemsAreSignable && !viewingSomeoneElse;
 
   // The verification panel's data: read when a checklist is open and the reader may verify, and cleared
@@ -616,17 +621,17 @@ export default function DocumentsModule({
   );
 
   const outstanding = useMemo(
-    () => outstandingSignatureDocuments(documents, signatures, userId),
-    [documents, signatures, userId]
+    () => outstandingSignatureDocuments(recordDocuments, recordSignatures, recordUserId),
+    [recordDocuments, recordSignatures, recordUserId]
   );
-  const visible = onlyOutstanding ? outstanding : documents;
+  const visible = onlyOutstanding ? outstanding : recordDocuments;
 
   // A filter spans the whole library: searching, or asking for what needs signing, is a question about EVERY folder,
   // so while one is on the folder column stops deciding what the second column lists.
   const filtering = query.trim() !== '' || onlyOutstanding;
   const folders = useMemo(
-    () => folderSummaries(visible, signatures, userId),
-    [visible, signatures, userId]
+    () => folderSummaries(visible, recordSignatures, recordUserId),
+    [visible, recordSignatures, recordUserId]
   );
   const activeFolder = useMemo(() => {
     if (filtering) return '';
@@ -638,8 +643,11 @@ export default function DocumentsModule({
     [filtering, visible, query, activeFolder]
   );
 
-  const listIsEmpty = !loading && !loadError && documents.length === 0;
-  const filterFoundNothing = !loading && !loadError && documents.length > 0 && listed.length === 0;
+  // Loading is one state for the member and for somebody else's records: while either is in flight the card must
+  // not show "there are no documents yet", which is what an empty list looks like otherwise.
+  const recordsLoading = loading || (viewingSomeoneElse && viewerLoading);
+  const listIsEmpty = !recordsLoading && !loadError && !viewerError && recordDocuments.length === 0;
+  const filterFoundNothing = !recordsLoading && !loadError && recordDocuments.length > 0 && listed.length === 0;
 
   // Closing the document puts the browser back the way it was: no selection, and no half-ticked checklist items
   // left over from a document the member is no longer looking at.
@@ -700,7 +708,7 @@ export default function DocumentsModule({
           )}
           {!openId && (
             <span className={`text-xs text-slate-500 dark:text-slate-400 ${outstanding.length > 0 ? '' : 'ml-auto'}`}>
-              {onlyOutstanding ? `${visible.length} of ${documents.length}` : `${documents.length} document${documents.length === 1 ? '' : 's'}`}
+              {onlyOutstanding ? `${visible.length} of ${recordDocuments.length}` : `${recordDocuments.length} document${recordDocuments.length === 1 ? '' : 's'}`}
             </span>
           )}
 
@@ -736,16 +744,16 @@ export default function DocumentsModule({
           )}
         </div>
 
-        {loading && (
+        {(loading || viewerLoading) && (
           <div className="p-6 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
             <Loader2 className="w-4 h-4 animate-spin" />
-            Loading the documents…
+            {viewingSomeoneElse && viewerLoading ? 'Loading their records…' : 'Loading the documents…'}
           </div>
         )}
 
-        {!loading && loadError && (
+        {!loading && !viewerLoading && (loadError || viewerError) && (
           <div className="p-6">
-            <p className="text-sm font-medium text-red-600 dark:text-red-400">{loadError}</p>
+            <p className="text-sm font-medium text-red-600 dark:text-red-400">{loadError || viewerError}</p>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Documents live in the station&rsquo;s spreadsheet, so this screen needs a connection.
             </p>
@@ -768,7 +776,7 @@ export default function DocumentsModule({
             open.
             With nothing open the two columns that remain SPAN the card: there is no third track waiting for a
             document to arrive, because the reader takes the card rather than a column of it. */}
-        {!loading && !loadError && documents.length > 0 && (
+        {!loading && !loadError && recordDocuments.length > 0 && (
           <div
             className={
               openId
@@ -843,7 +851,7 @@ export default function DocumentsModule({
                   <div className="mt-1.5 space-y-1">
                     {listed.map((item) => {
                       const selected = item.id === openId;
-                      const state = documentSignatureState(item, signatures, userId);
+                      const state = documentSignatureState(item, recordSignatures, recordUserId);
                       const checklist = isChecklist(item);
                       return (
                         <button
