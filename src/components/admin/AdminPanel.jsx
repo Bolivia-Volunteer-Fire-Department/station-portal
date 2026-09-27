@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -15,6 +15,8 @@ import AdminSystemLogTab from './AdminSystemLogTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
 import AdminTrainingTab from './AdminTrainingTab';
+import AdminCertificationsTab from './AdminCertificationsTab';
+import AdminCertificationSetupTab from './AdminCertificationSetupTab';
 import AdminAnnouncementsTab from './AdminAnnouncementsTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
@@ -36,6 +38,8 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'users', label: 'Users', icon: User },
       { id: 'roles', label: 'Roles', icon: ShieldCheck },
       { id: 'ranks', label: 'Ranks', icon: Award },
+      { id: 'certifications', label: 'Certifications', icon: BadgeCheck },
+      { id: 'certification-setup', label: 'Certification Setup', icon: ClipboardCheck },
     ],
   },
   {
@@ -131,6 +135,10 @@ export default function AdminPanel({
   // set when the role can administer trainings.
   trainings = [],
   trainingSignatures = [],
+  // Certifications. The catalog rides with every bootstrap (it names and icons the records, and the icons
+  // appear beside members' names); the records only arrive for a role that may manage them.
+  certificationSetup = [],
+  certificationRecords = [],
   // Non-shift calendar entries, drawn on the board and the calendars this module hosts.
   events = [],
   // Lets a tab show a saved row immediately rather than waiting for the refresh wave.
@@ -313,6 +321,27 @@ export default function AdminPanel({
 
       {activeSubTab === 'ranks' && (
         <AdminRanksTab token={token} ranks={ranks} onDataChanged={onDataChanged} onRowSaved={onRowSaved} />
+      )}
+
+      {/* Who holds what. The catalog comes with the payload (it is small and every tab that shows an icon needs
+          it); the records only arrive for a role that may manage them, so a Setup-only role sees an empty table
+          rather than somebody else's data. */}
+      {activeSubTab === 'certifications' && (
+        <AdminCertificationsTab
+          token={token}
+          users={users}
+          setup={certificationSetup}
+          records={certificationRecords}
+          onDataChanged={onAdminDataChanged}
+        />
+      )}
+
+      {activeSubTab === 'certification-setup' && (
+        <AdminCertificationSetupTab
+          token={token}
+          setup={certificationSetup}
+          onDataChanged={onAdminDataChanged}
+        />
       )}
 
       {activeSubTab === 'templates' && (

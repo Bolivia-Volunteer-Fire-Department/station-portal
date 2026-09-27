@@ -1,6 +1,7 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, Shield, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, Shield, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck } from 'lucide-react';
 import RankIcon from './RankIcon';
+import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl } from '../utils/assets';
 import AnnouncementList from './AnnouncementList';
 
@@ -19,6 +20,7 @@ export default function Sidebar({
     canUseTimeclock,
     canSignTrainings,
     canViewDocuments,
+    canViewCertifications,
     ranks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
@@ -155,6 +157,22 @@ export default function Sidebar({
                     >
                         <GraduationCap className="w-5 h-5" />
                         <span>Training</span>
+                    </button>
+                    )}
+
+                    {/* My Certifications: the member's own records. Gated on can_view_certifications, so a
+                        station that does not track certifications can leave the module out of every role. */}
+                    {canViewCertifications && (
+                    <button
+                        onClick={() => { setActiveTab('certifications'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'certifications'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <BadgeCheck className="w-5 h-5" />
+                        <span>My Certifications</span>
+                        <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5 text-current opacity-80" />
                     </button>
                     )}
 

@@ -200,6 +200,16 @@ function memberBootstrapPayload(ss, auth) {
     events: eventsForViewer(ss, viewer, auth.userId),
     // GET_TIMECLOCK_LOGS
     logs: getSheetData(ss, "timeclock"),
+    // GET_CERTIFICATIONS - the member's own records, and the catalog they are named and iconed from.
+    certifications: certificationsForUser(ss, auth.userId),
+    certificationSetup: certificationTypes(ss),
+    // The sign-in notice: only the types that set a warning window, and only the ones inside it (or already
+    // lapsed). Computed here so the notice and the module cannot disagree.
+    certificationAlerts: certificationsExpiringForUser(ss, auth.userId),
+    // Who to show an icon beside, for the types that asked for it. Computed for EVERY member rather than for
+    // the viewer: the point of the badge is to be seen on other people's names, and it is one pass over two
+    // sheets.
+    certificationBadges: certificationBadgeIndex(ss),
     // GET_ON_DUTY
     onDuty: onDutyRowsFor(ss)
   };
@@ -236,6 +246,12 @@ function adminBootstrapPayload(ss, auth) {
     payload.scheduleTemplates = getSheetData(ss, "schedule_templates");
     payload.assignments = getSheetData(ss, "assignments");
     payload.apparatus = getSheetData(ss, "apparatus");
+  }
+
+  if (hasRolePermission(ss, auth.userId, "can_manage_certifications")) {
+    // Every record, decorated with its type and its status: the table shows what is expiring next, and the
+    // state is computed by the same function the member's own page uses (see certificationsDecorated).
+    payload.certificationRecords = certificationsDecorated(ss);
   }
 
   if (hasAnyRolePermission(ss, auth.userId, ["can_approve_shifts", "can_edit_schedule"])) {
@@ -2518,6 +2534,224 @@ function doPost(e) {
         if (deletedRole) {
           logSystemEvent(ss, authCtx.userId, "ADMIN_DELETE_ROLE", "Admin deleted role " + targetDeleteRoleId);
         }
+        break;
+      }
+
+      // The member's own certification records, plus the catalog so each one can show its name and icon.
+      //
+      // Read-only and unprivileged: this is a member's own paperwork, like their schedule or their clock
+      // history. `expiring` rides along because the sign-in notice and the module have to agree - both are
+      // this computation, not two.
+      case "GET_CERTIFICATIONS": {
+        const authCert = getAuthContext(ss, data);
+        if (!authCert) {
+          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
+          break;
+        }
+
+        responseData = {
+          success: true,
+          certifications: certificationsForUser(ss, authCert.userId),
+          setup: certificationTypes(ss),
+          expiring: certificationsExpiringForUser(ss, authCert.userId)
+        };
+        break;
+      }
+
+      // Everything the two administration tabs need: the catalog, and every record (which the table joins to
+      // the member list the client already holds).
+      case "ADMIN_GET_CERTIFICATIONS": {
+        const authCertAdmin = getAuthContext(ss, data);
+        if (!authCertAdmin || !hasRolePermission(ss, authCertAdmin.userId, "can_manage_certifications")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        responseData = {
+          success: true,
+          records: certificationsDecorated(ss),
+          setup: certificationTypes(ss)
+        };
+        break;
+      }
+
+      // One row of the CATALOG: the name, the icon, whether it can be renewed, how many days before it
+      // expires to warn, and whether a current one shows beside the member's name.
+      //
+      // Gated separately from the records: defining what the station tracks is a different job from recording
+      // who holds what, and the second is far more widely needed.
+      case "ADMIN_SAVE_CERTIFICATION_SETUP": {
+        const authCertSetup = getAuthContext(ss, data);
+        if (!authCertSetup || !hasRolePermission(ss, authCertSetup.userId, "can_manage_certification_setup")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const certName = String(data.name || payload.name || "").trim();
+        if (!certName) {
+          responseData = { success: false, message: "A certification needs a name." };
+          break;
+        }
+
+        const rawCertWarn = data.warn_days_before !== undefined ? data.warn_days_before : payload.warn_days_before;
+        const trimmedCertWarn = String(rawCertWarn === undefined || rawCertWarn === null ? "" : rawCertWarn).trim();
+        const parsedCertWarn = parseInt(trimmedCertWarn, 10);
+
+        const certSetupFields = {
+          id: String(data.id || payload.id || ""),
+          name: certName,
+          icon: String(data.icon || payload.icon || "").trim(),
+          description: String(data.description || payload.description || "").trim(),
+          // Blank stays blank: that IS the "do not warn" answer, so it must not be turned into a number here.
+          warn_days_before:
+            trimmedCertWarn === "" || !isFinite(parsedCertWarn) || parsedCertWarn < 0 ? "" : parsedCertWarn,
+          is_renewable: isTruthyValue(data.is_renewable !== undefined ? data.is_renewable : payload.is_renewable),
+          show_next_to_name: isTruthyValue(
+            data.show_next_to_name !== undefined ? data.show_next_to_name : payload.show_next_to_name
+          )
+        };
+
+        const rawCertOrder = data.sort_order !== undefined ? data.sort_order : payload.sort_order;
+        if (rawCertOrder !== undefined) {
+          const parsedCertOrder = parseInt(String(rawCertOrder).trim(), 10);
+          certSetupFields.sort_order = isFinite(parsedCertOrder) ? parsedCertOrder : "";
+        }
+
+        const savedCertSetupId = upsertSheetRowById(certificationSetupSheet(ss), certSetupFields);
+        responseData = { success: true, id: savedCertSetupId };
+
+        logSystemEvent(
+          ss,
+          authCertSetup.userId,
+          "ADMIN_SAVE_CERTIFICATION_SETUP",
+          "Saved certification " + certName + " (" + savedCertSetupId + ")"
+        );
+        break;
+      }
+
+      // Removing a type that members hold records for would leave those rows pointing at nothing, so it is
+      // refused with a count rather than orphaning them quietly. Delete the records first, deliberately.
+      case "ADMIN_DELETE_CERTIFICATION_SETUP": {
+        const authCertSetupDelete = getAuthContext(ss, data);
+        if (
+          !authCertSetupDelete ||
+          !hasRolePermission(ss, authCertSetupDelete.userId, "can_manage_certification_setup")
+        ) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const certSetupDeleteId = String(data.id || payload.id || "").trim();
+        if (!certSetupDeleteId) {
+          responseData = { success: false, message: "No certification was supplied." };
+          break;
+        }
+
+        const holderCount = certificationRecords(ss).filter(function (row) {
+          return row.certification_id === certSetupDeleteId;
+        }).length;
+
+        if (holderCount > 0) {
+          responseData = {
+            success: false,
+            message:
+              holderCount === 1
+                ? "1 member record still uses this certification. Remove that record first."
+                : holderCount + " member records still use this certification. Remove them first."
+          };
+          break;
+        }
+
+        responseData = {
+          success: true,
+          removed: deleteSheetRowById(certificationSetupSheet(ss), certSetupDeleteId)
+        };
+        logSystemEvent(
+          ss,
+          authCertSetupDelete.userId,
+          "ADMIN_DELETE_CERTIFICATION_SETUP",
+          "Deleted certification " + certSetupDeleteId
+        );
+        break;
+      }
+
+      // One RECORD: a member, a certification, and the period they held it for.
+      //
+      // Renewing adds a row rather than editing the last one, which is why nothing here stops a member having
+      // two periods of the same certification. When the type is not renewable the end date is BLANKED rather
+      // than merely ignored: the form disables that field, and this makes the rule true of the data too, so
+      // "does it expire?" has one answer wherever it is asked.
+      case "ADMIN_SAVE_CERTIFICATION": {
+        const authCertSave = getAuthContext(ss, data);
+        if (!authCertSave || !hasRolePermission(ss, authCertSave.userId, "can_manage_certifications")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const certUserId = String(data.user_id || payload.user_id || "").trim();
+        const certTypeId = String(data.certification_id || payload.certification_id || "").trim();
+        const certType = certificationTypeIndex(ss)[certTypeId] || null;
+
+        if (!certUserId || !findRowById(getSheetData(ss, "users"), certUserId)) {
+          responseData = { success: false, message: "Choose a member for this certification." };
+          break;
+        }
+        if (!certType) {
+          responseData = { success: false, message: "Choose a certification. Add it under Certification Setup first." };
+          break;
+        }
+
+        const certEffective = String(data.effective_date || payload.effective_date || "").trim();
+        const certEnd = certType.is_renewable ? String(data.end_date || payload.end_date || "").trim() : "";
+
+        if (certEffective && certEnd && certEnd < certEffective) {
+          responseData = { success: false, message: "The end date is before the effective date." };
+          break;
+        }
+
+        const certFields = {
+          id: String(data.id || payload.id || ""),
+          user_id: certUserId,
+          certification_id: certTypeId,
+          effective_date: certEffective,
+          end_date: certEnd,
+          notes: String(data.notes || payload.notes || "").trim(),
+          // Stamped here rather than by the client: it is the server's clock that decides what "now" is.
+          updated_at: getEasternTimestamp()
+        };
+
+        const savedCertId = upsertSheetRowById(certificationSheet(ss), certFields);
+        responseData = { success: true, id: savedCertId };
+
+        logSystemEvent(
+          ss,
+          authCertSave.userId,
+          "ADMIN_SAVE_CERTIFICATION",
+          "Saved " + certType.name + " for " + certUserId + " (" + savedCertId + ")"
+        );
+        break;
+      }
+
+      case "ADMIN_DELETE_CERTIFICATION": {
+        const authCertDelete = getAuthContext(ss, data);
+        if (!authCertDelete || !hasRolePermission(ss, authCertDelete.userId, "can_manage_certifications")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const certDeleteId = String(data.id || payload.id || "").trim();
+        if (!certDeleteId) {
+          responseData = { success: false, message: "No certification record was supplied." };
+          break;
+        }
+
+        responseData = { success: true, removed: deleteSheetRowById(certificationSheet(ss), certDeleteId) };
+        logSystemEvent(
+          ss,
+          authCertDelete.userId,
+          "ADMIN_DELETE_CERTIFICATION",
+          "Deleted certification record " + certDeleteId
+        );
         break;
       }
 
@@ -6553,6 +6787,269 @@ function pushDeviceCountByUser(ss) {
   return counts;
 }
 
+
+// ============================================================================
+// Certifications
+//
+// Two sheets, and the distinction between them is the whole design:
+//
+//   certification_setup  - the CATALOG: what the station tracks, what each one is called, which icon stands
+//                          for it, whether it can be renewed, how many days before it expires a member should
+//                          be warned, and whether a currently-valid one shows as an icon beside their name.
+//   certifications       - the RECORDS: one row per member per certification PERIOD. Renewing one adds a row
+//                          rather than overwriting the last, so "who was certified in what, and when"
+//                          survives a renewal - which is the reason this is a sheet rather than a column on
+//                          the user. A record is therefore identified by (member, type, effective date).
+//
+// Both sheets are created on first use, like push_devices: a missing sheet would mean records vanishing
+// silently, and the station should not have to know the headers to start using this.
+//
+// Two rules live here rather than in the screens, because the screens and the bootstrap all have to agree:
+//
+//   * a NON-RENEWABLE certification has no end date. The form disables that field and this file blanks it on
+//     save, so a stale date cannot survive a type being switched from renewable.
+//   * a record with no end date never expires (it is an achievement, not a licence), and a record with no
+//     effective date counts as always having started. Both are things the station will do by accident.
+// ============================================================================
+
+const CERT_SETUP_SHEET = "certification_setup";
+const CERT_SETUP_HEADERS = [
+  "id",
+  "name",
+  "icon",
+  "sort_order",
+  "warn_days_before",
+  "is_renewable",
+  "show_next_to_name",
+  "description"
+];
+
+const CERT_SHEET = "certifications";
+const CERT_HEADERS = ["id", "user_id", "certification_id", "effective_date", "end_date", "notes", "updated_at"];
+
+function certificationSetupSheet(ss) {
+  let sheet = ss.getSheetByName(CERT_SETUP_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(CERT_SETUP_SHEET);
+    sheet.appendRow(CERT_SETUP_HEADERS.slice());
+  }
+  return sheet;
+}
+
+function certificationSheet(ss) {
+  let sheet = ss.getSheetByName(CERT_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(CERT_SHEET);
+    sheet.appendRow(CERT_HEADERS.slice());
+  }
+  return sheet;
+}
+
+// The catalog, parsed into the shapes the screens and the rules want: a number or null for the warning
+// window (null is what "blank means do not warn" means), booleans for the two switches, and a defined order
+// with anything unset last.
+function certificationTypes(ss) {
+  return getSheetData(ss, CERT_SETUP_SHEET)
+    .filter(function (row) {
+      return String(row.name || "").trim() !== "";
+    })
+    .map(function (row) {
+      const rawWarn = String(
+        row.warn_days_before === undefined || row.warn_days_before === null ? "" : row.warn_days_before
+      ).trim();
+      const parsedWarn = rawWarn === "" ? null : parseInt(rawWarn, 10);
+      return {
+        id: String(row.id === undefined || row.id === null ? "" : row.id).trim(),
+        name: String(row.name || "").trim(),
+        icon: String(row.icon || "").trim(),
+        description: String(row.description || "").trim(),
+        sort_order: parseInt(row.sort_order, 10) || 0,
+        warn_days_before:
+          parsedWarn === null || !isFinite(parsedWarn) || parsedWarn < 0 ? null : parsedWarn,
+        is_renewable: isTruthyValue(row.is_renewable),
+        show_next_to_name: isTruthyValue(row.show_next_to_name)
+      };
+    })
+    .sort(function (a, b) {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+// Type id -> the parsed type, for decorating records.
+function certificationTypeIndex(ss) {
+  const index = {};
+  certificationTypes(ss).forEach(function (type) {
+    index[type.id] = type;
+  });
+  return index;
+}
+
+// The record rows as stored. A row without both keys is not a record of anything, so it is dropped rather
+// than shown as a blank line.
+function certificationRecords(ss) {
+  return getSheetData(ss, CERT_SHEET)
+    .filter(function (row) {
+      return String(row.user_id || "").trim() !== "" && String(row.certification_id || "").trim() !== "";
+    })
+    .map(function (row) {
+      return {
+        id: String(row.id === undefined || row.id === null ? "" : row.id).trim(),
+        user_id: String(row.user_id || "").trim(),
+        certification_id: String(row.certification_id || "").trim(),
+        effective_date: String(row.effective_date || "").trim(),
+        end_date: String(row.end_date || "").trim(),
+        notes: String(row.notes || "").trim(),
+        updated_at: String(row.updated_at || "").trim()
+      };
+    });
+}
+
+// Today as the dates in this sheet are written (YYYY-MM-DD) - which is how every other date in the app is
+// stored, so these columns can be typed in the spreadsheet without a format to remember.
+function certificationTodayKey() {
+  return String(getEasternTimestamp()).slice(0, 10);
+}
+
+// Calendar days between two date keys, or null when either is unusable.
+//
+// Counted from midnight rather than by subtracting timestamps: a certification ending "in 3 days" at 23:59
+// has to answer 3, not 2, or the warning fires a day early at some times of day and not others.
+function certificationDaysUntil(dateKey, todayKey) {
+  const target = String(dateKey || "").trim();
+  const today = String(todayKey || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(target) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+
+  const targetMs = Date.parse(target + "T00:00:00Z");
+  const todayMs = Date.parse(today + "T00:00:00Z");
+  if (!isFinite(targetMs) || !isFinite(todayMs)) return null;
+  return Math.round((targetMs - todayMs) / 86400000);
+}
+
+// Where a record stands today: 'active' | 'expiring' | 'expired' | 'upcoming'.
+//
+// `expiring` is not a separate thing from active - it is active AND inside the type's warning window - which
+// is why the badge and the sign-in notice cannot disagree about whether somebody is currently certified.
+// Both ask this.
+function certificationState(record, type, todayKey) {
+  const today = String(todayKey || "").trim();
+  const start = String((record || {}).effective_date || "").trim();
+  if (start && start > today) return "upcoming";
+
+  const end = String((record || {}).end_date || "").trim();
+  if (!end) return "active";
+  if (end < today) return "expired";
+
+  // A blank warning window is the station saying "do not warn about this one", which is not the same as zero
+  // days - so it is checked before the comparison rather than defaulting to 0.
+  const warnDays = type ? type.warn_days_before : null;
+  if (warnDays === null || warnDays === undefined) return "active";
+
+  const days = certificationDaysUntil(end, today);
+  return days !== null && days <= warnDays ? "expiring" : "active";
+}
+
+// Every record, decorated, for the administration table. The per-member reader above filters this, so the
+// table and a member's own page can never disagree about what "expiring" means.
+function certificationsDecorated(ss, todayKey) {
+  const types = certificationTypeIndex(ss);
+  const today = todayKey || certificationTodayKey();
+
+  return certificationRecords(ss).map(function (row) {
+    const type = types[row.certification_id] || null;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      certification_id: row.certification_id,
+      name: type ? type.name : "",
+      icon: type ? type.icon : "",
+      is_renewable: type ? type.is_renewable : false,
+      warn_days_before: type ? type.warn_days_before : null,
+      effective_date: row.effective_date,
+      end_date: row.end_date,
+      notes: row.notes,
+      updated_at: row.updated_at,
+      state: certificationState(row, type, today),
+      days_until_end: certificationDaysUntil(row.end_date, today)
+    };
+  });
+}
+
+// One member's records, decorated with the type they belong to and where they stand, most urgent first.
+function certificationsForUser(ss, userId, todayKey) {
+  const wanted = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!wanted) return [];
+
+  const types = certificationTypeIndex(ss);
+  const today = todayKey || certificationTodayKey();
+  const rank = { expiring: 0, active: 1, upcoming: 2, expired: 3 };
+
+  return certificationRecords(ss)
+    .filter(function (row) {
+      return row.user_id === wanted;
+    })
+    .map(function (row) {
+      const type = types[row.certification_id] || null;
+      return {
+        id: row.id,
+        certification_id: row.certification_id,
+        name: type ? type.name : "",
+        icon: type ? type.icon : "",
+        description: type ? type.description : "",
+        is_renewable: type ? type.is_renewable : false,
+        warn_days_before: type ? type.warn_days_before : null,
+        effective_date: row.effective_date,
+        end_date: row.end_date,
+        notes: row.notes,
+        state: certificationState(row, type, today),
+        days_until_end: certificationDaysUntil(row.end_date, today)
+      };
+    })
+    .sort(function (a, b) {
+      const byState =
+        (rank[a.state] === undefined ? 9 : rank[a.state]) - (rank[b.state] === undefined ? 9 : rank[b.state]);
+      if (byState !== 0) return byState;
+      return String(a.end_date || "9999").localeCompare(String(b.end_date || "9999"));
+    });
+}
+
+// What a member is told about when they sign in: the ones inside their type's window, plus any that have
+// already lapsed - a licence that quietly expired should be mentioned at least once, or the station finds out
+// a year later. Types with a blank window are never mentioned here; see certificationState.
+function certificationsExpiringForUser(ss, userId, todayKey) {
+  const today = todayKey || certificationTodayKey();
+  return certificationsForUser(ss, userId, today).filter(function (row) {
+    if (row.warn_days_before === null || row.warn_days_before === undefined) return false;
+    return row.state === "expiring" || row.state === "expired";
+  });
+}
+
+// Who to show an icon beside, and which one: member id -> [{ id, name, icon }] for the types that asked for
+// it, and only while the certification is CURRENT. A paramedic badge on somebody whose licence lapsed is
+// worse than no badge at all - it is the app making a claim the station cannot back.
+function certificationBadgeIndex(ss, todayKey) {
+  const types = certificationTypeIndex(ss);
+  const today = todayKey || certificationTodayKey();
+  const index = {};
+
+  certificationRecords(ss).forEach(function (row) {
+    const type = types[row.certification_id];
+    if (!type || !type.show_next_to_name || !type.icon) return;
+
+    const state = certificationState(row, type, today);
+    if (state === "expired" || state === "upcoming") return;
+
+    if (!index[row.user_id]) index[row.user_id] = [];
+    // One badge per type, however many periods a member has of it.
+    const already = index[row.user_id].some(function (badge) {
+      return badge.id === type.id;
+    });
+    if (already) return;
+    index[row.user_id].push({ id: type.id, name: type.name, icon: type.icon });
+  });
+
+  return index;
+}
 
 // ============================================================================
 // Password hashing (PBKDF2-HMAC-SHA256)

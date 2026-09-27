@@ -241,6 +241,57 @@ export const fetchMyPushDevices = async (token, deviceToken) =>
     device_token: String(deviceToken || ''),
   });
 
+// --- Certifications ---
+
+// The member's own records, the catalog they are named and iconed from, and whichever are expiring. The
+// bootstrap carries all three at sign-in; this is for a re-read without signing in again.
+export const fetchCertifications = async (token) => appScriptFetch({ action: 'GET_CERTIFICATIONS', token });
+
+// Every record, for the administration table. The catalog comes from the bootstrap (or the call above), so it
+// is not repeated here.
+export const adminFetchCertifications = async (token) =>
+  appScriptFetch({ action: 'ADMIN_GET_CERTIFICATIONS', token }, { retryOnNetworkError: true });
+
+// The catalog: what the station tracks, how each one is shown, and what should happen when it runs out.
+export const adminSaveCertificationSetup = async (certification, token) =>
+  appScriptFetch({
+    action: 'ADMIN_SAVE_CERTIFICATION_SETUP',
+    token,
+    id: String(certification.id || ''),
+    name: String(certification.name || ''),
+    icon: String(certification.icon || ''),
+    description: String(certification.description || ''),
+    // `undefined` is dropped by the fetch layer, so a field the caller did not touch is left alone; an empty
+    // string is the deliberate "do not warn about this one".
+    sort_order: certification.sort_order === undefined ? undefined : String(certification.sort_order),
+    warn_days_before:
+      certification.warn_days_before === undefined ? undefined : String(certification.warn_days_before),
+    is_renewable: certification.is_renewable === true,
+    show_next_to_name: certification.show_next_to_name === true,
+  });
+
+export const adminDeleteCertificationSetup = async (id, token) =>
+  appScriptFetch({ action: 'ADMIN_DELETE_CERTIFICATION_SETUP', token, id: String(id || '') });
+
+// One member's record of one certification, for one period. Renewing saves a NEW row rather than editing the
+// last, which is what keeps the history.
+export const adminSaveCertification = async (certification, token) =>
+  appScriptFetch({
+    action: 'ADMIN_SAVE_CERTIFICATION',
+    token,
+    id: String(certification.id || ''),
+    user_id: String(certification.user_id || ''),
+    certification_id: String(certification.certification_id || ''),
+    effective_date: String(certification.effective_date || ''),
+    // Ignored by the server when the type is not renewable, which is the rule rather than this call's promise.
+    end_date: String(certification.end_date || ''),
+    notes: String(certification.notes || ''),
+  });
+
+export const adminDeleteCertification = async (id, token) =>
+  appScriptFetch({ action: 'ADMIN_DELETE_CERTIFICATION', token, id: String(id || '') });
+
+// The member's own settings row (time format, theme, sounds, which notifications they want).
 export const saveUserSettings = async (updatedSettings, token) =>
   appScriptFetch({
     action: 'UPDATE_USER_SETTINGS',

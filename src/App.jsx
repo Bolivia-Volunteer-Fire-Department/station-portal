@@ -56,6 +56,9 @@ import HelpGuides from './components/HelpGuides';
 import DocumentsModule from './components/DocumentsModule';
 import { pageBarLabel } from './utils/pageLabels';
 import TrainingModule from './components/TrainingModule';
+import CertificationsModule from './components/CertificationsModule';
+import CertificationNotice from './components/CertificationNotice';
+import { setCertificationBadges } from './utils/certifications';
 import DigitalClock from './components/DigitalClock';
 import AdminPanel from './components/admin/AdminPanel';
 import { getCurrentCoordinates } from './utils/geolocation';
@@ -105,6 +108,12 @@ export default function App() {
   // role can administer trainings - the server decides which).
   const [trainings, setTrainings] = useState([]);
   const [trainingSignatures, setTrainingSignatures] = useState([]);
+  // Certifications: the member's own warnings for the dashboard notice, the catalog (which names and icons the
+  // records), and - for a role that may manage them - every record for the administration table. The badge
+  // registry that sits beside members' names is not state; see utils/certifications.
+  const [certificationAlerts, setCertificationAlerts] = useState([]);
+  const [certificationSetup, setCertificationSetup] = useState([]);
+  const [certificationRecords, setCertificationRecords] = useState([]);
   // Announcements: the public ones from the initial payload (login screen), and this member's own
   // targeted ones fetched after sign-in. Kept apart so signing out cannot clear the public list.
   const [announcements, setAnnouncements] = useState([]);
@@ -239,6 +248,10 @@ export default function App() {
   // server refuses every documents action, which is where the rule actually lives. The other two documents
   // permissions both require this one (see utils/permissions).
   const canViewDocuments = can('can_view_documents');
+  // The member's own certifications. A member permission rather than an administrative one: seeing your own
+  // licence dates is not a management act, and it is gated so a station that does not use this feature can turn
+  // the module off for everybody.
+  const canViewCertifications = can('can_view_certifications');
   const canManageDocuments = can('can_manage_documents');
 
   // Modules that render a seven-column calendar get the wider container.
@@ -581,6 +594,13 @@ const getLoadingMessage = () => {
   // The two member projections are skipped for an administrator, exactly as refreshSchedule skips them: an admin
   // already holds the FULL assignment and template rows, and the narrower member copy must not replace them.
   const applyBootstrap = (data) => {
+    // The certification icons beside every member's name, and the warnings for the signed-in member. Both are
+    // registry/lookup shaped rather than component state, which is why they are not in the list below.
+    if (data.certificationBadges) setCertificationBadges(data.certificationBadges);
+    if (data.certificationAlerts) setCertificationAlerts(data.certificationAlerts);
+    if (data.certificationSetup) setCertificationSetup(data.certificationSetup);
+    // Only present for a role that may manage certifications - see adminBootstrapPayload.
+    if (data.certificationRecords) setCertificationRecords(data.certificationRecords);
     if (data.schedule) setSchedule(data.schedule);
     if (data.availability) setAvailability(data.availability);
     if (data.roster) setRoster(data.roster);
@@ -1322,6 +1342,7 @@ const getLoadingMessage = () => {
             canUseTimeclock={canUseTimeclock}
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
+            canViewCertifications={canViewCertifications}
             ranks={ranks}
           />
 
@@ -1349,6 +1370,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'schedule' && 'My Schedule'}
                 {activeTab === 'availability' && 'My Availability'}
                 {activeTab === 'training' && 'Training'}
+                {activeTab === 'certifications' && 'My Certifications'}
                 {activeTab === 'help' && 'Help'}
                 {activeTab === 'settings' && 'User Settings'}
                 {activeTab === 'admin' && 'Administration'}
@@ -1359,6 +1381,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'schedule' && 'Review your assigned shifts, or switch on "Show everyone" to see the whole crew.'}
                 {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
                 {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
+                {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
                 {activeTab === 'help' && 'Guides for using the portal. Administrators have their own set under Administration → System → Help.'}
                 {activeTab === 'settings' && 'Customize your personal account preferences.'}
                 {activeTab === 'admin' && 'Manage users, roles, ranks, and system settings.'}
@@ -1367,6 +1390,9 @@ const getLoadingMessage = () => {
 
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
+                {/* Anything about to run out, above everything else: it is the one thing on this screen that is
+                    both personal and time-critical. Nothing renders when there is nothing to say. */}
+                <CertificationNotice alerts={certificationAlerts} />
                 {/* Announcements for the crew: above the clock, below the welcome message. */}
                 <AnnouncementList
                   announcements={announcements}
@@ -1469,6 +1495,10 @@ const getLoadingMessage = () => {
               />
             )}
 
+            {activeTab === 'certifications' && canViewCertifications && (
+              <CertificationsModule token={authToken} />
+            )}
+
             {activeTab === 'settings' && (
               <UserSettings
                 currentUser={currentUser}
@@ -1488,6 +1518,10 @@ const getLoadingMessage = () => {
                 departmentName={departmentName}
                 // Lets the app bar name the open Administration tab ("Admin: Schedule Mgt").
                 onActiveSubTabChange={setAdminSubTab}
+                // Certifications: the catalog rides with every payload, the records only for a role that may
+                // manage them (see adminBootstrapPayload).
+                certificationSetup={certificationSetup}
+                certificationRecords={certificationRecords}
                 currentRole={currentUserRole}
                 isAdmin={isAdmin}
                 currentUserId={String(currentUser?.id ?? '')}

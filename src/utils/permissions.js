@@ -115,6 +115,22 @@ export const ADMIN_PERMISSIONS = [
     requires: 'can_view_documents',
   },
   {
+    // Two tabs, and therefore two permissions - the Roles model maps one permission to one tab, and the split
+    // is real: recording who holds what is a supervisor's job, while defining what the station tracks is an
+    // administrator's.
+    key: 'can_manage_certifications',
+    tab: 'certifications',
+    label: 'Manage certifications',
+    description: 'Open Certifications: record what each member holds, with effective and end dates, and remove records. Renewals are added rather than overwritten, so the history stays.',
+  },
+  {
+    key: 'can_manage_certification_setup',
+    tab: 'certification-setup',
+    label: 'Set up certifications',
+    description: 'Open Certification Setup: define the certifications the station tracks, their icon, whether each can be renewed, how many days before one expires to warn the member, and whether it shows as an icon beside their name. Requires "Manage certifications".',
+    requires: 'can_manage_certifications',
+  },
+  {
     key: 'can_view_system_log',
     tab: 'system-log',
     label: 'View the system log',
@@ -167,6 +183,11 @@ export const MEMBER_PERMISSIONS = [
     label: 'Manage trainings',
     description: 'Add and change training activities in the Training module. Requires "Sign trainings".',
     requires: 'can_sign_trainings',
+  },
+  {
+    key: 'can_view_certifications',
+    label: 'View their certifications',
+    description: 'Open the Certifications module and see the certifications recorded for them, with their dates and where each one stands.',
   },
   {
     // The floor for the Documents module: without this a member has no Documents tab, and the server refuses
