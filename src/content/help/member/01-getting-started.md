@@ -43,6 +43,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 **Version 1.06**
 * Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...
 * Added Checklists - used for creating and viewing things like new hire orientation packet lists.
+* Added Links - used for external URLs.
 
 **Version 1.05x**
 * Added sounds.
