@@ -135,6 +135,89 @@ select,
   animation: swapPop 0.22s ease-out;
 }
 
+/* The app's motion, in one place.
+//
+// Three values, and they are deliberately short. This is an app that already responds instantly - a menu
+// click lands on the next screen and a modal is there before the finger leaves the glass - and the point
+// of these animations is to make the CHANGE legible, not to be watched. Past roughly 200ms a transition
+// stops reading as polish and starts reading as latency, which is the opposite of what was asked for.
+//
+// The curve is the other half of "swift": it leaves the start quickly and spends its time settling, so a
+// 160ms animation looks like something placed rather than something sliding. `ease-out` (the default in
+// the swap animations below) reads softer and slower at the same duration.
+//
+// Every animation defined with them is listed in the reduced-motion block at the end of this file. */
+:root {
+  --motion-quick: 0.11s;
+  --motion-base: 0.16s;
+  --motion-settle: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* A module change. Applied to <main>, and RESTARTED in place by utils/motion (see useReplayAnimation -
+// re-keying the element is the obvious way to replay an animation and would also throw away its scroll
+// position, which is shared across modules and belongs to the document on a phone).
+//
+// Opacity does the work; the 6px rise is what stops it reading as a flicker. `both` fill mode is
+// load-bearing: the element starts at the first keyframe rather than at its final state, so a replay does
+// not flash the destination before travelling to it.
+//
+// One caveat, accepted deliberately: for the 160ms it runs, a transform on <main> makes it a containing
+// block, so a `position: fixed` descendant would anchor to it rather than to the viewport. The only fixed
+// things inside a module are the schedule board's popovers (which are positioned from a click, and a click
+// cannot land inside this window on the same gesture that changed the tab), and the alternative - fading
+// only, no movement - gives up the rise that makes the change read as a change. */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.animate-pageIn {
+  animation: pageIn var(--motion-base) var(--motion-settle) both;
+}
+
+/* A dialog arriving. The backdrops already fade (animate-fadeIn), so this is the panel catching up with
+// them - until now the sheet itself appeared between two frames while the shade behind it eased in.
+//
+// The scale is the native cue: something arriving from just behind the glass rather than fading up out of
+// nothing. It is 2%, because anything larger on a dialog reads as a bounce. */
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.animate-modalIn {
+  animation: modalIn var(--motion-base) var(--motion-settle) both;
+}
+
+/* A menu, dropdown or popover. Quicker than a dialog by design - it hangs off a control the member just
+// pressed, so it has to feel like it was already there - and it grows FROM that control: pair this with
+// Tailwind's `origin-top-right` / `origin-top-left` on the panel, which is what turns the scale into
+// "opening downwards from the button". */
+@keyframes popoverIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.animate-popoverIn {
+  animation: popoverIn var(--motion-quick) var(--motion-settle) both;
+}
+
+/* Press feedback on controls.
+//
+// The cheapest way to make a screen feel alive: a press that shows NOTHING for a frame reads as a miss,
+// and the member presses again. Buttons only - deliberately not links or cards, since a link can wrap a
+// whole card and scaling a card's contents looks like the layout moved.
+//
+// No transition is declared here on purpose. Nearly every button in the app already carries Tailwind's
+// `transition` (which covers transform), and setting the shorthand from this file would WIN over that
+// utility - being unlayered - and silently drop every hover colour transition in the app to buy a
+// press that eases instead of snapping. The price is that the few buttons without `transition` snap
+// their press, which is the correct trade. */
+button:not(:disabled):active,
+[role='button']:not([aria-disabled='true']):active {
+  transform: scale(0.98);
+}
+
 /* Reduced motion: keep the MEANING and drop the movement. The dwell still has to say "this spot will swap", so it
 // becomes a solid outline instead of a blink - a flashing ring is exactly what this preference is about - and the
 // pop is removed, since the pills have already changed places by then. */
@@ -146,5 +229,24 @@ select,
 
   .animate-swapPop {
     animation: none;
+  }
+
+  /* The arrivals above, and the press scale. Nothing is lost by removing them: each one is decorating a
+     change that has already happened by the time the animation would run, so the app simply returns to the
+     instant behavior it had before any of this existed.
+     //
+     // This is also the only place the page transition is silenced - useReplayAnimation restarts whatever
+     // animations the element has, and with `animation: none` there are none to restart, so the preference
+     // is honored without the hook having to know about it. */
+  .animate-pageIn,
+  .animate-modalIn,
+  .animate-popoverIn,
+  .animate-fadeIn {
+    animation: none;
+  }
+
+  button:not(:disabled):active,
+  [role='button']:not([aria-disabled='true']):active {
+    transform: none;
   }
 }

@@ -1290,7 +1290,7 @@ export default function AdminScheduleManagementTab({
               </button>
 
               {quickAddOpen && (
-                <div className="absolute right-0 z-50 mt-1 w-64 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl">
+                <div className="absolute right-0 z-50 mt-1 w-64 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl origin-top-right animate-popoverIn">
                   <p className="px-3 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
                     Pick a member, then click any empty slot on the calendar to assign them.
                   </p>
@@ -1639,7 +1639,7 @@ export default function AdminScheduleManagementTab({
               <>
                 <div className="fixed inset-0 z-40" onClick={closePopover} />
                 <div
-                  className="fixed z-50 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-xl shadow-2xl overflow-hidden"
+                  className="fixed z-50 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-xl shadow-2xl overflow-hidden origin-top animate-popoverIn"
                   style={{ top: popover.top, left: popover.left, width: popover.width }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -1748,7 +1748,7 @@ export default function AdminScheduleManagementTab({
             <>
               <div className="fixed inset-0 z-40" onClick={closePopover} />
               <div
-                className="fixed z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden"
+                className="fixed z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden origin-top animate-popoverIn"
                 style={{ top: popover.top, left: popover.left, width: popover.width }}
                 onClick={(e) => e.stopPropagation()}
               >

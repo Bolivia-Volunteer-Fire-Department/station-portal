@@ -41,7 +41,7 @@ export default function Sidebar({
             {isSidebarOpen && (
                 <div
                     onClick={() => setIsSidebarOpen(false)}
-                    className="fixed inset-0 bg-black/60 z-20 md:hidden"
+                    className="fixed inset-0 bg-black/60 z-20 md:hidden animate-fadeIn"
                 />
             )}
 

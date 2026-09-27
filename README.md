@@ -617,6 +617,16 @@ per-request traffic this design removes — so it is left open on purpose.
 
 ## Performance Notes
 
+- **The app's motion is deliberately shorter than it looks.** Every state change used to be a single
+  frame — a menu click replaced the whole screen between two frames, and a dialog appeared with no beat
+  at all while the shade behind it eased in — which reads as abrupt rather than as fast. There is now one
+  small vocabulary of entry animations (`--motion-quick` 110ms, `--motion-base` 160ms, one settle curve)
+  for module changes, dialog panels and popovers, plus a 2% press scale on controls. The budgets are the
+  point: nothing may exceed ~200ms, nothing loops, and every animation class defined in `src/index.css`
+  has to appear in its `prefers-reduced-motion` block — `npm run verify:motion` measures all three, so a
+  future animation cannot quietly be added without a decision about the member who asked for less
+  movement. The page transition is replayed in place (`utils/motion`) rather than by re-keying `<main>`,
+  which would have thrown away the scroll position that modules share.
 - **Batched backend writes**: `ADMIN_BULK_SAVE_SCHEDULE` reads the `schedule` sheet
   once, applies each row update with a single `setValues`, appends all new rows in
   one call, and removes deleted rows in a single bottom-up pass

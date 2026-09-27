@@ -68,7 +68,7 @@ export default function ConfirmModal({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={message ? messageId : undefined}
-        className="relative w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6"
+        className="relative w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6 animate-modalIn"
       >
         <div className="flex items-start gap-3">
           <div

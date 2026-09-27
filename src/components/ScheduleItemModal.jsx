@@ -31,7 +31,7 @@ export default function ScheduleItemModal({ details, icon, onClose }) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6"
+        className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6 animate-modalIn"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">

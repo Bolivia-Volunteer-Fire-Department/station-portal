@@ -41,7 +41,7 @@ export default function ClockBlockedModal({ notice, onDismiss }) {
       aria-modal="true"
       aria-labelledby="clock-blocked-title"
     >
-      <div className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8">
+      <div className="w-full max-w-md mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8 animate-modalIn">
         <div className="flex flex-col items-center mb-6 text-center">
           <div className="p-3 bg-amber-500/10 rounded-full mb-3">
             <Icon className="w-10 h-10 text-amber-500" />

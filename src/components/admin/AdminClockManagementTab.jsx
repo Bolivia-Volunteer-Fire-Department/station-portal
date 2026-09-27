@@ -61,7 +61,7 @@ function AddressPopover({ label, address, lat, lon, children }) {
         <div
           id={popoverId}
           role="tooltip"
-          className="absolute z-20 top-full left-0 mt-1 w-60 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl text-xs font-sans normal-case"
+          className="absolute z-20 top-full left-0 mt-1 w-60 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl text-xs font-sans normal-case origin-top-left animate-popoverIn"
         >
           <p className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200 mb-1">
             <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0" /> {label}

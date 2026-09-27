@@ -6,7 +6,7 @@ export default function LoadingOverlay({ isLoading, message = 'Communicating wit
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300 animate-fadeIn">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 text-center">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 text-center animate-modalIn">
         <div className="relative mb-4 flex items-center justify-center">
           {/* Pulsing Outer Glow */}
           <div className="absolute inset-0 rounded-full bg-red-600/20 blur-xl animate-pulse" />

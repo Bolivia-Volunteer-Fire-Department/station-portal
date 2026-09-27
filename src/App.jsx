@@ -15,6 +15,7 @@ import {
   resetSoundVolumes,
 } from './utils/uiSounds';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from './utils/refreshWave';
+import { useReplayAnimation } from './utils/motion';
 import {
   fetchInitialData,
   fetchBootstrap,
@@ -349,6 +350,10 @@ const getLoadingMessage = () => {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkMode);
   }, [isDarkMode]);
+
+  // The page transition. `activeTab` is what it replays on: the members' modules and the Administration
+  // panel's sub-tabs are handled separately (see AdminPanel), because that one owns its own sub-tab state.
+  const mainRef = useReplayAnimation(activeTab);
 
   // Sounds.
   //
@@ -1329,11 +1334,12 @@ const getLoadingMessage = () => {
             // `md:flex md:flex-col` only on the Help screen, where the heading above the guide card has to be one of
             // the rows rather than something the card is stacked under - see boundedScreen above. Every other
             // tab is untouched: the page scrolls them.
-            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 ${
+            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 animate-pageIn ${
               boundedScreen ? 'md:flex md:flex-col' : ''
             } ${
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
             }`}
+            ref={mainRef}
           >
             {/* The page title scrolls with the content: only the app bar above is pinned, so the heading
                 moves out of the way as you read. Once it has, the app bar says which page this is.

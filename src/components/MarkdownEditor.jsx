@@ -470,7 +470,7 @@ export default function MarkdownEditor({
               <ChevronDown className="w-4 h-4" />
             </button>
             {showCallouts && (
-              <div className="absolute left-0 top-9 z-20 w-40 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1">
+              <div className="absolute left-0 top-9 z-20 w-40 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1 origin-top-left animate-popoverIn">
                 {CALLOUT_ACTIONS.map((action) => (
                   <button
                     key={action.callout}
