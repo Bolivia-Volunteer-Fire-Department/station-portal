@@ -2083,10 +2083,46 @@ function doPost(e) {
           break;
         }
 
-        const registered = registerPushDevice(ss, authDevice.userId, deviceToken, deviceLabel);
-        responseData = registered
-          ? { success: true, devices: pushTokensForUser(ss, authDevice.userId).length }
-          : { success: false, message: "Could not register this device." };
+        // `transfer` is only ever sent by the "use this computer for me" button, whose label says what
+        // it does. Without it, a device that already belongs to another member is REFUSED rather than
+        // taken - the refusal is what stops signing in on a shared computer from quietly making it
+        // yours (see registerPushDevice).
+        const transferDevice = isTruthyValue(
+          data.transfer !== undefined ? data.transfer : payload.transfer
+        );
+
+        const registered = registerPushDevice(
+          ss,
+          authDevice.userId,
+          deviceToken,
+          deviceLabel,
+          { transfer: transferDevice }
+        );
+
+        if (registered.ok) {
+          // A device changing hands is security-relevant for BOTH members and neither of them can see
+          // it from their own side: one has lost a notification target, the other has gained one. The
+          // log is the only place the two are recorded together.
+          if (registered.transferredFrom) {
+            logSystemEvent(
+              ss,
+              authDevice.userId,
+              "REGISTER_PUSH_DEVICE",
+              "Moved a device from " + registered.transferredFromLabel +
+                " (" + registered.transferredFrom + ") to their own account"
+            );
+          }
+          responseData = { success: true, devices: pushTokensForUser(ss, authDevice.userId).length };
+        } else if (registered.reason === "owned_by_another_member") {
+          responseData = {
+            success: false,
+            code: "DEVICE_OWNED_BY_ANOTHER_MEMBER",
+            owner_name: registered.ownerLabel,
+            message: "This device is registered to " + registered.ownerLabel + "."
+          };
+        } else {
+          responseData = { success: false, message: "Could not register this device." };
+        }
         break;
       }
 
@@ -2106,15 +2142,53 @@ function doPost(e) {
           break;
         }
 
-        responseData = { success: true, removed: deletePushTokens(ss, [removeToken], authUnregister.userId) };
+        // The row is deleted for the TOKEN, whatever member it names.
+        //
+        // Holding the token is the proof: a browser can only name its own subscription, so a caller
+        // that produces one is standing at that device. Bounding the delete to the session's own member
+        // - which this used to do - left the OTHER member's row behind after this browser had
+        // unsubscribed, i.e. a device recorded as registered that cannot receive anything. That is the
+        // silent failure this whole sheet exists to prevent, and it is worse than the delete it was
+        // avoiding, because a stale row looks fine until the day it matters.
+        //
+        // The prune path (dead tokens reported by FCM during a send) stays bounded by member, which is
+        // what that bound was for: no session, no device, just a token that failed for one recipient.
+        const ownerBefore = pushDeviceOwner(ss, removeToken);
+        const removedCount = deletePushTokens(ss, [removeToken]);
+        const removedSomeoneElses =
+          !!ownerBefore && String(ownerBefore.user_id) !== String(authUnregister.userId).trim();
+
+        if (removedSomeoneElses) {
+          logSystemEvent(
+            ss,
+            authUnregister.userId,
+            "UNREGISTER_PUSH_DEVICE",
+            "Turned notifications off for a device registered to " + ownerBefore.name +
+              " (" + ownerBefore.user_id + ")"
+          );
+        }
+
+        responseData = {
+          success: true,
+          removed: removedCount,
+          // Named so the card can say whose notifications just stopped here rather than claiming a
+          // clean "turned off for this device" over somebody else's row.
+          removed_owner_name: removedSomeoneElses ? ownerBefore.name : ""
+        };
         break;
       }
 
-      // The signed-in member's own devices, WITHOUT tokens.
+      // The signed-in member's own devices, WITHOUT tokens - plus, when the caller passes the token
+      // THIS browser holds, whose device that browser is.
       //
       // A label and a last-seen stamp are what the settings card needs to say "also on 2 other
       // devices", and a token is a credential-shaped value that has no business traveling to a
       // browser that does not already hold it.
+      //
+      // The `device_owner` half is here rather than in its own request because the card asks both
+      // questions at once and Apps Script round trips are slow: "what do I have?" and "is this one of
+      // mine?" are one picture. It is answered only for the token the caller supplied - the one this
+      // browser's own service worker holds - so it describes the computer the member is sitting at.
       case "MY_PUSH_DEVICES": {
         const authMyDevices = getAuthContext(ss, data);
         if (!authMyDevices) {
@@ -2123,6 +2197,8 @@ function doPost(e) {
         }
 
         const myDeviceUserId = String(authMyDevices.userId).trim();
+        const thisDeviceToken = String(data.device_token || payload.device_token || "").trim();
+
         responseData = {
           success: true,
           devices: pushDeviceRows(ss).filter(function (row) {
@@ -2133,7 +2209,8 @@ function doPost(e) {
               device_label: String(row.device_label || "").trim(),
               updated_at: String(row.updated_at || "").trim()
             };
-          })
+          }),
+          device_owner: thisDeviceToken ? pushDeviceOwner(ss, thisDeviceToken) : null
         };
         break;
       }
@@ -6130,35 +6207,70 @@ function pushTokensForUser(ss, userId) {
 
 // Registers or refreshes one device.
 //
-// Idempotent by token, so opening the settings card repeatedly cannot accumulate rows. A row that
-// already exists is re-pointed at the current member - a shared station tablet can change hands -
-// and its label and timestamp are refreshed so the admin list can show what is stale.
-function registerPushDevice(ss, userId, token, label) {
+// Idempotent by token, so opening the settings card repeatedly cannot accumulate rows.
+//
+// A token belongs to ONE member. The row is the record of whose alerts this browser receives - FCM
+// delivers to a browser, not to an account - and it used to be re-pointed at whoever registered next,
+// justified as "a shared station tablet can change hands". That sentence was wrong in one specific
+// way: the settings card registers whenever it finds a subscription, so merely SIGNING IN on a shared
+// computer handed that computer over, with nobody told. The member who set it up went on believing
+// their alerts arrived there (they did not), and the member who signed in afterwards owned a device
+// they had never enabled - and a test push to them appeared on the first member's desk.
+//
+// Handing a device over is still the right answer for a station computer, so it is still allowed - but
+// only as an explicit act. `options.transfer` is set by the one button that says what it does, and the
+// previous owner's legacy token column is cleared with it, or one browser would deliver for both
+// members at once (see clearLegacyPushToken).
+//
+// The result is an object rather than a boolean because "this computer is registered to someone else"
+// is an ANSWER rather than a failure: the caller has to be able to say whose it is.
+function registerPushDevice(ss, userId, token, label, options) {
   const targetUserId = String(userId === undefined || userId === null ? "" : userId).trim();
   const targetToken = String(token === undefined || token === null ? "" : token).trim();
-  if (!targetUserId || !targetToken) return false;
+  if (!targetUserId || !targetToken) return { ok: false, reason: "missing_arguments" };
 
   const sheet = pushDeviceSheet(ss);
   const data = sheet.getDataRange().getValues();
-  if (!data.length) return false;
+  if (!data.length) return { ok: false, reason: "missing_headers" };
 
   const headers = data[0].map(String);
   const userCol = headers.indexOf("user_id");
   const tokenCol = headers.indexOf("token");
   const labelCol = headers.indexOf("device_label");
   const stampCol = headers.indexOf("updated_at");
-  if (tokenCol === -1 || userCol === -1) return false;
+  if (tokenCol === -1 || userCol === -1) return { ok: false, reason: "missing_headers" };
 
   const stamp = getEasternTimestamp();
   const deviceLabel = String(label || "").trim().slice(0, 80);
+  const transfer = !!(options && options.transfer);
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][tokenCol]).trim() !== targetToken) continue;
 
+    const currentOwner = String(data[i][userCol]).trim();
+    if (currentOwner && currentOwner !== targetUserId && !transfer) {
+      return {
+        ok: false,
+        reason: "owned_by_another_member",
+        ownerUserId: currentOwner,
+        ownerLabel: pushDeviceOwnerLabel(ss, currentOwner)
+      };
+    }
+
     sheet.getRange(i + 1, userCol + 1).setValue(targetUserId);
     if (labelCol !== -1) sheet.getRange(i + 1, labelCol + 1).setValue(deviceLabel);
     if (stampCol !== -1) sheet.getRange(i + 1, stampCol + 1).setValue(stamp);
-    return true;
+
+    if (currentOwner && currentOwner !== targetUserId) {
+      clearLegacyPushToken(ss, currentOwner, targetToken);
+      return {
+        ok: true,
+        transferredFrom: currentOwner,
+        transferredFromLabel: pushDeviceOwnerLabel(ss, currentOwner)
+      };
+    }
+
+    return { ok: true, transferredFrom: "" };
   }
 
   const newRow = headers.map(function (header) {
@@ -6170,7 +6282,67 @@ function registerPushDevice(ss, userId, token, label) {
     return "";
   });
   sheet.appendRow(newRow);
-  return true;
+  return { ok: true, transferredFrom: "" };
+}
+
+// Which member a device's row currently names, or null when the token has no row.
+//
+// The settings card asks this with the token THIS browser holds, which is what bounds the disclosure:
+// a browser can obtain its own subscription and no other, so the answer describes the computer the
+// caller is standing at and nothing else. Without it the card cannot tell "this device is set up for
+// me" from "this device is set up for the member who signed in before me" - and getting that wrong is
+// what let a shared computer be taken over silently.
+function pushDeviceOwner(ss, token) {
+  const wanted = String(token === undefined || token === null ? "" : token).trim();
+  if (!wanted) return null;
+
+  const found = pushDeviceRows(ss).filter(function (row) {
+    return String(row.token || "").trim() === wanted;
+  })[0];
+  if (!found) return null;
+
+  const ownerId = String(found.user_id || "").trim();
+  return {
+    user_id: ownerId,
+    name: pushDeviceOwnerLabel(ss, ownerId),
+    device_label: String(found.device_label || "").trim()
+  };
+}
+
+// A member's name, as a settings card or a log line should show it. `name` is the display name and
+// `user_name` the sign-in name; either beats an id, and a phrase beats an empty cell - this is always
+// being shown to somebody who has to work out which account they are looking at.
+function pushDeviceOwnerLabel(ss, userId) {
+  const wanted = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!wanted) return "";
+
+  const user = getSheetData(ss, "users").filter(function (row) {
+    return String(row.id === undefined || row.id === null ? "" : row.id).trim() === wanted;
+  })[0];
+  if (!user) return "another member";
+
+  return String(user.name || user.user_name || "").trim() || "another member";
+}
+
+// Clears a token out of the member's legacy `user_settings.fcm_token` column.
+//
+// Only a hand-over needs this. That column is still READ by pushTokenIndex so that a device enabled
+// before the push_devices sheet existed keeps working - which means a token left in it delivers for
+// the member who put it there whatever the row says now. On a transfer that is one browser receiving
+// two members' notifications, which is the leak this change exists to close.
+function clearLegacyPushToken(ss, userId, token) {
+  const wanted = String(token === undefined || token === null ? "" : token).trim();
+  const owner = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!wanted || !owner) return false;
+
+  try {
+    const settings = userSettingsIndex(ss)[owner] || {};
+    if (String(settings.fcm_token || "").trim() !== wanted) return false;
+    return upsertUserSettingsColumns(ss, owner, { fcm_token: "" });
+  } catch (err) {
+    Logger.log("Could not clear the legacy FCM token for " + owner + ": " + err.toString());
+    return false;
+  }
 }
 
 // Forgets the given tokens, everywhere they are stored.

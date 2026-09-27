@@ -25,11 +25,78 @@ html {
   /* No bounce past the end of the page, and no pull-to-refresh: the app refreshes itself in its own time, so
      dragging the top of the page down should do nothing. */
   overscroll-behavior-y: none;
+  /* Every tap here is a gesture the app reads itself, so the browser can stop guessing. `manipulation`
+     allows panning and PINCH-zoom but drops the double-tap-to-zoom - the one that fires by accident, on
+     a button the member was pressing twice, and reshapes the page around it. It also removes the 300ms
+     wait for a second tap that never comes, which is the difference between a button that feels instant
+     and one that feels like a web page. Pinch is left alone on purpose: it is how a low-vision member
+     reads the screen, and only an INSTALLED window turns it off (src/utils/nativeShell.js). */
+  touch-action: manipulation;
+  /* iOS inflates type when a phone turns to landscape, which reflows the whole app mid-rotation. */
+  -webkit-text-size-adjust: 100%;
 }
 
 html.dark {
   background-color: var(--color-slate-900);
   color-scheme: dark;
+}
+
+/* A control is not text.
+//
+// Press-and-hold on a button, a tab or a table heading used to offer the browser's text-selection menu
+// - the magnifier, Copy, Look Up, Share - because nothing told the browser that the thing under the
+// finger is a control. No native app does that, and it is the moment a screen stops feeling like one.
+//
+// CONTENT is deliberately left alone: a member may well want to copy an announcement, an address, a
+// document or a row of the schedule, and taking that away would be a worse bug than the one being
+// fixed. So only the surfaces that ARE controls opt out, and `.no-select` exists for chrome that is not
+// a real <button> or <a> - a row, a tile, a pill.
+//
+// `-webkit-tap-highlight-color` rides along because it is the same giveaway: the grey flash is painted
+// on the way IN to a tap, so a control that keeps it can never feel pressed rather than selected. */
+button,
+a,
+label,
+summary,
+th,
+[role='button'],
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ...and a field is the one place a tap SHOULD put a caret.
+//
+// Load-bearing, not tidiness: a form field is often a child of its own <label>, and Safari carries
+// `user-select: none` down from an ancestor into the text inside the field - so without this the rule
+// above would stop members selecting what they had just typed. */
+input,
+textarea,
+select,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Tapping a field must not zoom the page.
+//
+// This is the zoom members actually hit: iOS Safari zooms the whole viewport whenever the field it
+// focuses renders under 16px, and this app's fields are 12-14px by design. So the app appeared to "zoom
+// on its own" the moment anybody touched a search box or the login form - and no amount of touch-action
+// or user-select work would have stopped it, because the browser is doing it deliberately.
+//
+// Phones only, and fields only: everything else keeps its intended size. These rules are unlayered, so
+// they win over the utility classes that specify the smaller sizes - Tailwind emits into a cascade
+// layer, and unlayered declarations take precedence over layered ones. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 @keyframes fadeIn {

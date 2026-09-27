@@ -15,14 +15,18 @@ This card controls push notifications to your devices. There are up to four swit
 
 **Turning on this device.** The card shows whether **this** device is on, and press **Enable** to subscribe it. Your browser may ask for permission to show notifications — allow it, or nothing can be delivered. The card reports the browser's permission state, so if it says *blocked* you have previously declined and must re-allow it in your browser's site settings rather than in here.
 
+**A computer belongs to one member at a time.** The subscription belongs to the *browser*, so one machine can only deliver one member's notifications. If somebody has already enabled them on the computer you are sitting at, the card says whose it is and offers **Use this computer for me** — taking it over stops their notifications arriving here, and the app records that it happened. Nothing changes hands by itself: **signing in on a shared computer leaves whoever set it up alone**, which is why the card has to be told.
+
 > [!WARNING]
-> Each device is registered separately. Enabling notifications on a phone does not enable them on a desktop, and **Turn off** releases only the device you are using — the card tells you how many others you have, and none of them are affected.
+> Each device is registered separately. Enabling notifications on a phone does not enable them on a desktop, and **Turn off** releases only the device you are using — the card tells you how many others you have, and none of them are affected. On a device that belongs to another member the button reads **Turn off here**, and pressing it stops *their* notifications on that computer.
 
 **When notifications arrive.** Push notifications are delivered by your device, so they arrive whether or not the app is open, and **whether or not you are signed in** — signing out does not unregister the device; it only stops the app showing them *in-app*. If you tap one to open the app you may be asked to sign in again first.
 
 On an iPhone or iPad the app must be **added to the Home Screen** and opened from that icon before notifications can be enabled at all — a plain Safari tab cannot receive them.
 
-**Stopping notifications.** Press **Turn off** on the device you want to stop. *Sign out* is a separate thing and does **not** unregister a device — signing out on your phone leaves it receiving pushes (see above), so use **Turn off** when you actually want a device silenced. Although unlikely to cause an issue, we recommend not enabling notifications on a shared device used by other members.
+**Installed, it behaves like an app.** Opened from a Home Screen icon, the portal runs without browser chrome and fills the screen, keeps its content clear of the notch and the home indicator, and takes away the gestures that give a web page away: no pinch-zoom, no double-tap zoom, and no selection menu when you press and hold a button. In an ordinary browser tab **pinch-zoom still works**, which is deliberate — a member who needs larger text is never stuck with text they cannot enlarge.
+
+**Stopping notifications.** Press **Turn off** on the device you want to stop. *Sign out* is a separate thing and does **not** unregister a device — signing out on your phone leaves it receiving pushes (see above), so use **Turn off** when you actually want a device silenced. If the device is another member's, the button reads **Turn off here** and the app tells you whose notifications have stopped; it also records it, because the owner cannot see it from their own side. On a shared computer, prefer **Turn off here** when you finish rather than leaving it set up for you.
 
 ## Sound Effects
 

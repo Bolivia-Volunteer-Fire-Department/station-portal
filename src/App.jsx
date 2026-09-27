@@ -1025,9 +1025,12 @@ const getLoadingMessage = () => {
   // unregister takes the token the browser released rather than the member's id.
   const pushDeviceApi = useMemo(
     () => ({
-      register: (deviceToken, deviceLabel) => registerPushDevice(deviceToken, deviceLabel, authToken),
+      register: (deviceToken, deviceLabel, options) => registerPushDevice(deviceToken, deviceLabel, authToken, options),
       unregister: (deviceToken) => unregisterPushDevice(deviceToken, authToken),
-      list: () => fetchMyPushDevices(authToken),
+      // My devices AND whose this browser is, in one call. The card cannot answer the second half from
+      // the member's own rows - that is exactly what the bug was - so the token this browser holds has
+      // to travel with the question.
+      status: (deviceToken) => fetchMyPushDevices(authToken, deviceToken),
     }),
     [authToken]
   );
@@ -1152,7 +1155,7 @@ const getLoadingMessage = () => {
     const messages = configuredMessages.length > 0 ? configuredMessages : defaultMessages;
 
     return (
-      <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white flex items-center justify-center">
+      <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white flex items-center justify-center">
         <Clock className="w-8 h-8 animate-spin text-red-500 mr-3" />
         <span className="text-xl font-medium">{messages[Math.floor(Math.random() * messages.length)]}</span>
       </div>
@@ -1178,7 +1181,7 @@ const getLoadingMessage = () => {
       {currentUser && idleWarningSeconds !== null && (
         <div
           role="alert"
-          className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center justify-center gap-3 border-t border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-2xl dark:border-amber-800/80 dark:bg-amber-950/90 dark:text-amber-200"
+          className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center justify-center gap-3 border-t border-amber-300 bg-amber-50 px-4 py-3 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))] text-sm text-amber-900 shadow-2xl dark:border-amber-800/80 dark:bg-amber-950/90 dark:text-amber-200"
         >
           <span className="font-medium">
             Still there? You will be signed out in {formatIdleCountdown(idleWarningSeconds)} of inactivity.
@@ -1235,11 +1238,21 @@ const getLoadingMessage = () => {
       {!currentUser ? (
         <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} announcements={loginAnnouncements} />
       ) : (
-        <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-screen md:overflow-hidden">
+        <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
+          {/* `min-h-dvh` (not `min-h-screen`) is the viewport the member can actually SEE: on a phone in a
+              browser tab `100vh` is measured with the URL bar hidden, so a short screen left a strip of
+              canvas at the bottom and a scrolling one overshot it by the height of the bar. `dvh` follows
+              the bar as it moves, which is also what makes the installed app fill the window exactly.
+
+              `pb-[env(safe-area-inset-bottom)]` and the matching `pt-` on the header below give the layout
+              the whole screen WITHOUT letting anything important sit under the home indicator - a pair
+              that only means anything because index.html declares `viewport-fit=cover` (see the note
+              there). Both resolve to 0 on a device with no inset, and both are dropped at md, where the
+              sidebar takes the full height and there is no bottom edge left to clear. */}
           {/* Sticky on mobile so the app name and the menu button are always reachable; the page title
               below scrolls with the content, as it should. `z-10` keeps it BELOW the sidebar's z-20
               backdrop and z-30 drawer, so opening the menu dims the whole page including this bar. */}
-          <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4">
+          <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
             <div className="flex min-w-0 items-center gap-2">
               <a href="#" onClick={(e) => {
                 e.preventDefault();

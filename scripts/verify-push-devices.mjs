@@ -61,10 +61,13 @@ const HARNESS = `
   ${extract('pushDeviceRows')}
   ${extract('pushTokenIndex')}
   ${extract('pushTokensForUser')}
+  ${extract('pushDeviceOwnerLabel')}
+  ${extract('clearLegacyPushToken')}
+  ${extract('pushDeviceOwner')}
   ${extract('registerPushDevice')}
   ${extract('deletePushTokens')}
   ${extract('pushDeviceCountByUser')}
-  return { registerPushDevice, deletePushTokens, pushTokenIndex, pushTokensForUser, pushDeviceCountByUser, pushDeviceRows, PUSH_DEVICE_SHEET };
+  return { registerPushDevice, deletePushTokens, pushTokenIndex, pushTokensForUser, pushDeviceCountByUser, pushDeviceRows, pushDeviceOwner, pushDeviceOwnerLabel, PUSH_DEVICE_SHEET };
 `;
 
 // A sheet good enough for these functions: everything they touch is implemented, and every write is
@@ -102,9 +105,11 @@ class FakeSheet {
 
 const DEVICE_HEADERS = ['id', 'user_id', 'token', 'device_label', 'updated_at'];
 
-const makeBackend = ({ devices = [], settings = [] } = {}) => {
+const makeBackend = ({ devices = [], settings = [], members = [] } = {}) => {
   const sheets = {
     push_devices: new FakeSheet([DEVICE_HEADERS.slice(), ...devices.map((d) => d.slice())]),
+    // The members sheet is what turns an owner id into a name the settings card can show.
+    users: new FakeSheet([['id', 'name', 'user_name'], ...members.map((m) => m.slice())]),
     user_settings: new FakeSheet([
       ['user_id', 'fcm_token'],
       ...settings.map((s) => s.slice()),
@@ -190,15 +195,83 @@ console.log('\n--- registering twice is idempotent ---');
   check('with a timestamp', sheets.push_devices.rows[1][headers.indexOf('updated_at')], '2026-01-01 12:00');
 }
 
-console.log('\n--- a shared device changes hands ---');
+console.log('\n--- a shared device does not change hands by itself ---');
+// The bug this replaces: the row was re-pointed at whoever registered. Since the settings card registers
+// whenever it finds a subscription, SIGNING IN on a shared computer handed it over - the member who set
+// it up went on believing their alerts arrived there, and the member who signed in owned a device they
+// had never enabled, with a test push to them landing on the first member's desk.
 {
-  const { backend, ss, sheets } = makeBackend();
+  const { backend, ss, sheets } = makeBackend({
+    members: [['u1', 'Kayla Nguyen', 'kayla'], ['u2', 'Sam Okafor', 'sam']],
+  });
   backend.registerPushDevice(ss, 'u1', 'token-tablet', 'Chrome on Android');
-  backend.registerPushDevice(ss, 'u2', 'token-tablet', 'Chrome on Android');
+  const refused = backend.registerPushDevice(ss, 'u2', 'token-tablet', 'Chrome on Android');
 
-  check('the row re-points rather than duplicating', deviceTokens(sheets), ['u2:token-tablet']);
+  check('the row stays with the member who set it up', deviceTokens(sheets), ['u1:token-tablet']);
+  check(
+    'and the refusal says whose it is',
+    [refused.ok, refused.reason, refused.ownerLabel],
+    [false, 'owned_by_another_member', 'Kayla Nguyen']
+  );
+  check('the second member gains nothing', backend.pushTokensForUser(ss, 'u2'), []);
+  check('and the first still receives', backend.pushTokensForUser(ss, 'u1'), ['token-tablet']);
+}
+{
+  // The move is still possible - a station computer really does change hands - but only said out loud.
+  const { backend, ss, sheets } = makeBackend({
+    members: [['u1', 'Kayla Nguyen', 'kayla'], ['u2', 'Sam Okafor', 'sam']],
+  });
+  backend.registerPushDevice(ss, 'u1', 'token-tablet', 'Chrome on Android');
+  const moved = backend.registerPushDevice(ss, 'u2', 'token-tablet', 'Chrome on Android', { transfer: true });
+
+  check('an explicit transfer re-points the row', deviceTokens(sheets), ['u2:token-tablet']);
+  check(
+    'and reports who it came from, so it can be logged',
+    [moved.ok, moved.transferredFrom, moved.transferredFromLabel],
+    [true, 'u1', 'Kayla Nguyen']
+  );
   check('u1 has nothing left', backend.pushTokensForUser(ss, 'u1'), []);
   check('and u2 has the device', backend.pushTokensForUser(ss, 'u2'), ['token-tablet']);
+}
+{
+  // Registering your OWN device again is a refresh, not a transfer - it happens on every settings open.
+  const { backend, ss } = makeBackend({ members: [['u1', 'Kayla Nguyen', 'kayla']] });
+  backend.registerPushDevice(ss, 'u1', 'token-phone', 'Safari on iPhone');
+  const again = backend.registerPushDevice(ss, 'u1', 'token-phone', 'Safari on iPhone');
+
+  check('re-registering your own device is a plain refresh', [again.ok, again.transferredFrom], [true, '']);
+}
+{
+  // A device enabled before the push_devices sheet existed also lives in the legacy column, which is
+  // still read. If a transfer left it there, ONE browser would deliver for BOTH members at once.
+  const { backend, ss, sheets } = makeBackend({
+    members: [['u1', 'Kayla Nguyen', 'kayla'], ['u2', 'Sam Okafor', 'sam']],
+    settings: [['u1', 'token-tablet']],
+  });
+  backend.registerPushDevice(ss, 'u1', 'token-tablet', 'Chrome on Android');
+  backend.registerPushDevice(ss, 'u2', 'token-tablet', 'Chrome on Android', { transfer: true });
+
+  check('the previous owner\u2019s legacy token is cleared', sheets.user_settings.rows[1][1], '');
+  check('so only the new owner receives', backend.pushTokensForUser(ss, 'u1'), []);
+}
+
+console.log('\n--- the card can ask whose this computer is ---');
+{
+  const { backend, ss } = makeBackend({
+    members: [['u1', 'Kayla Nguyen', 'kayla'], ['u2', '', 'sam']],
+    devices: [['1', 'u1', 'shared-token', 'Chrome on Mac', '']],
+  });
+
+  check('a registered token names its owner', backend.pushDeviceOwner(ss, 'shared-token'), {
+    user_id: 'u1',
+    name: 'Kayla Nguyen',
+    device_label: 'Chrome on Mac',
+  });
+  // An empty display name falls back to the sign-in name rather than showing nothing.
+  check('a member with no display name still reads well', backend.pushDeviceOwnerLabel(ss, 'u2'), 'sam');
+  check('a token with no row names nobody', backend.pushDeviceOwner(ss, 'never-registered'), null);
+  check('and an empty token does not throw', backend.pushDeviceOwner(ss, ''), null);
+  check('nor does an id with no member row', backend.pushDeviceOwnerLabel(ss, 'deleted-member'), 'another member');
 }
 
 console.log('\n--- turning off ONE device leaves the other alone ---');
@@ -217,8 +290,10 @@ console.log('\n--- turning off ONE device leaves the other alone ---');
   check('and still receives', backend.pushTokensForUser(ss, 'u1'), ['token-computer']);
 }
 
-console.log('\n--- a token cannot be removed from another member ---');
-// The blast radius of deleting on a token match, bounded by the session's user id.
+console.log('\n--- a dead-token prune cannot reach another member ---');
+// The blast radius of deleting on a token match, bounded by the member the send was FOR. This is the
+// only path that keeps the bound (see the unregister section below): a prune has no session behind it
+// and no device to prove anything with, just a token FCM refused for one recipient.
 {
   const { backend, ss, sheets } = makeBackend({
     devices: [
@@ -243,6 +318,39 @@ check('enabling registers the device', /pushDeviceApi\?\.register\(/.test(settin
 check('and no longer writes fcm_token', /fcm_token/.test(settingsSource), false);
 // Turning off must remove exactly the token this browser released.
 check('turning off unregisters the released token', /disablePushNotifications\(webConfig\)/.test(settingsSource) && /unregister\(releasedToken\)/.test(settingsSource), true);
+
+console.log('\n--- the card asks WHOSE this computer is ---');
+// The second half of the bug: a subscription existing here was taken as proof it was the member's, so
+// opening the card registered it for them. The card has to ask the server who the row names, and write
+// nothing when the answer is somebody else.
+check('the card reads the owner from the server', /pushDeviceApi\?\.status\(/.test(settingsSource), true);
+check('and never registers a device it does not own', /ownerIsSomeoneElse/.test(settingsSource), true);
+check('it says whose computer this is', /is set up for/.test(settingsSource), true);
+// Handing over is a button, not a side effect: the transfer flag exists for exactly one call site.
+check('the transfer is behind its own button', /onClick=\{handleClaimDevice\}/.test(settingsSource), true);
+check('which sends the transfer flag', /transfer: true/.test(settingsSource), true);
+check('and the wire carries it as a boolean', /transfer: options\?\.transfer === true/.test(apiSource), true);
+check('the server only re-points a row when it is set', /options && options\.transfer/.test(codeSource), true);
+check('and refuses, naming the owner, when it is not', /owned_by_another_member/.test(codeSource), true);
+check('the refusal reaches the client by name', /DEVICE_OWNED_BY_ANOTHER_MEMBER/.test(codeSource), true);
+check('a hand-over is written to the system log', /Moved a device from/.test(codeSource), true);
+
+console.log('\n--- turning a device off clears the row, whatever it names ---');
+// Bounded to the session's member, this left the other member's row behind after the browser had
+// unsubscribed: a device recorded as registered that could never receive anything. Holding the token
+// is the proof - a browser can only name its own subscription - so the delete is by token alone.
+check('unregister deletes by token alone', /deletePushTokens\(ss, \[removeToken\]\)/.test(codeSource), true);
+check(
+  'not bounded to the session member',
+  /deletePushTokens\(ss, \[removeToken\], authUnregister\.userId\)/.test(codeSource),
+  false
+);
+check('and reports whose device it was', /removed_owner_name/.test(codeSource), true);
+check('so the card can say whose alerts stopped here', /removed_owner_name/.test(settingsSource), true);
+// The prune path keeps the bound where it can: a one-member send removes that member's dead token only.
+// (The announcement and offer fan-outs send to many members at once, so they prune by TOKEN - asserted
+// above - because there is no single member to bound the delete to.)
+check('a dead-token prune is still bounded by member', /deletePushTokens\(ss, deadTokens, targetUserId\)/.test(codeSource), true);
 
 console.log('\n--- the wire name cannot collide with the session ---');
 // `token` is the session in the RPC envelope. Reading it as the device token would register a session

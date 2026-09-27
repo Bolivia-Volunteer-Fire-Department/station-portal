@@ -213,20 +213,33 @@ export const submitClockAction = async (action, userId, coords = {}, token) =>
 
 // Push devices. Registration is per DEVICE (see the Push devices section of Code.gs): a member's
 // phone and computer each hold their own row, so enabling one never disturbs the other.
-
-export const registerPushDevice = async (deviceToken, deviceLabel, token) =>
+//
+// A device belongs to ONE member, so registering a token that is already somebody else's is refused
+// and the refusal names them. `options.transfer` is the one way to insist - it is set by the settings
+// card's "use this computer for me" button, and by nothing else.
+export const registerPushDevice = async (deviceToken, deviceLabel, token, options) =>
   appScriptFetch({
     action: 'REGISTER_PUSH_DEVICE',
     token, // the session
     // The device token travels as `device_token`, because `token` is the session in the envelope.
     device_token: String(deviceToken || ''),
     device_label: String(deviceLabel || ''),
+    transfer: options?.transfer === true,
   });
 
 export const unregisterPushDevice = async (deviceToken, token) =>
   appScriptFetch({ action: 'UNREGISTER_PUSH_DEVICE', token, device_token: String(deviceToken || '') });
 
-export const fetchMyPushDevices = async (token) => appScriptFetch({ action: 'MY_PUSH_DEVICES', token });
+// The member's own devices, plus whose device this browser is when its token is passed in. The second
+// half has to come from the server: the local subscription only says a device is enabled, never whose
+// alerts it is set up to receive - and assuming it was the signed-in member's is what let a shared
+// computer be taken over by simply signing in on it.
+export const fetchMyPushDevices = async (token, deviceToken) =>
+  appScriptFetch({
+    action: 'MY_PUSH_DEVICES',
+    token,
+    device_token: String(deviceToken || ''),
+  });
 
 export const saveUserSettings = async (updatedSettings, token) =>
   appScriptFetch({

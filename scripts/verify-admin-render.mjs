@@ -1267,7 +1267,9 @@ check(
 // would pass, because a non-empty string is truthy. Hence the explicit comparisons.
 const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
 const backdropZ = /fixed inset-0 bg-black\/60 z-(\d+)/.exec(sidebarSource);
-const drawerZ = /fixed md:static md:h-screen inset-y-0 left-0 z-(\d+)/.exec(sidebarSource);
+// `md:h-dvh` here: the drawer's height unit is the visible viewport (see verify-app-shell), and the
+// pinned order below is about the CLASS LIST this pattern identifies, not about that unit.
+const drawerZ = /fixed md:static md:h-dvh inset-y-0 left-0 z-(\d+)/.exec(sidebarSource);
 const headerZ = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(headerClass);
 check('the sidebar backdrop z-index was found', (backdropZ ? backdropZ[1] : null) === '20', true);
 check('the drawer z-index was found', (drawerZ ? drawerZ[1] : null) === '30', true);

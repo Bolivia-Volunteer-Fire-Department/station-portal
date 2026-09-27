@@ -47,11 +47,13 @@ An amber banner appears when the Firebase configuration is incomplete, because t
 
 Each **device** is registered separately, so one member with a phone and a desktop counts twice. Members register themselves in *User Settings → Notifications*; a member who has never done that receives nothing regardless of the defaults.
 
+A device belongs to **one member at a time**. The push subscription belongs to the browser, so a shared station computer can only deliver one member's notifications, and the row naming it is the record of whose. Two members using the same machine therefore need to take it over deliberately, from the button in *User Settings* — signing in changes nothing on its own, which is what stops a login on the office computer from quietly stealing it. Every hand-over is written to the **System Log** (*Moved a device from …*), as is turning off a device that was set up for somebody else, because neither member can see the other's side of it.
+
 ## Why nobody is getting notifications
 
 Work through it in this order:
 
-1. **Does the member have a device?** Check the **Device** column. If it reads empty or *none*, they have never enabled notifications — no server setting can change that.
+1. **Does the member have a device?** Check the **Device** column. If it reads empty or *none*, they have never enabled notifications — no server setting can change that. If the count has *dropped* since it last worked, suspect a shared computer: another member can only take a device over deliberately (see **Device Status** above), and the System Log says who did it and when.
 2. **Is the Firebase configuration complete?** An amber banner in **Device Status** says not.
 3. **Did they allow the browser prompt?** A member who dismissed it shows as *blocked* in their own User Settings, and must re-allow it in the browser's site settings.
 4. **Does a Test reach them?** Press **Test** on their row. A failure names the cause; a success that does not appear on their device means the problem is on the device, not the server.

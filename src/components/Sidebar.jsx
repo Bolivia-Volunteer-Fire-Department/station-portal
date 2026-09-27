@@ -45,8 +45,11 @@ export default function Sidebar({
                 />
             )}
 
+            {/* The drawer is a full-height window of its own on a phone, so it clears the status bar and
+                the home indicator the same way the shell does - `pt-`/`pb-` with the safe-area insets,
+                which are 0 on any device without them and unused at md, where this is a static column. */}
             <aside className={`
-        fixed md:static md:h-screen inset-y-0 left-0 z-30 w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-transform duration-200 ease-in-out
+        fixed md:static md:h-dvh inset-y-0 left-0 z-30 w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-transform duration-200 ease-in-out pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
                 <div className="hidden md:flex items-center gap-3 p-6 border-b border-slate-200 dark:border-slate-700">

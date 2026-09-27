@@ -33,6 +33,7 @@ const css = readFileSync('src/index.css', 'utf8');
 const appCss = readFileSync('src/App.css', 'utf8');
 const printCss = readFileSync('src/print.css', 'utf8');
 const app = readFileSync('src/App.jsx', 'utf8');
+const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
 // A rule's declarations as an object, so the checks below read like sentences. Comments are stripped first: one
@@ -76,7 +77,7 @@ checkIs('the dark canvas is painted', /^var\(--color-slate-\d+\)$/.test(darkRule
 // Every full-screen branch of App.jsx has to agree, because one canvas color cannot match two different shells -
 // and the branch a member is looking at is the one that matters when they overscroll.
 console.log('\n--- and in the same colors as the shell ---');
-const shellBranches = [...app.matchAll(/className="min-h-screen ([^"]*)"/g)].map((match) => match[1]);
+const shellBranches = [...app.matchAll(/className="min-h-dvh ([^"]*)"/g)].map((match) => match[1]);
 checkIs('the full-screen branches were found', shellBranches.length >= 2, `${shellBranches.length} found`);
 const shellColors = shellBranches.map((classes) => ({
   light: /(?:\s|^)bg-slate-(\d+)/.exec(classes)?.[1] || null,
@@ -163,7 +164,7 @@ checkIs('the guide card is bounded on desktop', /\bmd:h-full\b/.test(helpCard) &
 // it has two different parents; without either, the chain breaks silently and the page scrolls again.
 const helpRoot = /<div className="space-y-4[^"]*"/.exec(help)?.[0] || '';
 checkIs('and the root takes the height it is given', /\bmd:h-full\b/.test(helpRoot) && /\bmd:flex-1\b/.test(helpRoot) && /\bmd:min-h-0\b/.test(helpRoot), helpRoot);
-// Each caller has to give it one. The member module renders it straight into <main> (asserted above: md:h-screen),
+// Each caller has to give it one. The member module renders it straight into <main> (asserted above: md:h-dvh),
 // and the Administration panel's own wrapper is auto-height unless it cooperates - which is the trap this catches.
 const panel = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
 // A wrapper between the two would undo the whole chain, so both call sites are pinned as a bare render with no
@@ -211,7 +212,7 @@ checkIs(
   /const boundedScreen = activeTab === 'help' \|\| activeTab === 'documents' \|\| \(activeTab === 'admin' && adminSubTab === 'help'\);/.test(app)
 );
 // The base classes must NOT be a flex column, or every other tab's page scroll would be governed by flex rules.
-checkIs('and no other screen is affected', !/md:h-screen md:overflow-y-auto[^`]*md:flex md:flex-col(?!')/.test(app), 'the flex classes leaked into the base classes');
+checkIs('and no other screen is affected', !/md:h-dvh md:overflow-y-auto[^`]*md:flex md:flex-col(?!')/.test(app), 'the flex classes leaked into the base classes');
 // The heading keeps its height when the window is short, so the guide shrinks instead of the title being squashed.
 checkIs('the heading cannot be squashed by a short window', /className="mb-8 md:shrink-0"/.test(app), 'no md:shrink-0 on the heading');
 // The panel's own column must take the height LEFT OVER, not 100% of main - which is the same bug one level down.
@@ -287,7 +288,7 @@ const withoutCanvas = css.replace(/html\s*\{[^}]*\}/, 'html {\n}');
 checkIs('and the canvas check fails with the color taken out', !ruleFor(withoutCanvas, 'html')?.['background-color']);
 const repaintedShell = app.replace('bg-slate-100', 'bg-white');
 checkIs('the mutation repainted the shell', repaintedShell !== app);
-const repaintedLight = /className="min-h-screen ([^"]*)"/.exec(repaintedShell)?.[1] || '';
+const repaintedLight = /className="min-h-dvh ([^"]*)"/.exec(repaintedShell)?.[1] || '';
 const shellLight = /\sbg-slate-(\d+)/.exec(' ' + repaintedLight)?.[1] || null;
 checkIs(
   'and the drift check between shell and canvas would fail',
@@ -392,6 +393,62 @@ sourceFiles.forEach((file) => {
 });
 check('no utility carries a comma in its arbitrary value', commaValues, []);
 checkIs('and the scan looked at the sources', sourceFiles.length > 20, `only ${sourceFiles.length} files`);
+
+// ---------------------------------------------------------------------------
+// 7. Installed, the window is the app's - and the gestures are not the page's
+// ---------------------------------------------------------------------------
+// The family of complaints this covers: pinch-zoom and double-tap zoom reshaping the layout, text being
+// selectable where it is a control and not text, and the app not filling the screen it was installed on.
+// Every one of them is invisible in a desktop browser, which is exactly why they are asserted here rather
+// than remembered - and every one of them is a decision that a later tidy-up could silently undo.
+console.log('\n--- installed, the window belongs to the app ---');
+const viewportMeta = /<meta\s+name="viewport"\s+content="([^"]*)"/.exec(html)?.[1] ?? '';
+// The rule about zoom in a TAB, as a named predicate so the mutation below can be shown to fail it.
+const viewportKeepsPinchZoom = (content) => !/user-scalable=no/.test(content);
+// Without viewport-fit=cover the layout cannot reach the notch or the home-indicator area at all, so the
+// safe-area insets below resolve to zero and the app stays letterboxed however it is styled.
+checkIs('the viewport claims the full screen', /viewport-fit=cover/.test(viewportMeta), viewportMeta);
+// ...and it deliberately does NOT take zoom away here: a tab is where pinch-zoom has to keep working.
+checkIs('briefly, without taking pinch-zoom out of a browser tab', viewportKeepsPinchZoom(viewportMeta), viewportMeta);
+// The CLASS usage, not the words: the shell's own comment names the class it replaced, so a plain
+// substring search for `min-h-screen` would be answered by the note explaining why it is gone.
+checkIs('the height is the VISIBLE viewport, not the URL-bar-less one', /className="min-h-dvh/.test(app) && !/className="min-h-screen/.test(app), 'a 100vh shell overshoots a phone tab');
+checkIs('and the mobile bar paints under the status bar', /pt-\[calc\(1rem_\+_env\(safe-area-inset-top\)\)\]/.test(app), 'the bar would sit below the notch instead of behind it');
+checkIs('while the last row clears the home indicator', /pb-\[env\(safe-area-inset-bottom\)\]/.test(app));
+checkIs('the drawer clears both as well', /pt-\[env\(safe-area-inset-top\)\]/.test(sidebar) && /pb-\[env\(safe-area-inset-bottom\)\]/.test(sidebar));
+checkIs('and the idle banner sits above the indicator', /pb-\[calc\(0\.75rem_\+_env\(safe-area-inset-bottom\)\)\]/.test(app));
+// The window's own height, in the column that a desktop layout pins: `h-screen` there would leave the
+// sidebar 80-100px short on a phone-shaped window whose bars have moved.
+checkIs('the pinned desktop column uses the same unit', /md:h-dvh/.test(app) && /md:h-dvh/.test(sidebar));
+
+console.log('\n--- and the gestures are the app\'s, not the page\'s ---');
+// `manipulation` is the pair of decisions at once: no double-tap zoom, no 300ms wait for a second tap -
+// and pinch-zoom still allowed, which is why it is used rather than a viewport that forbids zoom.
+check('taps do not wait out a double-tap zoom', ruleFor(css, 'html')?.['touch-action'], 'manipulation');
+checkIs('iOS cannot inflate the type on rotation', /-webkit-text-size-adjust:\s*100%/.test(css));
+// A control is not text. The selectors matter: CONTENT has to stay selectable or the fix is worse than the
+// bug, so the rule is checked as written rather than as "something somewhere sets user-select".
+const controlRule = /(?:^|\n)\s*button,\s*\n\s*a,\s*\n\s*label,\s*\n\s*summary,\s*\n\s*th,\s*\n\s*\[role='button'\],\s*\n\s*\.no-select\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+checkIs('the chrome does not select like text', /user-select:\s*none/.test(controlRule), controlRule.trim());
+checkIs('no long-press menu on a control', /-webkit-touch-callout:\s*none/.test(controlRule));
+checkIs('and no grey flash on the way in', /-webkit-tap-highlight-color:\s*transparent/.test(controlRule));
+checkIs('a typed value stays selectable', /(?:^|\n)\s*input,[\s\S]{0,120}user-select:\s*text/.test(css), 'Safari carries user-select: none into a field from its label');
+// The zoom members actually hit. 16px is the threshold iOS uses, and these rules are unlayered on purpose
+// so they beat the utility classes that ask for 12-14px.
+checkIs('a field cannot zoom the page on a phone', /@media \(max-width: 767px\)[\s\S]{0,120}font-size:\s*16px/.test(css));
+// The lock itself: applied only to an installed window, which is the only place the browser honors it.
+const native = readFileSync('src/utils/nativeShell.js', 'utf8');
+checkIs('zoom is locked in an installed window', /user-scalable=no/.test(native));
+checkIs('and only there, by asking the display mode', /\(display-mode: \$\{mode\}\)/.test(native));
+checkIs('with the installed modes enumerated once', /INSTALLED_WINDOWS\s*=\s*\[[^\]]*'standalone'/.test(native));
+checkIs("iOS's older spelling is honored too", /navigator\?\.standalone === true/.test(native));
+checkIs('the cover fit survives the lock', /viewport-fit=cover/.test(native));
+checkIs('and it runs before the first paint', /lockGesturesWhenInstalled\(\)/.test(readFileSync('src/main.jsx', 'utf8')));
+// Teeth: the same failure mode as the metas above - a line quietly removed, or moved somewhere it would
+// apply to a tab as well. This is the mutation that would do it, and it has to fail the tab check.
+const lockedEverywhere = viewportMeta.replace('initial-scale=1.0', 'maximum-scale=1, user-scalable=no');
+checkIs('the mutation changed the viewport', lockedEverywhere !== viewportMeta);
+checkIs('and the mutation fails the tab rule', !viewportKeepsPinchZoom(lockedEverywhere));
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

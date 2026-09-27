@@ -2,7 +2,20 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The viewport is the app's, not the page's.
+    //
+    // `viewport-fit=cover` is what lets the layout reach the sides of a notched phone and extend under
+    // the status bar and the home indicator; the shell then keeps its own content clear of them with
+    // env(safe-area-inset-*) (see App.jsx, Sidebar.jsx and the notes in index.css). Without it iOS
+    // letterboxes the app inside the safe area - which is the "installed, but it does not fill the
+    // screen" look, and no amount of CSS fixes it from there.
+    //
+    // Pinch-zoom is deliberately still ALLOWED here. It is how a low-vision member reads a schedule or
+    // a document, and it costs nothing in a browser tab. The double-tap zoom is taken out by
+    // `touch-action: manipulation` (index.css) instead, which is the half that actually gets in the
+    // way. An INSTALLED window closes the door on pinch as well - see src/utils/nativeShell.js, which
+    // rewrites this meta only when the app is not in a tab. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <!-- Icons: department patch. Absolute paths are fine here because Vite
          rewrites them to the deployed base path at build time (unlike files in
