@@ -20,6 +20,9 @@ This card controls push notifications to your devices. There are up to four swit
 > [!WARNING]
 > Each device is registered separately. Enabling notifications on a phone does not enable them on a desktop, and **Turn off** releases only the device you are using — the card tells you how many others you have, and none of them are affected. On a device that belongs to another member the button reads **Turn off here**, and pressing it stops *their* notifications on that computer.
 
+> [!NOTE]
+> An administrator can turn notifications off for your account altogether. When that has happened the card says so, and **Enable** is not offered because it could not work — ask an administrator if you need them back. Being switched off does not hide anything in the app: announcements, your shift decisions and everything else still appear as usual.
+
 **When notifications arrive.** Push notifications are delivered by your device, so they arrive whether or not the app is open, and **whether or not you are signed in** — signing out does not unregister the device; it only stops the app showing them *in-app*. If you tap one to open the app you may be asked to sign in again first.
 
 On an iPhone or iPad the app must be **added to the Home Screen** and opened from that icon before notifications can be enabled at all — a plain Safari tab cannot receive them.

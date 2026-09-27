@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Save, Loader2, Bell, AlertCircle, CheckCircle, KeyRound, Send,
+  Save, Loader2, Bell, BellOff, AlertCircle, CheckCircle, KeyRound, Send,
   Smartphone, RefreshCw, Settings2, Info, Lock,
 } from 'lucide-react';
-import { adminSaveSystemSetting, adminFetchPushStatus, adminSendTestPush, adminFetchFcmStatus } from '../../services/api';
+import { adminSaveSystemSetting, adminFetchPushStatus, adminSendTestPush, adminFetchFcmStatus, adminSetPushDisabled } from '../../services/api';
 import CenteredContent from '../CenteredContent';
+import ConfirmModal from '../ConfirmModal';
 import ToggleSwitch from '../ToggleSwitch';
 
 // Every value on this tab is a `system_settings` row (key/value sheet), the same
@@ -402,6 +403,11 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
   const [error, setError] = useState(null);
   const [sendingTo, setSendingTo] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  // The member whose notifications are about to be turned off, held while the confirmation asks. The
+  // other direction is not destructive and does not ask.
+  const [confirmingOff, setConfirmingOff] = useState(null);
+  const [switchingId, setSwitchingId] = useState(null);
+  const [switchResult, setSwitchResult] = useState(null);
 
   const loadStatus = async () => {
     if (!token) return;
@@ -446,6 +452,34 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
     }
   };
 
+  // Turns one member's notifications off (or lets them back on), then re-reads the table so the row
+  // shows the new state rather than the state it had when it was drawn.
+  const handleSetPushDisabled = async (user, disabled) => {
+    setSwitchingId(user.id);
+    setSwitchResult(null);
+    setTestResult(null);
+    try {
+      const response = await adminSetPushDisabled(user.id, disabled, token);
+      if (!response?.success) {
+        setSwitchResult({ userId: user.id, ok: false, message: response?.message || 'Could not change that member\'s notifications.' });
+        return;
+      }
+
+      setSwitchResult({
+        userId: user.id,
+        ok: true,
+        message: disabled
+          ? `Notifications are off for ${userLabel(user)}. ${response.devices === 1 ? '1 device was' : `${Number(response.devices) || 0} devices were`} forgotten, and their browsers cannot re-register themselves.`
+          : `${userLabel(user)} may enable notifications again. Each device still has to be turned on from the device.`,
+      });
+      await loadStatus();
+    } catch (err) {
+      setSwitchResult({ userId: user.id, ok: false, message: err.message || 'Could not change that member\'s notifications.' });
+    } finally {
+      setSwitchingId(null);
+    }
+  };
+
   // Blank cells inherit the station default, so they read as "Default".
   const prefLabel = (value) => {
     if (value === undefined || value === null || value === '') return 'Default';
@@ -458,6 +492,9 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
   // difference is what tells you whether a silent device is a configuration problem or simply a
   // device nobody has set up yet.
   const deviceTotal = users.reduce((sum, user) => sum + (Number(user.device_count) || 0), 0);
+  // Members an administrator has switched off. Counted separately because they are NOT "not set up yet":
+  // nothing in their own settings will fix it, and only this table can turn it back on.
+  const disabledCount = users.filter((u) => u.push_disabled).length;
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -470,7 +507,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Device Status</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               {status
-                ? `${registeredCount} of ${users.length} members have notifications enabled, on ${deviceTotal} device${deviceTotal === 1 ? '' : 's'} in total.`
+                ? `${registeredCount} of ${users.length} members have notifications enabled, on ${deviceTotal} device${deviceTotal === 1 ? '' : 's'} in total.${disabledCount ? ` ${disabledCount} turned off by an administrator.` : ''}`
                 : 'Which members can receive push notifications right now.'}
             </p>
           </div>
@@ -497,6 +534,23 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
           <div className="p-4 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {switchResult && (
+          <div
+            className={`p-4 rounded-xl text-sm font-medium border ${
+              switchResult.ok
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800/80'
+                : 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              {switchResult.ok
+                ? <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                : <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />}
+              <p>{switchResult.message}</p>
+            </div>
           </div>
         )}
 
@@ -536,12 +590,13 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
               <th className="px-4 py-3">Approved</th>
               <th className="px-4 py-3">Declined</th>
               <th className="px-4 py-3 text-right">Test</th>
+              <th className="px-4 py-3 text-right">Notifications</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
             {users.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
                   {loading ? 'Loading device status...' : 'No members found.'}
                 </td>
               </tr>
@@ -550,15 +605,21 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
                 <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                   <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{userLabel(user)}</td>
                   <td className="px-4 py-3">
-                    <span className={user.device_registered
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-slate-400 dark:text-slate-500'}>
-                      {/* A count, not a tick: a member with a phone and a computer has two, and knowing
-                          how many is how you tell "one device is silent" from "no device at all". */}
-                      {user.device_registered
-                        ? `${Number(user.device_count) || 1} device${(Number(user.device_count) || 1) === 1 ? '' : 's'}`
-                        : '—'}
-                    </span>
+                    {/* A member switched off by an administrator is not the same as one who never set a
+                        device up: the first needs this table to change, the second needs that member. */}
+                    {user.push_disabled ? (
+                      <span className="text-amber-600 dark:text-amber-400">Off (administrator)</span>
+                    ) : (
+                      <span className={user.device_registered
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-slate-400 dark:text-slate-500'}>
+                        {/* A count, not a tick: a member with a phone and a computer has two, and knowing
+                            how many is how you tell "one device is silent" from "no device at all". */}
+                        {user.device_registered
+                          ? `${Number(user.device_count) || 1} device${(Number(user.device_count) || 1) === 1 ? '' : 's'}`
+                          : '—'}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">{prefLabel(user.notify_new_offer)}</td>
                   <td className="px-4 py-3">{prefLabel(user.notify_offer_approved)}</td>
@@ -567,12 +628,37 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
                     <button
                       type="button"
                       onClick={() => handleTest(user.id)}
-                      disabled={!user.device_registered || sendingTo === user.id}
-                      title={user.device_registered ? 'Send a test notification' : 'No registered device'}
+                      disabled={!user.device_registered || user.push_disabled || sendingTo === user.id}
+                      title={user.push_disabled
+                        ? 'Notifications are off for this member'
+                        : (user.device_registered ? 'Send a test notification' : 'No registered device')}
                       className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {sendingTo === user.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                       Send
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      // Turning a member off is destructive and, from this table, one-way: their devices
+                      // are forgotten and their browsers cannot put them back, so it asks first. Turning
+                      // them back on is neither destructive nor complete on its own, so it does not.
+                      onClick={() => (user.push_disabled ? handleSetPushDisabled(user, false) : setConfirmingOff(user))}
+                      disabled={switchingId === user.id || (!user.push_disabled && !user.device_registered)}
+                      title={user.push_disabled
+                        ? 'Let this member enable notifications again'
+                        : (user.device_registered ? 'Forget this member\'s devices and stop delivery' : 'No devices to turn off')}
+                      className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                        user.push_disabled
+                          ? 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
+                          : 'bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400'
+                      }`}
+                    >
+                      {switchingId === user.id
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : (user.push_disabled ? <Bell className="w-3 h-3" /> : <BellOff className="w-3 h-3" />)}
+                      {user.push_disabled ? 'Turn on' : 'Turn off'}
                     </button>
                   </td>
                 </tr>
@@ -581,6 +667,22 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
           </tbody>
         </table>
       </div>
+
+      {/* The confirmation replaces a native dialog: styled, heard (ConfirmModal plays the tone), and able to
+          name what is lost - which here is two things, and both are why this is not a one-line delete. */}
+      {confirmingOff && (
+        <ConfirmModal
+          title={`Turn off notifications for ${userLabel(confirmingOff)}?`}
+          message={`This forgets ${Number(confirmingOff.device_count) === 1 ? 'their device' : `all ${Number(confirmingOff.device_count) || 0} of their devices`}, so nothing is delivered to them any more. It also blocks their account, so their browsers cannot re-register themselves by opening User Settings, and it is written to the System Log. They keep seeing announcements and their shift decisions inside the app.`}
+          confirmLabel="Turn off notifications"
+          onConfirm={() => {
+            const target = confirmingOff;
+            setConfirmingOff(null);
+            handleSetPushDisabled(target, true);
+          }}
+          onCancel={() => setConfirmingOff(null)}
+        />
+      )}
     </div>
   );
 }

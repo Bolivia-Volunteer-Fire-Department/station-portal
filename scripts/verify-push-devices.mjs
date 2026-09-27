@@ -24,10 +24,17 @@ const check = (label, actual, expected) => {
     }`
   );
 };
+// For the wiring checks below, where the interesting thing is a condition over source text rather than a
+// value that can be printed.
+const checkIs = (label, condition, detail) => {
+  if (!condition) failures++;
+  console.log(`${condition ? 'ok  ' : 'FAIL'} ${label}${condition || !detail ? '' : ` -> ${detail}`}`);
+};
 
 const codeSource = readFileSync('src/services/Code.gs', 'utf8');
 const apiSource = readFileSync('src/services/api.js', 'utf8');
 const settingsSource = readFileSync('src/components/UserSettings.jsx', 'utf8');
+const adminSource = readFileSync('src/components/admin/AdminNotificationsTab.jsx', 'utf8');
 
 const extract = (name) => {
   const start = codeSource.indexOf(`function ${name}(`);
@@ -64,10 +71,14 @@ const HARNESS = `
   ${extract('pushDeviceOwnerLabel')}
   ${extract('clearLegacyPushToken')}
   ${extract('pushDeviceOwner')}
+  ${extract('isTruthyValue')}
+  ${extract('pushDisabledForUser')}
+  ${extract('setPushDisabledForUser')}
+  ${extract('disablePushForUser')}
   ${extract('registerPushDevice')}
   ${extract('deletePushTokens')}
   ${extract('pushDeviceCountByUser')}
-  return { registerPushDevice, deletePushTokens, pushTokenIndex, pushTokensForUser, pushDeviceCountByUser, pushDeviceRows, pushDeviceOwner, pushDeviceOwnerLabel, PUSH_DEVICE_SHEET };
+  return { registerPushDevice, deletePushTokens, pushTokenIndex, pushTokensForUser, pushDeviceCountByUser, pushDeviceRows, pushDeviceOwner, pushDeviceOwnerLabel, pushDisabledForUser, setPushDisabledForUser, disablePushForUser, PUSH_DEVICE_SHEET };
 `;
 
 // A sheet good enough for these functions: everything they touch is implemented, and every write is
@@ -111,7 +122,10 @@ const makeBackend = ({ devices = [], settings = [], members = [] } = {}) => {
     // The members sheet is what turns an owner id into a name the settings card can show.
     users: new FakeSheet([['id', 'name', 'user_name'], ...members.map((m) => m.slice())]),
     user_settings: new FakeSheet([
-      ['user_id', 'fcm_token'],
+      // `is_push_disabled` is the column the administrator's switch writes; the real sheet grows it on
+      // first use (upsertUserSettingsColumns adds anything it is asked to write), so a harness that did
+      // not have it would be testing a sheet this app never sees.
+      ['user_id', 'fcm_token', 'is_push_disabled'],
       ...settings.map((s) => s.slice()),
     ]),
   };
@@ -125,20 +139,35 @@ const makeBackend = ({ devices = [], settings = [], members = [] } = {}) => {
 
   const Logger = { log: () => {} };
   const getEasternTimestamp = () => '2026-01-01 12:00';
+  // Mirrors Code.gs's upsertUserSettingsColumns: it grows the header row for anything it is asked to
+  // write, and creates the member's row when they have none. Both matter to these tests - `is_push_disabled`
+  // is a column that exists only once the administrator's switch is first used, and a member who has
+  // devices but no settings row is exactly the member an administrator is most likely to switch off.
   const upsertUserSettingsColumns = (spreadsheet, userId, values) => {
     const sheet = spreadsheet.getSheetByName('user_settings');
-    const rows = sheet.rows;
-    const headers = rows[0];
-    const idCol = headers.indexOf('user_id');
-    for (let i = 1; i < rows.length; i++) {
-      if (String(rows[i][idCol]).trim() !== String(userId).trim()) continue;
+    if (!sheet || !sheet.rows.length) return false;
+
+    const headers = sheet.rows[0];
+    const idCol = headers.indexOf('user_id') !== -1 ? headers.indexOf('user_id') : headers.indexOf('id');
+    if (idCol === -1) return false;
+
+    Object.keys(values).forEach((key) => {
+      if (headers.indexOf(key) === -1) headers.push(key);
+    });
+
+    for (let i = 1; i < sheet.rows.length; i++) {
+      if (String(sheet.rows[i][idCol]).trim() !== String(userId).trim()) continue;
       Object.keys(values).forEach((key) => {
         const col = headers.indexOf(key);
-        if (col !== -1) sheet.getRange(i + 1, col + 1).setValue(values[key]);
+        if (col !== -1) sheet.rows[i][col] = values[key];
       });
       return true;
     }
-    return false;
+
+    const newRow = headers.map((key) => (values[key] !== undefined ? values[key] : ''));
+    newRow[idCol] = String(userId).trim();
+    sheet.rows.push(newRow);
+    return true;
   };
 
   const backend = new Function(
@@ -306,6 +335,65 @@ console.log('\n--- a dead-token prune cannot reach another member ---');
   check('and both rows survive', deviceTokens(sheets), ['u1:shared-token', 'u2:shared-token']);
 }
 
+console.log('\n--- an administrator can turn a member off, and it stays off ---');
+// The button an administrator presses. Two halves that fail in different ways: forgetting the devices
+// stops delivery NOW, and the flag stops the member's own browser from registering itself again the next
+// time their User Settings is opened - which, without the flag, would silently undo the whole thing.
+{
+  const { backend, ss, sheets } = makeBackend({
+    members: [['u1', 'Kayla Nguyen', 'kayla'], ['u2', 'Sam Okafor', 'sam']],
+    devices: [
+      ['1', 'u1', 'token-phone', 'Safari on iPhone', ''],
+      ['2', 'u1', 'token-computer', 'Chrome on Mac', ''],
+      ['3', 'u2', 'token-tablet', 'Chrome on Android', ''],
+    ],
+  });
+
+  const off = backend.disablePushForUser(ss, 'u1');
+
+  check('every device is forgotten', backend.pushTokensForUser(ss, 'u1'), []);
+  check('and the admin is told how many', off.devices, 2);
+  check('so the count they see is zero', backend.pushDeviceCountByUser(ss), { u2: 1 });
+  check('and the member reads as switched off', backend.pushDisabledForUser(ss, 'u1'), true);
+
+  // The load-bearing half: the browser still holds a subscription, and it registers itself on sight.
+  const putBack = backend.registerPushDevice(ss, 'u1', 'token-phone', 'Safari on iPhone');
+  check('a browser cannot put itself back', [putBack.ok, putBack.reason], [false, 'disabled_by_admin']);
+  check('and nothing is stored', deviceTokens(sheets), ['u2:token-tablet']);
+
+  // Nobody else is affected, in either direction.
+  check('another member is untouched', backend.pushDisabledForUser(ss, 'u2'), false);
+  const other = backend.registerPushDevice(ss, 'u2', 'token-laptop', 'Chrome on Windows');
+  check('and can still register a new device', [other.ok, other.transferredFrom], [true, '']);
+
+  // Lifting it: allowed again, but nothing handed back - a subscription can only be turned on at the
+  // device, by the member, which is why this direction is one-sided.
+  check('allowing again lifts the block', [backend.setPushDisabledForUser(ss, 'u1', false), backend.pushDisabledForUser(ss, 'u1')], [true, false]);
+  check('but their devices are still gone', backend.pushTokensForUser(ss, 'u1'), []);
+  check('so re-enabling is theirs to do', backend.registerPushDevice(ss, 'u1', 'token-phone', 'Safari on iPhone').ok, true);
+}
+{
+  // A device enabled before the push_devices sheet existed lives in the legacy column, which is still
+  // read - so the switch has to clear that too, or the member keeps receiving after being turned off.
+  const { backend, ss } = makeBackend({
+    members: [['u1', 'Kayla Nguyen', 'kayla']],
+    settings: [['u1', 'legacy-computer-token']],
+  });
+
+  const off = backend.disablePushForUser(ss, 'u1');
+
+  check('a legacy-only device is silenced as well', backend.pushTokensForUser(ss, 'u1'), []);
+  check('and counted for the admin', off.devices, 1);
+  check('and even that token cannot come back', backend.registerPushDevice(ss, 'u1', 'legacy-computer-token', 'Chrome on Mac').reason, 'disabled_by_admin');
+}
+{
+  // The flag is read through the same settings index as everything else, so a blank or absent column is
+  // simply "not switched off" - the state every member is in until somebody says otherwise.
+  const { backend, ss } = makeBackend({ settings: [['u1', '']] });
+  check('an empty settings row is not a block', backend.pushDisabledForUser(ss, 'u1'), false);
+  check('and neither is a member with no row', backend.pushDisabledForUser(ss, 'u9'), false);
+}
+
 console.log('\n--- the card asks the DEVICE, not the member ---');
 // The exact bug: the state was read from the member's stored token, so a phone that had never been
 // enabled showed "Registered" because the member's computer was.
@@ -351,6 +439,30 @@ check('so the card can say whose alerts stopped here', /removed_owner_name/.test
 // (The announcement and offer fan-outs send to many members at once, so they prune by TOKEN - asserted
 // above - because there is no single member to bound the delete to.)
 check('a dead-token prune is still bounded by member', /deletePushTokens\(ss, deadTokens, targetUserId\)/.test(codeSource), true);
+
+console.log('\n--- the administrator\'s switch is wired to all three ends ---');
+// Middle: the action. Gated on the same permission as the table it is on, and logged, because a member
+// whose notifications stop has to be able to find out why and who did it.
+checkIs('there is an action for the switch', /case "ADMIN_SET_PUSH_DISABLED":/.test(codeSource));
+checkIs('gated on the notification permission, like the table', /case "ADMIN_SET_PUSH_DISABLED"[\s\S]{0,260}can_edit_notification_settings/.test(codeSource));
+checkIs('it writes a system log line', /"ADMIN_SET_PUSH_DISABLED",\s*\n?\s*"Turned notifications off for "/.test(codeSource));
+checkIs('and names the member in it', /Allowed notifications for " \+ pushTargetName/.test(codeSource));
+// The flag has to reach BOTH surfaces: the admin table (so the row reads as switched off) and the
+// member's own card (so a live subscription is not reported as delivery).
+checkIs('the admin table is told the state', /push_disabled: pushDisabledForUser\(ss, String\(user\.id\)\.trim\(\)\)/.test(codeSource));
+checkIs('and so is the member', /push_disabled: pushDisabledForUser\(ss, myDeviceUserId\)/.test(codeSource));
+// The refusal has to be a NAME, not a generic failure: the member has done nothing wrong.
+checkIs('the block has its own code for the client', /PUSH_DISABLED_BY_ADMIN/.test(codeSource) && /PUSH_DISABLED_BY_ADMIN/.test(settingsSource));
+checkIs('so the card can explain rather than shrug', /An administrator has turned notifications off for your account/.test(settingsSource));
+checkIs('and it offers no Enable button that could only fail', /pushBlocked \? \(/.test(settingsSource));
+// Front: the admin UI. Disabling is destructive and asks first (a native dialog is banned here - see
+// verify:confirmations); allowing does not ask, because nothing is lost.
+checkIs('the admin sends the switch', /adminSetPushDisabled\(/.test(adminSource) && /action: 'ADMIN_SET_PUSH_DISABLED'/.test(apiSource));
+checkIs('the destructive direction asks in ConfirmModal', /import ConfirmModal/.test(adminSource) && /<ConfirmModal/.test(adminSource));
+checkIs('holding the row it is asking about', /setConfirmingOff\(user\)/.test(adminSource) && /confirmingOff\.device_count/.test(adminSource));
+checkIs('and the row re-reads itself afterwards', /await loadStatus\(\)/.test(adminSource));
+checkIs('the table shows the switched-off state', /Off \(administrator\)/.test(adminSource));
+checkIs('and cannot send a test to a switched-off member', /!user\.device_registered \|\| user\.push_disabled \|\| sendingTo === user\.id/.test(adminSource));
 
 console.log('\n--- the wire name cannot collide with the session ---');
 // `token` is the session in the RPC envelope. Reading it as the device token would register a session

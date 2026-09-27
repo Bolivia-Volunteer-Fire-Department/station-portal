@@ -795,6 +795,20 @@ export const adminFetchPushStatus = async (token) =>
 export const adminSendTestPush = async (userId, token) =>
   appScriptFetch({ action: 'ADMIN_SEND_TEST_PUSH', token, user_id: userId });
 
+// Turns a member's notifications off for every device they have, or lets them back in.
+//
+// `disabled: true` is the forceful direction: their devices are forgotten AND a flag is set, because the
+// member's own browser re-registers any subscription it holds when User Settings is opened - without the
+// flag this would quietly undo itself. Lifting it only clears the flag: each device has to be enabled
+// again from the device itself, which is the only place its push subscription can be turned back on.
+export const adminSetPushDisabled = async (userId, disabled, token) =>
+  appScriptFetch({
+    action: 'ADMIN_SET_PUSH_DISABLED',
+    token,
+    user_id: String(userId || ''),
+    disabled: disabled === true,
+  });
+
 // Which FCM credentials are present, as booleans - the service-account private
 // key is write-only and is never returned, not even to an authenticated admin.
 export const adminFetchFcmStatus = async (token) =>

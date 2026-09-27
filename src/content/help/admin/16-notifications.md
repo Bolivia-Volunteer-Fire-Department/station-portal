@@ -33,11 +33,21 @@ A per-member table showing, for each person:
 | Column | Meaning |
 |---|---|
 | **Member** | Who the row is about |
-| **Device** | How many devices they have registered — a member with a phone and a computer counts twice |
+| **Device** | How many devices they have registered — a member with a phone and a computer counts twice — or **Off (administrator)** if they have been switched off below |
 | **New requests** / **Approved** / **Declined** | Their own notification switches, or *Default* when they have not overridden the station setting |
 | **Test** | Sends a test notification to **every** device they have registered |
 | **New requests** / **Approved** / **Declined** | Whether that notification would actually reach them, after their own settings and the station defaults are combined |
 | **Test** | Sends one test notification to that member's devices |
+| **Notifications** | **Turn off** forgets every device that member has and blocks their account; **Turn on** lets them enable devices again |
+
+**Turning a member's notifications off** is for the cases where a member keeps receiving and should not — a device they no longer hold, an account being stood down. It asks first, because it does two things at once:
+
+- **Their devices are forgotten**, so nothing is delivered any more. This includes a device that registered before the device list existed.
+- **Their account is blocked**, so it cannot come back by itself. Without this the member's own browser would register itself again the next time they opened *User Settings* — the app re-checks a device every time that page is opened — and the switch would quietly undo itself.
+
+Neither half touches what the member sees **inside** the app: announcements, shift decisions and everything else still work. They are simply not interrupted away from it. The change is written to the **System Log** either way, naming both members — that is where someone whose alerts stopped can find out why, and who decided it.
+
+**Turning them back on** lifts the block only. Their devices stay off until they enable each one again from the device itself, because that is the only place a push subscription can be turned on — a browser cannot be subscribed from the server.
 
 The three notification columns matter because they show the **effective** answer rather than the raw switches: a member who has opted out will read *Off* here even if the station default is on, which is exactly what you want to know when a member says they are not being told about their shifts.
 
@@ -53,7 +63,7 @@ A device belongs to **one member at a time**. The push subscription belongs to t
 
 Work through it in this order:
 
-1. **Does the member have a device?** Check the **Device** column. If it reads empty or *none*, they have never enabled notifications — no server setting can change that. If the count has *dropped* since it last worked, suspect a shared computer: another member can only take a device over deliberately (see **Device Status** above), and the System Log says who did it and when.
+1. **Does the member have a device?** Check the **Device** column. If it reads empty or *none*, they have never enabled notifications — no server setting can change that. If it reads **Off (administrator)**, somebody switched them off deliberately (see **Device Status** above): the System Log says who and when, and **Turn on** in that table is the only way back. If the count has *dropped* since it last worked, suspect a shared computer: another member can only take a device over deliberately, and the System Log says who did it and when.
 2. **Is the Firebase configuration complete?** An amber banner in **Device Status** says not.
 3. **Did they allow the browser prompt?** A member who dismissed it shows as *blocked* in their own User Settings, and must re-allow it in the browser's site settings.
 4. **Does a Test reach them?** Press **Test** on their row. A failure names the cause; a success that does not appear on their device means the problem is on the device, not the server.

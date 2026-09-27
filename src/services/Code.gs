@@ -2120,6 +2120,14 @@ function doPost(e) {
             owner_name: registered.ownerLabel,
             message: "This device is registered to " + registered.ownerLabel + "."
           };
+        } else if (registered.reason === "disabled_by_admin") {
+          // Named rather than folded into a generic failure: the member has done nothing wrong and
+          // nothing is broken, and "ask an administrator" is the only useful thing to tell them.
+          responseData = {
+            success: false,
+            code: "PUSH_DISABLED_BY_ADMIN",
+            message: "An administrator has turned notifications off for your account."
+          };
         } else {
           responseData = { success: false, message: "Could not register this device." };
         }
@@ -2210,7 +2218,11 @@ function doPost(e) {
               updated_at: String(row.updated_at || "").trim()
             };
           }),
-          device_owner: thisDeviceToken ? pushDeviceOwner(ss, thisDeviceToken) : null
+          device_owner: thisDeviceToken ? pushDeviceOwner(ss, thisDeviceToken) : null,
+          // So the card can say why nothing is arriving, rather than showing a browser that still holds a
+          // subscription as though it were delivering (an administrator may have turned this member off -
+          // see ADMIN_SET_PUSH_DISABLED).
+          push_disabled: pushDisabledForUser(ss, myDeviceUserId)
         };
         break;
       }
@@ -3162,12 +3174,79 @@ function doPost(e) {
               name: user.name || user.user_name || String(user.id),
               device_registered: deviceCount > 0,
               device_count: deviceCount,
+              // An administrator can stop a member's notifications outright, and the table has to say so:
+              // a blocked member reads as "off" rather than as a member nobody has set up yet.
+              push_disabled: pushDisabledForUser(ss, String(user.id).trim()),
               notify_new_offer: row ? row.notify_new_offer : "",
               notify_offer_approved: row ? row.notify_offer_approved : "",
               notify_offer_declined: row ? row.notify_offer_declined : ""
             };
           })
         };
+        break;
+      }
+
+      // Turns a member's notifications off for every device they have - or lifts that block again.
+      //
+      // One action with two directions rather than two actions, because it is one fact about the member
+      // and one control shows it. Disabling forgets their devices AND sets a flag: the delete is what
+      // stops delivery now, and the flag is what stops the member's own browser from restoring it on the
+      // next visit (see disablePushForUser, which explains why the second half is not optional).
+      //
+      // Gated on the same permission as the Device Status table above: whoever can already decide what
+      // the whole department receives is not being handed anything new by this.
+      case "ADMIN_SET_PUSH_DISABLED": {
+        const authPushCtx = getAuthContext(ss, data);
+        if (!authPushCtx || !hasRolePermission(ss, authPushCtx.userId, "can_edit_notification_settings")) {
+          responseData = { success: false, message: "Unauthorized." };
+          break;
+        }
+
+        const pushTargetId = String(data.user_id || payload.user_id || "").trim();
+        if (!pushTargetId) {
+          responseData = { success: false, message: "No member was supplied." };
+          break;
+        }
+
+        const pushTargetUser = findRowById(getSheetData(ss, "users"), pushTargetId);
+        if (!pushTargetUser) {
+          responseData = { success: false, message: "That member no longer exists." };
+          break;
+        }
+
+        const pushTargetName = String(
+          pushTargetUser.name || pushTargetUser.user_name || pushTargetId
+        ).trim();
+        const disablePush = isTruthyValue(data.disabled !== undefined ? data.disabled : payload.disabled);
+
+        if (!disablePush) {
+          if (!setPushDisabledForUser(ss, pushTargetId, false)) {
+            responseData = { success: false, message: "Could not allow notifications for that member." };
+            break;
+          }
+          logSystemEvent(
+            ss,
+            authPushCtx.userId,
+            "ADMIN_SET_PUSH_DISABLED",
+            "Allowed notifications for " + pushTargetName + " again (their devices stay off until they enable one)"
+          );
+          responseData = { success: true, disabled: false, devices: 0 };
+          break;
+        }
+
+        const disabled = disablePushForUser(ss, pushTargetId);
+        if (!disabled.ok) {
+          responseData = { success: false, message: "Could not turn notifications off for that member." };
+          break;
+        }
+
+        logSystemEvent(
+          ss,
+          authPushCtx.userId,
+          "ADMIN_SET_PUSH_DISABLED",
+          "Turned notifications off for " + pushTargetName + ", forgetting " + disabled.devices + " device(s)"
+        );
+        responseData = { success: true, disabled: true, devices: disabled.devices };
         break;
       }
 
@@ -6205,6 +6284,62 @@ function pushTokensForUser(ss, userId) {
   return pushTokenIndex(ss)[String(userId === undefined || userId === null ? "" : userId).trim()] || [];
 }
 
+// Whether an administrator has turned notifications off for this member.
+//
+// The flag lives in `user_settings.is_push_disabled`, which is a column the sheet grows on first use
+// (upsertUserSettingsColumns adds anything it is asked to write), so there is no manual step and no
+// new sheet. Absent or blank means "not blocked" - the state every member is in until somebody says
+// otherwise.
+function pushDisabledForUser(ss, userId) {
+  const wanted = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!wanted) return false;
+  const settings = userSettingsIndex(ss)[wanted] || {};
+  return isTruthyValue(settings.is_push_disabled);
+}
+
+// Sets or lifts that flag. Used by the administrator's button, and by nothing else.
+function setPushDisabledForUser(ss, userId, disabled) {
+  const wanted = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!wanted) return false;
+
+  try {
+    return upsertUserSettingsColumns(ss, wanted, { is_push_disabled: disabled ? true : false });
+  } catch (err) {
+    Logger.log("Could not set the push-disabled flag for " + wanted + ": " + err.toString());
+    return false;
+  }
+}
+
+// Turns notifications off for every device a member has, and KEEPS them off.
+//
+// Two halves, and both are load-bearing:
+//
+//   * the devices are forgotten, so delivery stops now rather than at the next send. That is
+//     deletePushTokens, which also clears the legacy `user_settings.fcm_token` column - a token left
+//     there still delivers, whatever the device list says.
+//
+//   * the flag is set, so the member's own browser cannot put itself back. This is the half that makes
+//     the button mean something: the settings card re-registers any browser that holds a push
+//     subscription (that self-healing is deliberate - see registerPushDevice), so without the flag the
+//     next person to open that member's User Settings would restore delivery and the administrator
+//     would never know it had happened. "Forcibly" is the flag, not the delete.
+//
+// Lifting it is deliberately one-sided: the member is allowed to register again, but nothing is handed
+// back to them. Their devices re-enable themselves one at a time, from the device, by the member - which
+// is the only place the browser's subscription can actually be turned back on.
+function disablePushForUser(ss, userId) {
+  const wanted = String(userId === undefined || userId === null ? "" : userId).trim();
+  if (!wanted) return { ok: false, reason: "missing_member" };
+
+  const tokens = pushTokensForUser(ss, wanted);
+  const removed = tokens.length ? deletePushTokens(ss, tokens, wanted) : 0;
+  const flagged = setPushDisabledForUser(ss, wanted, true);
+
+  // `devices` rather than `removed`: the administrator is being told how many devices were silenced, and
+  // a legacy-only device is a device even though it has no row to delete.
+  return { ok: flagged, devices: tokens.length, removed: removed };
+}
+
 // Registers or refreshes one device.
 //
 // Idempotent by token, so opening the settings card repeatedly cannot accumulate rows.
@@ -6228,6 +6363,15 @@ function registerPushDevice(ss, userId, token, label, options) {
   const targetUserId = String(userId === undefined || userId === null ? "" : userId).trim();
   const targetToken = String(token === undefined || token === null ? "" : token).trim();
   if (!targetUserId || !targetToken) return { ok: false, reason: "missing_arguments" };
+
+  // An administrator can turn a member's notifications off outright, and that decision has to hold.
+  // The refusal belongs HERE rather than at the settings card's call site, because this function is the
+  // only door into the device list: every path - the card's Enable button, its self-healing
+  // re-registration, a transfer taken from somebody else - ends up in this one place, so a block cannot
+  // be walked around by opening the right screen.
+  if (pushDisabledForUser(ss, targetUserId)) {
+    return { ok: false, reason: "disabled_by_admin" };
+  }
 
   const sheet = pushDeviceSheet(ss);
   const data = sheet.getDataRange().getValues();

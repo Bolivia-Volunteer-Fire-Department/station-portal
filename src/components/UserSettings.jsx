@@ -412,6 +412,10 @@ function NotificationsCard({
   // signing in on somebody's computer quietly hand it over, so the owner is read from the server.
   const [thisDevice, setThisDevice] = useState({ known: false, enabled: false, token: '', ownerName: '' });
   const [deviceTotal, setDeviceTotal] = useState(0);
+  // Set when an administrator has turned this member's notifications off outright. It outranks the local
+  // picture: a browser can hold a live subscription and still receive nothing, and a card that showed
+  // "on for this device" would be describing the subscription rather than the delivery.
+  const [pushBlocked, setPushBlocked] = useState(false);
   const [permission, setPermission] = useState(notificationPermission());
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
@@ -452,6 +456,13 @@ function NotificationsCard({
         const listed = (status?.devices || []).length;
         const owner = status?.device_owner || null;
         const ownerIsSomeoneElse = !!owner && String(owner.user_id) !== String(currentUser?.id);
+        // An administrator's switch outranks everything below it: there is no registration to refresh, no
+        // device to claim and nothing for the member to press, so the card stops here.
+        setPushBlocked(!!status?.push_disabled);
+        if (status?.push_disabled) {
+          setDeviceTotal(listed);
+          return;
+        }
 
         if (ownerIsSomeoneElse && token) {
           // Somebody else's device, and saying so is the whole point: the card must not offer to turn
@@ -528,6 +539,15 @@ function NotificationsCard({
       setPermission(notificationPermission());
 
       if (registered && registered.success === false) {
+        // An administrator's switch is not a race and not a device problem, so it gets its own answer
+        // rather than the borrowed-computer one below.
+        if (registered.code === 'PUSH_DISABLED_BY_ADMIN') {
+          setPushBlocked(true);
+          setThisDevice({ known: true, enabled: true, token, ownerName: '' });
+          setStatusMessage({ type: 'error', text: registered.message || 'An administrator has turned notifications off for your account.' });
+          return;
+        }
+
         // A brand-new subscription has no row, so this is the narrow race: another member claimed this
         // browser (in another window, or while this page sat open) between the read above and this
         // click. The permission prompt cannot be undone, so the honest move is to show whose the
@@ -681,18 +701,28 @@ function NotificationsCard({
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {!thisDevice.known
                   ? 'Checking this device…'
-                  : !thisDevice.enabled
-                    ? 'Notifications are not on for this device yet.'
-                    : thisDevice.ownerName
-                      // The sentence that was missing. A subscription existing here is not the same as
-                      // it being the signed-in member's, and a card that cannot tell the two apart
-                      // either lies about delivery or offers to break somebody else's device.
-                      ? `This computer is set up for ${thisDevice.ownerName}, so ${
-                          thisDevice.ownerName === 'another member' ? 'their' : `${thisDevice.ownerName}'s`
-                        } alerts appear here.`
-                      : 'Notifications are on for this device.'}
+                  : pushBlocked
+                    // Outranks the owner sentence below it: whoever the subscription belongs to, nothing
+                    // is being delivered, and that is the whole of what the member needs to know.
+                    ? 'An administrator has turned notifications off for your account.'
+                    : !thisDevice.enabled
+                      ? 'Notifications are not on for this device yet.'
+                      : thisDevice.ownerName
+                        // The sentence that was missing. A subscription existing here is not the same as
+                        // it being the signed-in member's, and a card that cannot tell the two apart
+                        // either lies about delivery or offers to break somebody else's device.
+                        ? `This computer is set up for ${thisDevice.ownerName}, so ${
+                            thisDevice.ownerName === 'another member' ? 'their' : `${thisDevice.ownerName}'s`
+                          } alerts appear here.`
+                        : 'Notifications are on for this device.'}
               </p>
-              {thisDevice.ownerName && (
+              {pushBlocked && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  Enabling a device will not work until an administrator allows it again. Ask an
+                  administrator if you need them back.
+                </p>
+              )}
+              {thisDevice.ownerName && !pushBlocked && (
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                   One computer can only receive one member&rsquo;s notifications at a time. If you take this
                   one over, {thisDevice.ownerName} stops receiving them here &mdash; and the app records
@@ -734,7 +764,7 @@ function NotificationsCard({
               )}
             </div>
             <div className="shrink-0 flex flex-col items-end gap-2">
-              {thisDevice.ownerName && (
+              {thisDevice.ownerName && !pushBlocked && (
                 // The one place a device changes hands. It is a button, with the consequence written on
                 // it, rather than something a page load does on the member's behalf.
                 <button
@@ -757,6 +787,10 @@ function NotificationsCard({
                   {busy && !thisDevice.ownerName && <Loader2 className="w-3 h-3 animate-spin" />}
                   {thisDevice.ownerName ? 'Turn off here' : 'Turn off'}
                 </button>
+              ) : pushBlocked ? (
+                // No Enable button at all while the account is switched off: it could only fail, and a
+                // control that exists to be refused is worse than the explanation above it.
+                null
               ) : (
                 <button
                   type="button"
