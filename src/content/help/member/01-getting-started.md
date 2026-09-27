@@ -44,6 +44,10 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...
 * Added Checklists - used for creating and viewing things like new hire orientation packet lists.
 * Added Links - used for external URLs.
+* Added a "Turn Off" button for administrators in the Notifications configuration tab.
+* Added some animations and transitions to the app overall to help this feel fast, as opposed to abrupt.
+* Modified some PWA settings that make the app feel more like a native app instead of just another web app, like taking over the full screen, preventing pinch-to-zoom, etc.
+* Added Certifications, where things like an EMT certification can be tracked. Optionally allowed the representing icon be displayed next to user names (to assist with scheduling).
 
 **Version 1.05x**
 * Added sounds.
