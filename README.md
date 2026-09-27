@@ -122,14 +122,30 @@ in the publish checklist below.
   previews whose buttons close instead. It needs no backend change, which is why it is the one
   tab whose permission works against a deployment that has not been re-published.
 - **The Documents module is a three-part browser, and the reader owns the card.** Folders (with how many documents
-  each holds, and how many are waiting on *this* member's signature), the documents in the chosen folder, and the
-  document itself — but **opening a document gives it the whole card at every width**: the two columns are not
-  rendered at all while something is open (`{!openId && (`), and the back arrow in the card's header is the only way
-  back. A reader that shared the card at one width and owned it at another was two answers to the same question.
-  A filter — a search, or the **to sign** button — spans every folder, so its rows name theirs, and both are put away
-  while reading, because a filter that changes a hidden list looks like a button that does nothing. The folder counts
-  come from `folderSummaries` in `utils/documents` rather than from the component, because a folder showing "2" must
-  contain the two documents the next column lists.
+  each holds, and how many are waiting on *this* member's signature) and the documents in the chosen folder — two
+  columns using the whole card, with **no third track reserved** for a reader — and then **opening a document gives
+  it the entire card at every width**: the two columns are not rendered at all while something is open
+  (`{!openId && (`), and the back arrow in the card's header is the only way back. A reader that shared the card at
+  one width and owned it at another was two answers to the same question. A filter — a search, or the **to sign**
+  button — spans every folder, so its rows name theirs, and both are put away while reading, because a filter that
+  changes a hidden list looks like a button that does nothing. The folder counts come from `folderSummaries` in
+  `utils/documents` rather than from the component, because a folder showing "2" must contain the two documents the
+  next column lists.
+- **A verifier can read one member's records without impersonating them.** The **View as** box at the top of the
+  member module (offered only with `can_verify_documents`) switches *whose* ticks and *whose* signature the reader
+  shows: one `recordUserId` / `recordSignatures` pair drives the item states, the progress label and the signature
+  block, so the two modes cannot half-apply. It is a READER — the document list is still what the session may see,
+  because what exists is the server's decision from the reader's own rank — and it is strictly read-only:
+  `canTickItems` is false, the tick handler refuses with the reason rather than silently, no signing is offered, and
+  the card says *Viewing X's records — read only* at the top. It needs **no new server action**: the report is
+  `GET_DOCUMENT_SIGNATURES`, which is already the verifier's to read. The Administration tab's version of the same
+  question is the per-member panel plus its **already verified** list.
+- **"Verified" says who and when.** `checklistVerifiedLabel` in `utils/checklists` is the one wording, used by the
+  member's own line and by a verifier reading somebody else's: *Verified by Jane Doe on Wed, Jul 1 2026 · 2:04 PM*,
+  *Verified by 2 people on …* when more than one officer confirmed the same line, and simply *Verified* for a row
+  written before verifications carried a verifier. Desktop prints it; a phone shows the word as a **button** that
+  reveals the same text under the item, because the name and date would otherwise crowd out the item's own wording —
+  the one place the two widths deliberately show different things rather than the same thing at different sizes.
 - **Position is dragged, not typed.** There is no Order box: documents are draggable rows and folder headings are
   draggable blocks. The rule lives in two pure helpers — `reorderDocuments` and `reorderFolders` in
   `utils/documents` — which return the `{id, sort_order}` pairs to save, so "what does dropping A onto B mean" is

@@ -6,6 +6,7 @@ import ConfirmModal from '../ConfirmModal';
 import { normalizeChecklistItemList, normalizeSignatureList, signatureDateLabel } from '../../utils/documents';
 import {
   checklistProgressLabel,
+  checklistVerifiedLabel,
   membersAwaitingVerification,
   verificationQueue,
 } from '../../utils/checklists';
@@ -37,6 +38,9 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
   const [verifyingItemId, setVerifyingItemId] = useState('');
   const [verifyingAll, setVerifyingAll] = useState(false);
   const [confirmingAll, setConfirmingAll] = useState(false);
+  // Which member's already-verified items are expanded. Collapsed by default: the panel is a to-do list, and the
+  // work is what is still outstanding - the record is what you open when somebody asks about it.
+  const [showingVerifiedFor, setShowingVerifiedFor] = useState('');
 
   // Only checklists have anything to confirm item by item: a document's signature is the whole acknowledgment.
   const checklists = useMemo(
@@ -254,8 +258,8 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
               {emptyReason === 'only-yours' && (
                 <>
                   <p>
-                    The only signed items on this checklist are <strong>yours</strong>, and nobody can verify their
-                    own checklist — that is the rule that makes a verification mean something.
+                    The only signed items on this checklist are <strong>yours</strong> (you cannot verify your
+                    own checklist).
                   </p>
                   <p className="mt-1">
                     Another member&rsquo;s items appear here as soon as they sign them. To check your own, ask
@@ -342,10 +346,48 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
                       </ul>
 
                       {openMemberQueue.verified > 0 && (
-                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                          {openMemberQueue.verified} item
-                          {openMemberQueue.verified === 1 ? ' is' : 's are'} already verified on this checklist.
-                        </p>
+                        <div className="mt-2">
+                          {/* The record, for when somebody asks "who checked this, and when?". The outstanding list
+                              above is the WORK; this is what has already been signed off, item by item, with the
+                              verifier and the date on each one. */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShowingVerifiedFor((current) =>
+                                current === entry.userId ? '' : entry.userId
+                              )
+                            }
+                            aria-expanded={showingVerifiedFor === entry.userId}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400"
+                          >
+                            <BadgeCheck className="w-3.5 h-3.5" />
+                            {openMemberQueue.verified} already verified
+                            {showingVerifiedFor === entry.userId ? ' — hide' : ' — show'}
+                          </button>
+
+                          {showingVerifiedFor === entry.userId && (
+                            <ul className="mt-1.5 space-y-1.5">
+                              {openMemberQueue.verifiedItems.map((state) => (
+                                <li
+                                  key={state.itemId}
+                                  className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm dark:border-emerald-900 dark:bg-emerald-950/20"
+                                >
+                                  <CheckCircle2 className="h-4 w-4 shrink-0 self-center text-emerald-600" />
+                                  <span className="min-w-0 flex-1 text-slate-700 dark:text-slate-200">
+                                    {state.item.label}
+                                  </span>
+                                  <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                                    {checklistVerifiedLabel(
+                                      state,
+                                      state.verifiedByUserId ? memberName(state.verifiedByUserId) : '',
+                                      timeFormat
+                                    )}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}

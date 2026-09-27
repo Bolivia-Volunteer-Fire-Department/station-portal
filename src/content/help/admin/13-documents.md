@@ -96,6 +96,8 @@ A folder is simply a name carried by the documents in it, so there is no folder 
 
 The folder button beside a heading opens a rename box. Renaming moves **every document in that folder**, and clearing the name moves them all to *Unfiled*. Documents with no folder are shown last, under **Unfiled**.
 
+**The library is two columns** — the folders, then the documents in the folder you picked — and they use the whole width of the card. There is no third column held open for a document: opening one takes the entire card, and the back arrow in the header hands it back. So the space you are working in is never half list and half empty pane.
+
 ## Ordering
 
 Position is set by **dragging**, not by typing numbers:
@@ -179,6 +181,12 @@ There are two ways to do it, and they answer different questions:
 The second one is the one to use for a backlog. It lists the station's checklists, and for the one you pick it lists every member with something outstanding — *3 to verify, 8 of 12 signed* — busiest first. Expanding a member shows their signed items with **Verify** on each, and **Verify all 3** for the rest. Confirming several at once asks first, because a verification is a record that a check was made.
 
 A role with *Verify checklists* opens this tab for that panel alone: it sees no editor, no folder list and no signatures report. That is why the permission is a member permission — a verifier has nothing to edit here.
+
+### The record, once it is done
+
+Under each member's outstanding items there is a **N already verified — show** line. It opens the item-by-item record: what was confirmed, **who confirmed it and when** ("Verified by Jane Doe on Wed, Jul 1 2026 · 2:04 PM"). If two officers confirmed the same line, it says so with the count rather than picking one, because both confirmations are on the record.
+
+That is where you answer "who checked the truck checklist in March", and it works for any member, whether or not anything is still outstanding. The same detail appears to the member on their own line — printed on a desktop, and behind a tap on the word **Verified** on a phone, where the name and date would otherwise crowd out the item.
 
 **If the panel says nothing is waiting, it now tells you which of the four reasons it is** — because the most common one looks exactly like a bug:
 

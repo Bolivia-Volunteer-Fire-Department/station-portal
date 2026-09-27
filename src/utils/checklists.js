@@ -11,6 +11,7 @@
 // "verified".
 
 import { normalizeChecklistItemList, normalizeSignatureList } from './documents';
+import { formatLogTimestamp } from './systemLog';
 
 // One item's state for one member: what they did, and what was confirmed about it.
 //
@@ -97,8 +98,26 @@ export const checklistSections = (items) => {
 };
 
 // ---------------------------------------------------------------------------
-// Verification
+// Saying WHO verified an item
 // ---------------------------------------------------------------------------
+
+// "Verified by Jane Doe on Jul 1, 2026 · 14:04" - and simply "Verified" when the row records neither, which is what
+// a verification written before the verifier's identity was kept looks like.
+//
+// The wording lives here rather than in a component because two screens say it - the member's own list of items and
+// a verifier looking at somebody else's - and they must not drift into saying it differently. The NAME is supplied
+// by the caller: turning a user id into a person's name is one rule (utils/displayLabel) and belongs in one place.
+export const checklistVerifiedLabel = (state, verifierName, timeFormat = '12') => {
+  const count = Number(state && state.verificationCount) || 0;
+  const who = String(verifierName || '').trim();
+  const when = state && state.verifiedAt ? formatLogTimestamp(state.verifiedAt, timeFormat) : '';
+
+  // Two officers confirming the same line is two confirmations, not a conflict, so the row says so instead of
+  // showing only the first of them.
+  const subject = count > 1 ? `Verified by ${count} people` : who ? `Verified by ${who}` : 'Verified';
+  return when ? `${subject} on ${when}` : subject;
+};
+
 
 // What one verifier still has to do about one member: the items that member has signed and nobody has confirmed
 // yet. An item the member has NOT signed is not in here - there is nothing to confirm about it yet - which is
@@ -111,6 +130,9 @@ export const verificationQueue = (items, signatures, userId) => {
     total: states.length,
     signed: states.filter((state) => state.signed).length,
     verified: states.filter((state) => state.signed && state.verified).length,
+    // The verified states themselves, for the record an administrator opens when somebody asks who checked what
+    // and when. Same list as the count above, so the two cannot disagree.
+    verifiedItems: states.filter((state) => state.signed && state.verified),
     remaining,
     remainingIds: remaining.map((state) => state.itemId),
   };

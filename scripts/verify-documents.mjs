@@ -62,6 +62,7 @@ import {
   checklistProgress,
   checklistProgressLabel,
   checklistSections,
+  checklistVerifiedLabel,
   membersAwaitingVerification,
   verificationQueue,
 } from '../src/utils/checklists.js';
@@ -1507,8 +1508,8 @@ const moduleSource = readFileSync(path.resolve(process.cwd(), 'src/components/Do
 console.log('\n--- the browser: folders, then documents, then the reader ---');
 checkIs('there is a folder column', /Folders\s*</.test(moduleSource) && /FolderOption/.test(moduleSource), 'no folder column');
 checkIs(
-  'three columns on a wide screen, and the document column first below that',
-  /lg:grid-cols-\[15rem_16rem_1fr\]/.test(moduleSource) && /md:grid-cols-\[18rem_1fr\]/.test(moduleSource),
+  'two columns on a wide screen: the folders, then the list, and no third track waiting',
+  /lg:grid-cols-\[16rem_1fr\]/.test(moduleSource) && /md:grid-cols-\[18rem_1fr\]/.test(moduleSource),
   'the grid columns are not the shape the browser needs'
 );
 checkIs(
@@ -1605,7 +1606,7 @@ checkIs(
 checkIs(
   'a checklist is always signed item by item, so its items are always tickable',
   /const itemsAreSignable = documentIsChecklist;/.test(moduleSource) &&
-    /canTick=\{itemsAreSignable\}/.test(moduleSource),
+    /canTick=\{canTickItems\}/.test(moduleSource),
   'a checklist whose stored flag is false would show items that refuse to be ticked'
 );
 checkIs(
@@ -1681,7 +1682,123 @@ checkIs(
   /withItemSummaries\([\s\S]{0,300}documentItemSummaries\(ss, ""\)/.test(action('ADMIN_GET_DOCUMENTS'))
 );
 
-console.log('\n--- the wire format the verification queue depends on ---');
+console.log('\n--- saying who verified an item ---');
+const verifiedState = {
+  verified: true,
+  verifiedAt: '2026-07-01 14:04:00',
+  verifiedByUserId: 'user-officer',
+  verificationCount: 1,
+};
+check(
+  'the row names the verifier and the date',
+  checklistVerifiedLabel(verifiedState, 'Jane Doe'),
+  'Verified by Jane Doe on Wed, Jul 1 2026 · 2:04 PM'
+);
+check(
+  'a 24-hour clock is the caller\u2019s choice',
+  checklistVerifiedLabel(verifiedState, 'Jane Doe', '24'),
+  'Verified by Jane Doe on Wed, Jul 1 2026 · 14:04'
+);
+check('no name means no name in the sentence', checklistVerifiedLabel({ ...verifiedState }, ''), 'Verified on Wed, Jul 1 2026 · 2:04 PM');
+check('no date leaves just the name', checklistVerifiedLabel({ ...verifiedState, verifiedAt: '' }, 'Jane Doe'), 'Verified by Jane Doe');
+check('neither leaves just the word', checklistVerifiedLabel({ verified: true, verifiedAt: '', verifiedByUserId: '' }, ''), 'Verified');
+check(
+  'two verifiers are counted rather than picked between',
+  checklistVerifiedLabel({ ...verifiedState, verificationCount: 2 }, 'Jane Doe'),
+  'Verified by 2 people on Wed, Jul 1 2026 · 2:04 PM'
+);
+check(
+  'the queue exposes the verified states the record list is built from',
+  verificationQueue(
+    [{ id: 'i1', label: 'One' }, { id: 'i2', label: 'Two' }],
+    [
+      { ...memberRow, checklist_item_id: 'i1' },
+      { ...memberRow, checklist_item_id: 'i2' },
+      { ...verifierRow, checklist_item_id: 'i1' },
+    ],
+    'user-ff' && 'user-ff'
+  ).verifiedItems.map((state) => state.item.label),
+  ['One']
+);
+check(
+  'and the count matches the list it is shown beside',
+  verificationQueue(
+    [{ id: 'i1', label: 'One' }, { id: 'i2', label: 'Two' }],
+    [
+      { ...memberRow, checklist_item_id: 'i1' },
+      { ...memberRow, checklist_item_id: 'i2' },
+      { ...verifierRow, checklist_item_id: 'i1' },
+    ],
+    'user-ff'
+  ).verified,
+  1
+);
+
+console.log('\n--- reading somebody else\'s records ---');
+checkIs(
+  'the dropdown is offered only to a role that may verify',
+  /\{canVerify && viewableMembers\.length > 0 && \(/.test(moduleSource),
+  'every member would be offered the signature report'
+);
+checkIs(
+  'and it never lists the reader themselves',
+  /String\(user\.id\) !== String\(userId\)/.test(moduleSource),
+  'viewing yourself as somebody else is not a thing'
+);
+checkIs(
+  'the whole reader follows one "whose records" value',
+  /const recordUserId = viewAsMember \? viewAsMember\.id : userId;/.test(moduleSource) &&
+    /const recordSignatures = viewingSomeoneElse \? viewerSignatures : signatures;/.test(moduleSource),
+  'half the screen could show one member and half another'
+);
+checkIs(
+  'the item states come from that value',
+  /checklistItemState\(item, recordSignatures, recordUserId\)/.test(moduleSource) &&
+    /checklistProgressLabel\(openDocument\.items, recordSignatures, recordUserId\)/.test(moduleSource)
+);
+checkIs(
+  'ticking is closed off in the viewing mode',
+  /const canTickItems = itemsAreSignable && !viewingSomeoneElse;/.test(moduleSource) &&
+    /canTick=\{canTickItems\}/.test(moduleSource)
+);
+checkIs(
+  'and the tick handler refuses with the reason, not silently',
+  /if \(viewingSomeoneElse\) \{[\s\S]{0,160}Only they can tick them/.test(moduleSource),
+  'a tap on somebody else\'s item would do nothing and say nothing'
+);
+checkIs(
+  'their signature is read from the report rather than assumed',
+  /memberSignatureFor\(viewerSignatures, openDocumentId, recordUserId\)/.test(moduleSource),
+  'the reader would show the wrong member\'s signature'
+);
+checkIs(
+  'and the mode is announced, not just applied',
+  /Viewing \{viewAsMember\.label\}&rsquo;s records — read only\./.test(moduleSource),
+  'a verifier could think a member had signed something they have not'
+);
+checkIs(
+  'no signing is offered on somebody else\'s document',
+  /\{!viewingSomeoneElse && \(\n\s+<p className="mt-1\.5 text-xs text-slate-500/.test(moduleSource) &&
+    /has not signed this document/.test(moduleSource)
+);
+
+console.log('\n--- the two columns span the card ---');
+checkIs(
+  'the library is two tracks, never three',
+  /md:grid-cols-\[18rem_1fr\] lg:grid-cols-\[16rem_1fr\]/.test(moduleSource) &&
+    !/grid-cols-\[15rem_16rem_1fr\]/.test(moduleSource),
+  'a third track would reserve width for a reader that is not there'
+);
+checkIs(
+  'and nothing is reserved for a body that is not open',
+  /\{openId && \(\n\s+<div className="p-4 md:overflow-y-auto md:flex-1">/.test(moduleSource),
+  'the list would still be squeezed by an empty pane'
+);
+checkIs(
+  'so the "choose a document" placeholder is gone with it',
+  !/Choose a document from the list to read it/.test(moduleSource)
+);
+
 // The regression guard for "I ticked some items and the verify card said nothing was waiting". The queue is built
 // from the signatures `GET_DOCUMENT_SIGNATURES` returns, so the fields SIGN_CHECKLIST_ITEM WRITES are the contract:
 // a member-role row, on a real item id, for the member who signed. Losing any one of them empties the card without
@@ -1805,7 +1922,7 @@ checkIs(
 );
 checkIs(
   'including the rule that makes it look empty',
-  /nobody can verify their\n\s+own checklist/.test(verificationView),
+  /you cannot verify your[\s\S]{0,40}own checklist/.test(verificationView),
   'the self-verification rule is not explained where it bites'
 );
 checkIs(

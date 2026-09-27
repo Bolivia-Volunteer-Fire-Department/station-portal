@@ -36,6 +36,7 @@ import {
   folderSummaries,
   isChecklist,
   isLink,
+  memberSignatureFor,
   normalizeChecklistItemList,
   normalizeDocument,
   normalizeDocumentList,
@@ -43,11 +44,13 @@ import {
   normalizeSignatureList,
   outstandingSignatureDocuments,
   signatureDateLabel,
+  signatureIsStale,
 } from '../utils/documents';
 import {
   checklistItemState,
   checklistProgressLabel,
   checklistSections,
+  checklistVerifiedLabel,
   membersAwaitingVerification,
   verificationQueue,
 } from '../utils/checklists';
@@ -73,9 +76,16 @@ import { unnamedLabel, userLabel } from '../utils/displayLabel';
 // swallows a tap reads as broken - which is exactly how it was reported: "clicking checklist items does nothing".
 // The box is drawn as a span inside the button because a button inside a button is not valid and would swallow the
 // click; the icon is what marks it, so nothing is lost by it not being one.
-function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer }) {
+//
+// "Verified" itself is a control when the row already is one, and only on a narrow screen: the names and the date
+// are worth a line of their own on a desktop, where there is room, and on a phone they would push the item's own
+// wording off the row - so the word is tappable instead. On a desktop the same text is simply there, and this is
+// the one place the two widths show different things rather than the same thing at different sizes.
+function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer, verifiedLabel }) {
+  const [showingDetail, setShowingDetail] = useState(false);
   const marked = state.signed || ticked;
   const tickable = Boolean(onToggle) && canTick && !state.signed;
+  const detail = state.verified ? verifiedLabel : '';
 
   const body = (
     <>
@@ -97,15 +107,41 @@ function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer }) {
             This item changed after it was signed, so the signature covers the earlier wording.
           </p>
         )}
+        {/* The mobile form: the detail appears under the item, where there is room for it, only when asked for. */}
+        {detail && showingDetail && (
+          <p className="mt-0.5 text-xs text-emerald-700 md:hidden dark:text-emerald-400">{detail}</p>
+        )}
         {footer}
       </div>
 
       <div className="shrink-0 text-right text-xs">
         {state.verified ? (
-          <span className="inline-flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
-            <BadgeCheck className="h-3.5 w-3.5" />
-            Verified
-          </span>
+          detail ? (
+            <>
+              {/* Tap to reveal, where there is no room to print it. A verified item is never tickable, so this
+                  button is never rendered inside the row's own button - which is what would make it invalid. */}
+              <button
+                type="button"
+                onClick={() => setShowingDetail((current) => !current)}
+                aria-expanded={showingDetail}
+                title={detail}
+                className="inline-flex items-center gap-1 font-medium text-emerald-700 hover:underline md:hidden dark:text-emerald-400"
+              >
+                <BadgeCheck className="h-3.5 w-3.5" />
+                Verified
+              </button>
+              {/* Printed, where there is. */}
+              <span className="hidden items-center gap-1 font-medium text-emerald-700 md:inline-flex dark:text-emerald-400">
+                <BadgeCheck className="h-3.5 w-3.5" />
+                {detail}
+              </span>
+            </>
+          ) : (
+            <span className="inline-flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              Verified
+            </span>
+          )
         ) : state.signed ? (
           <span className="text-slate-500 dark:text-slate-400">Awaiting verification</span>
         ) : null}
@@ -225,6 +261,16 @@ export default function DocumentsModule({
   const [panelItems, setPanelItems] = useState([]);
   const [panelSignatures, setPanelSignatures] = useState([]);
   const [panelLoading, setPanelLoading] = useState(false);
+  // "View as": a verifier looking at somebody else's records. The documents themselves are the ones THIS reader
+  // may see - which documents exist is not what is being asked - so the only thing that changes is whose signature
+  // and whose item ticks are shown. Nothing about it is writable: the reader's own items are not ticked, signing
+  // is not offered, and the server would refuse both anyway because every member-facing action works on the
+  // caller's own id from the session.
+  const [viewAsMemberId, setViewAsMemberId] = useState('');
+  const [viewerSignatures, setViewerSignatures] = useState([]);
+  const [viewerLoading, setViewerLoading] = useState(false);
+  const [viewerError, setViewerError] = useState('');
+
   const [panelError, setPanelError] = useState('');
   const [verifyTargetId, setVerifyTargetId] = useState('');
   const [verifyingItemId, setVerifyingItemId] = useState('');
@@ -301,6 +347,78 @@ export default function DocumentsModule({
   // the "no usable address" note instead of an href built from whatever the cell happens to contain.
   const openLinkUrl = useMemo(() => documentLinkUrl(openDocument || {}), [openDocument]);
 
+  // The members a verifier can look at: everyone except themselves, by name. The list is the roster the module
+  // already holds for putting names beside signatures, so nothing new travels for it.
+  const viewableMembers = useMemo(() => {
+    if (!canVerify) return [];
+    return (Array.isArray(users) ? users : [])
+      .filter((user) => String(user.id) !== String(userId) && String(user.id).trim() !== '')
+      .map((user) => ({ id: String(user.id), label: userLabel(user) }))
+      .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
+  }, [canVerify, users, userId]);
+
+  const viewAsMember = viewableMembers.find((member) => member.id === viewAsMemberId) || null;
+
+  // Whose records the reader is showing: the signed-in member's own, unless a verifier has asked for somebody
+  // else's. This one value is what every "is this mine?" question below tests, so the two modes cannot half-apply.
+  const recordUserId = viewAsMember ? viewAsMember.id : userId;
+  const viewingSomeoneElse = Boolean(viewAsMember);
+
+  // The verifier's read of one document's signatures, which is what makes somebody else's item states available.
+  // It is the SAME action the verification panel uses, gated on can_verify_documents on the server, so looking at
+  // another member's records is not a new way in - it is the report that already exists, scoped to one person.
+  useEffect(() => {
+    if (!viewingSomeoneElse || !openDocumentId) {
+      setViewerSignatures([]);
+      setViewerError('');
+      setViewerLoading(false);
+      return undefined;
+    }
+
+    let canceled = false;
+    setViewerLoading(true);
+    setViewerError('');
+    fetchDocumentSignatures(openDocumentId, token)
+      .then((result) => {
+        if (canceled) return;
+        if (!result?.success) throw new Error(result?.message || 'Could not load those records.');
+        setViewerSignatures(normalizeSignatureList(result.signatures));
+      })
+      .catch((err) => {
+        if (!canceled) {
+          setViewerSignatures([]);
+          setViewerError(err?.message || 'Could not load those records.');
+        }
+      })
+      .finally(() => {
+        if (!canceled) setViewerLoading(false);
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [viewingSomeoneElse, openDocumentId, token]);
+
+  // The document-level signature of whoever is being looked at, and whether it predates the last edit. In the
+  // member's own mode these come from the document read itself (the server sends the caller's own row); in the
+  // viewing mode they are picked out of the records just read.
+  const shownSignature = useMemo(() => {
+    if (!viewingSomeoneElse) return openDocument?.signature || null;
+    if (!openDocumentId) return null;
+    return memberSignatureFor(viewerSignatures, openDocumentId, recordUserId);
+  }, [viewingSomeoneElse, openDocument, openDocumentId, viewerSignatures, recordUserId]);
+
+  const shownSignatureStale = useMemo(() => {
+    if (!viewingSomeoneElse) return openDocument?.signature_stale === true;
+    return signatureIsStale(shownSignature, openDocument || {});
+  }, [viewingSomeoneElse, openDocument, shownSignature]);
+
+  // Whose signatures the reader reasons about, and whether this reader may TICK anything. Looking at another
+  // member's records is read-only in the strongest sense: their ticks belong to them, and only they can produce
+  // one, from their own sign-in.
+  const recordSignatures = viewingSomeoneElse ? viewerSignatures : signatures;
+  const canTickItems = itemsAreSignable && !viewingSomeoneElse;
+
   // The verification panel's data: read when a checklist is open and the reader may verify, and cleared
   // otherwise so a stale list can never be shown against another document.
   useEffect(() => {
@@ -338,6 +456,15 @@ export default function DocumentsModule({
   // Ticking an item that is already signed is refused here rather than by the server, and says why: signatures
   // are add-only, so the only thing that button could do is nothing.
   const togglePendingItem = (item, state) => {
+    // Ticking is the member's own act. In the viewing mode the lines on screen are somebody else's, and a tick
+    // here would be a claim about their work - which is the one thing this mode must never produce.
+    if (viewingSomeoneElse) {
+      toast.warning(`These are ${viewAsMember.label}'s items.`, {
+        description: 'Only they can tick them, from their own sign-in. A verifier confirms what they have signed.',
+      });
+      return;
+    }
+
     if (state.signed) {
       toast.warning('You have already signed this item. Signatures cannot be removed.', {
         description: 'If it is wrong, ask an administrator to correct it in the Documents report.',
@@ -469,8 +596,8 @@ export default function DocumentsModule({
     [documentIsChecklist, openDocument]
   );
   const openProgressLabel = useMemo(
-    () => (openDocument ? checklistProgressLabel(openDocument.items, signatures, userId) : ''),
-    [openDocument, signatures, userId]
+    () => (openDocument ? checklistProgressLabel(openDocument.items, recordSignatures, recordUserId) : ''),
+    [openDocument, recordSignatures, recordUserId]
   );
   const pendingItemCount = pendingItemIds.size;
 
@@ -576,6 +703,37 @@ export default function DocumentsModule({
               {onlyOutstanding ? `${visible.length} of ${documents.length}` : `${documents.length} document${documents.length === 1 ? '' : 's'}`}
             </span>
           )}
+
+          {/* "View as": a verifier reading somebody else's records. It is a READER rather than a switch of the whole
+              module - which documents exist is decided by the server from the session's own rank, and impersonation
+              is not what any of this is for - so it changes whose ticks and whose signature are shown, and nothing
+              else. Offered only to a role that may verify, because what it opens is the signature report. */}
+          {canVerify && viewableMembers.length > 0 && (
+            <label
+              className={`flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 ${
+                openId || outstanding.length > 0 ? 'ml-auto' : ''
+              }`}
+            >
+              <span className="hidden sm:inline">View as</span>
+              <select
+                value={viewAsMemberId}
+                onChange={(event) => setViewAsMemberId(event.target.value)}
+                aria-label="View another member's records"
+                className={`rounded-xl border px-2 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-500 ${
+                  viewingSomeoneElse
+                    ? 'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950/50 dark:text-amber-200'
+                    : 'border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                <option value="">Myself</option>
+                {viewableMembers.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
 
         {loading && (
@@ -607,13 +765,15 @@ export default function DocumentsModule({
             it in a third of the width, and the back arrow in the header above is the way back to them. That is one
             layout for every screen size - a reader that shared the card at one width and owned it at another was
             two answers to the same question - which is why the reader below is the only child when something is
-            open. */}
+            open.
+            With nothing open the two columns that remain SPAN the card: there is no third track waiting for a
+            document to arrive, because the reader takes the card rather than a column of it. */}
         {!loading && !loadError && documents.length > 0 && (
           <div
             className={
               openId
                 ? 'md:flex-1 md:min-h-0 md:flex'
-                : 'md:flex-1 md:min-h-0 md:grid md:grid-rows-1 md:grid-cols-[18rem_1fr] lg:grid-cols-[15rem_16rem_1fr]'
+                : 'md:flex-1 md:min-h-0 md:grid md:grid-rows-1 md:grid-cols-[18rem_1fr] lg:grid-cols-[16rem_1fr]'
             }
           >
             {/* Column 1: the folders, with what is in each one. Hidden below `lg`, where the same choice is a row of
@@ -750,14 +910,10 @@ export default function DocumentsModule({
 
             {/* The document, and now the whole card's width when it is open. Nothing is fetched until one is chosen,
                 which is the point of splitting the list from the body: a station with a hundred documents still
-                opens in one small request. */}
-            <div className="p-4 md:overflow-y-auto md:flex-1">
-              {!openId && (
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Choose a document from the list to read it.
-                </p>
-              )}
-
+                opens in one small request - and nothing is reserved for a body that is not there, so the folders and
+                the list own the card until they hand it over. */}
+            {openId && (
+              <div className="p-4 md:overflow-y-auto md:flex-1">
               {openId && opening && (
                 <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -771,6 +927,22 @@ export default function DocumentsModule({
 
               {openId && !opening && !openError && openDocument && (
                 <article>
+                  {/* Reading somebody else's records says so at the top, in the same amber the selector uses: a
+                      verifier who forgets which mode they are in is a verifier who thinks a member has signed
+                      something they have not. */}
+                  {viewingSomeoneElse && (
+                    <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                      <p className="font-medium">
+                        Viewing {viewAsMember.label}&rsquo;s records — read only.
+                      </p>
+                      <p className="mt-0.5">
+                        {viewerLoading
+                          ? 'Loading their signatures…'
+                          : 'What is shown below is theirs, not yours. Ticking and signing are theirs to do from their own sign-in.'}
+                      </p>
+                      {viewerError && <p className="mt-0.5 font-medium">{viewerError}</p>}
+                    </div>
+                  )}
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white">{openDocument.title}</h2>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     {openDocument.folder || 'Unfiled'}
@@ -824,23 +996,31 @@ export default function DocumentsModule({
                       which is exactly why this cannot simply test the flag. */}
                   {openDocument.is_sign_required && !documentIsChecklist && (
                     <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4">
-                      {openDocument.signature ? (
+                      {shownSignature ? (
                         <>
                           <p className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
                             <CheckCircle2 className="w-4 h-4" />
-                            {signatureDateLabel(openDocument.signature, timeFormat) || 'Signed'}
+                            {signatureDateLabel(shownSignature, timeFormat) || 'Signed'}
                           </p>
-                          {openDocument.signature_stale && (
+                          {shownSignatureStale && (
                             <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                              This document has been edited since you signed it, so your signature covers the
-                              earlier version. Read it again and ask an administrator if you are happy for it to
-                              stand.
+                              {viewingSomeoneElse
+                                ? 'This document has been edited since it was signed, so the signature covers the earlier version.'
+                                : 'This document has been edited since you signed it, so your signature covers the earlier version. Read it again and ask an administrator if you are happy for it to stand.'}
                             </p>
                           )}
-                          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                            A signature cannot be withdrawn from here. Ask an administrator if it is wrong.
-                          </p>
+                          {!viewingSomeoneElse && (
+                            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                              A signature cannot be withdrawn from here. Ask an administrator if it is wrong.
+                            </p>
+                          )}
                         </>
+                      ) : viewingSomeoneElse ? (
+                        /* Looking at somebody else's records: there is no signature of THEIR own on this document,
+                           and nothing here can produce one - only they can sign it, from their own sign-in. */
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          {viewAsMember.label} has not signed this document.
+                        </p>
                       ) : (
                         <>
                           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -872,7 +1052,7 @@ export default function DocumentsModule({
                         {openProgressLabel && (
                           <span className="text-xs text-slate-500 dark:text-slate-400">{openProgressLabel}</span>
                         )}
-                        {itemsAreSignable && pendingItemCount > 0 && (
+                        {canTickItems && pendingItemCount > 0 && (
                           <button
                             type="button"
                             onClick={handleSaveItems}
@@ -896,16 +1076,24 @@ export default function DocumentsModule({
                               {group.section}
                             </h4>
                             <ul className="mt-1.5 space-y-1.5">
-                              {group.items.map((item) => (
-                                <ChecklistItemRow
-                                  key={item.id}
-                                  item={item}
-                                  state={checklistItemState(item, signatures, userId)}
-                                  ticked={pendingItemIds.has(item.id)}
-                                  canTick={itemsAreSignable}
-                                  onToggle={togglePendingItem}
-                                />
-                              ))}
+                              {group.items.map((item) => {
+                                const state = checklistItemState(item, recordSignatures, recordUserId);
+                                return (
+                                  <ChecklistItemRow
+                                    key={item.id}
+                                    item={item}
+                                    state={state}
+                                    ticked={pendingItemIds.has(item.id)}
+                                    canTick={canTickItems}
+                                    onToggle={togglePendingItem}
+                                    verifiedLabel={checklistVerifiedLabel(
+                                      state,
+                                      state.verifiedByUserId ? userLabelFor(state.verifiedByUserId) : '',
+                                      timeFormat
+                                    )}
+                                  />
+                                );
+                              })}
                             </ul>
                           </div>
                         ))
@@ -917,7 +1105,16 @@ export default function DocumentsModule({
                           can no longer reach. An administrator wanting a list that is only READ writes a Document,
                           not a Checklist. */}
 
-                      {itemsAreSignable && pendingItemCount > 0 && (
+                      {/* In the viewing mode the lines are somebody else's, which is worth saying once - the rows
+                          themselves then read the same way they do for the member. */}
+                      {viewingSomeoneElse && openDocument.items.length > 0 && (
+                        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                          These are {viewAsMember.label}&rsquo;s ticks. Only they can add one, from their own
+                          sign-in; a verifier reads them and confirms them.
+                        </p>
+                      )}
+
+                      {canTickItems && pendingItemCount > 0 && (
                         <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                           {pendingItemCount} item{pendingItemCount === 1 ? '' : 's'} ticked. Saving records them
                           against your name and today&rsquo;s date.
@@ -1021,6 +1218,13 @@ export default function DocumentsModule({
                                             state={itemState}
                                             ticked={false}
                                             canTick={false}
+                                            verifiedLabel={checklistVerifiedLabel(
+                                              itemState,
+                                              itemState.verifiedByUserId
+                                                ? userLabelFor(itemState.verifiedByUserId)
+                                                : '',
+                                              timeFormat
+                                            )}
                                             footer={
                                               !itemState.signed ? (
                                                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -1041,14 +1245,10 @@ export default function DocumentsModule({
                                                   Verify this item
                                                 </button>
                                               ) : (
-                                                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                                                  {itemState.verificationCount > 1
-                                                    ? `Verified by ${itemState.verificationCount} people`
-                                                    : 'Verified'}
-                                                  {itemState.verifiedByUserId
-                                                    ? ` · ${userLabelFor(itemState.verifiedByUserId)}`
-                                                    : ''}
-                                                </p>
+                                                /* Verified: nothing to add. The ROW says who confirmed it and when
+                                                   (see ChecklistItemRow), so a second copy here would be the same
+                                                   sentence twice. */
+                                                null
                                               )
                                             }
                                           />
@@ -1066,7 +1266,8 @@ export default function DocumentsModule({
                   )}
                 </article>
               )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </div>
