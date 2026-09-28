@@ -13,6 +13,7 @@
     "verify:rules": "firebase emulators:exec --project demo-station-portal --only firestore,auth \"node scripts/verify-rules.mjs\"",
     "verify:firebase-auth": "firebase emulators:exec --project demo-station-portal --only firestore,auth,functions \"node scripts/verify-firebase-auth.mjs\"",
     "verify:firestore-reads": "firebase emulators:exec --project demo-station-portal --only firestore,auth \"node scripts/verify-firestore-reads.mjs\"",
+    "verify:firestore-writes": "firebase emulators:exec --project demo-station-portal --only firestore,auth \"node scripts/verify-firestore-writes.mjs\"",
     "verify:offer-row": "vite build --ssr scripts/verify-shift-offer-row.mjs --outDir tmp-test-out/offer-row --logLevel error && node tmp-test-out/offer-row/verify-shift-offer-row.js",
     "verify:auth": "node scripts/verify-auth-security.mjs",
     "verify:crew-order": "node scripts/verify-crew-order.mjs",

@@ -21,6 +21,49 @@ const AUTH = `http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/$
 // The demo station's members and the accounts they sign in with. The domain is the department's synthetic one - no
 // mail is ever sent to it - so the shared password below is a fixture, not a credential.
 export const DEMO_PASSWORD = 'demo-passw0rd';
+
+// Every permission flag the roles sheet has a column for. A role document carries the WHOLE set, which is not a
+// convenience: reading an absent key in the security rules is an evaluation error rather than a false, and a client
+// cannot tell that apart from a correct denial. The seed writes them all, and the role editor will too.
+const PERMISSION_FLAGS = [
+  'can_access_debug',
+  'can_administer_trainings',
+  'can_approve_shifts',
+  'can_create_events',
+  'can_edit_assignments',
+  'can_edit_member_availability',
+  'can_edit_notification_settings',
+  'can_edit_own_availability',
+  'can_edit_ranks',
+  'can_edit_roles',
+  'can_edit_schedule',
+  'can_edit_schedule_template',
+  'can_edit_schedule_templates',
+  'can_edit_system_settings',
+  'can_edit_timeclock',
+  'can_edit_trainings',
+  'can_edit_users',
+  'can_make_announcements',
+  'can_make_offers',
+  'can_manage_certification_setup',
+  'can_manage_certifications',
+  'can_manage_documents',
+  'can_sign_trainings',
+  'can_use_timeclock',
+  'can_verify_documents',
+  'can_view_certifications',
+  'can_view_documents',
+  'can_view_full_schedule',
+  'can_view_my_schedule',
+  'can_view_system_log',
+];
+
+// A role row: the description, the master switch, and every flag explicitly granted or not.
+const roleRow = (description, isAdmin, granted = []) => ({
+  description,
+  is_admin: isAdmin,
+  ...Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, granted.includes(flag)])),
+});
 export const DEMO_ACCOUNTS = [
   {
     uid: 'u1',
@@ -98,22 +141,21 @@ const createAccount = async ({ uid, email, claims }) => {
 
 export const seed = async () => {
   // --- permissions: two roles, one the administrator (r1), the other a plain member (r2) ---
-  await put('roles/r1', {
-    description: 'Administrator',
-    is_admin: true,
-    can_edit_users: false,
-    can_edit_roles: false,
-    can_edit_schedule: false,
-    can_view_system_log: false,
-  });
-  await put('roles/r2', {
-    description: 'Firefighter',
-    is_admin: false,
-    can_edit_users: false,
-    can_edit_roles: false,
-    can_edit_schedule: false,
-    can_view_system_log: false,
-  });
+  // r2 is granted the member-level flags explicitly rather than left to omit them, because a missing flag is an
+  // evaluation error in the rules rather than a false.
+  await put('roles/r1', roleRow('Administrator', true));
+  await put(
+    'roles/r2',
+    roleRow('Firefighter', false, [
+      'can_use_timeclock',
+      'can_view_my_schedule',
+      'can_edit_own_availability',
+      'can_make_offers',
+      'can_view_documents',
+      'can_view_certifications',
+      'can_sign_trainings',
+    ])
+  );
 
   // --- the roster: name, rank and role, and nothing else. Readable by every member. ---
   await put('ranks/k1', { description: 'Officer', rank_order: 3, color: '#ef4444', icon: 'shield' });

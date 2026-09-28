@@ -73,6 +73,14 @@ service cloud.firestore {
     }
 
     // `is_admin` is the master switch: it implies every other permission.
+    //
+    // `is_admin` is the master switch: it implies every other permission.
+    //
+    // A ROLE DOCUMENT CARRIES EVERY FLAG, as the roles sheet had a column for each one. That is an invariant, not a
+    // convenience: reading an absent key in these rules is an EVALUATION ERROR rather than a false, and a client
+    // cannot tell that apart from a rule that correctly denies - which is exactly how a missing "can_make_offers"
+    // made creating an offer fail for the right-looking reason. "Not granted" is written down as false, and the role
+    // editor is what keeps it that way.
     function permission(name) {
       return role() != null && (role().is_admin == true || role()[name] == true);
     }
@@ -203,15 +211,20 @@ service cloud.firestore {
         && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
     }
 
-    // Clock entries, written by the clock in/out transaction. A member may open and close their OWN entry and
-    // read it back; an officer may do anything, which is what the Clock Management tab needs.
+    // Clock entries, written by the clock in/out TRANSACTION, which also writes the on_duty row so the two cannot
+    // disagree. That pairing is what used to be covered by the script-wide lock; a transaction is what covers it now.
     //
     // The coordinates are the record of where: the app restricts clocking in and out to a radius, so a resolved
     // street address was extra data to keep in step for no decision it changed. `calc_address` is gone.
     match /timeclock/{entryId} {
       allow read: if signedIn() && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
+      // An entry OPENS with no time_out and belongs to the caller: a member cannot open a shift for somebody else,
+      // and cannot open one that is already closed.
       allow create: if signedIn()
-        && (request.resource.data.user_id == uid() || permission('can_edit_timeclock'));
+        && request.resource.data.user_id == uid()
+        && request.resource.data.time_out == '';
+      // Closing it is the same document again, by its owner; an officer may do anything, which is the Clock
+      // Management tab.
       allow update, delete: if signedIn()
         && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
     }
@@ -282,12 +295,22 @@ service cloud.firestore {
       allow write: if permission('can_manage_certifications');
     }
 
-    // Offers: a member's own, and the whole table for whoever approves shifts. The writes arrive with the schedule
-    // work in Phase 3, so this is read-only for now rather than half-tested.
+    // Offers: a member raises one for an open shift, withdraws their own, and an officer approves one - the approval
+    // is what writes the schedule row, so it is an officer's write either way.
     match /schedule_offers/{offerId} {
       allow read: if signedIn()
         && (resource.data.user_id == uid() || permission('can_approve_shifts') || permission('can_edit_schedule'));
-      allow write: if false;
+      // A member may raise an offer on their own behalf, and only as a pending one: the status is not theirs to set
+      // to approved.
+      allow create: if signedIn()
+        && request.resource.data.user_id == uid()
+        && request.resource.data.status == 'pending'
+        && permission('can_make_offers');
+      // Withdrawing is a DELETE, and approving is an UPDATE the member cannot make: owning an offer must not mean
+      // being able to change its status to approved, which is the one field that matters.
+      allow update: if signedIn() && permission('can_approve_shifts');
+      allow delete: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_approve_shifts'));
     }
 
     // Badges for the types that ask for one, materialized: the icon beside a member's name depends on EVERY member's
