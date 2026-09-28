@@ -290,6 +290,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Badges for the types that ask for one, materialized: the icon beside a member's name depends on EVERY member's
+    // records, and a member may only read their own - so the answer is a small public-safe document per member rather
+    // than a query nobody but an officer could run. Written by the certification work in Phase 4; the rules already
+    // say who may.
+    match /certification_badges/{memberId} {
+      allow read: if signedIn();
+      allow write: if permission('can_manage_certifications');
+    }
+
     // Everything not named above is denied, including the collections whose rules arrive with their client code
     // (documents and their signatures). This is the default that makes a missing rule fail closed instead of open.
     match /{document=**} {

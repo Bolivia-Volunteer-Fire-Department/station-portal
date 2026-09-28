@@ -49,6 +49,13 @@ const docValue = (value) => {
   if (typeof value === 'boolean') return { booleanValue: value };
   if (typeof value === 'number') return { integerValue: String(value) };
   if (Array.isArray(value)) return { arrayValue: { values: value.map(docValue) } };
+  // A nested object, which the badge index needs: member id -> the icons to draw. Recursed rather than specially
+  // cased, so a shape deeper than this one still works if a fixture ever needs it.
+  if (value && typeof value === 'object') {
+    return {
+      mapValue: { fields: Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, docValue(entry)])) },
+    };
+  }
   throw new Error(`The seed cannot write a ${typeof value}: ${JSON.stringify(value)}`);
 };
 
@@ -229,6 +236,14 @@ export const seed = async () => {
     assignment_id: 'a1',
     status: 'pending',
     slot_key: '2026-03-09|a1',
+  });
+
+  // --- the badge index, materialized: what the app draws beside a member's name ---
+  // It depends on every member's records, which a member may not read, so it is a small public-safe document per
+  // member rather than a query. Phase 4's certification work is what will maintain it; the seed writes it by hand.
+  await put('certification_badges/u2', {
+    user_id: 'u2',
+    badges: [{ id: 'c1', name: 'EMT', icon: 'heart-pulse' }],
   });
 
   // --- one audit row, so the rules can show an officer reading it and a member unable to ---

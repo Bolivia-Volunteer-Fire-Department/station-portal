@@ -46,7 +46,7 @@ const checkIs = (label, condition, detail) => {
 const read = (label, allowed, ...args) => {
   const target = args[0];
   return getDoc(target).then(
-    (snapshot) => checkIs(label, allowed, allowed ? '' : 'the read was allowed'),
+    () => checkIs(label, allowed, allowed ? '' : 'the read was allowed'),
     (error) => checkIs(label, !allowed && error.code === 'permission-denied', `threw ${error.code}`)
   );
 };

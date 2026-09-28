@@ -61,6 +61,7 @@ export const fetchMemberPayload = async (account) => {
     certifications,
     setup,
     trainings,
+    badges,
     announcements,
     events,
   ] = await Promise.all([
@@ -74,6 +75,7 @@ export const fetchMemberPayload = async (account) => {
     rowsFor('certifications', 'user_id', account.userId),
     rowsOf(collection(db, 'certification_setup')),
     rowsOf(collection(db, 'trainings')),
+    rowsOf(collection(db, 'certification_badges')),
     audienceRows('announcements', keys),
     audienceRows('events', keys),
   ]);
@@ -103,6 +105,9 @@ export const fetchMemberPayload = async (account) => {
     signatures,
     certifications,
     certificationSetup: setup,
+    // The badge index, as the app's setCertificationBadges expects it: member id -> the icons to draw beside their
+    // name. Materialized because it is derived from every member's records, which a member may not read.
+    certificationBadges: Object.fromEntries(badges.map((row) => [String(row.user_id), row.badges || []])),
     announcements,
     events,
     systemSettings: settingRows(settings),
@@ -110,4 +115,68 @@ export const fetchMemberPayload = async (account) => {
     // settings and the client picked its own out of them.
     userSettings: [{ user_id: account.userId, ...(mySettings.data() || {}) }],
   };
+};
+
+// The administrator's payload: the member payload PLUS the sections an officer's tabs read, each gated on the
+// permission its tab needs.
+//
+// The gating is not decoration. Where the sheet server could omit a section a role may not have and leave the rest
+// of the payload working, a read the rules refuse THROWS - so an ungated section would take the whole payload down
+// for the role that cannot see it. The viewer's role document is read first, and every extra section sits behind the
+// same flag the action it replaces was gated on.
+export const fetchAdminPayload = async (account) => {
+  const db = firestore();
+  const payload = await fetchMemberPayload(account);
+  const role = (await getDoc(doc(db, 'roles', account.roleId))).data() || {};
+  const may = (flag) => role.is_admin === true || role[flag] === true;
+
+  if (may('can_edit_users')) {
+    // The directory the Users tab shows: the roster row joined to the private half, because a username and an account
+    // status are the officer's business and deliberately absent from the roster document.
+    const [users, privateRows] = await Promise.all([
+      rowsOf(collection(db, 'users')),
+      rowsOf(collection(db, 'users_private')),
+    ]);
+    const privateById = Object.fromEntries(privateRows.map((row) => [row.id, row]));
+    payload.users = users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      rank_id: user.rank_id,
+      role_id: user.role_id,
+      username: (privateById[user.id] || {}).username || '',
+      status: (privateById[user.id] || {}).status || '',
+    }));
+  }
+
+  if (may('can_edit_schedule_templates') || may('can_edit_assignments') || may('can_edit_schedule')) {
+    // The FULL rows, with their private halves merged back: an officer's pickers and notes read the whole record, and
+    // the member projection must never replace it.
+    const [assignments, assignmentNotes, templates, templateNotes, apparatus] = await Promise.all([
+      rowsOf(collection(db, 'assignments')),
+      rowsOf(collection(db, 'assignment_private')),
+      rowsOf(collection(db, 'schedule_templates')),
+      rowsOf(collection(db, 'schedule_template_private')),
+      rowsOf(collection(db, 'apparatus')),
+    ]);
+    const notesFor = (rows) => Object.fromEntries(rows.map((row) => [row.id, row.admin_note || '']));
+    const assignmentNotesById = notesFor(assignmentNotes);
+    const templateNotesById = notesFor(templateNotes);
+
+    payload.assignments = assignments.map((row) => ({ ...row, admin_note: assignmentNotesById[row.id] || '' }));
+    payload.scheduleTemplates = templates.map((row) => ({ ...row, admin_note: templateNotesById[row.id] || '' }));
+    payload.apparatus = apparatus;
+  }
+
+  if (may('can_approve_shifts') || may('can_edit_schedule')) {
+    // The whole offers table, so Schedule Management can flag the slots waiting on approval.
+    payload.scheduleOffers = await rowsOf(collection(db, 'schedule_offers'));
+  }
+
+  if (may('can_manage_certifications')) {
+    // Every record, for the table that shows what is expiring next. The STATE is not stored and not added here: it
+    // is a function of the two dates and today, so it would go stale with nobody writing anything.
+    payload.certificationRecords = await rowsOf(collection(db, 'certifications'));
+  }
+
+  return payload;
 };

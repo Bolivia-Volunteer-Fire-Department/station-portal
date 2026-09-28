@@ -20,7 +20,7 @@ import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, upda
 import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { EMAIL_DOMAIN, syntheticEmail } from '../src/services/firebaseAuth.js';
-import { DEMO_ACCOUNTS, DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
+import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
 
 let failures = 0;
 let cases = 0;
