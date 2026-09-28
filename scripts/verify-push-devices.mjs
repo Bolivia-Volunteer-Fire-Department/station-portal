@@ -58,9 +58,13 @@ const constSource = (name) => {
 
 // The real functions, with the timestamp helper stubbed: it is not what is under test, and a fixed
 // value makes "the stamp was refreshed" assertable.
+// getSheetData reads SHEET_VALUES_CACHE, the per-execution sheet cache, so a sandbox lifting the function has to
+// declare the global as well: without it the function throws on the read and this script would silently fall back
+// to defaults. scripts/verify-refresh-wiring.mjs asserts that every harness doing this declares it.
 const HARNESS = `
   ${constSource('PUSH_DEVICE_SHEET')}
   ${constSource('PUSH_DEVICE_HEADERS')}
+  var SHEET_VALUES_CACHE = null;
   ${extract('getSheetData')}
   ${extract('newRowId')}
   ${extract('userSettingsIndex')}

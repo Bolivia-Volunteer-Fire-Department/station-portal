@@ -195,12 +195,21 @@ const settingsSource = extract('systemSettingsMap');
 const sheetDataSource = extract('getSheetData');
 check('the settings chain was extracted', settingsSource.length > 100 && sheetDataSource.length > 200, true);
 
-const SHEET_SOURCES = [sheetDataSource, settingsSource].join('\n');
+// getSheetData reads SHEET_VALUES_CACHE, the per-execution sheet cache, so the sandbox must declare the global as
+// well: without it the function throws on the read and - because the reading path swallows errors - every
+// configuration below would quietly come back as the 12h default.
+const SHEET_SOURCES = ['var SHEET_VALUES_CACHE = null;', sheetDataSource, settingsSource].join('\n');
 
-const serverTtlFor = (settingValue, cache = makeCache()) => {
+// `sheetCacheOn` runs the same chain the way a READ-ONLY request does, with getSheetData answering every question
+// from one read of each sheet. The configured window has to come out identical either way, and that is the point
+// of the check: the first version of this cache left this sandbox without the global above, the settings read
+// threw, the default won, and these assertions failed as "43200000 (expected 1800000)" - a symptom nowhere near
+// its cause. Cached and uncached are now compared directly, so the next such slip fails here and says so.
+const serverTtlFor = (settingValue, cache = makeCache(), sheetCacheOn = false) => {
   const body = `
     ${SESSION_CONSTS.join('\n')}
     ${SHEET_SOURCES}
+    SHEET_VALUES_CACHE = ${sheetCacheOn ? '{}' : 'null'};
     ${parseSource}
     ${ttlSource}
     return sessionTtlMs;
@@ -224,6 +233,22 @@ check(
 );
 check('zero falls back to the default too', serverTtlFor('0'), defaultTtlMs);
 check('a blank value falls back to the default', serverTtlFor(''), defaultTtlMs);
+
+// The same six configurations, read the way a read-only request reads them. Equal is the whole assertion: the
+// cache may change how many times a sheet is read, and nothing else.
+console.log('\n--- and the same window with the sheet cache on ---');
+[
+  ['a configured timeout becomes the session window', '30'],
+  ['and the server floors it just as the client does', '2.7'],
+  ['the minimum is honored', '1'],
+  ['an unusable value falls back to the default rather than expiring everyone', 'half an hour'],
+  ['zero falls back to the default too', '0'],
+  ['a blank value falls back to the default', ''],
+].forEach(([label, value]) => {
+  const uncached = serverTtlFor(value, makeCache(), false);
+  const cached = serverTtlFor(value, makeCache(), true);
+  check(`${label} - with the sheet cache on`, cached, uncached);
+});
 
 // --- the performance contract ------------------------------------------------------------------
 //

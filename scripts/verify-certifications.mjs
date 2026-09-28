@@ -59,9 +59,13 @@ const constSource = (name) => {
 // The real functions, with the two things Apps Script supplies stubbed: the clock (a fixed "today" is the only
 // way to test a warning window) and the timezone formatter (deterministic, from the date's UTC parts - the
 // sheets in these tests are built with Date.UTC, so a real timezone would only add noise).
+// getSheetData reads SHEET_VALUES_CACHE, the per-execution sheet cache, so a sandbox lifting the function has to
+// declare the global as well: without it the function throws on the read and this script would silently fall back
+// to defaults. scripts/verify-refresh-wiring.mjs asserts that every harness doing this declares it.
 const HARNESS = `
   ${constSource('CERT_SETUP_SHEET')}
   ${constSource('CERT_SHEET')}
+  var SHEET_VALUES_CACHE = null;
   ${extract('getSheetData')}
   ${extract('isTruthyValue')}
   ${extract('pad2')}

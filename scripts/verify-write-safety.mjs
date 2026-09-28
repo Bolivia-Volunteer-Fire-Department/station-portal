@@ -457,7 +457,10 @@ const timeclockHarness = ({ rows = [CLOCK_HEADERS.slice()], geocodeThrows = fals
       break;
     }`;
 
+  // getSheetData reads SHEET_VALUES_CACHE, the per-execution sheet cache. These are WRITE paths, so nothing turns
+  // the cache on and it stays null - but the global still has to be declared, or the function throws on the read.
   const runner = new Function('ss', 'timeclock', 'logged', 'geocodes', 'actionName', 'data', 'payload', 'Utilities', `
+    var SHEET_VALUES_CACHE = null;
     ${extract('getSheetData')}
     ${extract('newRowId')}
     ${extract('rowValuesForHeaders')}

@@ -151,6 +151,7 @@ const migrationHarness = (initialSheets, { lockAvailable = true } = {}) => {
     ${extract('newRowId')}
     ${extract('isUuidValue')}
     ${extract('getEasternTimestamp')}
+    var SHEET_VALUES_CACHE = null;
     ${extract('getSheetData')}
     ${extract('sessionEpochFor')}
     ${extract('bumpSessionEpoch')}

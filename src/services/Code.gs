@@ -272,6 +272,13 @@ function doPost(e) {
     const action = data.action;
     const payload = data.payload || {};
 
+    // A read may answer every question from ONE read of each sheet - see SHEET_VALUES_CACHE, and note that the
+    // function reads it in getSheetData. This is the very same test acquireWriteLock makes below, so a request
+    // that caches is by definition a request already established to contain no write call at all.
+    //
+    // Set before the lock is taken, so the lock check itself - and everything after it - reads through the cache.
+    sheetCacheEnabled(READ_ONLY_ACTIONS[String(action)] === true);
+
     // The lock is taken for WRITES only.
     //
     // Apps Script runs a script's executions concurrently, but this lock serialized every request - and a
@@ -4480,11 +4487,53 @@ function runnerScoreToStore(currentBest, rawScore) {
   return score;
 }
 
+// A READ CACHE FOR ONE EXECUTION, and only for a request that cannot write.
+//
+// Every getSheetData call reads a whole sheet and builds an object per row, and there are 111 call sites. A single
+// request walks several of them more than once: the auth path reads `roles` through the permission checks and
+// reads `users`, and the payload that follows reads both again plus everything else - the same sheet is asked the
+// same question three or four times in one request. A sheet read is a round trip to the spreadsheet service, which
+// is the dominant cost of an Apps Script request, so this is the difference between one round trip per sheet and
+// one per question.
+//
+// Off by default, and switched on ONLY for an action in READ_ONLY_ACTIONS. That list is the one place in this file
+// that already means "this cannot write": acquireWriteLock trusts it, and scripts/verify-refresh-wiring.mjs
+// enforces it by asserting that no listed action contains a write call. Reusing it is what makes this safe rather
+// than merely plausible - a read-only request has nothing that could change a cell underneath the cache, so there
+// is no invalidation to forget, and a writing request caches nothing at all.
+//
+// Globals in Apps Script live for one execution, which is exactly the lifetime wanted here: two members' requests
+// never share a cache, and nothing outlives the request that filled it.
+//
+// The cache holds 2D VALUES, never row objects: getSheetData still builds fresh objects on every call, so a caller
+// that sorts the array or edits a row behaves exactly as it did before. Only the round trip is shared.
+//
+// Any test harness that lifts getSheetData out of this file into its own sandbox must declare this global too - a
+// sandbox that does not have it makes the function throw, and a harness that swallows the throw quietly returns
+// defaults. scripts/verify-refresh-wiring.mjs asserts that every harness lifting the function declares it.
+var SHEET_VALUES_CACHE = null;
+
+function sheetCacheEnabled(enabled) {
+  SHEET_VALUES_CACHE = enabled ? {} : null;
+}
+
 function getSheetData(ss, sheetName) {
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return [];
-  
-  const values = sheet.getDataRange().getValues();
+  const readValues = function () {
+    const sheet = ss.getSheetByName(sheetName);
+    return sheet ? sheet.getDataRange().getValues() : [];
+  };
+
+  // Inline rather than in a helper of its own - see the note on SHEET_VALUES_CACHE above.
+  let values;
+  if (!SHEET_VALUES_CACHE) {
+    values = readValues();
+  } else {
+    const key = String(sheetName);
+    if (!Object.prototype.hasOwnProperty.call(SHEET_VALUES_CACHE, key)) {
+      SHEET_VALUES_CACHE[key] = readValues();
+    }
+    values = SHEET_VALUES_CACHE[key];
+  }
   if (values.length <= 1) return [];
 
   const headers = values[0];

@@ -685,6 +685,142 @@ for (const name of ['AdminRolesTab', 'AdminRanksTab', 'AdminAssignmentsTab', 'Ad
   );
 }
 
+// ---------------------------------------------------------------------------
+// 5c. One read of each sheet per read-only request
+// ---------------------------------------------------------------------------
+//
+// The section above establishes which actions cannot write. That is what makes the sheet cache safe rather than
+// merely plausible: a request that caches is a request with nothing that could change a cell underneath it, so
+// there is no invalidation to forget, and a writing request caches nothing at all.
+console.log('\n--- a read-only request reads each sheet once ---');
+
+// Top-level functions, sliced from one header to the next. extractFunction above is for `const x = …;` blocks and
+// would throw on a plain `function f() { … }`.
+const functionBlock = (name) => {
+  const start = gsSource.indexOf(`function ${name}(`);
+  if (start === -1) return '';
+  const rest = gsSource.slice(start);
+  const end = rest.slice(1).search(/\n(function |var |const )/);
+  return end === -1 ? rest : rest.slice(0, end + 1);
+};
+
+const getSheetDataSource = functionBlock('getSheetData');
+const cacheSource = functionBlock('sheetCacheEnabled');
+check(
+  'getSheetData and the cache switch were both lifted out of Code.gs',
+  getSheetDataSource.length > 400 && cacheSource.length > 40,
+  'an empty source here would make every label below meaningless'
+);
+// Off unless a request turns it on. A cache that started on would be shared by every execution the Apps Script
+// runtime reuses, which is the one way this could go wrong.
+check(
+  'the cache starts off',
+  /^var SHEET_VALUES_CACHE = null;$/m.test(gsSource),
+  'SHEET_VALUES_CACHE does not start null, so it could outlive the request that filled it'
+);
+check(
+  'and only a request turns it on',
+  /SHEET_VALUES_CACHE = enabled \? \{\} : null;/.test(cacheSource),
+  'the switch no longer clears it'
+);
+check(
+  'getSheetData stores the values it read',
+  /SHEET_VALUES_CACHE\[key\] = readValues\(\)/.test(getSheetDataSource),
+  'the read no longer goes into the cache'
+);
+check(
+  'and reads afresh whenever it is off',
+  /if \(!SHEET_VALUES_CACHE\) \{\s*values = readValues\(\);/.test(getSheetDataSource),
+  'with the cache off there is no path that reads the sheet, so a write would see stale data'
+);
+// The cache holds 2D values; the row OBJECTS are rebuilt on every call, after the cache read. Sharing those
+// instead would let one caller's sort or edit reach another's array - the classic way a cache like this breaks.
+check(
+  'the row objects are rebuilt after the cached read, not shared',
+  /values = SHEET_VALUES_CACHE\[key\];[\s\S]{0,120}const results = \[\];/.test(getSheetDataSource),
+  'the object-building sits inside the cached branch, so callers share row objects'
+);
+
+// The wiring, and the point of it: the cache is switched on by the SAME test acquireWriteLock uses, so the two can
+// never disagree about what a read is.
+check(
+  'doPost switches the cache on for the read-only actions',
+  /sheetCacheEnabled\(READ_ONLY_ACTIONS\[String\(action\)\] === true\);/.test(gsSource),
+  'nothing turns the cache on, so this is dead code'
+);
+check(
+  'using the very test the lock gate uses',
+  (gsSource.match(/READ_ONLY_ACTIONS\[String\(action\)\] === true/g) || []).length === 2,
+  'the cache and the lock decide what a read is with two different tests, and they will drift'
+);
+
+
+// Behaviour, on the real functions, against a fake sheet that counts how often it is read.
+const counting = { reads: 0 };
+const fakeBook = () => ({
+  getSheetByName: () => ({
+    getDataRange: () => ({
+      getValues: () => {
+        counting.reads += 1;
+        return [['id'], ['a']];
+      },
+    }),
+  }),
+});
+const sandboxWithCache = (on) =>
+  new Function(
+    'SHEET_VALUES_CACHE',
+    `${cacheSource}\n${getSheetDataSource}\nreturn { getSheetData };`
+  )(on ? {} : null);
+
+counting.reads = 0;
+const cached = sandboxWithCache(true);
+cached.getSheetData(fakeBook(), 'users');
+cached.getSheetData(fakeBook(), 'users');
+cached.getSheetData(fakeBook(), 'users');
+check('three questions about one sheet cost one read', counting.reads === 1, `read ${counting.reads} times`);
+
+counting.reads = 0;
+cached.getSheetData(fakeBook(), 'roles');
+check('and each sheet keeps its own entry', counting.reads === 1, `read ${counting.reads} times`);
+
+counting.reads = 0;
+const uncached = sandboxWithCache(false);
+uncached.getSheetData(fakeBook(), 'users');
+uncached.getSheetData(fakeBook(), 'users');
+check('with it off - a writing request - every call reads the sheet', counting.reads === 2, `read ${counting.reads} times`);
+
+const freshlyRead = cached.getSheetData(fakeBook(), 'users');
+const reread = cached.getSheetData(fakeBook(), 'users');
+check(
+  'and two callers get separate objects, so one sorting its rows cannot disturb another',
+  freshlyRead !== reread && freshlyRead[0] !== reread[0],
+  'the cache is handing the same row objects to every caller'
+);
+
+// Every harness that lifts getSheetData into its own sandbox has to declare the global too. Without it the
+// function throws on the read, and a harness that catches errors quietly returns defaults - which is precisely how
+// the first version of this cache turned nine session-timeout assertions into "43200000 (expected 1800000)", a
+// symptom nowhere near its cause. The count floor matters: if the detection below stops matching, `every` over an
+// empty list would pass this while testing nothing.
+const liftingHarnesses = fs
+  .readdirSync(path.resolve(root, 'scripts'))
+  .filter((name) => name.endsWith('.mjs'))
+  .filter((name) => /extract\('getSheetData'\)|sheetDataSource/.test(read(`scripts/${name}`)));
+check(
+  'the harnesses that lift getSheetData are found',
+  liftingHarnesses.length >= 5,
+  `found ${liftingHarnesses.length} - either the detection stopped matching or a harness lost its extraction`
+);
+// Requiring the DECLARATION, not just the name: the comment above each of these says "SHEET_VALUES_CACHE" as
+// well, and a guard satisfied by a comment word would pass while the sandbox still threw on the read.
+const undeclaredHarnesses = liftingHarnesses.filter((name) => !/var SHEET_VALUES_CACHE/.test(read(`scripts/${name}`)));
+check(
+  'and every one of them declares the cache global it now depends on',
+  undeclaredHarnesses.length === 0,
+  `${undeclaredHarnesses.join(', ')} would throw on the sheet read and pass on defaults instead`
+);
+
 // The rule that matters for members: a save must never put a password into a list that holds none.
 const userRowSource = read('src/utils/userRow.js');
 check('a saved user can never carry a password', userRowSource.includes("omit: ['password']"), 'the omit list is gone');
