@@ -276,6 +276,9 @@ const app = readFileSync('src/App.jsx', 'utf8');
 const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
 const memberModule = readFileSync('src/components/CertificationsModule.jsx', 'utf8');
 const adminTab = readFileSync('src/components/admin/AdminCertificationsTab.jsx', 'utf8');
+const setupTab = readFileSync('src/components/admin/AdminCertificationSetupTab.jsx', 'utf8');
+const rankIcon = readFileSync('src/components/RankIcon.jsx', 'utf8');
+const iconPicker = readFileSync('src/components/IconPicker.jsx', 'utf8');
 
 checkIs(
   'there is no member permission gating your own certifications',
@@ -305,6 +308,73 @@ checkIs('the client disables that field to match', /disabled=\{endDateOff\}/.tes
 checkIs('records normalize their dates on the way out', /effective_date: toDateKeyValue\(row\.effective_date\)/.test(codeSource));
 checkIs('and "today" comes from the one helper that knows the station timezone', /function certificationTodayKey\(\) \{\s*return todayDateKey\(\);/.test(codeSource));
 checkIs('the member module reads its own rows', /fetchCertifications\(token\)/.test(memberModule));
+
+// ---------------------------------------------------------------------------------------------------------
+// THE ICON SET, AND THE PICKER THAT CHOOSES FROM IT.
+//
+// A certification icon is the glyph a member is identified by at a glance, so the set it is chosen from is a
+// real requirement rather than decoration: the sixteen requested (heart, heart-pulse, heart-plus, ambulance,
+// briefcase-medical, scan-heart, square-activity, germ, van, toolbox, biohazard, radiation, sailboat, ship,
+// life-buoy - plus the ones already there) must all be present, and each has to be a lucide export rather than
+// a name that quietly renders a question mark. The build is what actually proves the last part; this checks
+// that the map lists them, so a deletion here fails a test rather than shipping.
+const REQUESTED_ICONS = [
+  'heart',
+  'heart-pulse',
+  'heart-plus',
+  'ambulance',
+  'briefcase-medical',
+  'scan-heart',
+  'square-activity',
+  'germ',
+  'van',
+  'toolbox',
+  'biohazard',
+  'radiation',
+  'sailboat',
+  'ship',
+  'life-buoy',
+];
+// The key may be quoted or not: single-word names are written bare, the hyphenated ones need quotes.
+const ICON_KEY = (name) => new RegExp(`(?:'${name}'|\\b${name}):\\s*\\w`);
+// The lucide import block sits at the top of the file, above the map - so the component has to be found there,
+// not after its entry.
+const lucideImports = rankIcon.slice(0, rankIcon.indexOf("from 'lucide-react'"));
+const missingIcons = REQUESTED_ICONS.filter((name) => !ICON_KEY(name).test(rankIcon));
+check('the requested icons are all in the set', missingIcons, []);
+REQUESTED_ICONS.forEach((name) => {
+  const component = (rankIcon.match(new RegExp(`(?:'${name}'|\\b${name}):\\s*(\\w+)`)) || [])[1];
+  checkIs(`and ${name} is imported from lucide`, !!(component && lucideImports.includes(component)), component);
+});
+
+// The dropdowns are gone. Every icon field is the visual picker, and none of them lists icon names any more.
+const ICON_FIELDS = {
+  'AdminCertificationSetupTab': setupTab,
+  'AdminRanksTab': readFileSync('src/components/admin/AdminRanksTab.jsx', 'utf8'),
+  'AdminAssignmentsTab': readFileSync('src/components/admin/AdminAssignmentsTab.jsx', 'utf8'),
+  'AdminAnnouncementsTab': readFileSync('src/components/admin/AdminAnnouncementsTab.jsx', 'utf8'),
+};
+Object.entries(ICON_FIELDS).forEach(([file, src]) => {
+  checkIs(`${file} picks icons visually`, src.includes('<IconPicker') && src.includes("from '../IconPicker'"));
+  checkIs(`and has no icon dropdown left`, !/-- No Icon --|-- No icon --|-- Warning triangle --/.test(src));
+});
+
+// The picker itself: the three ways in, and the two ways out.
+checkIs('the picker renders a grid of the icons', /grid-cols-6/.test(iconPicker) && /filtered\.map/.test(iconPicker));
+checkIs('filters them as you type', /filtered/.test(iconPicker) && /placeholder="Search, or type a number/.test(iconPicker));
+checkIs('offers a no-icon choice', /No icon<\/span>|No icon\b/.test(iconPicker) && /onClick=\{\(\) => choose\(''\)\}/.test(iconPicker));
+checkIs(
+  'and takes a number or roman numeral, which nothing in the set is',
+  /const TYPED_ICON = \/\^\(\?:\\d\{1,2\}\|\[IVX\]\{1,4\}\)\$\//.test(iconPicker),
+  'the icon set has no digits, so 1, 2 and III have to be drawn as text'
+);
+checkIs('it renders into the viewport so a card cannot clip it', /renderInViewport\(/.test(iconPicker) && /fixed z-50/.test(iconPicker));
+checkIs('Escape closes it', /event\.key === 'Escape'/.test(iconPicker));
+checkIs(
+  'and so does scrolling, heard in the capture phase',
+  /addEventListener\('scroll', onScroll, true\)/.test(iconPicker),
+  'the forms scroll inside <main>, so a bubbling listener would never fire'
+);
 
 const SUMMARY = `\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`;
 console.log(SUMMARY);

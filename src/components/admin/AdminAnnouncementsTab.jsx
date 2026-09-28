@@ -4,7 +4,8 @@ import {
   ChevronDown, ChevronRight, UserRound,
 } from 'lucide-react';
 import { adminDeleteAnnouncement, adminFetchAnnouncements, adminSaveAnnouncement } from '../../services/api';
-import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
+import RankIcon from '../RankIcon';
+import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel, userLabel } from '../../utils/displayLabel';
 import { toDateKey } from '../../utils/scheduleDate';
@@ -336,17 +337,12 @@ export default function AdminAnnouncementsTab({
               <label className={labelClass}>
                 Icon <span className="font-normal text-slate-400">(optional)</span>
               </label>
-              <div className="flex items-center gap-2">
-                <select
+              <div className="flex items-end gap-2">
+                <IconPicker
                   value={formData.icon}
-                  onChange={(e) => setField('icon', e.target.value)}
-                  className={fieldClass}
-                >
-                  <option value="">-- Warning triangle --</option>
-                  {Object.keys(RANK_ICON_MAP).map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
+                  onChange={(icon) => setField('icon', icon)}
+                  label="announcement icon"
+                />
                 <span className={`p-2 shrink-0 rounded-xl border ${variantPreview.box} ${variantPreview.head}`}>
                   <RankIcon name={previewIcon} className="w-5 h-5" />
                 </span>

@@ -33,9 +33,11 @@ The end date is then disabled on the Certifications tab, and the server clears i
 
 ## Icons, including numbers
 
-Pick from the list, or type a **number or roman numeral** (`1`, `2`, `III`) into the same box. Nothing in the icon set is a digit, so those are drawn as text in the same slot — which is what a station needs for levels like *Instructor 1* or *Level III*.
+Click the **Icon** field and you get a grid of the icons themselves rather than a list of their names — which is the point, because *life-buoy* and *life-buoy-ring* are indistinguishable as words and obvious as pictures. The search box filters the grid; **No icon** clears it. Hover a glyph to see its name.
 
-The set includes the rank and badge icons the rest of the app uses, plus emergency-services ones: a medical cross, a stethoscope, a syringe, a fire extinguisher, a hazmat mark, an ID card and more.
+The same box also takes a **number or roman numeral** (`1`, `2`, `III`): nothing in the icon set is a digit, so those are drawn as text in the same slot — which is what a station needs for levels like *Instructor 1* or *Level III*.
+
+The set includes the rank and badge icons the rest of the app uses, plus emergency-services ones: a medical cross, hearts (plain, pulse and plus), an ambulance, a medical briefcase, a heart with a scan line, an activity monitor, a germ, a hazmat mark, a radiation trefoil, a stethoscope, a syringe, a fire extinguisher, a van, a toolbox, a life-buoy, a sailboat, a ship, an ID card and more.
 
 > [!WARNING]
 > Ticking **Display icon next to user name** puts that icon beside the member's name *wherever it appears* in the app — and only while the certification is current. Two small glyphs beside a name do not explain themselves: hover them to see which certifications they stand for.

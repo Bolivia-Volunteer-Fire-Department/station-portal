@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, AlertCircle } from 'lucide-react';
 import { adminSaveCertificationSetup, adminDeleteCertificationSetup } from '../../services/api';
-import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
+import RankIcon from '../RankIcon';
+import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading } from '../../utils/displayLabel';
 
@@ -64,8 +65,6 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
   const [error, setError] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-
-  const iconNames = useMemo(() => Object.keys(RANK_ICON_MAP).sort(), []);
 
   const startNew = () => {
     setFormData(EMPTY_FORM);
@@ -169,27 +168,14 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
 
           <label className="block">
             <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Icon</span>
-            <div className="mt-1 flex items-center gap-2">
-              <select
-                value={formData.icon}
-                onChange={(event) => setFormData({ ...formData, icon: event.target.value })}
-                className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-              >
-                <option value="">-- No icon --</option>
-                {iconNames.map((iconName) => (
-                  <option key={iconName} value={iconName}>
-                    {iconName}
-                  </option>
-                ))}
-              </select>
-              <div className="shrink-0 rounded-xl border border-slate-300 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-900">
-                <RankIcon name={formData.icon} className="h-5 w-5 text-slate-600 dark:text-slate-300" />
-              </div>
-            </div>
-            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-              Pick an icon, or type a number / roman numeral (1, 2, III) — nothing in the set is a digit, so those
-              are drawn as text.
-            </span>
+            {/* Was a dropdown of icon NAMES; now a grid of the icons themselves, which is the only way to tell
+                "life-buoy" from "life-buoy-ring". The picker also carries the number/roman-numeral entry, so the
+                hint that used to sit under the select lives in its footer now. */}
+            <IconPicker
+              value={formData.icon}
+              onChange={(icon) => setFormData({ ...formData, icon })}
+              label="certification icon"
+            />
           </label>
         </div>
 

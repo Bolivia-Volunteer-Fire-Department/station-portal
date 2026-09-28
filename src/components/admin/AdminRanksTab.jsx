@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-react';
 import { adminSaveRank, adminDeleteRank } from '../../services/api';
-import RankIcon, { RANK_ICON_MAP } from '../RankIcon';
+import RankIcon from '../RankIcon';
+import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading } from '../../utils/displayLabel';
 
@@ -139,17 +140,12 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Icon</label>
-              <div className="flex items-center gap-3">
-                <select
+              <div className="flex items-end gap-3">
+                <IconPicker
                   value={formData.icon}
-                  onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">-- No Icon --</option>
-                  {Object.keys(RANK_ICON_MAP).map((iconName) => (
-                    <option key={iconName} value={iconName}>{iconName}</option>
-                  ))}
-                </select>
+                  onChange={(icon) => setFormData({ ...formData, icon })}
+                />
+                {/* The picker can only show one neutral glyph; this shows the same icon in the rank's colour. */}
                 <div className="shrink-0 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
                   <RankIcon name={formData.icon} className="w-5 h-5" style={{ color: formData.color }} />
                 </div>

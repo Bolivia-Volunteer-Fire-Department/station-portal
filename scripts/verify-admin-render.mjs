@@ -378,12 +378,19 @@ const assignmentsHtml = (() => {
   }
 })();
 check('renders', typeof assignmentsHtml === 'string', assignmentsHtml.error && assignmentsHtml.error.message);
-check('with the icon picker', String(assignmentsHtml).includes('-- No Icon --'));
-// The catalog itself is the same RANK_ICON_MAP the ranks editor renders, so an option
-// that exists there must exist here.
+// The icon is chosen from a grid of the icons themselves now, not a <select> of their names, so what a render
+// can show is the trigger - which reads "No icon" while the field is empty - and that nothing was left behind
+// on a dropdown. The catalog itself is asserted from the source below, because a closed picker renders none of
+// its options.
+check('with the icon picker', String(assignmentsHtml).includes('No icon'));
+check('and no icon dropdown left behind', !String(assignmentsHtml).includes('-- No Icon --'));
+//
+// The picker imports the same RANK_ICON_MAP the ranks editor renders, so there is one catalog and an icon
+// added for one editor is available in the other - which is the property the <option> assertion used to hold.
+const iconPickerSrc = readFileSync('src/components/IconPicker.jsx', 'utf8');
 check(
   'and the catalog the ranks editor uses',
-  String(assignmentsHtml).includes('<option value="star">star</option>')
+  iconPickerSrc.includes('from') && iconPickerSrc.includes("'./RankIcon'") && iconPickerSrc.includes('RANK_ICON_MAP')
 );
 check('and the saved icon drawn in the list', String(assignmentsHtml).includes('lucide-truck'));
 

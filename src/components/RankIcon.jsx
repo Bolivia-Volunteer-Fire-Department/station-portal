@@ -9,6 +9,8 @@ import {
   Activity, LifeBuoy, FireExtinguisher, Biohazard, HardHat, Droplet, Wind,
   HandHelping, BadgePlus, ClipboardCheck, FileCheck, IdCard, BookMarked,
   Ribbon, Hash, Microscope, Beaker, TestTube, RefreshCw, Clock,
+  HeartPlus, BriefcaseMedical, ScanHeart, SquareActivity, Germ, Van, Toolbox,
+  Radiation, Sailboat, Ship,
 } from 'lucide-react';
 
 // Curated, tree-shakable subset of lucide icons commonly used for ranks/badges
@@ -81,6 +83,19 @@ export const RANK_ICON_MAP = {
   'test-tube': TestTube,
   'refresh-cw': RefreshCw,
   clock: Clock,
+  // The second batch, requested for certifications: the medical and rescue side of the same family the ranks
+  // draw on. Anything lucide's version here does not export fails the build rather than rendering a question
+  // mark, which is how this list is kept honest.
+  'heart-plus': HeartPlus,
+  'briefcase-medical': BriefcaseMedical,
+  'scan-heart': ScanHeart,
+  'square-activity': SquareActivity,
+  germ: Germ,
+  van: Van,
+  toolbox: Toolbox,
+  radiation: Radiation,
+  sailboat: Sailboat,
+  ship: Ship,
 };
 
 // An icon NAME that is a number or a roman numeral is drawn as that text rather than as a glyph.
