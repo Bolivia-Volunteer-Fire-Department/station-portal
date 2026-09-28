@@ -23,6 +23,13 @@ authoring rules.
 **This README covers the rest**: installing, building, the backend, deploying to GitHub
 Pages, and the design notes and verification scripts a developer needs.
 
+Longer design notes live in `docs/`, one file per subject: [`docs/WRITE_SAFETY.md`](docs/WRITE_SAFETY.md)
+(record ids and concurrency), [`docs/AUTH_SECURITY.md`](docs/AUTH_SECURITY.md) (sessions and
+password handling), [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md) (push notifications),
+[`docs/SOUNDS.md`](docs/SOUNDS.md) (UI sound), and
+[`docs/FIRESTORE_MODEL.md`](docs/FIRESTORE_MODEL.md) — the design for moving the data off Google
+Sheets onto Firestore, which is a plan rather than a description of what runs today.
+
 ## Tech Stack
 
 - React 19 + Vite (Oxc-powered)
