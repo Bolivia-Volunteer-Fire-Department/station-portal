@@ -1270,7 +1270,8 @@ check('and so is the backdrop', /if \(!busy\) dismiss\(\);/.test(viewportModal),
 
 // The shell: full screen on a phone, most of the viewport once there is room, toolbar pinned above a body that
 // scrolls - which is what makes Save reachable from the bottom of a long checklist.
-check('the panel is full screen on a phone', /h-full w-full[\s\S]{0,120}sm:h-\[92dvh\]/.test(viewportModal), true);
+// Full screen on a phone, at every size: only the `sm:` frame varies (asserted below).
+check('the panel is full screen on a phone', /relative flex h-full w-full flex-col/.test(viewportModal), true);
 check('and most of the viewport on a larger screen', /sm:w-\[94vw\] sm:max-w-6xl/.test(viewportModal), true);
 // The toolbar is what stays put while the body scrolls, so the two are asserted as two facts: the toolbar does not
 // shrink, the body is the flexible scrolling child, and the toolbar comes first.
@@ -2197,6 +2198,19 @@ checkIs(
   'with the ends disabled rather than wrapping',
   /disabled=\{savingOrder \|\| selectedIndex <= 0\}/.test(tabSource) &&
     /selectedIndex >= selectedSiblings\.length - 1/.test(tabSource)
+);
+
+// The frame comes in two sizes. Size is the FRAME, not the contract: the toolbar, the disabled fieldset and the
+// blocked dismissal are asserted above, once, and hold for both.
+check('the shell has a small frame and a large one', /small: 'sm:h-auto/.test(viewportModal) && /large: 'sm:h-\[92dvh\]/.test(viewportModal), true);
+check('large is the default, so the other editors are unchanged', /size = 'large'/.test(viewportModal), true);
+check('and an unknown size falls back to large rather than to no frame', /size === 'small' \? 'small' : 'large'/.test(viewportModal), true);
+// The field-count rule lives in one place, beside the component, so it does not have to be re-argued per tab.
+check('the rule is written down once', /SMALL_EDITOR_FIELD_LIMIT = 5/.test(viewportModal) && /export const editorModalSize/.test(viewportModal), true);
+check(
+  'the timeclock editor asks for the small frame',
+  /size="small"/.test(readFileSync('src/components/admin/AdminClockManagementTab.jsx', 'utf8')),
+  true
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

@@ -256,6 +256,9 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
           title={isEditing ? recordHeading('Timeclock Entry') : 'New timeclock entry'}
           subtitle={isEditing ? 'Editing an existing entry' : 'Not saved yet'}
           icon={<Clock className="h-4 w-4" />}
+          // Three short fields and a computed readout: five or fewer is the small frame, by the rule documented on
+          // ViewportModal. A 92dvh panel around this much would be mostly empty space.
+          size="small"
           formId={CLOCK_ENTRY_FORM_ID}
           saveLabel={isEditing ? 'Save changes' : 'Add entry'}
           saving={saving}

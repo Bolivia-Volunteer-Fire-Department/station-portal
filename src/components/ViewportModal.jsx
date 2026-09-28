@@ -25,10 +25,40 @@ import { renderInViewport } from '../utils/viewportLayer';
  *
  * Callers close it themselves when the write is confirmed - this component does not decide when saving is over.
  */
+// How big the frame is.
+//
+//   'large'  the default, and the reason this component exists: an editor with a body, a checklist, a signature
+//            record or a grid of twenty-four checkboxes needs the screen.
+//   'small'  for the editors that are a handful of short fields. A 92dvh panel around three inputs is mostly
+//            empty space, and the eye reads a compact dialog as "this is a small thing to do".
+//
+// The BEHAVIOUR is identical in both - the pinned toolbar, the disabled fieldset while saving, the blocked
+// dismissal, closing only once the write lands. Size is the frame, not the contract, which is why it is one prop
+// and not two components.
+//
+// The rule of thumb, in one place so it does not have to be re-argued per tab: FIVE OR FEWER SHORT FIELDS is
+// small. Anything with a long text area, a list, a signature panel, a date range or a grid of checkboxes is
+// large, because those grow in one direction and would scroll inside a small frame. `editorModalSize(fieldCount)`
+// encodes the count so a caller can pass a number rather than a judgement.
+export const SMALL_EDITOR_FIELD_LIMIT = 5;
+
+export const editorModalSize = (fieldCount) =>
+  Number(fieldCount) <= SMALL_EDITOR_FIELD_LIMIT ? 'small' : 'large';
+
+// The frame, per size. Mobile is the full screen either way: a compact dialog on a phone is a keyboard's worth of
+// scrolling, and the safe-area padding only makes sense against the whole screen.
+const PANEL_SIZE_CLASS = {
+  small: 'sm:h-auto sm:max-h-[85dvh] sm:w-[34rem] sm:max-w-[94vw]',
+  large: 'sm:h-[92dvh] sm:max-h-[92dvh] sm:w-[94vw] sm:max-w-6xl',
+};
+
 export default function ViewportModal({
   title,
   subtitle = '',
   icon = null,
+  // 'large' or 'small': see above. Anything else falls back to large, so a typo cannot produce a frame with no
+  // height at all.
+  size = 'large',
   // Extra toolbar buttons that belong beside Save (a Delete, say). Rendered before the Save button.
   actions = null,
   // The id of the <form> inside. Save submits it through the HTML `form` attribute, so the fields keep their
@@ -94,7 +124,9 @@ export default function ViewportModal({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-busy={busy}
-        className="relative flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl animate-modalIn dark:bg-slate-800 sm:h-[92dvh] sm:max-h-[92dvh] sm:w-[94vw] sm:max-w-6xl sm:rounded-2xl sm:border sm:border-slate-200 sm:dark:border-slate-700"
+        className={`relative flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl animate-modalIn dark:bg-slate-800 ${
+          PANEL_SIZE_CLASS[size === 'small' ? 'small' : 'large']
+        } sm:rounded-2xl sm:border sm:border-slate-200 sm:dark:border-slate-700`}
       >
         {/* The pinned toolbar. `shrink-0` is what keeps it visible while the body scrolls under it. */}
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-700 dark:bg-slate-800/95 sm:px-6">
