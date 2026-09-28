@@ -338,3 +338,42 @@ exports.setMemberStatus = onCall(async (request) => {
   await audit(caller.uid, 'ADMIN_SET_MEMBER_STATUS', `${status} for ${userId}`);
   return { userId, status };
 });
+
+// ---------------------------------------------------------------------------------------------
+// The only way an account may come into existence
+// ---------------------------------------------------------------------------------------------
+//
+// The email/password provider cannot be closed to self-sign-up, and the Firebase web config is public by design - so
+// without this, anybody could call createUserWithEmailAndPassword from a browser console and make an account. They
+// would get no role and therefore see nothing (the rules deny everything to a user with no roster row), but the
+// account would exist and count toward the project's users.
+//
+// An Auth BLOCKING function is what closes it. It runs for every account creation, and the discriminator is that a
+// browser's request carries an IP address and a user agent while the Admin SDK's does not: createMember above is
+// the only legitimate creator, and it is server-side.
+//
+// Two things to know before relying on it:
+//
+//   - Blocking functions FAIL CLOSED. If this function cannot run - a bad deploy, a quota problem - then account
+//     creation fails rather than falling through. That is the right way round for a security control, and it is why
+//     the logic here is deliberately trivial: the more it does, the more ways it has to break sign-ups.
+//   - It needs the project upgraded to Identity Platform, which is a one-click action in the Firebase console and
+//     free at this scale. See docs/FIREBASE_SETUP.md.
+const { beforeUserCreated } = require('firebase-functions/v2/identity');
+
+exports.beforeUserCreated = beforeUserCreated((event) => {
+  const fromBrowser = Boolean(event.ipAddress) || Boolean(event.userAgent);
+  if (fromBrowser) {
+    throw new HttpsError(
+      'permission-denied',
+      'Accounts are created by an officer in the app, not by signing up here.'
+    );
+  }
+
+  // Belt and braces: even a server-side creation has to be a station address, so a stray Admin SDK call or a
+  // console-side invite cannot introduce an account on a domain that would never be one of ours.
+  const email = String((event.data && event.data.email) || '');
+  if (!email.toLowerCase().endsWith(`@${EMAIL_DOMAIN}`)) {
+    throw new HttpsError('permission-denied', `An account must be on the @${EMAIL_DOMAIN} domain.`);
+  }
+});

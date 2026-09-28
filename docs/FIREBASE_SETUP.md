@@ -18,7 +18,8 @@ Two things to know before the list:
 than chosen deliberately. Check it against the console and correct it if it is wrong:
 
 ```bash
-npx firebase use --add        # pick the project; this writes .firebaserc for you
+npx firebase login
+npx firebase projects:list   # confirm you can see fire-clock-76723
 ```
 
 ## 2. Put the web app's config in `.env` and in CI
@@ -68,9 +69,30 @@ Auth sends a verification or a reset email only when the app ASKS it to, and thi
 **One gap worth knowing about:** the email/password provider cannot be closed to self-sign-up, and the API key is
 public, so somebody could create their own Auth account. They would get no role, and therefore nothing to see - the
 rules deny everything to a user with no roster row - but the account would exist, and it would count toward the
-project's users. If that ever matters, an Auth **blocking function** (`beforeUserCreated`) can refuse anything that
-did not come from an officer's `createMember`, since the Admin SDK's own creations are distinguishable from a
-browser's. It is deliberately not in place yet: it is hardening, not a hole in the data.
+project's users.
+
+### Closing self-sign-up
+
+`beforeUserCreated` in `functions/index.js` closes it: a blocking function that runs on every account creation and
+refuses anything that came from a browser. The Admin SDK's own creations - `createMember`, the only legitimate way in
+- are told apart by having no IP address and no user agent. It also refuses any address outside the station domain.
+
+Two things it needs:
+
+1. **Identity Platform.** Blocking functions require the project to be upgraded, which is a single click in the
+   console (Authentication → the upgrade prompt) and free at this scale. Deploying the function without the upgrade
+   simply leaves it unused.
+2. **A deploy** - `npm run deploy:functions`.
+
+It is worth knowing that blocking functions **fail closed**: if the function cannot run, account creation fails
+rather than quietly falling through. That is the correct way round for a security control, and it is why its logic is
+three lines long - the more it does, the more ways it has to stop an officer adding a member.
+
+**To check it worked**, open the deployed site, and in the browser console call
+`firebase.auth().createUserWithEmailAndPassword('someone@example.com', 'password123')`. It should fail, and no
+account should appear under Authentication → Users.
+The emulators cannot check this for us - the Auth emulator does not run blocking triggers - so this one stays a
+manual step after each deploy of `functions/`.
 
 ## 4. Create the Firestore database
 
@@ -84,10 +106,18 @@ the station. It is the one decision here that cannot be undone.
 
 ```bash
 npx firebase login          # opens a browser; --reauth if it is the wrong account
-npx firebase use --add      # confirms the project for this directory
 npm --prefix functions install
 npm run deploy:firestore
 npm run deploy:functions
+```
+
+`.firebaserc` already names the project, and both deploys print it as they start ("Deploying to '...'"), so there is
+normally no `firebase use` step at all. If you do need to point the directory somewhere else, note that `firebase use
+--add` wants a terminal: in a script, a CI job, or an agent's shell it fails with *"Cannot run firebase use --add in
+non-interactive mode"*. Use the non-interactive form instead, which needs no prompt:
+
+```bash
+npx firebase use fire-clock-76723 --alias default
 ```
 
 The indexes take a few minutes to build the first time. If a query ever needs an index that is missing, Firestore
