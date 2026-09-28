@@ -37,6 +37,8 @@ import {
   emptyTrainingFilters,
   filterTrainings,
   DEFAULT_TRAINING_SORT,
+  TRAINING_CATEGORY_OPTIONS,
+  TRAINING_NO_CATEGORY,
 } from '../src/utils/training.js';
 
 let failures = 0;
@@ -56,17 +58,18 @@ const ROW = {
   duration: '2',
   location: 'Station 1',
   instructors: 'Capt. Alvarez',
-  is_certification: 'TRUE',
-  is_drill: 'TRUE',
+  is_hazmat: 'TRUE',
+  is_company_training: 'TRUE',
   is_multipanycompany: 'FALSE',
   narrative: 'Masks and bottles.',
 };
 
 console.log('--- one flag column per classification ---');
-check('every flag column is covered', TRAINING_FLAGS.length, 8);
+check('every flag column is covered', TRAINING_FLAGS.length, 9);
 check('and they are the sheet columns', TRAINING_FLAG_KEYS, [
-  'is_certification',
-  'is_drill',
+  'is_company_training',
+  'is_hazmat',
+  'is_ems',
   'is_fire_prevention',
   'is_multicompany',
   'is_training_facility',
@@ -75,7 +78,7 @@ check('and they are the sheet columns', TRAINING_FLAG_KEYS, [
   'is_entered_into_external',
 ]);
 check('each has a label and a short badge', TRAINING_FLAGS.every((f) => f.label && f.short), true);
-check('flags are unique', new Set(TRAINING_FLAG_KEYS).size, 8);
+check('flags are unique', new Set(TRAINING_FLAG_KEYS).size, 9);
 
 console.log('\n--- parsing a training row ---');
 const training = normalizeTraining(ROW);
@@ -85,8 +88,8 @@ check('the start time is normalized', training.start_time, '08:00');
 check('the duration is a number', training.duration, 2);
 check('the title survives', training.title, 'SCBA Refresher');
 check('a missing flag reads false', training.is_multicompany, false);
-check('a TRUE flag reads true', training.is_certification, true);
-check('derived flags only include the set ones', training.flags.map((f) => f.key), ['is_certification', 'is_drill']);
+check('a TRUE flag reads true', training.is_hazmat, true);
+check('derived flags only include the set ones', training.flags.map((f) => f.key), ['is_company_training', 'is_hazmat']);
 check('and the when label is derived', training.when_label, '8:00 AM · 2 hrs');
 
 // The sheet is hand-editable, so every one of these reaches the app in practice.
@@ -97,15 +100,15 @@ check('a leading-zero duration is a number', normalizeTraining({ ...ROW, duratio
 check('a blank duration is null', normalizeTraining({ ...ROW, duration: '' }).duration, null);
 check('text in the duration is null', normalizeTraining({ ...ROW, duration: 'two hours' }).duration, null);
 check('a zero duration is null, not "0 hrs"', normalizeTraining({ ...ROW, duration: '0' }).duration, null);
-check('the bool parser accepts true', normalizeTraining({ ...ROW, is_drill: true }).is_drill, true);
+check('the bool parser accepts true', normalizeTraining({ ...ROW, is_company_training: true }).is_company_training, true);
 // The client's shared TRUE parser accepts the text TRUE (and a real boolean) and nothing else.
 // The backend's isTruthyValue also accepts "1" and "YES" - a pre-existing difference, so the
 // two contracts are asserted separately rather than assumed to match.
-check('the text TRUE', normalizeTraining({ ...ROW, is_drill: 'TRUE' }).is_drill, true);
-check('and any casing or padding', normalizeTraining({ ...ROW, is_drill: ' true ' }).is_drill, true);
-check('but not an unrelated word', normalizeTraining({ ...ROW, is_drill: 'yes' }).is_drill, false);
-check('and not a random number', normalizeTraining({ ...ROW, is_drill: '1' }).is_drill, false);
-check('and rejects garbage', normalizeTraining({ ...ROW, is_drill: 'maybe' }).is_drill, false);
+check('the text TRUE', normalizeTraining({ ...ROW, is_company_training: 'TRUE' }).is_company_training, true);
+check('and any casing or padding', normalizeTraining({ ...ROW, is_company_training: ' true ' }).is_company_training, true);
+check('but not an unrelated word', normalizeTraining({ ...ROW, is_company_training: 'yes' }).is_company_training, false);
+check('and not a random number', normalizeTraining({ ...ROW, is_company_training: '1' }).is_company_training, false);
+check('and rejects garbage', normalizeTraining({ ...ROW, is_company_training: 'maybe' }).is_company_training, false);
 check('an empty row does not throw', normalizeTraining(null).id, '');
 
 console.log('\n--- duration text ---');
@@ -217,9 +220,9 @@ check('a training with no signatures has no count', signatureCounts(SIGNATURES).
 
 console.log('\n--- filtering ---');
 const FILTER_ROWS = [
-  normalizeTraining({ id: 'f1', date: '2026-01-10', title: 'Jan drill', location: 'Station 1', duration: '2' }),
-  normalizeTraining({ id: 'f2', date: '2026-02-14', title: 'Feb drill', location: 'Station 1', duration: '1.5' }),
-  normalizeTraining({ id: 'f3', date: '2026-03-20', title: 'March class', location: 'Academy', duration: '4' }),
+  normalizeTraining({ id: 'f1', date: '2026-01-10', title: 'Jan drill', location: 'Station 1', duration: '2', is_company_training: 'TRUE' }),
+  normalizeTraining({ id: 'f2', date: '2026-02-14', title: 'Feb drill', location: 'Station 1', duration: '1.5', is_hazmat: 'TRUE' }),
+  normalizeTraining({ id: 'f3', date: '2026-03-20', title: 'March class', location: 'Academy', duration: '4', is_ems: 'TRUE', is_officer_training: 'TRUE' }),
   normalizeTraining({ id: 'f4', date: 'nonsense', title: 'Undated', location: 'Academy', duration: '3' }),
 ];
 const ids = (list) => list.map((t) => t.id);
@@ -241,6 +244,58 @@ check('filters combine', ids(filterTrainings(FILTER_ROWS, { from: '2026-01-01', 
 check('a blank filter value is ignored', ids(filterTrainings(FILTER_ROWS, { location: '   ' })), ['f1', 'f2', 'f3', 'f4']);
 check('nulls in the list are dropped', filterTrainings([null, undefined], {}).length, 0);
 check('a non-array is an empty list', filterTrainings(null, {}), []);
+
+// The Category filter added for the Training module and the report.
+console.log('\n--- the category filter ---');
+check('a category matches the rows tagged with it', ids(filterTrainings(FILTER_ROWS, { category: 'is_company_training' })), ['f1']);
+check('the hazmat category', ids(filterTrainings(FILTER_ROWS, { category: 'is_hazmat' })), ['f2']);
+check('the new EMS category', ids(filterTrainings(FILTER_ROWS, { category: 'is_ems' })), ['f3']);
+// f3 is both EMS and officer training, so either filter finds it - a category filter is "has this
+// tag", not "is only this tag".
+check(
+  'a row can be in more than one category',
+  ids(filterTrainings(FILTER_ROWS, { category: 'is_officer_training' })),
+  ['f3']
+);
+check(
+  'a category nothing is tagged with',
+  filterTrainings(FILTER_ROWS, { category: 'is_hazmat', from: '2027-01-01' }),
+  []
+);
+check('it combines with the other filters', ids(filterTrainings(FILTER_ROWS, { category: 'is_ems', location: 'Station 1' })), []);
+check('"No category" finds the untagged rows', ids(filterTrainings(FILTER_ROWS, { category: TRAINING_NO_CATEGORY })), ['f4']);
+check(
+  'and only those',
+  ids(filterTrainings(FILTER_ROWS, { category: TRAINING_NO_CATEGORY })).includes('f3'),
+  false
+);
+// is_drill and is_certification are the names these two had before the rename. An unrecognised value
+// must not empty the table, so a stale filter is ignored rather than matching nothing.
+check(
+  'an unknown category is ignored rather than emptying the table',
+  ids(filterTrainings(FILTER_ROWS, { category: 'is_drill' })),
+  ['f1', 'f2', 'f3', 'f4']
+);
+check('a blank category is ignored', ids(filterTrainings(FILTER_ROWS, { category: '   ' })), ['f1', 'f2', 'f3', 'f4']);
+
+// The options are derived from the flags, so the categories cannot drift from the badges, and the
+// administrative flag - which is not a kind of training - is not offered as one.
+check(
+  'the filter offers every category a member can set',
+  TRAINING_CATEGORY_OPTIONS.map((option) => option.value),
+  ['', ...MEMBER_EDITABLE_FLAGS.map((flag) => flag.key), TRAINING_NO_CATEGORY]
+);
+check(
+  'labelled the same as the badges',
+  TRAINING_CATEGORY_OPTIONS.map((option) => option.label),
+  ['All categories', 'Company Training', 'Hazmat', 'EMS', 'Fire prevention', 'Multi-company', 'Training Facility', 'Officer training', 'Driver training', 'No category']
+);
+check(
+  'the external flag is not a category',
+  TRAINING_CATEGORY_OPTIONS.some((option) => option.value === ENTERED_EXTERNALLY_KEY),
+  false
+);
+check('clearing the filters clears the category too', emptyTrainingFilters().category, '');
 
 // The member-side filters, driven by the ids the active member signed.
 const signedF1F3 = new Set(['f1', 'f3']);
@@ -268,7 +323,7 @@ check('location options come from the rows', trainingLocationOptions(FILTER_ROWS
 check('duplicate locations collapse', trainingLocationOptions(FILTER_ROWS).length, 2);
 check('no locations is an empty list', trainingLocationOptions([{ id: 'x' }]), []);
 check('an empty filter set is blank', emptyTrainingFilters(), {
-  from: '', to: '', location: '', member: '', signed: '',
+  from: '', to: '', location: '', category: '', member: '', signed: '',
 });
 
 console.log('\n--- training hours totals ---');
@@ -342,7 +397,7 @@ const backendRow = backend.normalizeTrainingRow(ROW);
 check('the backend keeps the id', backendRow.id, 't1');
 check('and the date as the sheet had it', backendRow.date, '2026-03-14');
 check('and the duration as given', backendRow.duration, '2');
-check('flags are written as TRUE/FALSE text', backendRow.is_certification, 'TRUE');
+check('flags are written as TRUE/FALSE text', backendRow.is_hazmat, 'TRUE');
 check('a false flag is written explicitly', backendRow.is_multicompany, 'FALSE');
 check(
   'every flag column is present',
@@ -357,9 +412,9 @@ check(
 check('a missing column becomes blank, not undefined', backend.normalizeTrainingRow({ id: 'x' }).location, '');
 // The backend is the more permissive of the two parsers: it also accepts 1 and YES, and always
 // writes back TRUE/FALSE, so a hand-edited sheet converges on the canonical value.
-check('the backend accepts YES', backend.normalizeTrainingRow({ id: 'x', is_drill: 'yes' }).is_drill, 'TRUE');
-check('and 1', backend.normalizeTrainingRow({ id: 'x', is_drill: 1 }).is_drill, 'TRUE');
-check('but writes FALSE for anything else', backend.normalizeTrainingRow({ id: 'x', is_drill: 'maybe' }).is_drill, 'FALSE');
+check('the backend accepts YES', backend.normalizeTrainingRow({ id: 'x', is_company_training: 'yes' }).is_company_training, 'TRUE');
+check('and 1', backend.normalizeTrainingRow({ id: 'x', is_company_training: 1 }).is_company_training, 'TRUE');
+check('but writes FALSE for anything else', backend.normalizeTrainingRow({ id: 'x', is_company_training: 'maybe' }).is_company_training, 'FALSE');
 
 // The rule that stops a half-filled form writing an unusable row.
 check('a row with a date and title is usable', backend.trainingRowIsUsable({ date: '2026-03-14', title: 'x' }), true);
@@ -418,11 +473,11 @@ check('but marked admin-only', TRAINING_FLAGS.find((f) => f.key === ENTERED_EXTE
 check('so a member-facing form does not offer it', MEMBER_EDITABLE_FLAGS.some((f) => f.key === ENTERED_EXTERNALLY_KEY), false);
 check('while the admin form does', TRAINING_FLAGS.some((f) => f.key === ENTERED_EXTERNALLY_KEY), true);
 check('and it is not a badge either', TRAINING_BADGES.some((f) => f.key === ENTERED_EXTERNALLY_KEY), false);
-check('the other seven flags stay member-editable', MEMBER_EDITABLE_FLAGS.length, 7);
-check('and are all badges', TRAINING_BADGES.length, 7);
+check('the other eight flags stay member-editable', MEMBER_EDITABLE_FLAGS.length, 8);
+check('and are all badges', TRAINING_BADGES.length, 8);
 // A row with only the external flag set must therefore show no badges at all.
-check('a row with only the external flag has no badges', normalizeTraining({ ...ROW, is_entered_into_external: 'TRUE', is_certification: 'FALSE', is_drill: 'FALSE' }).flags.length, 0);
-check('and a normal flag still badges', normalizeTraining({ ...ROW, is_certification: 'TRUE', is_drill: 'FALSE' }).flags.map((f) => f.key), ['is_certification']);
+check('a row with only the external flag has no badges', normalizeTraining({ ...ROW, is_entered_into_external: 'TRUE', is_hazmat: 'FALSE', is_company_training: 'FALSE' }).flags.length, 0);
+check('and a normal flag still badges', normalizeTraining({ ...ROW, is_hazmat: 'TRUE', is_company_training: 'FALSE' }).flags.map((f) => f.key), ['is_hazmat']);
 
 console.log('\n--- the backend enforces both rules ---');
 // The counts helper and the refusal helper, run against a stubbed sheet. getSheetData is passed
@@ -516,6 +571,39 @@ check(
 // The signature counts have to reach the client for the module to gray out Edit.
 check('the read hands back signature counts', /trainingRowsForApp\(ss\)/.test(getCase), true);
 
+// --- the categories, end to end -------------------------------------------------------------
+//
+// The flag list exists twice - once in src/utils/training.js for the app, once in Code.gs for the
+// sheet - and the two have to agree, because the client's list is what the form writes and the
+// server's is what reaches the spreadsheet. A rename applied to only one of them is exactly the
+// failure this catches: the app would offer "Hazmat" while the server wrote "is_certification".
+console.log('\n--- the category columns, client against server ---');
+const serverFlagColumns = (codeSource.match(/const TRAINING_BOOL_COLUMNS = \[([\s\S]*?)\];/) || [])[1];
+const serverFlagNames = (serverFlagColumns.match(/"([^"]+)"/g) || []).map((quoted) => quoted.replace(/"/g, ''));
+check('the server lists every flag column', serverFlagNames, TRAINING_FLAG_KEYS);
+check('including the new EMS column', serverFlagNames.includes('is_ems'), true);
+// The old names must be gone from the server too: a column the app no longer reads is a column that
+// silently keeps a stale value.
+check('and the renamed ones under their new names', serverFlagNames.includes('is_company_training') && serverFlagNames.includes('is_hazmat'), true);
+// The old names must be gone from the server's own columns too. This looks for the QUOTED form, which is
+// how a column is read or written: the rename comment above the list names the old columns on purpose, so
+// a bare mention is documentation rather than a live reference.
+check(
+  'with nothing left reading the old names',
+  /"is_drill"|"is_certification"/.test(codeSource),
+  false
+);
+
+// Both training screens render the shared filter bar, which is what puts the Category control on the
+// member module and the report at once.
+console.log('\n--- the filter bar reaches both screens ---');
+const filterBarSource = readFileSync('src/components/training/TrainingFilters.jsx', 'utf8');
+const memberModuleSource = readFileSync('src/components/TrainingModule.jsx', 'utf8');
+const adminReportSource = readFileSync('src/components/admin/AdminTrainingTab.jsx', 'utf8');
+check('the bar offers a Category control', /id="training-filter-category"/.test(filterBarSource) && /TRAINING_CATEGORY_OPTIONS/.test(filterBarSource), true);
+check('the member module uses the bar', memberModuleSource.includes('<TrainingFilters'), true);
+check('and so does the report', adminReportSource.includes('<TrainingFilters'), true);
+check('clearing the filters resets every one of them', /onChange\(emptyTrainingFilters\(\)\)/.test(filterBarSource), true);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

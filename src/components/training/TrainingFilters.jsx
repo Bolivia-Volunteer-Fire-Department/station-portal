@@ -1,5 +1,10 @@
 import { Filter, RotateCcw } from 'lucide-react';
-import { TRAINING_SORT_OPTIONS, trainingLocationOptions } from '../../utils/training';
+import {
+  TRAINING_CATEGORY_OPTIONS,
+  TRAINING_SORT_OPTIONS,
+  emptyTrainingFilters,
+  trainingLocationOptions,
+} from '../../utils/training';
 
 // The filter and sort controls shared by the Training module and the Administration Training report.
 //
@@ -22,7 +27,14 @@ export default function TrainingFilters({
   signedLabel = 'Signature',
 }) {
   const locations = trainingLocationOptions(rows);
-  const isFiltered = Boolean(filters.from || filters.to || filters.location || filters.member || filters.signed);
+  const isFiltered = Boolean(
+    filters.from ||
+      filters.to ||
+      filters.location ||
+      filters.category ||
+      filters.member ||
+      filters.signed
+  );
 
   // One handler for every control, keyed by the filter's own name, so adding a filter means adding
   // an entry here rather than another callback.
@@ -36,7 +48,7 @@ export default function TrainingFilters({
         {isFiltered && (
           <button
             type="button"
-            onClick={() => onChange({ from: '', to: '', location: '', member: '', signed: '' })}
+            onClick={() => onChange(emptyTrainingFilters())}
             className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -79,6 +91,20 @@ export default function TrainingFilters({
             <option value="">All locations</option>
             {locations.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelClass} htmlFor="training-filter-category">Category</label>
+          <select
+            id="training-filter-category"
+            value={filters.category || ''}
+            onChange={setFilter('category')}
+            className={selectClass}
+          >
+            {TRAINING_CATEGORY_OPTIONS.map((option) => (
+              <option key={option.value || 'all'} value={option.value}>{option.label}</option>
             ))}
           </select>
         </div>

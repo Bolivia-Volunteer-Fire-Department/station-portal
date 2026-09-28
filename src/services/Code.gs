@@ -5949,9 +5949,19 @@ function clockLocationRejection(ss, rawLat, rawLon) {
 // that goes through a separate admin action. Keeping the two actions apart is what makes
 // the rule enforceable rather than a UI convention.
 
+// The TRUE/FALSE columns on the training sheet, and the whole of the app's idea of its columns: the
+// client's TRAINING_FLAGS list in src/utils/training.js is the mirror of this one, so the two have to
+// move together.
+//
+// `is_drill` and `is_certification` were RENAMED to `is_company_training` and `is_hazmat`, and `is_ems`
+// is new. Renaming here is not enough on its own: the spreadsheet headers carry the same names, so they
+// have to be renamed too or every row reads as untagged. There is deliberately no fallback to the old
+// names - the app writes only the new ones, so reading a stale `is_drill` would resurrect a value the
+// app had just cleared.
 const TRAINING_BOOL_COLUMNS = [
-  "is_certification",
-  "is_drill",
+  "is_company_training",
+  "is_hazmat",
+  "is_ems",
   "is_fire_prevention",
   "is_multicompany",
   "is_training_facility",

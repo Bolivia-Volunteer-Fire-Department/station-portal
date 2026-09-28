@@ -983,8 +983,8 @@ const TRAININGS = [
     duration: '2',
     location: 'Station 1',
     instructors: 'Capt. Alvarez',
-    is_certification: 'TRUE',
-    is_drill: 'TRUE',
+    is_hazmat: 'TRUE',
+    is_company_training: 'TRUE',
     narrative: 'Masks and bottles.',
     signature_count: 1,
   },
@@ -1025,8 +1025,17 @@ check('the running count is shown', /1 of 3 signed/.test(visibleText(signerView)
 check('a signer does NOT get the add/edit form', !String(signerView).includes('Add New Training'));
 check('and no Edit action', !String(signerView).includes('>Edit<'));
 // Badges come from the member-facing flag set.
-check('a set flag shows as a badge', String(signerView).includes('Cert'));
-check('an unset flag does not', !String(signerView).includes('Fire prev'));
+//
+// Matched on the badge's own title attribute rather than on its text, because the Category filter in the bar
+// renders the SAME WORDS as option text - and "Fire prev" is a substring of "Fire prevention", so a plain text
+// match would pass with no badge rendered at all, and would fail with no badge missing.
+check('a set flag shows as a badge', /title="Hazmat"/.test(String(signerView)));
+check('and so does the other renamed category', /title="Company Training"/.test(String(signerView)));
+check('an unset flag does not', !/title="Fire prevention"/.test(String(signerView)));
+// The Category filter itself, rendered rather than asserted from the source: both screens share one filter bar,
+// so this is the check that the control actually reaches the member module.
+check('the member module has the Category filter', String(signerView).includes('training-filter-category'));
+check('offering the renamed categories', String(signerView).includes('All categories') && String(signerView).includes('No category'));
 
 const editorView = trainingModule({ canEdit: true });
 check('an editor gets the add/edit form', String(editorView).includes('Add New Training'));
@@ -1098,6 +1107,8 @@ const adminTrainingView = (() => {
   }
 })();
 check('the Training report renders', typeof adminTrainingView === 'string', adminTrainingView.error && adminTrainingView.error.message);
+// The report shares the filter bar with the member module, so the same control has to be here too.
+check('the report has the Category filter', String(adminTrainingView).includes('training-filter-category'));
 check('listing every training', String(adminTrainingView).includes('SCBA Refresher') && String(adminTrainingView).includes('Filed Externally'));
 check('with a signature count per training', String(adminTrainingView).includes('>2<') && String(adminTrainingView).includes('>1<'));
 check('and a total', /3 trainings · 3 signatures/.test(visibleText(adminTrainingView)));

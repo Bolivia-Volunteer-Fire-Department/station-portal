@@ -39,6 +39,7 @@ Above the list is a **Filter & sort** bar, and under it are totals for whatever 
 |---|---|
 | **From date** / **To date** | A date range. Either end can be left open |
 | **Location** | One location from those your trainings were held at |
+| **Category** | One classification, such as *Company Training*, *Hazmat* or *EMS* — or *No category* to find the trainings nobody classified |
 | **My signature** | *Signed only* or *Not signed only* |
 | **Sort by** | Date (newest or oldest first), title, or longest duration |
 

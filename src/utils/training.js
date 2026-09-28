@@ -20,12 +20,21 @@ import { toTimeInputValue } from './timeInputValue';
 // The TRUE/FALSE columns on the training sheet, in the order the form and the table show them.
 // `short` is the badge text, which has to stay compact enough for a table row.
 //
+// The first three are a training's CATEGORY - the kind of activity it was - and they lead the list
+// because that is what the filter bar offers as its Category select (see TRAINING_CATEGORY_OPTIONS
+// below). The rest are classifications that qualify a training rather than name its kind.
+//
+// Two of these were renamed when the station's vocabulary changed, and the RENAME IS THE SHEET
+// COLUMN: `is_drill` became `is_company_training` and `is_certification` became `is_hazmat`, so the
+// spreadsheet headers have to be renamed to match or every row reads as untagged. `is_ems` is new.
+//
 // `adminOnly` marks a column that is administrative bookkeeping rather than a description of the
 // training: it is edited only in the Administration module and shown as its own table column
 // rather than as a badge. See ENTERED_EXTERNALLY_KEY below for what that column does.
 export const TRAINING_FLAGS = [
-  { key: 'is_certification', label: 'Certification', short: 'Cert' },
-  { key: 'is_drill', label: 'Drill', short: 'Drill' },
+  { key: 'is_company_training', label: 'Company Training', short: 'Company' },
+  { key: 'is_hazmat', label: 'Hazmat', short: 'Hazmat' },
+  { key: 'is_ems', label: 'EMS', short: 'EMS' },
   { key: 'is_fire_prevention', label: 'Fire prevention', short: 'Fire prev' },
   { key: 'is_multicompany', label: 'Multi-company', short: 'Multi-co' },
   { key: 'is_training_facility', label: 'Training Facility', short: 'Facility' },
@@ -46,6 +55,26 @@ export const TRAINING_FLAG_KEYS = TRAINING_FLAGS.map((flag) => flag.key);
 // the training completely, so it is edited (and shown) only in the Administration module.
 export const MEMBER_EDITABLE_FLAGS = TRAINING_FLAGS.filter((flag) => !flag.adminOnly);
 export const TRAINING_BADGES = TRAINING_FLAGS.filter((flag) => !flag.adminOnly);
+
+// What the Category filter offers, in the order the filter bar shows it.
+//
+// The categories ARE the flags: a training is "a hazmat training" by having that column set, and there
+// is no second taxonomy to keep in step. That means the option values are flag keys, and adding a
+// category is a one-line change to TRAINING_FLAGS rather than an edit here.
+//
+// The flags that qualify rather than name a kind of training (fire prevention, multi-company, officer
+// training...) are offered too: they are the same kind of question, the table badges them the same
+// way, and leaving them out would make the filter able to answer less than the eye can see.
+//
+// TRAINING_NO_CATEGORY is the inverse of a category - rows with NO category at all - which is how a
+// station finds the trainings nobody tagged so they can be fixed.
+export const TRAINING_NO_CATEGORY = 'none';
+
+export const TRAINING_CATEGORY_OPTIONS = [
+  { value: '', label: 'All categories' },
+  ...MEMBER_EDITABLE_FLAGS.map((flag) => ({ value: flag.key, label: flag.label })),
+  { value: TRAINING_NO_CATEGORY, label: 'No category' },
+];
 
 // The "entered into an external system" column. Set once and never unset through the app: a
 // training that has been filed elsewhere is a closed record, so nothing about it or its
@@ -220,7 +249,7 @@ export const sortTrainingRows = (rows, sort = DEFAULT_TRAINING_SORT) => {
 
 
 // An empty filter set, for a component's initial state.
-export const emptyTrainingFilters = () => ({ from: '', to: '', location: '', member: '', signed: '' });
+export const emptyTrainingFilters = () => ({ from: '', to: '', location: '', category: '', member: '', signed: '' });
 
 // The distinct locations present in the rows, as {value,label} options.
 //
@@ -248,6 +277,7 @@ export const filterTrainings = (rows, filters = {}, { signedIds = new Set() } = 
   const from = text(filters.from);
   const to = text(filters.to);
   const location = text(filters.location);
+  const category = text(filters.category);
   const member = text(filters.member);
   const signed = text(filters.signed);
 
@@ -264,6 +294,24 @@ export const filterTrainings = (rows, filters = {}, { signedIds = new Set() } = 
     }
 
     if (location && text(row.location) !== location) return false;
+
+    // The Category filter. "Hazmat" means the row IS TAGGED hazmat, not that it is only hazmat: a
+    // training can carry several classifications, and this asks the same question the badge beside it
+    // answers. "No category" is the inverse, for finding the rows nobody tagged.
+    //
+    // An unrecognised value is ignored rather than matching nothing. The filter state is not persisted,
+    // so this is about being wrong-proof rather than about old data - silently emptying the table is a
+    // worse failure than quietly not filtering.
+    if (category === TRAINING_NO_CATEGORY) {
+      if (MEMBER_EDITABLE_FLAGS.some((flag) => row[flag.key])) return false;
+    } else if (
+      category &&
+      MEMBER_EDITABLE_FLAGS.some((flag) => flag.key === category) &&
+      !row[category]
+    ) {
+      return false;
+    }
+
     if (member && !signedIds.has(text(row.id))) return false;
     if (signed === 'yes' && !signedIds.has(text(row.id))) return false;
     if (signed === 'no' && signedIds.has(text(row.id))) return false;

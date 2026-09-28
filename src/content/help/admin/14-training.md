@@ -19,6 +19,7 @@ The **Filter & sort** bar above the report drives both the list and the totals b
 |---|---|
 | **From date** / **To date** | A date range, with either end left open |
 | **Location** | One location, from those the trainings were actually held at |
+| **Category** | One classification, since a training can carry several. *Hazmat* lists the hazmat ones whether or not they are anything else, and *No category* finds the rows nobody tagged |
 | **Member** | **All Members**, or one member |
 | **Signatures** | *Signed only* or *Not signed only* — meaningful once a member is selected |
 | **Sort by** | Date (newest or oldest first), title, or longest duration |
@@ -41,7 +42,7 @@ The card at the top of this tab is collapsed until you click it. It is the same 
 | **Duration (hours)** | A decimal, such as `2` or `1.5` |
 | **Location**, **Instructors** | Free text |
 | **Narrative** | What was covered; shown under the signature list |
-| **Classification** | Certification, drill, fire prevention, multi-company, training facility, officer training, driver training, and **entered into an external system** |
+| **Classification** | Company Training, Hazmat, EMS, fire prevention, multi-company, training facility, officer training, driver training, and **entered into an external system**. These are the sheet's `is_company_training`, `is_hazmat`, `is_ems` and so on columns, one per classification, so a training can carry several |
 
 **Edit is available here for a training that has been signed.** That is the point of the rule: the Training module closes a training as soon as anybody signs it, and changes from then on are made here, deliberately.
 
