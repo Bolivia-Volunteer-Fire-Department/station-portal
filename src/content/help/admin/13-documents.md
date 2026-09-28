@@ -133,12 +133,16 @@ Selecting a document shows a **Signatures** panel underneath the editor:
 
 | What it shows | Notes |
 |---|---|
-| How many have signed | On the heading, with the count of stale ones if any |
+| How many have signed | On the heading, with the count of stale ones if any. On a checklist this counts **signed items** — one row per member per item — not the underlying records |
 | Each member and the date | The date is stamped by the server, not the member's device |
+| **verified by** | On a checklist: who confirmed that member's item. It sits on the same row as the signature, because it is a fact about it rather than a separate piece of work |
 | **before the last edit** | A signature taken before the current wording. Editing a document makes existing signatures stale, which is the point: a signature that appears to approve text nobody read is the one way this feature misleads |
-| **remove** | The only way a signature ever disappears. It is recorded in the system log, and it puts the member back on the outstanding list |
+| **remove signature** | The only way a signature ever disappears. It is recorded in the system log, and it puts the member back on the outstanding list |
+| **remove verification** | Removes one verifier's confirmation and leaves the signature it confirmed in place, waiting to be verified again |
 
-The **Signatures** panel also names the checklist item each signature is about, so a member who signed eleven of twelve lines is a list of eleven rather than a wall of ids.
+The panel is **paged**, ten rows at a time, and the pager only appears when there is more than one page. A checklist fills up quickly — every member times every item is a row — and this is what keeps the panel from pushing the document's own fields off the screen.
+
+On a checklist, **each item appears once per member**. A signature and a verification are two separate records in the sheet, and this panel used to draw them as two lines, so every verified item looked as though it had been done twice with "Verified by…" underneath. The item and the person are now the row, with the verification shown on it. The two remain separately removable, which is why the buttons name which one they remove.
 
 > [!WARNING]
 > Editing a document does not require anyone to sign again — it marks the signatures they already gave as older than the current text. Whether that matters is a judgment for you, which is why it is reported rather than enforced.

@@ -165,3 +165,78 @@ export const checklistIsComplete = (items, signatures, userId) => {
   const progress = checklistProgress(items, signatures, userId);
   return progress.total > 0 && progress.signed === progress.total && progress.verified === progress.total;
 };
+
+// The signatures card's rows: one entry per (member, item), carrying that member's signature and every
+// verification of it.
+//
+// A signature and a verification are two ROWS in the same sheet - the member saying they did the item, somebody
+// else confirming it - which is right for the record and wrong for a list. Rendered row for row, the reader sees
+// every item twice and has to work out that the second line is about the first: a checklist three people have
+// signed reads as a long list with "Verified by…" lines interleaved, and the count in the heading is the number of
+// rows rather than of signatures.
+//
+// Folding them together is what the member-facing screen already does: it draws an item from checklistItemState
+// and shows the verification as a property of that item (see ChecklistItemRow). This is the same arithmetic for
+// the administrator's card, so the two screens read the same way - and it is why the pair is rebuilt from the
+// signatures rather than from the items, since a signature can point at an item that has since been removed.
+//
+// A signature with NO item belongs to the whole document - a checklist could take one before items existed - and
+// keeps its own entry. This card is a record, and a record that hides rows is worse than one that looks untidy.
+//
+// Ordered by the checklist's own item order, so everybody who signed one item is listed together and in the order
+// the reader is working through; then by when they signed, then by member, so the order is stable for equal times.
+export const checklistSignatureEntries = (items, signatures) => {
+  const ordered = normalizeChecklistItemList(items);
+  const labels = new Map(ordered.map((item) => [item.id, item.label]));
+  const position = new Map(ordered.map((item, index) => [item.id, index]));
+  const entries = new Map();
+
+  normalizeSignatureList(signatures).forEach((signature) => {
+    // One key per member per item. An item-less signature keys on the empty item id, which is what makes it its
+    // own entry rather than mixing it into somebody else's.
+    const key = `${signature.user_id}|${signature.checklist_item_id}`;
+    if (!entries.has(key)) {
+      entries.set(key, {
+        key,
+        userId: signature.user_id,
+        itemId: signature.checklist_item_id,
+        itemLabel: signature.checklist_item_id
+          ? labels.get(signature.checklist_item_id) || 'an item since removed'
+          : '',
+        // The member's own row. Filled below where there is one: a verification with no signature under it (the
+        // server never writes that, but the sheet is hand-editable) still has to appear.
+        signatureId: '',
+        signedAt: '',
+        stale: false,
+        verifications: [],
+      });
+    }
+
+    const entry = entries.get(key);
+    if (signature.signature_role === 'verifier') {
+      entry.verifications.push({
+        id: signature.id,
+        byUserId: signature.signed_by_user_id,
+        at: signature.signed_at,
+        stale: signature.stale,
+      });
+      // A verification is evidence too, so a stale one makes the entry stale: the point of the flag is that what
+      // was agreed is not what is on the page now.
+      entry.stale = entry.stale || signature.stale;
+      return;
+    }
+
+    entry.signatureId = signature.id;
+    entry.signedAt = signature.signed_at;
+    entry.stale = entry.stale || signature.stale;
+  });
+
+  return [...entries.values()].sort((a, b) => {
+    // An item the checklist no longer holds sorts last rather than first: it is a loose end, not the opening.
+    const aPos = position.has(a.itemId) ? position.get(a.itemId) : Number.MAX_SAFE_INTEGER;
+    const bPos = position.has(b.itemId) ? position.get(b.itemId) : Number.MAX_SAFE_INTEGER;
+    if (aPos !== bPos) return aPos - bPos;
+    if (a.signedAt !== b.signedAt) return a.signedAt < b.signedAt ? -1 : 1;
+    return a.userId.localeCompare(b.userId);
+  });
+};

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, FileText, FolderInput, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileText, FolderInput, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import {
   adminDeleteChecklistItem,
   adminDeleteDocument,
@@ -40,6 +40,15 @@ import {
   reorderFolders,
   signatureDateLabel,
 } from '../../utils/documents';
+import { checklistSignatureEntries } from '../../utils/checklists';
+import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
+
+// How many signature rows the card shows at once.
+//
+// Smaller than the 20 a table uses, because this card sits INSIDE the edit form rather than being the page: on a
+// checklist it fills up fast (every member who signed every item is a row) and it was the thing pushing the
+// document's own fields off the screen.
+const SIGNATURE_PAGE_SIZE = 10;
 
 const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: 0 };
 
@@ -100,6 +109,9 @@ export default function AdminDocumentsTab({
   const [signaturesError, setSignaturesError] = useState('');
   const [pendingSignatureRemoval, setPendingSignatureRemoval] = useState(null);
   const [removingSignature, setRemovingSignature] = useState(false);
+  // Which page of the signatures card is showing. Reset whenever the signatures are (re)loaded, because a reload
+  // is a different list: page 4 of the previous one is not page 4 of this one.
+  const [signaturePage, setSignaturePage] = useState(1);
   // The checklist items of the document being edited, and the item form. Items are their own records because a
   // signature points at an item's id: editing the wording keeps the id, so what somebody signed stays attached to
   // what they signed.
@@ -199,6 +211,8 @@ export default function AdminDocumentsTab({
   // member's own view cannot disagree about which signatures predate the last edit.
   const loadSignatures = async (documentId) => {
     setLoadingSignatures(true);
+    // Back to the first page: this is a fresh list, and the pager is about the list, not about the card.
+    setSignaturePage(1);
     try {
       const result = await fetchDocumentSignatures(documentId, token);
       if (!result?.success) throw new Error(result?.message || 'Could not load the signatures.');
@@ -303,11 +317,14 @@ export default function AdminDocumentsTab({
   const handleRemoveSignature = async () => {
     const target = pendingSignatureRemoval;
     if (!target || removingSignature) return;
+    // Named in the toast, because a reader who has just removed one of two records about the same item should be
+    // told which one went.
+    const wasVerification = target.role === 'verifier';
     setRemovingSignature(true);
     try {
       const result = await adminRemoveDocumentSignature(target.id, token);
       if (!result?.success) throw new Error(result?.message || 'Could not remove the signature.');
-      toast.success('Signature removed.');
+      toast.success(wasVerification ? 'Verification removed.' : 'Signature removed.');
       await loadSignatures(form.id);
       onDataChanged?.();
     } catch (err) {
@@ -575,6 +592,53 @@ export default function AdminDocumentsTab({
     items.forEach((item) => map.set(item.id, item.label));
     return map;
   }, [items]);
+
+  // The card's rows: one per member per item on a checklist, one per signature on anything else.
+  //
+  // Folding a member's item signature and its verification into one row is what stops every item being listed
+  // twice - see checklistSignatureEntries, which is the same arithmetic the member-facing screen already shows. On
+  // any other document there are no items and no verifications, so a row is a signature, as it always was.
+  const signatureRows = useMemo(() => {
+    if (form.doc_type === 'checklist') {
+      return checklistSignatureEntries(items, signatures).map((entry) => ({
+        key: entry.key,
+        userId: entry.userId,
+        itemLabel: entry.itemLabel,
+        at: entry.signedAt,
+        stale: entry.stale,
+        verifications: entry.verifications,
+        signatureId: entry.signatureId,
+      }));
+    }
+
+    return signatures.map((signature) => ({
+      key: signature.id,
+      userId: signature.user_id,
+      // A verifier row cannot normally exist on a document without items, but the sheet is hand-editable and a row
+      // that is not shown is a row an administrator cannot remove.
+      itemLabel: signature.checklist_item_id
+        ? itemLabels.get(signature.checklist_item_id) || 'an item since removed'
+        : '',
+      at: signature.signed_at,
+      stale: signature.stale,
+      verifications: [],
+      signatureId: signature.id,
+      verifiedById: signature.signature_role === 'verifier' ? signature.signed_by_user_id : '',
+    }));
+  }, [form.doc_type, items, signatures, itemLabels]);
+
+  // Paged, and clamped as well: removing the last row of the last page has to leave the card on the last page that
+  // still has rows rather than on an empty one - the same rule the events and log tables follow.
+  const signaturePageCount = totalPages(signatureRows.length, SIGNATURE_PAGE_SIZE);
+  const currentSignaturePage = clampPage(signaturePage, signatureRows.length, SIGNATURE_PAGE_SIZE);
+  const signatureRowsOnPage = useMemo(
+    () => pageSlice(signatureRows, currentSignaturePage, SIGNATURE_PAGE_SIZE),
+    [signatureRows, currentSignaturePage]
+  );
+  const staleSignatureCount = signatureRows.filter((row) => row.stale).length;
+  // "signature" is the wrong word for a checklist row once they are folded: the row is one member's signature on
+  // one item, and the count has to describe what is under it or the heading disagrees with the list.
+  const signatureCountNoun = form.doc_type === 'checklist' ? 'signed item' : 'signature';
 
   // A role that may VERIFY but not MANAGE gets only the verification view. There is nothing here for it to edit,
   // and an editor whose every save the server would refuse is worse than no editor: it would look like a
@@ -1196,9 +1260,13 @@ export default function AdminDocumentsTab({
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Signatures</h3>
             {!loadingSignatures && !signaturesError && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {signatures.length} signature{signatures.length === 1 ? '' : 's'}
-                {signatures.some((signature) => signature.stale)
-                  ? ` · ${signatures.filter((signature) => signature.stale).length} from before the last edit`
+                {/* Counted from the ROWS, not from the signature records. On a checklist those differ - every
+                    signed item is one row and every verification used to be another - and the heading has to
+                    describe the list beneath it, or a checklist with three signed items claims eleven signatures. */}
+                {signatureRows.length} {signatureCountNoun}
+                {signatureRows.length === 1 ? '' : 's'}
+                {staleSignatureCount > 0
+                  ? ` · ${staleSignatureCount} from before the last edit`
                   : ''}
               </span>
             )}
@@ -1215,45 +1283,133 @@ export default function AdminDocumentsTab({
             <p className="text-sm font-medium text-red-600 dark:text-red-400">{signaturesError}</p>
           )}
 
-          {!loadingSignatures && !signaturesError && signatures.length === 0 && (
+          {!loadingSignatures && !signaturesError && signatureRows.length === 0 && (
             <p className="text-sm text-slate-500 dark:text-slate-400">Nobody has signed this document yet.</p>
           )}
 
-          {!loadingSignatures && !signaturesError && signatures.length > 0 && (
-            <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-              {signatures.map((signature) => (
-                <li key={signature.id} className="flex flex-wrap items-center gap-3 py-2">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                    {memberLabel(signature.user_id)}
-                  </span>
-                  {signature.checklist_item_id !== '' && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      {itemLabels.get(signature.checklist_item_id) || 'an item since removed'}
+          {!loadingSignatures && !signaturesError && signatureRows.length > 0 && (
+            <>
+              <ul className="divide-y divide-slate-200 dark:divide-slate-700">
+                {signatureRowsOnPage.map((row) => (
+                  <li key={row.key} className="py-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                        {memberLabel(row.userId)}
+                      </span>
+                      {row.itemLabel && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{row.itemLabel}</span>
+                      )}
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {signatureDateLabel({ signed_at: row.at }, timeFormat) || 'Signed'}
+                      </span>
+                      {/* A verification is shown ON the row it belongs to, which is the whole point: the item is
+                          listed once and "verified by" is a fact about it rather than a second line the reader has
+                          to connect back to the first. */}
+                      {row.verifiedById && (
+                        <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          verified by {memberLabel(row.verifiedById)}
+                        </span>
+                      )}
+                      {row.verifications.length > 0 && (
+                        <span
+                          className="rounded-full bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400"
+                          title={`Verified on ${row.verifications
+                            .map((verification) => signatureDateLabel(verification, timeFormat) || 'an unknown date')
+                            .join(', ')}`}
+                        >
+                          verified by{' '}
+                          {row.verifications.map((verification) => memberLabel(verification.byUserId)).join(', ')}
+                        </span>
+                      )}
+                      {row.stale && (
+                        <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                          before the last edit
+                        </span>
+                      )}
+
+                      {/* One control per underlying record, and each is named. "remove" alone was ambiguous once
+                          a row can carry both: a signature and a verification are separate rows in the sheet, so
+                          removing one must not look like removing the other. */}
+                      <span className="ml-auto flex flex-wrap items-center gap-x-3">
+                        {row.verifications.map((verification) => (
+                          <button
+                            key={verification.id}
+                            type="button"
+                            onClick={() =>
+                              setPendingSignatureRemoval({
+                                id: verification.id,
+                                userId: row.userId,
+                                itemLabel: row.itemLabel,
+                                role: 'verifier',
+                                verifiedById: verification.byUserId,
+                              })
+                            }
+                            className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:underline"
+                          >
+                            remove verification by {memberLabel(verification.byUserId)}
+                          </button>
+                        ))}
+                        {row.signatureId && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPendingSignatureRemoval({
+                                id: row.signatureId,
+                                userId: row.userId,
+                                itemLabel: row.itemLabel,
+                                role: 'member',
+                              })
+                            }
+                            className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                          >
+                            remove signature
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {/* The card is the whole document's signature record, and on a checklist it grows with every member
+                  who signs every item. The pager hides itself on a single page, as the events tables do. */}
+              {signaturePageCount > 1 && (
+                <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  <span>{pageRangeLabel(signatureRows.length, currentSignaturePage, SIGNATURE_PAGE_SIZE)}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSignaturePage(
+                          clampPage(currentSignaturePage - 1, signatureRows.length, SIGNATURE_PAGE_SIZE)
+                        )
+                      }
+                      disabled={currentSignaturePage <= 1}
+                      aria-label="Previous page"
+                      className="rounded-lg p-1 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-700"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="font-medium">
+                      Page {currentSignaturePage} of {signaturePageCount}
                     </span>
-                  )}
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {signatureDateLabel(signature, timeFormat) || 'Signed'}
-                  </span>
-                  {signature.signature_role === 'verifier' && (
-                    <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      verified by {memberLabel(signature.signed_by_user_id)}
-                    </span>
-                  )}
-                  {signature.stale && (
-                    <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                      before the last edit
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPendingSignatureRemoval(signature)}
-                    className="ml-auto text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                  >
-                    remove
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSignaturePage(
+                          clampPage(currentSignaturePage + 1, signatureRows.length, SIGNATURE_PAGE_SIZE)
+                        )
+                      }
+                      disabled={currentSignaturePage >= signaturePageCount}
+                      aria-label="Next page"
+                      className="rounded-lg p-1 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-700"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -1277,10 +1433,34 @@ export default function AdminDocumentsTab({
       )}
 
       {pendingSignatureRemoval && (
+        // The two are separate records, so the message says which one goes and what stays: a verification can be
+        // removed without touching the signature it confirms, and the reader should not have to guess.
         <ConfirmModal
-          title={`Remove the signature by ${memberLabel(pendingSignatureRemoval.user_id)}?`}
-          message="They will be listed as needing to sign again. This is recorded in the system log."
-          confirmLabel={removingSignature ? 'Removing…' : 'Remove signature'}
+          title={
+            pendingSignatureRemoval.role === 'verifier'
+              ? `Remove the verification by ${memberLabel(pendingSignatureRemoval.verifiedById)}?`
+              : `Remove the signature by ${memberLabel(pendingSignatureRemoval.userId)}?`
+          }
+          message={
+            pendingSignatureRemoval.role === 'verifier'
+              ? `${memberLabel(pendingSignatureRemoval.verifiedById)} confirmed ${memberLabel(
+                  pendingSignatureRemoval.userId
+                )}${
+                  pendingSignatureRemoval.itemLabel
+                    ? ` on “${pendingSignatureRemoval.itemLabel}”`
+                    : ''
+                }. Removing it leaves their signature in place, waiting to be verified again. This is recorded in the system log.`
+              : `${memberLabel(pendingSignatureRemoval.userId)} will be listed as needing to sign ${
+                  pendingSignatureRemoval.itemLabel ? `“${pendingSignatureRemoval.itemLabel}”` : 'this document'
+                } again. This is recorded in the system log.`
+          }
+          confirmLabel={
+            removingSignature
+              ? 'Removing…'
+              : pendingSignatureRemoval.role === 'verifier'
+                ? 'Remove verification'
+                : 'Remove signature'
+          }
           onConfirm={handleRemoveSignature}
           onCancel={() => setPendingSignatureRemoval(null)}
         />

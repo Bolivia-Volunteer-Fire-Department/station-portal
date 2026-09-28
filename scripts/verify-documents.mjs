@@ -61,6 +61,7 @@ import {
   checklistItemStates,
   checklistProgress,
   checklistProgressLabel,
+  checklistSignatureEntries,
   checklistSections,
   checklistVerifiedLabel,
   membersAwaitingVerification,
@@ -1146,6 +1147,93 @@ check(
   ['item-2', 'item-1', 'item-3', 'item-empty']
 );
 check('an item belonging to another document is not here', screenItems.length, 4);
+
+// ---------------------------------------------------------------------------
+// One row per member per item on the administrator's signatures card.
+//
+// The reported bug: a checklist listed every signed item TWICE - once for the member's signature, once for the
+// verification, which is a separate row in the same sheet - so "Verified by…" appeared interleaved as though the
+// item had been done again, and the count in the heading was the number of records rather than of signatures.
+// The card is built from these entries now, so this is the shape that has to be right.
+console.log('\n--- one row per member per item ---');
+const foldItems = [
+  { id: 'f1', document_id: 'doc-checklist', label: 'Check the pump', sort_order: 1 },
+  { id: 'f2', document_id: 'doc-checklist', label: 'Check the hose', sort_order: 2 },
+];
+const foldSignatures = [
+  { id: 'x1', document_id: 'doc-checklist', checklist_item_id: 'f1', user_id: 'u-ff', signed_by_user_id: 'u-ff', signature_role: 'member', signed_at: '2026-04-01 09:00:00' },
+  { id: 'x2', document_id: 'doc-checklist', checklist_item_id: 'f1', user_id: 'u-ff', signed_by_user_id: 'u-officer', signature_role: 'verifier', signed_at: '2026-04-02 09:00:00' },
+  { id: 'x3', document_id: 'doc-checklist', checklist_item_id: 'f2', user_id: 'u-ff', signed_by_user_id: 'u-ff', signature_role: 'member', signed_at: '2026-04-01 09:05:00' },
+  { id: 'x4', document_id: 'doc-checklist', checklist_item_id: 'f1', user_id: 'u-other', signed_by_user_id: 'u-other', signature_role: 'member', signed_at: '2026-04-01 09:10:00' },
+];
+const folded = checklistSignatureEntries(foldItems, foldSignatures);
+check('four records fold into three rows', folded.length, 3);
+check('which is fewer than the records the heading used to count', foldSignatures.length - folded.length, 1);
+check(
+  'each row is one member and one item',
+  folded.map((entry) => `${entry.userId}|${entry.itemId}`),
+  ['u-ff|f1', 'u-other|f1', 'u-ff|f2']
+);
+check(
+  'the verification is attached to the signature it confirms',
+  folded[0].verifications.map((verification) => verification.byUserId),
+  ['u-officer']
+);
+check('and is not a row of its own', folded.filter((entry) => entry.verifications.length > 0).length, 1);
+check('the member row keeps its id, so it can still be removed', [folded[0].signatureId, folded[1].signatureId], ['x1', 'x4']);
+check('the verification keeps its id too', folded[0].verifications[0].id, 'x2');
+check('an unverified row has no verifications', folded[2].verifications, []);
+check('the item label travels with the row', folded.map((entry) => entry.itemLabel), ['Check the pump', 'Check the pump', 'Check the hose']);
+check('and when it was signed', folded[0].signedAt, '2026-04-01 09:00:00');
+
+// Two officers may both confirm one item - the server allows it deliberately - and that must still be ONE row,
+// with both named, rather than pushing the count back up.
+const twiceVerified = checklistSignatureEntries(foldItems, [
+  ...foldSignatures,
+  { id: 'x5', document_id: 'doc-checklist', checklist_item_id: 'f1', user_id: 'u-ff', signed_by_user_id: 'u-chief', signature_role: 'verifier', signed_at: '2026-04-03 09:00:00' },
+]);
+check('two verifications are still one row', twiceVerified.length, 3);
+check('naming both verifiers', twiceVerified[0].verifications.map((verification) => verification.byUserId), ['u-officer', 'u-chief']);
+
+// A signature taken before the checklist had items belongs to the whole document. It is kept rather than folded
+// away or hidden: this card is a record, and a record that drops rows is worse than one that looks untidy.
+const legacyFold = checklistSignatureEntries(foldItems, [
+  ...foldSignatures,
+  { id: 'x6', document_id: 'doc-checklist', checklist_item_id: '', user_id: 'u-ff', signed_by_user_id: 'u-ff', signature_role: 'member', signed_at: '2026-01-01 09:00:00' },
+]);
+check('a whole-document signature keeps a row of its own', legacyFold.length, 4);
+check('labelled as the document rather than as an item', legacyFold[3].itemLabel, '');
+
+// An item since removed, and no items to order by at all: the rows still read as sentences, and the loose item
+// sorts by when it was signed rather than vanishing.
+const orphanFold = checklistSignatureEntries([], foldSignatures);
+check('an item the checklist no longer holds is still named', orphanFold[0].itemLabel, 'an item since removed');
+check(
+  'and with no items to order by, the rows fall back to when they were signed',
+  orphanFold.map((entry) => entry.itemId),
+  ['f1', 'f2', 'f1']
+);
+
+// ---------------------------------------------------------------------------
+// The card: the rows it draws, and the pager under them.
+console.log('\n--- the signatures card in the tab ---');
+const documentsTab = readFileSync('src/components/admin/AdminDocumentsTab.jsx', 'utf8');
+check('a checklist card is built from the folded rows', /form\.doc_type === 'checklist'[\s\S]{0,160}checklistSignatureEntries\(items, signatures\)/.test(documentsTab), true);
+check('and every other document still lists one row per signature', /return signatures\.map\(\(signature\) => \(\{/.test(documentsTab), true);
+check('the heading counts the rows, not the records', /\{signatureRows\.length\} \{signatureCountNoun\}/.test(documentsTab), true);
+check('and calls a checklist row what it is', /signatureCountNoun = form\.doc_type === 'checklist' \? 'signed item' : 'signature'/.test(documentsTab), true);
+// The membership test that pages it, and the clamp that stops a delete emptying the card.
+check('the card is paged with the shared helpers', /pageSlice\(signatureRows, currentSignaturePage, SIGNATURE_PAGE_SIZE\)/.test(documentsTab), true);
+check('and clamped, so the last page cannot go empty', /clampPage\(signaturePage, signatureRows\.length, SIGNATURE_PAGE_SIZE\)/.test(documentsTab), true);
+check('the pager hides itself on a single page', /signaturePageCount > 1 && \(/.test(documentsTab), true);
+check('and says which rows are showing', /pageRangeLabel\(signatureRows\.length, currentSignaturePage, SIGNATURE_PAGE_SIZE\)/.test(documentsTab), true);
+// Both records on a row are removable, and each says which it is: they are separate rows in the sheet, so
+// removing one must not look like removing the other.
+check('a signature can still be removed from a folded row', /remove signature/.test(documentsTab), true);
+check('and so can each verification', /remove verification by \{memberLabel\(verification\.byUserId\)\}/.test(documentsTab), true);
+check('the confirmation names which one goes', /pendingSignatureRemoval\.role === 'verifier'/.test(documentsTab), true);
+// Reloading the signatures sends the reader back to the first page: a reload is a different list.
+check('a reload returns to the first page', /setSignaturePage\(1\);/.test(documentsTab), true);
 
 const memberItemSignatures = [
   {
