@@ -1,10 +1,14 @@
 import React, { useMemo, useEffect, useRef, useState, useId } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, ArrowUpDown, Download, MapPin } from 'lucide-react';
+import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, Clock, ArrowUpDown, Download, MapPin } from 'lucide-react';
 import { adminSaveTimeclockEntry, adminDeleteTimeclockEntry } from '../../services/api';
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
 import { CLOCK_LOG_SORT_OPTIONS, filterAndSortClockLogs } from '../../utils/clockLogs';
 import RankIcon from '../RankIcon';
+import ViewportModal from '../ViewportModal';
+
+// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+const CLOCK_ENTRY_FORM_ID = 'timeclock-editor-form';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
@@ -114,6 +118,8 @@ function computeDurationHours(log) {
 
 export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [] }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // Whether the editor modal is open: "a new entry" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   // The row whose delete is being confirmed in the modal below.
@@ -125,7 +131,10 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
   const [sortBy, setSortBy] = useState('time_in_desc');
 
   const isEditing = !!formData.id;
-  const resetForm = () => setFormData(EMPTY_FORM);
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditorOpen(false);
+  };
 
   const userById = (userId) => users.find((u) => String(u.id) === String(userId));
   const rankFor = (userId) => {
@@ -134,6 +143,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
   };
 
   const handleEdit = (log) => {
+    setEditorOpen(true);
     setError(null);
     setFormData({
       id: log.id,
@@ -240,18 +250,18 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
   return (
     <div className="space-y-6">
       {/* Add / Edit Entry Card */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? recordHeading('Timeclock Entry') : 'Add New Timeclock Entry'}
-            </h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in the viewport modal every New card in this module now uses. */}
+      {editorOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Timeclock Entry') : 'New timeclock entry'}
+          subtitle={isEditing ? 'Editing an existing entry' : 'Not saved yet'}
+          icon={<Clock className="h-4 w-4" />}
+          formId={CLOCK_ENTRY_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add entry'}
+          saving={saving}
+          onClose={resetForm}
+        >
+        <form id={CLOCK_ENTRY_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
           {error && (
             <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
@@ -304,18 +314,9 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
             Entries added or edited here are automatically marked as manual.
           </p>
 
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add Entry'}
-            </button>
-          </div>
         </form>
-      </div>
+        </ViewportModal>
+      )}
 
       {/* Filter & Sort Controls */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-4">
@@ -371,6 +372,17 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             Timeclock Entries {filteredSortedLogs.length > 0 && `(${filteredSortedLogs.length})`}
           </h3>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setEditorOpen(true);
+            }}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New entry
+          </button>
           <button
             type="button"
             onClick={handleExportCsv}

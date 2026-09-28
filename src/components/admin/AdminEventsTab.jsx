@@ -4,6 +4,10 @@ import {
   Repeat, Save, Trash2, UserRound, X,
 } from 'lucide-react';
 import { adminDeleteEvent, adminFetchEvents, adminSaveEvent } from '../../services/api';
+import ViewportModal from '../ViewportModal';
+
+// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+const EVENT_FORM_ID = 'event-editor-form';
 import { toDateKey } from '../../utils/scheduleDate';
 import { authorLabel } from '../../utils/authorLabel';
 import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
@@ -398,46 +402,23 @@ export default function AdminEventsTab({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        {/* The header is the collapse control, matching the Training and Announcements forms. It stays
-            visible when collapsed so "New Event" is always one click away. */}
-        <button
-          type="button"
-          onClick={() => setFormOpen((open) => !open)}
-          aria-expanded={formOpen}
-          className="w-full flex items-start gap-3 p-6 text-left hover:bg-slate-50 dark:hover:bg-slate-900/40 transition"
+      {/* The editor, in the viewport modal every New card in this module now uses. `formOpen` is unchanged: it was
+          the collapse state and it is the open state now - the same question, asked of a different shell. */}
+      {formOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Event', form.title) : 'New event'}
+          subtitle={
+            isEditing
+              ? 'Change this event. Saving redraws it on every calendar it appears on.'
+              : 'Add a non-shift entry to the calendars.'
+          }
+          icon={<CalendarPlus className="h-4 w-4" />}
+          formId={EVENT_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Create event'}
+          saving={saving}
+          onClose={closeForm}
         >
-          <span className="mt-0.5 text-slate-400 shrink-0">
-            {formOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-          </span>
-          <span className="min-w-0">
-            <span className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
-              <CalendarPlus className="w-5 h-5 text-red-500" />
-              {isEditing ? recordHeading('Event', form.title) : 'New Event'}
-            </span>
-            <span className="block text-sm text-slate-500 dark:text-slate-400">
-              {isEditing
-                ? 'Change this event. Saving redraws it on every calendar it appears on.'
-                : 'Add a non-shift entry to the calendars.'}
-            </span>
-          </span>
-        </button>
-
-        {formOpen && (
-          <form onSubmit={handleSave} className="px-6 pb-6 space-y-5">
-            {isEditing && (
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={closeForm}
-                  className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Cancel edit
-                </button>
-              </div>
-            )}
-
+          <form id={EVENT_FORM_ID} onSubmit={handleSave} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label={<>Title <span className="font-normal text-slate-400">(required)</span></>} wide>
                 <input
@@ -679,24 +660,27 @@ export default function AdminEventsTab({
               </div>
             )}
 
-            <div className="flex justify-end pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                {isEditing ? 'Save Changes' : 'Create Event'}
-              </button>
-            </div>
           </form>
-        )}
-      </div>
+        </ViewportModal>
+      )}
 
 
-      {/* Sorting and filtering, below the add card and above both lists. */}
+      {/* Sorting and filtering, between the editor and the lists - with New event in the same row, because a filter
+          bar is a toolbar and it is where somebody looks when they want another one. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl px-6 py-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setForm(EMPTY_FORM());
+              setFormOpen(true);
+            }}
+            className="ml-auto order-last flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New event
+          </button>
           <div>
             <label className={labelClass}>From</label>
             <input

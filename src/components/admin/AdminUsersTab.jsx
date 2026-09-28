@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Music, KeyRound } from 'lucide-react';
+import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
 import MemberName from '../MemberName';
 import { recordHeading } from '../../utils/displayLabel';
+
+// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+const USER_FORM_ID = 'user-editor-form';
 
 const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
 
 export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // Whether the editor modal is open: "a new member" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   // The row whose delete is being confirmed in the modal below.
@@ -18,9 +24,13 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
   const isEditing = !!formData.id;
 
-  const resetForm = () => setFormData(EMPTY_FORM);
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditorOpen(false);
+  };
 
   const handleEdit = (user) => {
+    setEditorOpen(true);
     setError(null);
     setFormData({
       id: user.id,
@@ -97,16 +107,18 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? recordHeading('User', formData.name || formData.user_name) : 'Add New User'}</h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in the viewport modal every New card in this module now uses. */}
+      {editorOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('User', formData.name || formData.user_name) : 'New member'}
+          subtitle={isEditing ? 'Editing an existing member' : 'Not saved yet'}
+          icon={<UsersIcon className="h-4 w-4" />}
+          formId={USER_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add member'}
+          saving={saving}
+          onClose={resetForm}
+        >
+        <form id={USER_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
           {error && (
             <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
@@ -272,20 +284,27 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             </div>
           )}
 
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add User'}
-            </button>
-          </div>
         </form>
-      </div>
+        </ViewportModal>
+      )}
 
+      {/* The roster, with New member where somebody looks for another one. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <UsersIcon className="h-4 w-4 shrink-0 text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Members</h3>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setEditorOpen(true);
+            }}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New member
+          </button>
+        </div>
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>

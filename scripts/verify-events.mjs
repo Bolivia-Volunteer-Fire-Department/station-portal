@@ -990,7 +990,9 @@ const renderedTab = renderToString(
   })
 );
 check('the events tab renders', renderedTab.length > 500, true);
-check('with the add card', renderedTab.includes('New Event'), true);
+// The editor is a modal now: the page carries a New event button, and the form itself is not rendered until it
+// is opened (and would not appear in a server render even then - a portal renders as nothing).
+check('with the New event button', renderedTab.includes('New event') && !renderedTab.includes('event-editor-form'), true);
 // The filter and sort bar. Its own count line is the one thing that proves the bar rendered with data bound to
 // it, and it is readable before any rows arrive.
 ['From', 'To', 'Shows to', 'Sort by'].forEach((label) => {
@@ -1248,7 +1250,7 @@ const renderedTabWithRepeat = renderToString(
     timeFormat: '12',
   })
 );
-check('the tab still renders with the new lines', renderedTabWithRepeat.includes('New Event'), true);
+check('the tab still renders with the new lines', renderedTabWithRepeat.includes('New event'), true);
 
 
 
