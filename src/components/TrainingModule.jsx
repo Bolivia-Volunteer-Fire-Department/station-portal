@@ -41,6 +41,8 @@ export default function TrainingModule({
 }) {
   const [pendingSignIds, setPendingSignIds] = useState(() => new Set());
   const [editing, setEditing] = useState(null);
+  // Whether the editor modal is open: "new training" and "no editor" are both `editing === null`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingSignatures, setSavingSignatures] = useState(false);
   const [message, setMessage] = useState(null);
@@ -129,6 +131,7 @@ export default function TrainingModule({
       const result = await saveTraining({ trainings: [values] }, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save the training.');
       setEditing(null);
+      setEditorOpen(false);
       await onChanged?.(token);
       setMessage({ type: 'success', text: 'Training saved.' });
     } catch (err) {
@@ -140,7 +143,7 @@ export default function TrainingModule({
 
   return (
     <div className="space-y-4">
-      {canEdit && (
+      {canEdit && editorOpen && (
         <TrainingForm
           // Remounts when the edited row changes, so the form's state is seeded exactly once
           // per row instead of being re-seeded by an effect.
@@ -148,7 +151,10 @@ export default function TrainingModule({
           editing={editing}
           saving={saving}
           onSubmit={handleSaveTraining}
-          onCancel={() => setEditing(null)}
+          onCancel={() => {
+            setEditing(null);
+            setEditorOpen(false);
+          }}
         />
       )}
 
@@ -174,6 +180,19 @@ export default function TrainingModule({
             {totals.count !== allRows.length ? ` (of ${allRows.length})` : ''}
           </span>
           <div className="ml-auto flex items-center gap-3">
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(null);
+                  setEditorOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                <PenLine className="h-3.5 w-3.5" />
+                Add training
+              </button>
+            )}
             {pendingCount > 0 && (
               <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
                 {pendingCount} unsaved {pendingCount === 1 ? 'signature' : 'signatures'}
@@ -279,7 +298,10 @@ export default function TrainingModule({
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"
-                          onClick={() => setEditing(training)}
+                          onClick={() => {
+                            setEditing(training);
+                            setEditorOpen(true);
+                          }}
                           disabled={!editable}
                           title={editable ? 'Edit this training' : editBlockedReason}
                           className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-white"

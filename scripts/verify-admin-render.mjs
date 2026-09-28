@@ -1038,7 +1038,8 @@ check('the member module has the Category filter', String(signerView).includes('
 check('offering the renamed categories', String(signerView).includes('All categories') && String(signerView).includes('No category'));
 
 const editorView = trainingModule({ canEdit: true });
-check('an editor gets the add/edit form', String(editorView).includes('Add New Training'));
+check('an editor gets an Add training button', String(editorView).includes('Add training'));
+check('but not the form itself until it is asked for', !String(editorView).includes('training-editor-form'));
 check('and an Edit action per row', String(editorView).includes('>Edit<'));
 check('but still no delete', !String(editorView).toLowerCase().includes('delete'));
 // Rule: a training anybody has signed, or one that is locked, cannot be edited from the module.
@@ -1046,50 +1047,30 @@ check('the Edit button is disabled for a signed training', /disabled=""[^>]*titl
 check('and for a locked one', /disabled=""[^>]*title="This training has been entered into an external/.test(String(editorView)));
 check('the external column exists', String(editorView).includes('>Ext.<'));
 
-console.log('\n--- the collapsible add/edit card ---');
-// Icons render as inline <svg>, which sits between an attribute and the text after it, so
-// assertions about "this disabled button says X" are made against the markup with icons removed.
+console.log('\n--- the training editor modal ---');
+// Icons render as inline <svg>, which sits between an attribute and the text after it, so assertions about "this
+// disabled button says X" are made against the markup with the icons removed.
 const withoutIcons = (html) => String(html).replace(/<svg[\s\S]*?<\/svg>/g, '');
-const formView = (props) => {
-  try {
-    return renderToString(React.createElement(TrainingForm, { onSubmit: () => {}, ...props }));
-  } catch (error) {
-    return { error };
-  }
-};
-
-// Collapsed by default: the card is there, its fields are not.
-const collapsedForm = formView({});
-check('the card renders', typeof collapsedForm === 'string', collapsedForm.error && collapsedForm.error.message);
-check('showing its title', String(collapsedForm).includes('Add New Training'));
-check('but collapsed by default', /aria-expanded="false"/.test(String(collapsedForm)));
-check('so no fields are rendered', !String(collapsedForm).includes('Start time') && !String(collapsedForm).includes('Narrative'));
-check('and it still says what it is for', String(collapsedForm).includes('Record a training activity'));
-
-// Editing a row opens it, so clicking Edit cannot appear to do nothing.
-const editingForm = formView({ editing: { id: 't9', date: '2026-03-14', title: 'Opened' } });
-check('editing opens the card', /aria-expanded="true"/.test(String(editingForm)));
-check('with the row loaded in', String(editingForm).includes('Edit Opened') && String(editingForm).includes('value="Opened"'));
-check('and the fields present', String(editingForm).includes('Narrative') && String(editingForm).includes('Duration (hours)'));
-check('plus a cancel action', String(editingForm).includes('Cancel edit'));
-
-// Which flags the form offers depends on the caller.
-check('a member-facing form shows the member flags', String(editingForm).includes('Fire prevention') && String(editingForm).includes('Multi-company'));
-check('and NOT the external marker', !String(editingForm).includes('Entered into an external system'));
-const adminForm = formView({ editing: { id: 't9', date: '2026-03-14', title: 'Opened' }, allowAdminFlags: true });
-check('an administrative form DOES offer the external marker', String(adminForm).includes('Entered into an external system'));
-check('and warns that it is permanent', /is permanent/.test(String(adminForm)));
-
+// The form is inside ViewportModal, which goes through createPortal - and server-side rendering skips portals
+// entirely, so this renders as nothing at all. The form's contents are therefore asserted at the source, the way
+// the document editor's are; what the render can prove is that the form is NOT on the page until it is asked for.
+const trainingFormSource = readFileSync('src/components/training/TrainingForm.jsx', 'utf8');
+check('it renders in the editor modal', /<ViewportModal/.test(trainingFormSource), true);
+check('with a Save and a Cancel in the toolbar', /formId=\{TRAINING_FORM_ID\}/.test(trainingFormSource) && /onClose=\{onCancel\}/.test(trainingFormSource), true);
+check('and the label the caller needs', /saveLabel=\{isEditing \? 'Save training' : 'Add training'\}/.test(trainingFormSource), true);
+check('the fields are all there', ['Start time', 'Duration', 'Location', 'Instructors', 'Narrative'].every((label) => trainingFormSource.includes(label)), true);
+// Which flags the form offers depends on the caller: the member module gets the member set, the Administration
+// report gets everything including the external-system marker.
+check('the member set by default', /allowAdminFlags \? TRAINING_FLAGS : MEMBER_EDITABLE_FLAGS/.test(trainingFormSource), true);
+check('and a warning that the external marker is permanent', /is permanent/.test(trainingFormSource), true);
 // A locked training is read-only even for an administrator, and says why.
-const lockedForm = formView({ editing: { id: 't9', date: '2026-03-14', title: 'Filed', is_entered_into_external: 'TRUE' }, allowAdminFlags: true });
-check('a locked training shows as locked', String(lockedForm).includes('Locked'));
-check('with an explanation', /entered into an external system, so it is locked/.test(String(lockedForm)));
-check('and a disabled fieldset', String(lockedForm).includes('<fieldset disabled=""'));
-check('and a disabled save button', /disabled=""[^>]*>\s*Save Training/.test(withoutIcons(lockedForm)));
+check('a locked training is read-only', /<fieldset disabled=\{locked\}/.test(trainingFormSource), true);
+check('with an explanation', /entered into an external system, so it is locked/.test(trainingFormSource), true);
+check('and cannot be saved', /const canSave = [^;]*!locked/.test(trainingFormSource), true);
+check('and the reason sits beside the Save button', /This training is locked\.|A date and a title are required\./.test(trainingFormSource), true);
 
 // A training with no date or title cannot be saved either - the backend would drop it.
-const blankForm = formView({ editing: { id: 't9' } });
-check('an incomplete training says what is missing', /A date and a title are required/.test(String(blankForm)));
+check('an incomplete training says what is missing', /A date and a title are required/.test(trainingFormSource));
 
 const adminTrainingView = (() => {
   try {
@@ -1112,7 +1093,7 @@ check('the report has the Category filter', String(adminTrainingView).includes('
 check('listing every training', String(adminTrainingView).includes('SCBA Refresher') && String(adminTrainingView).includes('Filed Externally'));
 check('with a signature count per training', String(adminTrainingView).includes('>2<') && String(adminTrainingView).includes('>1<'));
 check('and a total', /3 trainings · 3 signatures/.test(visibleText(adminTrainingView)));
-check('it offers to add a training', String(adminTrainingView).includes('Add New Training'));
+check('it offers to add a training', String(adminTrainingView).includes('Add training') && !String(adminTrainingView).includes('training-editor-form'));
 check('and to delete one', String(adminTrainingView).includes('Delete'));
 check('signatures start collapsed', String(adminTrainingView).includes('Nobody has signed this training yet') === false);
 check('the external marker is only in the administrative form', String(adminTrainingView).includes('Entered into an external system'));

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Printer, Trash2, UserMinus } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, Printer, Trash2, UserMinus } from 'lucide-react';
 import { adminBulkSaveTraining, adminRemoveTrainingSignature } from '../../services/api';
 import TrainingBadges from '../training/TrainingBadges';
 import ConfirmModal from '../ConfirmModal';
@@ -41,6 +41,9 @@ export default function AdminTrainingTab({
   onDataChanged,
 }) {
   const [editing, setEditing] = useState(null);
+  // Whether the editor modal is open. `editing` alone cannot say, because "new training" is `editing === null` -
+  // which is also what a closed editor looks like.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [removingId, setRemovingId] = useState(null);
@@ -143,6 +146,7 @@ export default function AdminTrainingTab({
       const result = await adminBulkSaveTraining({ trainings: [values] }, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save the training.');
       setEditing(null);
+      setEditorOpen(false);
       void onDataChanged?.(token);
       setMessage({ type: 'success', text: 'Training saved.' });
     } catch (err) {
@@ -207,17 +211,24 @@ export default function AdminTrainingTab({
 
   return (
     <div className="space-y-4">
-      <TrainingForm
-        // Remounts when the edited row changes, so the form's state is seeded exactly once per
-        // row instead of being re-seeded by an effect.
-        key={editing?.id || 'new'}
-        editing={editing}
-        saving={saving}
-        // The Administration report is the only place the external-system marker can be set.
-        allowAdminFlags
-        onSubmit={handleSave}
-        onCancel={() => setEditing(null)}
-      />
+      {/* The editor, mounted only while it is open. Mounting it per open is what its state seeding already assumed
+          (the key below and the mounting are the same trick): switching from Add to a row gives a fresh form. */}
+      {editorOpen && (
+        <TrainingForm
+          // Remounts when the edited row changes, so the form's state is seeded exactly once per
+          // row instead of being re-seeded by an effect.
+          key={editing?.id || 'new'}
+          editing={editing}
+          saving={saving}
+          // The Administration report is the only place the external-system marker can be set.
+          allowAdminFlags
+          onSubmit={handleSave}
+          onCancel={() => {
+            setEditing(null);
+            setEditorOpen(false);
+          }}
+        />
+      )}
 
       {message && (
         <div
@@ -262,6 +273,19 @@ export default function AdminTrainingTab({
             {signatures.length === 1 ? '' : 's'}
             {rows.length !== allRows.length ? ` (of ${allRows.length} trainings)` : ''}
           </span>
+          {/* Add a training, where the report is. The editor opens over the page rather than sitting under the
+              table, which is what the member-facing module does too - same form, same modal. */}
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(null);
+              setEditorOpen(true);
+            }}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add training
+          </button>
           {/* Prints what the table is showing - the same rows, filtered the same way - so the button is
               pointless with nothing on screen and says why. */}
           <button
@@ -273,7 +297,7 @@ export default function AdminTrainingTab({
                 ? 'Nothing to print - no trainings match these filters'
                 : 'Print this list, with who signed each training'
             }
-            className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
           >
             <Printer className="w-3.5 h-3.5" />
             Print list
@@ -370,13 +394,16 @@ export default function AdminTrainingTab({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setEditing(editing?.id === id ? null : training)}
+                          onClick={() => {
+                            setEditing(training);
+                            setEditorOpen(true);
+                          }}
                           disabled={training.locked}
                           title={training.locked ? 'Locked — entered into an external system' : 'Edit this training'}
                           className="inline-flex items-center text-xs gap-1.5 font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-white mr-3"
                         >
                           <Pencil className="w-3.5 h-3.5" />
-                          {editing?.id === id ? 'Editing…' : 'Edit'}
+                          Edit
                         </button>
                         <button
                           type="button"

@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Lock, Save, Loader2, X } from 'lucide-react';
+import { ClipboardCheck, Lock } from 'lucide-react';
 import { MEMBER_EDITABLE_FLAGS, TRAINING_FLAGS, TRAINING_FLAG_KEYS, normalizeTraining, trainingLocked } from '../../utils/training';
 import { recordHeading } from '../../utils/displayLabel';
+import ViewportModal from '../ViewportModal';
 
-// The add/edit form for a training activity.
+// The add/edit form for a training activity, in the editor modal both audiences use.
 //
-// One component for both audiences: a role with can_edit_trainings sees it in the Training
-// module, and the admin Training tab reuses it, so the two can never disagree about which
-// fields a training has. The flag checkboxes come from TRAINING_FLAGS rather than being spelled
-// out here, which is what keeps the form, the table badges and the backend column list in step.
+// One component for both: a role with can_edit_trainings opens it from the Training module, and the
+// Administration report opens the same one, so the two can never disagree about which fields a training has. The
+// flag checkboxes come from TRAINING_FLAGS rather than being spelled out here, which is what keeps the form, the
+// table badges and the backend column list in step.
+//
+// It was a collapsing card until now - a header that opened on a click and a body that pushed the table down the
+// page. It is mounted only while it is open, which its state seeding already assumed: the callers give it a `key`
+// derived from the row being edited, so switching rows remounts it rather than re-seeding state in an effect.
+const TRAINING_FORM_ID = 'training-editor-form';
 const EMPTY_FORM = {
   id: '',
   date: '',
@@ -54,9 +60,6 @@ export default function TrainingForm({
   // switching between "add" and a specific row remounts it rather than needing an effect to
   // re-seed state - which would render twice and briefly show the previous row's values.
   const [form, setForm] = useState(() => formFromTraining(editing));
-  // Collapsed by default to save screen space, but opened automatically when the caller is
-  // editing a specific row - otherwise clicking Edit would appear to do nothing.
-  const [open, setOpen] = useState(() => Boolean(editing));
   const isEditing = Boolean(form.id);
   const locked = trainingLocked(form);
   const flags = allowAdminFlags ? TRAINING_FLAGS : MEMBER_EDITABLE_FLAGS;
@@ -78,51 +81,28 @@ export default function TrainingForm({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-      {/* The header is the collapse control. It stays visible when collapsed so "Add New
-          Training" is always one click away rather than hidden behind a disclosure nobody sees. */}
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
-        className="w-full flex items-start gap-3 p-6 text-left hover:bg-slate-50 dark:hover:bg-slate-900/40 transition"
-      >
-        <span className="mt-0.5 text-slate-400 shrink-0">
-          {open ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-        </span>
-        <span className="min-w-0">
-          <span className="block text-lg font-semibold text-slate-900 dark:text-white">
-            {isEditing ? recordHeading('Training', form.title) : 'Add New Training'}
+    // The reason the Save button is off, shown beside it in the toolbar - the reader should not have to hunt for it.
+    <ViewportModal
+      title={isEditing ? recordHeading('Training', form.title) : 'New training'}
+      subtitle={
+        isEditing
+          ? 'Editing an existing training'
+          : 'Record a training activity. Members can then sign it in their Training module.'
+      }
+      icon={<ClipboardCheck className="h-4 w-4" />}
+      formId={TRAINING_FORM_ID}
+      saveLabel={isEditing ? 'Save training' : 'Add training'}
+      saving={saving}
+      onClose={onCancel}
+      actions={
+        canSave ? null : (
+          <span className="mr-1 hidden text-xs text-slate-500 dark:text-slate-400 sm:inline">
+            {locked ? 'This training is locked.' : 'A date and a title are required.'}
           </span>
-          <span className="block text-sm text-slate-500 dark:text-slate-400">
-            {isEditing
-              ? 'Change the details of this training.'
-              : 'Record a training activity. Members can then sign it in their Training module.'}
-          </span>
-        </span>
-        {locked && (
-          <span className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-900 px-3 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            <Lock className="w-3.5 h-3.5" />
-            Locked
-          </span>
-        )}
-      </button>
-
-      {open && (
-      <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
-        {isEditing && (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-            >
-              <X className="w-3.5 h-3.5" />
-              Cancel edit
-            </button>
-          </div>
-        )}
-
+        )
+      }
+    >
+      <form id={TRAINING_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
         {locked && (
           <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700">
             <Lock className="w-4 h-4 shrink-0 mt-0.5" />
@@ -236,24 +216,8 @@ export default function TrainingForm({
           )}
         </div>
 
-        <div className="flex flex-wrap justify-end items-center gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/80 mt-2">
-          {!canSave && !saving && (
-            <span className="text-xs text-slate-500 dark:text-slate-400 mr-auto">
-              {locked ? 'This training is locked.' : 'A date and a title are required.'}
-            </span>
-          )}
-          <button
-            type="submit"
-            disabled={!canSave}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {isEditing ? 'Save Training' : 'Add Training'}
-          </button>
-        </div>
         </fieldset>
       </form>
-      )}
-    </div>
+    </ViewportModal>
   );
 }
