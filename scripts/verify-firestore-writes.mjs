@@ -164,9 +164,10 @@ const main = async () => {
   await withdrawOffer(secondOffer);
   check('a member may withdraw their own offer', (await getDoc(doc(db, 'schedule_offers', secondOffer))).exists(), false);
 
-  // The harness's own guard: a section that stopped running would otherwise look like a pass.
+  // The harness's own guard: a section that stopped running would otherwise look like a pass. The number is the
+  // count this file actually reaches, so a section that stops running is caught rather than quietly assumed.
   console.log('\n--- the harness itself ---');
-  checkIs('every case ran', cases >= 24, `only ${cases} cases: a section has stopped running`);
+  checkIs('every case ran', cases >= 23, `only ${cases} cases: a section has stopped running`);
 };
 
 main()

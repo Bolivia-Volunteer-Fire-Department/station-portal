@@ -36,18 +36,21 @@ service cloud.firestore {
       return request.auth.uid;
     }
 
-    // The viewer's own roster row: `name`, `rank_id` and `role_id`. The role comes from here and not from a claim,
-    // because a claim can be an hour stale after an officer changes somebody's role.
+    // The viewer's roster row and their role, each read ONCE per evaluation.
     //
-    // EVERY segment and EVERY field read on this path is guarded, and that is not defensive padding. An empty path
-    // segment ("users/"), a document that does not exist, or a key that is absent all produce an EVALUATION ERROR in
-    // these rules rather than a false - and a client cannot tell an error apart from a correct denial. `get(key,
-    // default)` is the supported way to read a field that may be missing.
+    // These are deliberately FLAT: no helper calls another helper. The earlier version chained them - roleId() called
+    // viewerRow() twice, role() called roleId() twice, and permission() called role() three times - so a rule that
+    // checked two flags multiplied the same handful of document reads into hundreds of expressions and Firestore
+    // refused to evaluate it at all: "the maximum of 1000 expressions to evaluate has been reached", which a client
+    // sees as permission-denied, indistinguishable from a correct refusal. One document, read once, handed down.
     //
-    // The cost: a rule that needs the role, the rank and the audience keys makes about six document reads, all cached
-    // within the request. The limits are 10 for a single-document request and 20 for a query, so there is room - but
-    // a rule that starts reading several more documents per check will not have any.
-    function viewerRow() {
+    // Every segment and every field read is guarded, for the same family of reasons: an empty path segment
+    // ("users/"), a document that does not exist, and an absent key all produce an EVALUATION ERROR in these rules
+    // rather than a false. `get(key, default)` is the supported way to read a field that may be missing.
+    //
+    // What a check costs: two existence checks and two reads (the roster row, then the role), all cached within the
+    // request. A rule that needs to read several more documents than that per check will not fit in the allowance.
+    function viewerRole() {
       return uid() == null
         ? null
         : (exists(/databases/$(database)/documents/users/$(uid()))
@@ -55,19 +58,14 @@ service cloud.firestore {
           : null);
     }
 
-    function roleId() {
-      return viewerRow() == null ? '' : viewerRow().get('role_id', '');
-    }
-
-    function rankId() {
-      return viewerRow() == null ? '' : viewerRow().get('rank_id', '');
-    }
-
-    function role() {
-      return roleId() == ''
+    // The role document for a roster row. It takes the row rather than reading it again, which is what keeps the
+    // whole path to two document reads however many times a rule asks about permissions.
+    function roleFor(viewer) {
+      let roleRef = viewer == null ? '' : viewer.get('role_id', '');
+      return roleRef == ''
         ? null
-        : (exists(/databases/$(database)/documents/roles/$(roleId()))
-          ? get(/databases/$(database)/documents/roles/$(roleId())).data
+        : (exists(/databases/$(database)/documents/roles/$(roleRef))
+          ? get(/databases/$(database)/documents/roles/$(roleRef)).data
           : null);
     }
 
@@ -75,7 +73,13 @@ service cloud.firestore {
     // or their rank. One list, because the client asks ONE question with array-contains-any and the rule answers it
     // with hasAny - a shape Firestore can prove, unlike an OR across three columns.
     function viewerKeys() {
-      return ['*', 'user:' + uid(), 'role:' + roleId(), 'rank:' + rankId()];
+      let viewer = viewerRole();
+      return [
+        '*',
+        'user:' + uid(),
+        'role:' + (viewer == null ? '' : viewer.get('role_id', '')),
+        'rank:' + (viewer == null ? '' : viewer.get('rank_id', '')),
+      ];
     }
 
     // `is_admin` is the master switch: it implies every other permission.
@@ -88,11 +92,13 @@ service cloud.firestore {
     // made creating an offer fail for the right-looking reason. "Not granted" is written down as false, and the role
     // editor is what keeps it that way.
     function permission(name) {
-      return role() != null && (role().is_admin == true || role()[name] == true);
+      let role = roleFor(viewerRole());
+      return role != null && (role.is_admin == true || role.get(name, false) == true);
     }
 
     function isAdministrator() {
-      return role() != null && role().is_admin == true;
+      let role = roleFor(viewerRole());
+      return role != null && role.is_admin == true;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -310,8 +316,15 @@ service cloud.firestore {
     // Offers: a member raises one for an open shift, withdraws their own, and an officer approves one - the approval
     // is what writes the schedule row, so it is an officer's write either way.
     match /schedule_offers/{offerId} {
+      // `resource == null` first, and this is a rule worth copying to every read rule that inspects `resource.data`:
+      // reading a document that does NOT exist evaluates the read rule with `resource` null, and `.data` off null is
+      // a Null value error - which a client sees as permission-denied. Asking "does this offer exist?" is an ordinary
+      // thing for a screen to do, and the honest answer is "no", not "you may not know".
       allow read: if signedIn()
-        && (resource.data.user_id == uid() || permission('can_approve_shifts') || permission('can_edit_schedule'));
+        && (resource == null
+          || resource.data.user_id == uid()
+          || permission('can_approve_shifts')
+          || permission('can_edit_schedule'));
       // A member may raise an offer on their own behalf, and only as a pending one: the status is not theirs to set
       // to approved.
       allow create: if signedIn()
