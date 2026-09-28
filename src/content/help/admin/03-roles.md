@@ -4,7 +4,10 @@ A role is the term used for describing how a user can interact specifically with
 > Configuring roles requires the **Manage roles** permission in your own role.
 
 ## How to use
-The role list is at the top of the tab and the permission editor below it — click a role to edit it.
+
+The role list is at the top of the tab. Press **New role** in its header, or click a role in the list to edit it.
+
+Either way the editor opens **over the page** — the description and the whole permission list, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. It closes when the save lands; a save that fails keeps it open with the reason in it. The toolbar also shows how many permissions are currently granted, so the count is where the Save button is rather than at the bottom of a long list.
 
 ## Administrator access
 

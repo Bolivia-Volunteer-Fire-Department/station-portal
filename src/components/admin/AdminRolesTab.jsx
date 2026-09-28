@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, ShieldCheck, Lock } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, ShieldCheck, Lock } from 'lucide-react';
 import { adminSaveRole, adminDeleteRole } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
+
+// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+const ROLE_FORM_ID = 'role-editor-form';
 import { recordHeading } from '../../utils/displayLabel';
 import {
   ADMIN_PERMISSIONS,
@@ -53,9 +57,14 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
   // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
+  // Whether the editor modal is open: "a new role" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const isEditing = !!formData.id;
-  const resetForm = () => setFormData(buildEmptyForm());
+  const resetForm = () => {
+    setFormData(buildEmptyForm());
+    setEditorOpen(false);
+  };
 
   // The STORED row being edited (if any). Its current flags decide what this editor
   // is allowed to touch - the backend enforces the same rule.
@@ -67,6 +76,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
   const blockedByAdminRole = targetIsAdministrator && !isAdmin;
 
   const handleEdit = (role) => {
+    setEditorOpen(true);
     setError(null);
     setFormData(formFromRole(role));
   };
@@ -161,9 +171,24 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
   return (
     <div className="space-y-6">
       {/* The role list comes first: it is the overview an administrator opens
-          this tab for, and the permission editor below is only needed once a
+          this tab for, and the permission editor is only needed once a
           role is chosen or a new one is being added. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Roles</h3>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setEditorOpen(true);
+            }}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New role
+          </button>
+        </div>
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>
@@ -235,19 +260,28 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
         </table>
       </div>
 
-      {/* Add/edit form for the selected role, below the list. */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? recordHeading('Role', formData.description) : 'Add New Role'}
-            </h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in the viewport modal every New card in this module now uses. Its own Save was disabled for a
+          non-administrator editing the administrator role; that rule moved to saveDisabled, so the toolbar button
+          carries it instead - with the reason beside it, where the granted count already was. */}
+      {editorOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Role', formData.description) : 'New role'}
+          subtitle={isEditing ? 'Editing an existing role' : 'Not saved yet'}
+          icon={<ShieldCheck className="h-4 w-4" />}
+          formId={ROLE_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add role'}
+          saving={saving}
+          saveDisabled={blockedByAdminRole}
+          onClose={resetForm}
+          actions={
+            <span className="mr-1 hidden text-xs text-slate-500 dark:text-slate-400 sm:inline">
+              {blockedByAdminRole
+                ? 'Only an administrator can change this role.'
+                : `${grantedCount(formData)} of ${ALL_PERMISSIONS.length} permissions granted.`}
+            </span>
+          }
+        >
+        <form id={ROLE_FORM_ID} onSubmit={handleSubmit} className="space-y-5">
 
           {error && (
             <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
@@ -332,21 +366,10 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {grantedCount(formData)} of {ALL_PERMISSIONS.length} permissions granted.
-            </p>
-            <button
-              type="submit"
-              disabled={saving || blockedByAdminRole}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add Role'}
-            </button>
-          </div>
         </form>
-      </div>
+        </ViewportModal>
+      )}
+
 
       {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
           (ConfirmModal plays the tone), and it names what is about to be deleted. */}

@@ -38,6 +38,10 @@ export default function ViewportModal({
   // Save then simply calls this, and formId is left off.
   onSave,
   saveLabel = 'Save',
+  // A caller whose save is refused for a reason of its own (the Roles editor refuses to store an administrator
+  // role for a non-administrator) disables the toolbar's Save without disabling the whole form: the fields stay
+  // readable and the reason goes in `actions`, beside the button.
+  saveDisabled = false,
   saving = false,
   busy = false,
   busyLabel = 'Saving…',
@@ -128,7 +132,7 @@ export default function ViewportModal({
               type={formId ? 'submit' : 'button'}
               form={formId}
               onClick={formId ? undefined : onSave}
-              disabled={busy}
+              disabled={busy || saveDisabled}
               className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

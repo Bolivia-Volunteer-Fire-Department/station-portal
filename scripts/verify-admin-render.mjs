@@ -174,7 +174,14 @@ for (const [name, role] of Object.entries(ROLES)) {
         isAdmin: false,
       })
     );
-    check(`the Roles editor renders for a ${name} role`, editor.includes('Administrator access'));
+    // The permission list is inside the editor modal now, and a portal renders as nothing under SSR - so the label
+    // is asserted at the source. What the render proves is that the page came up: the list header and its button.
+    check(
+      `the Roles editor renders for a ${name} role`,
+      editor.includes('>Roles</h3>') &&
+        editor.includes('New role') &&
+        readFileSync('src/components/admin/AdminRolesTab.jsx', 'utf8').includes('Administrator access')
+    );
   } catch (error) {
     rolesError = error;
   }
