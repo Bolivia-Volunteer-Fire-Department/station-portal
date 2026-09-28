@@ -54,13 +54,23 @@ emulator.
 
 ## 3. Turn on Authentication
 
-- **Sign-in method** → enable **Email/Password**. Nothing else: no other provider, no verification, no reset by
-  email, because the addresses are synthetic (`username@boliviavfd.invalid`) and no mail is ever sent.
-- **Settings → Email enumeration protection**: on.
+- **Sign-in method** → enable **Email/Password**. Nothing else - no other provider.
+- **Settings → Email enumeration protection**: on, so Auth does not reveal whether an address exists.
 - **Settings → Authorized domains**: `localhost` is there by default; **add the GitHub Pages host**
   (`<your-org>.github.io`). Sign-in fails on the deployed site without it, and the failure is not obvious.
-- Resets are officer-driven: `resetMemberPassword` sets a temporary password and flags the member to change it.
-  There is no self-service reset, deliberately, and no inbox to send one to.
+- Resets are officer-driven: `resetMemberPassword` sets a temporary password and flags the member to change it. No
+  self-service reset, deliberately.
+
+**There is nothing to turn off for verification or reset mail**, and it is worth knowing that before hunting for it.
+Auth sends a verification or a reset email only when the app ASKS it to, and this app never does - there is no
+"send these automatically" setting to disable. What is left is the two settings above.
+
+**One gap worth knowing about:** the email/password provider cannot be closed to self-sign-up, and the API key is
+public, so somebody could create their own Auth account. They would get no role, and therefore nothing to see - the
+rules deny everything to a user with no roster row - but the account would exist, and it would count toward the
+project's users. If that ever matters, an Auth **blocking function** (`beforeUserCreated`) can refuse anything that
+did not come from an officer's `createMember`, since the Admin SDK's own creations are distinguishable from a
+browser's. It is deliberately not in place yet: it is hardening, not a hole in the data.
 
 ## 4. Create the Firestore database
 
@@ -68,16 +78,35 @@ Cloud Firestore → **Create database** → **production mode** (the rules come 
 **location**. The location is permanent, so choose it once: `nam5` for a US multi-region, or a single US region near
 the station. It is the one decision here that cannot be undone.
 
-## 5. Deploy the rules, indexes and functions
+## 5. Log in, then deploy the rules, indexes and functions
+
+**First, log the CLI in** - deploys are authenticated, and a fresh machine has no credentials:
 
 ```bash
-npm --prefix functions install      # once, and again after any change to functions/package.json
-npm run deploy:firestore            # rules + indexes
+npx firebase login          # opens a browser; --reauth if it is the wrong account
+npx firebase use --add      # confirms the project for this directory
+npm --prefix functions install
+npm run deploy:firestore
 npm run deploy:functions
 ```
 
-The indexes take a few minutes to build the first time. Firestore reports a missing index in the browser console
-with a link if a query needs one - but they are all in `firestore.indexes.json`, so that should not happen.
+The indexes take a few minutes to build the first time. If a query ever needs an index that is missing, Firestore
+reports it in the browser console with a link - but they are all in `firestore.indexes.json`, so that should not
+happen.
+
+### If something goes wrong
+
+- **`HTTP Error: 401 ... invalid authentication credentials`** - not logged in. `npx firebase login`.
+- **`Error: Too many arguments. Run firebase help deploy`** - something extra reached the command. The npm scripts
+  are the command and nothing else; a note appended to one (`... --only firestore:rules # rules + indexes`) is
+  passed to firebase as arguments, not ignored. Notes belong in this document, not in `package.json`.
+- **`npm warn EBADENGINE ... required: { node: '22' }, current: { node: '25.x' }`** - expected and harmless. The
+  `engines` field in `functions/package.json` names the runtime the functions DEPLOY to, and it has to be an exact
+  supported version, so it stays `22` even when the machine has a newer Node. Nothing needs changing; the warning
+  appears because npm compares the two.
+- **`npm audit` reports moderate vulnerabilities** - they come in with `firebase-admin`'s dependency tree. `npm
+  audit fix` at this level can move dependencies under a Functions runtime, so leave them and read the report if it
+  matters.
 
 ## 6. Bootstrap the first administrator
 
