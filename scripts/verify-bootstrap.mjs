@@ -154,7 +154,13 @@ addSheet('schedule', [
   ['id', 'schedule_template_id', 'assignment_id', 'user_id', 'date_from', 'date_to', 'start_time', 'end_time'],
   ['s1', 't1', 'a1', 'u1', '2026-03-02', '2026-03-02', '08:00', '18:00'],
 ]);
-addSheet('availability', [['id', 'schedule_template_id', 'date_from', 'date_to', 'user_id']]);
+// Two members' slots, so "the member's own only" is a claim with something to get wrong: u1's row must reach u1 and
+// u2's must not.
+addSheet('availability', [
+  ['id', 'schedule_template_id', 'date_from', 'date_to', 'user_id'],
+  ['av1', 't1', '2026-03-06', '2026-03-06', 'u1'],
+  ['av2', 't1', '2026-03-07', '2026-03-07', 'u2'],
+]);
 // `admin_note` is not in either member projection: it is the column that shows the two payloads apart, so an
 // administrator's pickers get the whole row while a member's calendar gets the six fields it draws.
 addSheet('schedule_templates', [
@@ -191,9 +197,25 @@ const { memberBootstrapPayload, adminBootstrapPayload, rosterRowsFor, onDutyRows
 const member = memberBootstrapPayload(ss, { userId: 'u1' });
 
 checkIs('it reports success', member.success === true);
-check('the schedule rows', member.schedule, getSheetData(ss, 'schedule'));
-check('availability in the same shape', member.availability, getSheetData(ss, 'availability'));
-check('clock history in the same shape', member.logs, getSheetData(ss, 'timeclock'));
+check('the schedule rows, whole - a member is meant to see the crew', member.schedule, getSheetData(ss, 'schedule'));
+// The two unbounded sheets, cut to the viewer. Both are per-member tables - an availability row per member per
+// date, a clock entry per shift - and every sign-in used to carry them whole, which is about 3.5 MB a year of
+// growth at a station of thirty. Every member screen reads its own rows and filters by user id itself, so the rest
+// was transferred only to be thrown away (and it was everybody's comings and goings leaving the spreadsheet).
+//
+// Asserted against u2, a plain member, because the payload above is u1's - and u1 is this workbook's ADMINISTRATOR,
+// who legitimately receives both tables whole (asserted with the admin payload below).
+const asMember = memberBootstrapPayload(ss, { userId: 'u2' });
+check('availability is only their own slots', asMember.availability.map((row) => row.id), ['av2']);
+check('and clock history only their own entries', asMember.logs.map((log) => log.id), ['c2']);
+// The reason their own rows are enough: this is the lookup that decides whether the clock card offers "clock out",
+// so the member's own open entry has to be in their payload. Here it is u1's, in the whole table an administrator
+// gets - and for a member the same row arrives through the same filter, which is what the assertions below pin.
+check(
+  'and their own open shift is in what they get, so "am I clocked in" still answers',
+  member.logs.filter((log) => !log.time_out).map((log) => log.id),
+  ['c1']
+);
 check('the roster the same helper produces', member.roster, rosterRowsFor(ss));
 check('who is on duty, clocked-out members excluded', member.onDuty, onDutyRowsFor(ss));
 check('with only the one member on duty', member.onDuty.map((u) => u.id), ['u1']);
@@ -213,10 +235,14 @@ checkIs('the same for the on-duty list', !JSON.stringify(member.onDuty).includes
 console.log('\n--- the administrator payload ---');
 const admin = adminBootstrapPayload(ss, { userId: 'u1' });
 
-// Everything the member needs is in it, because the two waves land on the same screen.
-for (const field of ['schedule', 'availability', 'roster', 'onDuty', 'logs', 'trainings', 'events', 'userSettings']) {
+// Everything the member needs is in it, because the two waves land on the same screen - EXCEPT the two per-member
+// tables, which an administrator gets whole: the Clock Management and Member Availability tabs list everybody.
+for (const field of ['schedule', 'roster', 'onDuty', 'trainings', 'events', 'userSettings']) {
   checkIs(`it carries ${field} too`, JSON.stringify(admin[field]) === JSON.stringify(member[field]));
 }
+// The whole tables, through the same helper the member path uses - isAdminUser is the single place that decides.
+check('the whole clock table for an administrator', admin.logs.map((log) => log.id), ['c1', 'c2']);
+check('and every member\u2019s availability', admin.availability.map((row) => row.id), ['av1', 'av2']);
 check('the user directory', admin.users.map((u) => u.id), ['u1', 'u2']);
 checkIs('with the passwords stripped', !JSON.stringify(admin.users).includes('HASHED'));
 checkIs('and the usernames kept, because an administrator edits them', JSON.stringify(admin.users).includes('jane'));
@@ -240,7 +266,8 @@ checkIs('so no admin-only column is in them', !('admin_note' in (narrow.schedule
 checkIs('and it is not an error response', narrow.success === true);
 check('but the schedule is still there', narrow.schedule, member.schedule);
 check('and the roster', narrow.roster, member.roster);
-check('and the clock history', narrow.logs, member.logs);
+check('and the clock history, still only their own', narrow.logs.map((log) => log.id), ['c2']);
+check('with that member\u2019s own availability as well', narrow.availability.map((row) => row.id), ['av2']);
 check('and this member\u2019s own preference', narrow.userSettings.filter((s) => String(s.user_id) === 'u2').map((s) => s.time_format), ['24']);
 checkIs('with the members\u2019 own offers still present for them', Array.isArray(narrow.offers));
 
@@ -256,6 +283,40 @@ checkIs('and it requires a session', /case "GET_BOOTSTRAP"[\s\S]{0,300}getAuthCo
 // The admin batch is guarded by is_admin, which is what grants Administration at all.
 checkIs('the admin batch is guarded by is_admin', /case "ADMIN_GET_BOOTSTRAP"[\s\S]{0,400}isAdminUser\(ss, authAdminBootstrap\.userId\)/.test(gsSource));
 checkIs('and the member actions it replaces are still dispatched', gsSource.includes('case "GET_SCHEDULE": {'));
+
+console.log('\n--- the two per-member sheets are cut for the viewer, on every path ---');
+// The claim the cut rests on: every member screen that reads these sheets draws the SIGNED-IN member's own rows. If
+// one of them started listing the crew, the server would now be hiding rows that screen needs - so it is asserted
+// here, beside the payload that depends on it, rather than assumed.
+const clockHistory = readFileSync('src/components/MyClockHistory.jsx', 'utf8');
+checkIs(
+  'My Clock History filters the rows to the signed-in member',
+  /String\(log\.user_id\) === String\(currentUser\.id\)/.test(clockHistory)
+);
+const appSource = readFileSync('src/App.jsx', 'utf8');
+checkIs(
+  'and so does the "am I clocked in" lookup that arms the clock card',
+  /String\(log\.user_id\) === String\(currentUser\.id\) && !log\.time_out/.test(appSource)
+);
+const availabilityScreen = readFileSync('src/components/MyAvailability.jsx', 'utf8');
+checkIs('My Availability is built for that member', /member=\{currentUser\}/.test(availabilityScreen));
+// And both read actions go through the same viewer check, so a background refresh cannot put back what the payload
+// narrowed - the failure that would otherwise show up as a member's clock history quietly growing to the whole crew.
+checkIs(
+  'the clock action is scoped for its viewer too',
+  /case "GET_TIMECLOCK_LOGS"[\s\S]{0,400}clockLogsForViewer\(ss, authLogs\.userId\)/.test(gsSource)
+);
+checkIs(
+  'and so is the availability action',
+  /case "GET_AVAILABILITY"[\s\S]{0,400}availabilityForViewer\(ss, authAvail\.userId\)/.test(gsSource)
+);
+// One helper decides for both, by asking whether the viewer is an administrator - the same question the Clock
+// Management and Member Availability tabs' own gate asks.
+checkIs(
+  'with isAdminUser the single decision for both',
+  /function clockLogsForViewer[\s\S]{0,200}isAdminUser\(ss, userId\)/.test(gsSource) &&
+    /function availabilityForViewer[\s\S]{0,200}isAdminUser\(ss, userId\)/.test(gsSource)
+);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

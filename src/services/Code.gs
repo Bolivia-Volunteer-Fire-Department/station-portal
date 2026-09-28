@@ -155,6 +155,41 @@ function onDutyRowsFor(ss) {
     .map(function (u) { return { id: u.id, name: u.name, rank_id: u.rank_id }; });
 }
 
+// The rows of a per-member sheet that belong to ONE member.
+//
+// The two sheets this serves, timeclock and availability, are the two that grow without bound: one clock entry per
+// shift, and one availability row per member per date. A station of thirty adds roughly 3.5 MB of them a year, and
+// every sign-in carried BOTH IN FULL to everybody.
+//
+// Every member screen that reads them shows the signed-in member's own rows - My Clock History filters by user id,
+// the app's "am I clocked in" lookup filters by user id, and My Availability is built from the member's own slots -
+// so the other rows were transferred only to be discarded, and everybody's comings and goings left the spreadsheet
+// for no reason at all.
+//
+// The administrator case is handled by the callers (see clockLogsForViewer), not by a flag here.
+function rowsForUser(ss, sheetName, userId) {
+  const wanted = String(userId == null ? "" : userId);
+  return getSheetData(ss, sheetName).filter(function (row) {
+    return String(row && row.user_id) === wanted;
+  });
+}
+
+// Clock history as one viewer may read it: the whole station for an administrator, whose Clock Management tab lists
+// everybody, and the member's own rows for anyone else.
+//
+// BOTH the sign-in payload and GET_TIMECLOCK_LOGS go through this, which is the point: a member's background
+// refresh returns the same rows the payload did, so it cannot quietly put the rest of the crew back into the cache
+// the payload had just narrowed.
+function clockLogsForViewer(ss, userId) {
+  return isAdminUser(ss, userId) ? getSheetData(ss, "timeclock") : rowsForUser(ss, "timeclock", userId);
+}
+
+// Member availability, the same way round: the whole table for an administrator, whose Member Availability tab
+// shows every member, and the member's own slots for anyone else.
+function availabilityForViewer(ss, userId) {
+  return isAdminUser(ss, userId) ? getSheetData(ss, "availability") : rowsForUser(ss, "availability", userId);
+}
+
 // Everything a member's sign-in needs. See the section note above.
 function memberBootstrapPayload(ss, auth) {
   const viewer = findRowById(getSheetData(ss, "users"), auth.userId) || {};
@@ -174,8 +209,9 @@ function memberBootstrapPayload(ss, auth) {
     schedule: getSheetData(ss, "schedule"),
     assignments: memberAssignmentRows(ss),
     scheduleTemplates: memberScheduleTemplateRows(ss),
-    // GET_AVAILABILITY
-    availability: getSheetData(ss, "availability"),
+    // GET_AVAILABILITY - the member's own slots only: My Availability is built from them, and this sheet is one
+    // row per member per date, so shipping the whole table meant every member downloading every member's calendar.
+    availability: availabilityForViewer(ss, auth.userId),
     // GET_ROSTER
     roster: rosterRowsFor(ss),
     // GET_SHIFT_OFFERS - the member's own only; the whole table stays admin-only.
@@ -198,8 +234,9 @@ function memberBootstrapPayload(ss, auth) {
     }),
     // GET_EVENTS - filtered to what this member may see.
     events: eventsForViewer(ss, viewer, auth.userId),
-    // GET_TIMECLOCK_LOGS
-    logs: getSheetData(ss, "timeclock"),
+    // GET_TIMECLOCK_LOGS - the member's own entries only. My Clock History filters to them anyway, and the app's
+    // "am I clocked in" lookup filters to them too, so this is the same screen with a fraction of the transfer.
+    logs: clockLogsForViewer(ss, auth.userId),
     // GET_CERTIFICATIONS - the member's own records, and the catalog they are named and iconed from.
     certifications: certificationsForUser(ss, auth.userId),
     certificationSetup: certificationTypes(ss),
@@ -467,7 +504,8 @@ function doPost(e) {
           responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
           break;
         }
-        responseData = { logs: getSheetData(ss, "timeclock") };
+        // The same rows the payload sent this viewer, so a refresh cannot widen what a sign-in narrowed.
+        responseData = { logs: clockLogsForViewer(ss, authLogs.userId) };
         break;
       }
 
@@ -498,7 +536,8 @@ function doPost(e) {
           responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
           break;
         }
-        responseData = { availability: getSheetData(ss, "availability") };
+        // Ditto: the member's own slots, or every member's for an administrator.
+        responseData = { availability: availabilityForViewer(ss, authAvail.userId) };
         break;
       }
 

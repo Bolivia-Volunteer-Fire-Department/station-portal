@@ -127,15 +127,19 @@ const bootstrapSource = `${extractFunction(bootstrapGs, 'function memberBootstra
   'function adminBootstrapPayload('
 )}`;
 
+// The callee each cache and its action must SHARE. Two of them are viewer-scoped helpers rather than a sheet read,
+// because availability and clock history are cut to the viewer: a member gets their own rows, an administrator the
+// whole table (see clockLogsForViewer in Code.gs). Naming the helper here is what keeps the batch and the action on
+// the same rows, which is why a member's background refresh cannot widen what their sign-in had just narrowed.
 const SHARED_READS = [
   ['the schedule rows', 'GET_SCHEDULE', 'getSheetData(ss, "schedule")'],
   ['the member assignment projection', 'GET_SCHEDULE', 'memberAssignmentRows('],
   ['the member template projection', 'GET_SCHEDULE', 'memberScheduleTemplateRows('],
-  ['availability', 'GET_AVAILABILITY', 'getSheetData(ss, "availability")'],
+  ['availability, cut to the viewer', 'GET_AVAILABILITY', 'availabilityForViewer('],
   ['the member roster', 'GET_ROSTER', 'rosterRowsFor('],
   ['who is on duty', 'GET_ON_DUTY', 'onDutyRowsFor('],
   ['the member\u2019s own offers', 'GET_SHIFT_OFFERS', 'offersForUser('],
-  ['clock history', 'GET_TIMECLOCK_LOGS', 'getSheetData(ss, "timeclock")'],
+  ['clock history, cut to the viewer', 'GET_TIMECLOCK_LOGS', 'clockLogsForViewer('],
   ['the training list', 'GET_TRAINING', 'trainingRowsForApp('],
   ['the member\u2019s signatures', 'GET_TRAINING', 'trainingSignaturesForUser('],
   ['the announcements', 'MY_ANNOUNCEMENTS', 'announcementRowsFor('],
