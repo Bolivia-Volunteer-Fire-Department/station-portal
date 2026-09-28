@@ -34,6 +34,9 @@ export default function ViewportModal({
   // The id of the <form> inside. Save submits it through the HTML `form` attribute, so the fields keep their
   // native behaviour: Enter in a text input still submits, and validation still runs.
   formId,
+  // For editors whose body is NOT a form - a stack of fields with a save handler, as the certification tabs are.
+  // Save then simply calls this, and formId is left off.
+  onSave,
   saveLabel = 'Save',
   saving = false,
   busy = false,
@@ -119,10 +122,12 @@ export default function ViewportModal({
               Cancel
             </button>
             {/* Submits the form inside through the HTML `form` attribute, so the fields keep their native
-                behaviour: Enter in a text input still submits the document. */}
+                behaviour: Enter in a text input still submits the document. A body that is not a form (the
+                certification editors) passes onSave instead, and this calls it. */}
             <button
-              type="submit"
+              type={formId ? 'submit' : 'button'}
               form={formId}
+              onClick={formId ? undefined : onSave}
               disabled={busy}
               className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
             >

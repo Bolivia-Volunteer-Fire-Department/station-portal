@@ -389,8 +389,12 @@ check('renders', typeof assignmentsHtml === 'string', assignmentsHtml.error && a
 // can show is the trigger - which reads "No icon" while the field is empty - and that nothing was left behind
 // on a dropdown. The catalog itself is asserted from the source below, because a closed picker renders none of
 // its options.
-check('with the icon picker', String(assignmentsHtml).includes('No icon'));
-check('and no icon dropdown left behind', !String(assignmentsHtml).includes('-- No Icon --'));
+// The editor is a modal now, so its fields are asserted at the source: a dialog renders through createPortal,
+// which server-side rendering skips. What the render proves is that the page is the list and a New assignment
+// button - not a form.
+const assignmentsTabSrc = readFileSync('src/components/admin/AdminAssignmentsTab.jsx', 'utf8');
+check('with the icon picker', /<IconPicker/.test(assignmentsTabSrc));
+check('and no icon dropdown left behind', !/-- No Icon --/.test(assignmentsTabSrc));
 //
 // The picker imports the same RANK_ICON_MAP the ranks editor renders, so there is one catalog and an icon
 // added for one editor is available in the other - which is the property the <option> assertion used to hold.
@@ -412,14 +416,19 @@ const stripMarkup = (html) =>
     .replace(/<[^>]*>/g, '');
 
 const assignmentsText = stripMarkup(assignmentsHtml);
-check('the form offers an Effective Date', /Effective Date/.test(assignmentsText));
-check('and an End Date', /End Date/.test(assignmentsText));
-check('with two date inputs', (String(assignmentsHtml).match(/type="date"/g) || []).length === 2);
-check('marking the effective date required', /Effective Date \(required\)/.test(assignmentsText));
-check('and the end date optional', /End Date \(optional\)/.test(assignmentsText));
-check('explaining what the effective date means', /The first date this assignment may be used/.test(assignmentsText));
-check('and that a blank end means still available', /still available/.test(assignmentsText));
-check('and noting that existing shifts are never removed', /never removed/.test(assignmentsText));
+check('the form offers an Effective Date', /Effective Date/.test(assignmentsTabSrc));
+check('and an End Date', /End Date/.test(assignmentsTabSrc));
+// Counted inside the form: the file has other date inputs (the filters).
+const assignmentFormSrc = assignmentsTabSrc.slice(
+  assignmentsTabSrc.indexOf('<form id={ASSIGNMENT_FORM_ID}'),
+  assignmentsTabSrc.indexOf('</form>', assignmentsTabSrc.indexOf('<form id={ASSIGNMENT_FORM_ID}'))
+);
+check('with two date inputs', (assignmentFormSrc.match(/type="date"/g) || []).length === 2);
+check('marking the effective date required', /Effective Date[\s\S]{0,200}\(required\)/.test(assignmentsTabSrc));
+check('and the end date optional', /End Date[\s\S]{0,200}\(optional\)/.test(assignmentsTabSrc));
+check('explaining what the effective date means', /The first date this assignment may be used/.test(assignmentsTabSrc));
+check('and that a blank end means still available', /still available/.test(assignmentsTabSrc));
+check('and noting that existing shifts are never removed', /never removed/.test(assignmentsTabSrc));
 // An assignment created before the rule has no effective date. It keeps working, so the list nudges
 // rather than hiding it - which is also how an administrator finds the rows still to fill in.
 check('an undated assignment is nudged, not hidden', /No start date/.test(assignmentsText));

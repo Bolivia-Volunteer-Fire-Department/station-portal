@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, Badge } from 'lucide-react';
 import { adminSaveAssignment, adminDeleteAssignment } from '../../services/api';
 import { eligibilityFor, rankOrderLabel, minRankChoices } from '../../utils/rankEligibility';
 import { assignmentColor, parseHexColor } from '../../utils/assignmentColor';
@@ -15,6 +15,10 @@ import { toDateKey } from '../../utils/scheduleDate';
 import RankIcon from '../RankIcon';
 import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
+
+// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+const ASSIGNMENT_FORM_ID = 'assignment-editor-form';
 import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = {
@@ -41,6 +45,8 @@ export default function AdminAssignmentsTab({
   onRowSaved,
 }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // Whether the editor modal is open: "a new assignment" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   // The row whose delete is being confirmed in the modal below.
@@ -48,7 +54,10 @@ export default function AdminAssignmentsTab({
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.id;
-  const resetForm = () => setFormData(EMPTY_FORM);
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditorOpen(false);
+  };
 
   // Minimum-rank choices derived from the ranks sheet (highest order first).
   const rankChoices = minRankChoices(ranks);
@@ -62,6 +71,7 @@ export default function AdminAssignmentsTab({
   const autoColor = assignmentColor(formData.id, assignments);
 
   const handleEdit = (assignment) => {
+    setEditorOpen(true);
     setError(null);
     setFormData({
       id: assignment.id,
@@ -128,16 +138,18 @@ export default function AdminAssignmentsTab({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? recordHeading('Assignment', formData.description) : 'Add New Assignment'}</h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in the viewport modal every New card in this module now uses. */}
+      {editorOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Assignment', formData.description) : 'New assignment'}
+          subtitle={isEditing ? 'Editing an existing assignment' : 'Not saved yet'}
+          icon={<Badge className="h-4 w-4" />}
+          formId={ASSIGNMENT_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add assignment'}
+          saving={saving}
+          onClose={resetForm}
+        >
+        <form id={ASSIGNMENT_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
           {error && (
             <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
@@ -311,19 +323,28 @@ export default function AdminAssignmentsTab({
             )}
           </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add Assignment'}
-            </button>
-          </div>
         </form>
-      </div>
-<div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
+        </ViewportModal>
+      )}
+
+      {/* The list, with New assignment where somebody looks for another one. */}
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <Badge className="h-4 w-4 shrink-0 text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Assignments</h3>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setEditorOpen(true);
+            }}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New assignment
+          </button>
+        </div>
+        <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>
@@ -428,6 +449,7 @@ export default function AdminAssignmentsTab({
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard

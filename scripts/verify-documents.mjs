@@ -1286,8 +1286,10 @@ check(
   true
 );
 check('with the phone safe areas respected', /env\(safe-area-inset-top\)/.test(viewportModal), true);
-// The Save button lives outside the <form>, so it submits through the HTML form attribute.
-check('Save submits the form from the toolbar', /type="submit"[\s\S]{0,200}form=\{formId\}/.test(viewportModal), true);
+// The Save button lives outside the <form>, so it submits through the HTML form attribute - or, when the body is
+// not a form at all (the certification editors), calls onSave instead.
+check('Save submits the form from the toolbar', /type=\{formId \? 'submit' : 'button'\}[\s\S]{0,220}form=\{formId\}/.test(viewportModal), true);
+check('and a body with no form saves through a handler', /onClick=\{formId \? undefined : onSave\}/.test(viewportModal), true);
 // A modal is a tone per open, from the one table.
 check('and it announces itself like every other modal', /modalSoundFor\('documentEditor'\)/.test(viewportModal), true);
 
