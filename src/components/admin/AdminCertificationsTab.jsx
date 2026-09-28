@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus } from 'lucide-react';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check } from 'lucide-react';
 import { adminSaveCertification, adminDeleteCertification } from '../../services/api';
 import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
@@ -306,13 +306,14 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                 <th className="px-4 py-3">Effective</th>
                 <th className="px-4 py-3">Ends</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-center">Notes</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
                     Nothing to show for this filter.
                   </td>
                 </tr>
@@ -350,6 +351,21 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                       >
                         {certificationStateLabel(row.state)}
                       </span>
+                    </td>
+                    {/* Notes are too long for a cell and are read in the editor, so the column answers the only
+                        question a table row can: is there anything in them? The icon carries a title, because an
+                        icon-only cell is a mystery to a screen reader otherwise. */}
+                    <td className="px-4 py-3 text-center">
+                      {row.notes ? (
+                        <span
+                          className="inline-flex text-emerald-600 dark:text-emerald-400"
+                          title="This record has notes — open it to read them"
+                        >
+                          <Check className="h-4 w-4" />
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">

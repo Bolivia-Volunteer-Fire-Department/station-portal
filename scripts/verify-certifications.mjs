@@ -391,6 +391,19 @@ checkIs(
   'without it, reaching the end of the grid scrolls the page - which closes the picker the same way'
 );
 
+// The Notes column. A table row cannot show a paragraph, so it answers the only question a row can - is there
+// anything in the notes? - and the icon carries a title so a screen reader is not left with an unlabelled glyph.
+checkIs('the records table has a Notes column', /text-center">Notes<\/th>/.test(adminTab));
+checkIs(
+  'drawn from the record\'s own notes',
+  /\{row\.notes \? \(/.test(adminTab) && /title="This record has notes/.test(adminTab)
+);
+checkIs('with an em dash where there are none', /text-slate-300 dark:text-slate-600">—<\/span>/.test(adminTab));
+checkIs('and the empty table still spans every column', /colSpan=\{7\}/.test(adminTab));
+// The column is only as good as the payload: `notes` has to be on every record the client is handed, which is
+// asserted here because a trimmed-away field would show as "—" on every row and look like a rendering bug.
+checkIs('and the server sends notes with every record', /notes: String\(row\.notes \|\| ""\)\.trim\(\)/.test(codeSource));
+
 const SUMMARY = `\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`;
 console.log(SUMMARY);
 process.exit(failures === 0 ? 0 : 1);
