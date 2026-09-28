@@ -117,6 +117,8 @@ export const MODAL_SOUNDS = {
   // A confirmation is positive by the rule above: the member opened it, by pressing the button that asks. The
   // wording and the red button carry the caution; the tone is about who asked, and nobody was interrupted.
   confirm: 'positive',
+  // The document editor: a screen of its own opened from the toolbar or a row, so the reader asked for it too.
+  documentEditor: 'positive',
   reauth: 'error',
   clockBlocked: 'error',
   passwordChange: 'error',

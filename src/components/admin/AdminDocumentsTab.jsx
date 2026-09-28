@@ -15,6 +15,7 @@ import {
 import { toast } from '../../utils/toast';
 import AdminChecklistVerification from './AdminChecklistVerification';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
 import MarkdownEditor from '../MarkdownEditor';
 import { authorLabel } from '../../utils/authorLabel';
 import { unnamedLabel } from '../../utils/displayLabel';
@@ -49,6 +50,11 @@ import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pa
 // checklist it fills up fast (every member who signed every item is a row) and it was the thing pushing the
 // document's own fields off the screen.
 const SIGNATURE_PAGE_SIZE = 10;
+
+// The editor's form id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
+// the HTML `form` attribute - so the fields keep their native behaviour (Enter in a text input, validation)
+// while the button sits where it can be reached from the bottom of a long checklist.
+const EDITOR_FORM_ID = 'document-editor-form';
 
 const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: 0 };
 
@@ -97,6 +103,9 @@ export default function AdminDocumentsTab({
   const [loadError, setLoadError] = useState('');
   const [form, setForm] = useState(EMPTY_DOCUMENT_FORM);
   const [loadingDocument, setLoadingDocument] = useState(false);
+  // Whether the editor is open. It used to be a card at the bottom of the tab, always there; now it is a modal
+  // that only exists while it is being used, so the page behind it is just the list.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -189,6 +198,10 @@ export default function AdminDocumentsTab({
     setError('');
     setSignatures([]);
     setSignaturesError('');
+    // Opened before the fetch, so the modal appears immediately and shows its own spinner while the document
+    // loads. The alternative - waiting for the request and then opening - is the pause this modal exists to
+    // explain.
+    setEditorOpen(true);
     if (!id) {
       setForm(EMPTY_DOCUMENT_FORM);
       return;
@@ -397,6 +410,11 @@ export default function AdminDocumentsTab({
         id: documentId,
         row_version: result.row_version ?? current.row_version,
       }));
+
+      // The write is confirmed, so the editor closes here - before the refresh below, which belongs to the page
+      // behind it. That is what makes "only then should the modal close" true without making the reader watch a
+      // list reload.
+      setEditorOpen(false);
 
       if (wasNew && wasChecklist && stagedItems.length > 0) {
         const flushed = await flushStagedItems(documentId);
@@ -689,12 +707,8 @@ export default function AdminDocumentsTab({
           </button>
         </div>
 
-        {loadingDocument && (
-          <div className="px-4 pt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Opening the document…
-          </div>
-        )}
+        {/* No "opening" line here any more: the editor is a modal now, and it says so itself while the document
+            loads. A line on the page underneath would be behind it and never read. */}
 
         {loading ? (
           <div className="p-6 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
@@ -831,676 +845,680 @@ export default function AdminDocumentsTab({
         )}
       </div>
 
-      {/* The editor: the fields a document owns - where it lives, who may read it, and its text. The preview
-          inside the editor is the app's own renderer, so what is seen here is what members get. */}
-      <form
-        onSubmit={handleSave}
-        className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-4"
-      >
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 shrink-0">
-            <FileText className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              {isEditing ? 'Edit document' : 'New document'}
-            </h3>
-            {isEditing && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {authorLabel({ author_user_id: form.author_user_id }, users) || 'Author not recorded'}
-                {documentUpdatedLabel(form, timeFormat) ? ` · ${documentUpdatedLabel(form, timeFormat)}` : ''}
+      {/* The editor, in a modal that takes most of the viewport. This is the one place in the tab with more than a
+          few fields - and on a checklist it carries the items and the signature record as well - so it gets the
+          screen rather than a card at the bottom of a page nobody scrolls to. Mounted only while it is open,
+          which is why the page behind it is just the list, and why the form is not sitting there when all the
+          reader wants is to read a document. */}
+      {editorOpen && (
+        // Both waits are this modal's: opening a document is a fetch, and saving is a write. Either way the reader
+        // cannot type into a form whose document has not arrived, or into one that is being written.
+        <ViewportModal
+          title={isEditing ? 'Edit document' : 'New document'}
+          subtitle={
+            isEditing
+              ? [
+                  authorLabel({ author_user_id: form.author_user_id }, users) || 'Author not recorded',
+                  documentUpdatedLabel(form, timeFormat),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : 'Not saved yet'
+          }
+          icon={<FileText className="h-4 w-4" />}
+          formId={EDITOR_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Create document'}
+          saving={saving}
+          busy={saving || loadingDocument}
+          busyLabel={loadingDocument ? 'Opening the document…' : 'Saving the document…'}
+          onClose={() => setEditorOpen(false)}
+          actions={
+            isEditing ? (
+              <button
+                type="button"
+                onClick={() => setPendingDelete({ id: form.id, title: form.title })}
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            ) : null
+          }
+        >
+          {/* The editor's own content: the fields a document owns - where it lives, who may read it, and its text. The
+              preview is the app's own renderer, so what is seen here is what members get. Its title, its Delete
+              button and its Save button are in the modal's toolbar above, so nothing here scrolls out of reach. */}
+          <form id={EDITOR_FORM_ID} onSubmit={handleSave} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label htmlFor="document-title" className={labelClass}>
+                  Title
+                </label>
+                <input
+                  id="document-title"
+                  type="text"
+                  value={form.title}
+                  onChange={(event) => setField('title', event.target.value)}
+                  placeholder="Driver checklist"
+                  className={fieldClass}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="document-folder" className={labelClass}>
+                  Folder
+                </label>
+                {/* Existing folders are offered, so the usual case is a choice rather than retyping a name exactly -
+                    a typo would quietly create a second folder. A new name is still allowed: that is how folders are
+                    made, because a folder here is a name rather than a record. */}
+                <input
+                  id="document-folder"
+                  type="text"
+                  list="document-folder-options"
+                  value={form.folder}
+                  onChange={(event) => setField('folder', event.target.value)}
+                  placeholder="Unfiled"
+                  className={fieldClass}
+                />
+                <datalist id="document-folder-options">
+                  {folders
+                    .filter((folder) => folder !== UNFILED_LABEL)
+                    .map((folder) => (
+                      <option key={folder} value={folder} />
+                    ))}
+                </datalist>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="document-type" className={labelClass}>
+                    Type
+                  </label>
+                  <select
+                    id="document-type"
+                    value={form.doc_type}
+                    onChange={(event) => {
+                      const nextType = event.target.value;
+                      // Choosing Checklist turns the signature on with it, because a checklist IS its items being
+                      // signed. Set here as well as on the server so the box the author is looking at matches what
+                      // will be stored - a locked checkbox showing the wrong state is worse than no checkbox.
+                      setForm((current) => ({
+                        ...current,
+                        doc_type: nextType,
+                        is_sign_required: nextType === 'checklist' ? true : current.is_sign_required,
+                      }));
+                    }}
+                    className={fieldClass}
+                  >
+                    {DOCUMENT_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {type === 'checklist' ? 'Checklist' : type === 'link' ? 'Link' : 'Document'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col justify-end gap-2">
+                  {/* There is no Order box: position is set by dragging the row in the list above, which is the only
+                      place the order is visible - a number typed here and a row sitting there would be two answers to
+                      the same question, and the one on screen would win. The number is still carried on save, so an
+                      untouched document keeps the position it has. */}
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Position in the list is set by <strong>dragging the rows</strong> above, and the folder by its place
+                    on a document.
+                  </p>
+                  {/* The keyboard-and-tablet path to the same thing: a touch screen fires no drag events. */}
+                  {isEditing && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => moveSelectedDocument(-1)}
+                        disabled={savingOrder || selectedIndex <= 0}
+                        className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                        Move up
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveSelectedDocument(1)}
+                        disabled={savingOrder || selectedIndex === -1 || selectedIndex >= selectedSiblings.length - 1}
+                        className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                        Move down
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+
+              <div>
+                <label htmlFor="document-rank" className={labelClass}>
+                  Minimum rank
+                </label>
+                <select
+                  id="document-rank"
+                  value={form.rank_id}
+                  onChange={(event) => setField('rank_id', event.target.value)}
+                  className={fieldClass}
+                >
+                  <option value="">Everyone</option>
+                  {rankChoices.map((choice) => (
+                    <option key={choice.order} value={choice.id}>
+                      {choice.label} and above
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col justify-end gap-2 text-sm text-slate-700 dark:text-slate-200">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.is_published)}
+                    onChange={(event) => setField('is_published', event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500"
+                  />
+                  Visible to members
+                </label>
+
+                {/* Locked ON for a checklist, because a checklist is signed line by line and that is the whole point of
+                    the type: "you cannot create a checklist that does not accept checks". The server forces the flag
+                    too, so this is the visible half of one rule rather than the rule itself. For every other type the
+                    box is an ordinary choice. */}
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={form.doc_type === 'checklist' ? true : Boolean(form.is_sign_required)}
+                    disabled={form.doc_type === 'checklist'}
+                    onChange={(event) => setField('is_sign_required', event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500 disabled:opacity-60"
+                  />
+                  <span>
+                    Members must sign this
+                    {form.doc_type === 'checklist' && (
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                        Always on for a checklist: its items are what members sign. There is no separate signature for
+                        the checklist itself.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* The window. Both dates blank is "no restriction" - forever, exactly how every document behaved before
+                these columns existed. An end date in the past RETIRES the document: members stop seeing it and stop
+                being asked to sign it, while the row, its items and every signature stay exactly where they are. */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="document-effective-date" className={labelClass}>
+                  Effective Date <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  id="document-effective-date"
+                  type="date"
+                  value={form.effective_date}
+                  onChange={(event) => setField('effective_date', event.target.value)}
+                  className={fieldClass}
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                  Members see it from this date. Blank means it is already live.
+                </p>
+              </div>
+              <div>
+                <label htmlFor="document-end-date" className={labelClass}>
+                  End Date <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  id="document-end-date"
+                  type="date"
+                  value={form.end_date}
+                  onChange={(event) => setField('end_date', event.target.value)}
+                  className={fieldClass}
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                  Retired after this date. Signatures already on it are kept.
+                </p>
+              </div>
+            </div>
+
+            {form.doc_type === 'link' ? (
+              <div>
+                <label htmlFor="document-link" className={labelClass}>
+                  Address
+                </label>
+                <input
+                  id="document-link"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com/policy"
+                  value={form.content}
+                  onChange={(event) => setField('content', event.target.value)}
+                  className={fieldClass}
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                  Opened in a new tab from the reader, so a member keeps their place in the app. http:// or https:// only.
+                </p>
+              </div>
+            ) : (
+              <MarkdownEditor
+                value={form.content}
+                onChange={(value) => setField('content', value)}
+                label={form.doc_type === 'checklist' ? 'Instructions (items come in the checklist stage)' : 'Content'}
+              />
+            )}
+
+            {error && (
+              <p className="text-sm font-medium text-red-600 dark:text-red-400" role="alert">
+                {error}
               </p>
             )}
-          </div>
-          {isEditing && (
-            <button
-              type="button"
-              onClick={() => setPendingDelete({ id: form.id, title: form.title })}
-              className="ml-auto flex items-center gap-2 text-sm font-medium text-red-600 dark:text-red-400 hover:underline"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </button>
-          )}
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="md:col-span-2">
-            <label htmlFor="document-title" className={labelClass}>
-              Title
-            </label>
-            <input
-              id="document-title"
-              type="text"
-              value={form.title}
-              onChange={(event) => setField('title', event.target.value)}
-              placeholder="Driver checklist"
-              className={fieldClass}
-            />
-          </div>
+          </form>
 
-          <div>
-            <label htmlFor="document-folder" className={labelClass}>
-              Folder
-            </label>
-            {/* Existing folders are offered, so the usual case is a choice rather than retyping a name exactly -
-                a typo would quietly create a second folder. A new name is still allowed: that is how folders are
-                made, because a folder here is a name rather than a record. */}
-            <input
-              id="document-folder"
-              type="text"
-              list="document-folder-options"
-              value={form.folder}
-              onChange={(event) => setField('folder', event.target.value)}
-              placeholder="Unfiled"
-              className={fieldClass}
-            />
-            <datalist id="document-folder-options">
-              {folders
-                .filter((folder) => folder !== UNFILED_LABEL)
-                .map((folder) => (
-                  <option key={folder} value={folder} />
-                ))}
-            </datalist>
-          </div>
+          {/* Renaming a folder rewrites the name on every document in it - one bulk write on the server. Leaving the
+              target blank moves those documents to Unfiled, which is the only way to be rid of a folder, since a
+              folder with no documents does not exist. */}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="document-type" className={labelClass}>
-                Type
-              </label>
-              <select
-                id="document-type"
-                value={form.doc_type}
-                onChange={(event) => {
-                  const nextType = event.target.value;
-                  // Choosing Checklist turns the signature on with it, because a checklist IS its items being
-                  // signed. Set here as well as on the server so the box the author is looking at matches what
-                  // will be stored - a locked checkbox showing the wrong state is worse than no checkbox.
-                  setForm((current) => ({
-                    ...current,
-                    doc_type: nextType,
-                    is_sign_required: nextType === 'checklist' ? true : current.is_sign_required,
-                  }));
-                }}
-                className={fieldClass}
-              >
-                {DOCUMENT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type === 'checklist' ? 'Checklist' : type === 'link' ? 'Link' : 'Document'}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col justify-end gap-2">
-              {/* There is no Order box: position is set by dragging the row in the list above, which is the only
-                  place the order is visible - a number typed here and a row sitting there would be two answers to
-                  the same question, and the one on screen would win. The number is still carried on save, so an
-                  untouched document keeps the position it has. */}
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Position in the list is set by <strong>dragging the rows</strong> above, and the folder by its place
-                on a document.
-              </p>
-              {/* The keyboard-and-tablet path to the same thing: a touch screen fires no drag events. */}
-              {isEditing && (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => moveSelectedDocument(-1)}
-                    disabled={savingOrder || selectedIndex <= 0}
-                    className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                    Move up
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveSelectedDocument(1)}
-                    disabled={savingOrder || selectedIndex === -1 || selectedIndex >= selectedSiblings.length - 1}
-                    className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                    Move down
-                  </button>
-                </div>
+          {/* Checklist items. Their own card, because an item is a record rather than part of the document's text: a
+              signature points at an item's id, so editing the wording keeps it attached to what was signed, and a
+              signed item cannot be removed at all. One form serves adding and editing, so the two cannot drift. */}
+          {form.doc_type === 'checklist' && (
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Checklist items</h3>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {items.length} item{items.length === 1 ? '' : 's'}
+                  {stagedItems.length > 0 ? ` · ${stagedItems.length} not saved yet` : ''}
+                </span>
+              </div>
+
+              {/* The panel is here for a checklist that has never been saved, too - that is the whole point of it. The
+                  items of a new checklist are held until the document exists, and written the moment it does, because
+                  making the author save first, reopen the document and start again is how this looked like it was
+                  missing altogether. */}
+              {!isEditing && (
+                <p className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                  Add the lines below now, then save this checklist: they are written as soon as it is created. Nothing is
+                  stored until then.
+                </p>
               )}
+
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Each item is signed on its own. Editing an item keeps its signatures attached to it; removing one is
+                refused once anybody has signed it. Changing any item marks signatures taken earlier as
+                &ldquo;before the last edit&rdquo;.
+              </p>
+
+              {items.length + stagedItems.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">This checklist has no items yet.</p>
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-700">
+                  {[...items, ...stagedItems].map((item) => {
+                    const staged = !isEditing || String(item.id).startsWith('staged-');
+                    return (
+                      <li key={item.id} className="flex flex-wrap items-center gap-3 py-2">
+                        {item.section && (
+                          <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            {item.section}
+                          </span>
+                        )}
+                        <span className="text-sm text-slate-700 dark:text-slate-200">{item.label}</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">#{item.sort_order}</span>
+                        {staged && (
+                          <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                            not saved
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setItemForm({
+                              id: item.id,
+                              label: item.label,
+                              section: item.section,
+                              sort_order: item.sort_order,
+                            })
+                          }
+                          className="ml-auto text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline"
+                        >
+                          edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingItemRemoval(item)}
+                          className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                        >
+                          remove
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <form onSubmit={handleSaveItem} className="space-y-3 border-t border-slate-200 dark:border-slate-700 pt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="sm:col-span-2">
+                    <label htmlFor="item-label" className={labelClass}>
+                      Item
+                    </label>
+                    <input
+                      id="item-label"
+                      type="text"
+                      value={itemForm.label}
+                      onChange={(event) => setItemForm((current) => ({ ...current, label: event.target.value }))}
+                      placeholder="Check the tire pressure"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="item-section" className={labelClass}>
+                      Section
+                    </label>
+                    <input
+                      id="item-section"
+                      type="text"
+                      value={itemForm.section}
+                      onChange={(event) => setItemForm((current) => ({ ...current, section: event.target.value }))}
+                      placeholder="Before leaving"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="item-order" className={labelClass}>
+                      Order
+                    </label>
+                    <input
+                      id="item-order"
+                      type="number"
+                      value={itemForm.sort_order}
+                      onChange={(event) =>
+                        setItemForm((current) => ({ ...current, sort_order: Number(event.target.value) || 0 }))
+                      }
+                      className={fieldClass}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={savingItem}
+                    className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
+                  >
+                    {savingItem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {itemForm.id ? 'Save item' : 'Add item'}
+                  </button>
+                  {itemForm.id && (
+                    <button
+                      type="button"
+                      onClick={() => setItemForm(EMPTY_ITEM_FORM)}
+                      className="text-sm font-medium text-slate-600 dark:text-slate-300 hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </form>
             </div>
-          </div>
+          )}
 
-
-          <div>
-            <label htmlFor="document-rank" className={labelClass}>
-              Minimum rank
-            </label>
-            <select
-              id="document-rank"
-              value={form.rank_id}
-              onChange={(event) => setField('rank_id', event.target.value)}
-              className={fieldClass}
-            >
-              <option value="">Everyone</option>
-              {rankChoices.map((choice) => (
-                <option key={choice.order} value={choice.id}>
-                  {choice.label} and above
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col justify-end gap-2 text-sm text-slate-700 dark:text-slate-200">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={Boolean(form.is_published)}
-                onChange={(event) => setField('is_published', event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500"
-              />
-              Visible to members
-            </label>
-
-            {/* Locked ON for a checklist, because a checklist is signed line by line and that is the whole point of
-                the type: "you cannot create a checklist that does not accept checks". The server forces the flag
-                too, so this is the visible half of one rule rather than the rule itself. For every other type the
-                box is an ordinary choice. */}
-            <label className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                checked={form.doc_type === 'checklist' ? true : Boolean(form.is_sign_required)}
-                disabled={form.doc_type === 'checklist'}
-                onChange={(event) => setField('is_sign_required', event.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500 disabled:opacity-60"
-              />
-              <span>
-                Members must sign this
-                {form.doc_type === 'checklist' && (
-                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                    Always on for a checklist: its items are what members sign. There is no separate signature for
-                    the checklist itself.
+          {/* The signature report. Below the editor on purpose: it answers "who has signed this", which is a question
+              about the document rather than part of writing it. A stale signature is one taken before the latest edit
+              and is called out, because a signature that appears to approve text nobody read is the one way this
+              feature can mislead. */}
+          {isEditing && form.is_sign_required && (
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Signatures</h3>
+                {!loadingSignatures && !signaturesError && (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    {/* Counted from the ROWS, not from the signature records. On a checklist those differ - every
+                        signed item is one row and every verification used to be another - and the heading has to
+                        describe the list beneath it, or a checklist with three signed items claims eleven signatures. */}
+                    {signatureRows.length} {signatureCountNoun}
+                    {signatureRows.length === 1 ? '' : 's'}
+                    {staleSignatureCount > 0
+                      ? ` · ${staleSignatureCount} from before the last edit`
+                      : ''}
                   </span>
                 )}
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {/* The window. Both dates blank is "no restriction" - forever, exactly how every document behaved before
-            these columns existed. An end date in the past RETIRES the document: members stop seeing it and stop
-            being asked to sign it, while the row, its items and every signature stay exactly where they are. */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="document-effective-date" className={labelClass}>
-              Effective Date <span className="font-normal text-slate-400">(optional)</span>
-            </label>
-            <input
-              id="document-effective-date"
-              type="date"
-              value={form.effective_date}
-              onChange={(event) => setField('effective_date', event.target.value)}
-              className={fieldClass}
-            />
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
-              Members see it from this date. Blank means it is already live.
-            </p>
-          </div>
-          <div>
-            <label htmlFor="document-end-date" className={labelClass}>
-              End Date <span className="font-normal text-slate-400">(optional)</span>
-            </label>
-            <input
-              id="document-end-date"
-              type="date"
-              value={form.end_date}
-              onChange={(event) => setField('end_date', event.target.value)}
-              className={fieldClass}
-            />
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
-              Retired after this date. Signatures already on it are kept.
-            </p>
-          </div>
-        </div>
-
-        {form.doc_type === 'link' ? (
-          <div>
-            <label htmlFor="document-link" className={labelClass}>
-              Address
-            </label>
-            <input
-              id="document-link"
-              type="url"
-              inputMode="url"
-              placeholder="https://example.com/policy"
-              value={form.content}
-              onChange={(event) => setField('content', event.target.value)}
-              className={fieldClass}
-            />
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
-              Opened in a new tab from the reader, so a member keeps their place in the app. http:// or https:// only.
-            </p>
-          </div>
-        ) : (
-          <MarkdownEditor
-            value={form.content}
-            onChange={(value) => setField('content', value)}
-            label={form.doc_type === 'checklist' ? 'Instructions (items come in the checklist stage)' : 'Content'}
-          />
-        )}
-
-        {error && (
-          <p className="text-sm font-medium text-red-600 dark:text-red-400" role="alert">
-            {error}
-          </p>
-        )}
-
-        <div className="flex items-center justify-end">
-          <button
-            type="submit"
-            disabled={saving}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {isEditing ? 'Save changes' : 'Create document'}
-          </button>
-        </div>
-      </form>
-
-      {/* Renaming a folder rewrites the name on every document in it - one bulk write on the server. Leaving the
-          target blank moves those documents to Unfiled, which is the only way to be rid of a folder, since a
-          folder with no documents does not exist. */}
-
-      {/* Checklist items. Their own card, because an item is a record rather than part of the document's text: a
-          signature points at an item's id, so editing the wording keeps it attached to what was signed, and a
-          signed item cannot be removed at all. One form serves adding and editing, so the two cannot drift. */}
-      {form.doc_type === 'checklist' && (
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Checklist items</h3>
-            <span className="text-xs text-slate-500 dark:text-slate-400">
-              {items.length} item{items.length === 1 ? '' : 's'}
-              {stagedItems.length > 0 ? ` · ${stagedItems.length} not saved yet` : ''}
-            </span>
-          </div>
-
-          {/* The panel is here for a checklist that has never been saved, too - that is the whole point of it. The
-              items of a new checklist are held until the document exists, and written the moment it does, because
-              making the author save first, reopen the document and start again is how this looked like it was
-              missing altogether. */}
-          {!isEditing && (
-            <p className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-              Add the lines below now, then save this checklist: they are written as soon as it is created. Nothing is
-              stored until then.
-            </p>
-          )}
-
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Each item is signed on its own. Editing an item keeps its signatures attached to it; removing one is
-            refused once anybody has signed it. Changing any item marks signatures taken earlier as
-            &ldquo;before the last edit&rdquo;.
-          </p>
-
-          {items.length + stagedItems.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">This checklist has no items yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-              {[...items, ...stagedItems].map((item) => {
-                const staged = !isEditing || String(item.id).startsWith('staged-');
-                return (
-                  <li key={item.id} className="flex flex-wrap items-center gap-3 py-2">
-                    {item.section && (
-                      <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        {item.section}
-                      </span>
-                    )}
-                    <span className="text-sm text-slate-700 dark:text-slate-200">{item.label}</span>
-                    <span className="text-xs text-slate-400 dark:text-slate-500">#{item.sort_order}</span>
-                    {staged && (
-                      <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                        not saved
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setItemForm({
-                          id: item.id,
-                          label: item.label,
-                          section: item.section,
-                          sort_order: item.sort_order,
-                        })
-                      }
-                      className="ml-auto text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline"
-                    >
-                      edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPendingItemRemoval(item)}
-                      className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                    >
-                      remove
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          <form onSubmit={handleSaveItem} className="space-y-3 border-t border-slate-200 dark:border-slate-700 pt-3">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div className="sm:col-span-2">
-                <label htmlFor="item-label" className={labelClass}>
-                  Item
-                </label>
-                <input
-                  id="item-label"
-                  type="text"
-                  value={itemForm.label}
-                  onChange={(event) => setItemForm((current) => ({ ...current, label: event.target.value }))}
-                  placeholder="Check the tire pressure"
-                  className={fieldClass}
-                />
               </div>
-              <div>
-                <label htmlFor="item-section" className={labelClass}>
-                  Section
-                </label>
-                <input
-                  id="item-section"
-                  type="text"
-                  value={itemForm.section}
-                  onChange={(event) => setItemForm((current) => ({ ...current, section: event.target.value }))}
-                  placeholder="Before leaving"
-                  className={fieldClass}
-                />
-              </div>
-              <div>
-                <label htmlFor="item-order" className={labelClass}>
-                  Order
-                </label>
-                <input
-                  id="item-order"
-                  type="number"
-                  value={itemForm.sort_order}
-                  onChange={(event) =>
-                    setItemForm((current) => ({ ...current, sort_order: Number(event.target.value) || 0 }))
-                  }
-                  className={fieldClass}
-                />
-              </div>
+
+              {loadingSignatures && (
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading the signatures…
+                </div>
+              )}
+
+              {!loadingSignatures && signaturesError && (
+                <p className="text-sm font-medium text-red-600 dark:text-red-400">{signaturesError}</p>
+              )}
+
+              {!loadingSignatures && !signaturesError && signatureRows.length === 0 && (
+                <p className="text-sm text-slate-500 dark:text-slate-400">Nobody has signed this document yet.</p>
+              )}
+
+              {!loadingSignatures && !signaturesError && signatureRows.length > 0 && (
+                <>
+                  <ul className="divide-y divide-slate-200 dark:divide-slate-700">
+                    {signatureRowsOnPage.map((row) => (
+                      <li key={row.key} className="py-2">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                          <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                            {memberLabel(row.userId)}
+                          </span>
+                          {row.itemLabel && (
+                            <span className="text-xs text-slate-500 dark:text-slate-400">{row.itemLabel}</span>
+                          )}
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            {signatureDateLabel({ signed_at: row.at }, timeFormat) || 'Signed'}
+                          </span>
+                          {/* A verification is shown ON the row it belongs to, which is the whole point: the item is
+                              listed once and "verified by" is a fact about it rather than a second line the reader has
+                              to connect back to the first. */}
+                          {row.verifiedById && (
+                            <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                              verified by {memberLabel(row.verifiedById)}
+                            </span>
+                          )}
+                          {row.verifications.length > 0 && (
+                            <span
+                              className="rounded-full bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400"
+                              title={`Verified on ${row.verifications
+                                .map((verification) => signatureDateLabel(verification, timeFormat) || 'an unknown date')
+                                .join(', ')}`}
+                            >
+                              verified by{' '}
+                              {row.verifications.map((verification) => memberLabel(verification.byUserId)).join(', ')}
+                            </span>
+                          )}
+                          {row.stale && (
+                            <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                              before the last edit
+                            </span>
+                          )}
+
+                          {/* One control per underlying record, and each is named. "remove" alone was ambiguous once
+                              a row can carry both: a signature and a verification are separate rows in the sheet, so
+                              removing one must not look like removing the other. */}
+                          <span className="ml-auto flex flex-wrap items-center gap-x-3">
+                            {row.verifications.map((verification) => (
+                              <button
+                                key={verification.id}
+                                type="button"
+                                onClick={() =>
+                                  setPendingSignatureRemoval({
+                                    id: verification.id,
+                                    userId: row.userId,
+                                    itemLabel: row.itemLabel,
+                                    role: 'verifier',
+                                    verifiedById: verification.byUserId,
+                                  })
+                                }
+                                className="text-xs font-medium text-amber-500 dark:text-amber-400 hover:underline"
+                              >
+                                remove verification
+                              </button>
+                            ))}
+                            {row.signatureId && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPendingSignatureRemoval({
+                                    id: row.signatureId,
+                                    userId: row.userId,
+                                    itemLabel: row.itemLabel,
+                                    role: 'member',
+                                  })
+                                }
+                                className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                              >
+                                remove signature
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* The card is the whole document's signature record, and on a checklist it grows with every member
+                      who signs every item. The pager hides itself on a single page, as the events tables do. */}
+                  {signaturePageCount > 1 && (
+                    <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                      <span>{pageRangeLabel(signatureRows.length, currentSignaturePage, SIGNATURE_PAGE_SIZE)}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSignaturePage(
+                              clampPage(currentSignaturePage - 1, signatureRows.length, SIGNATURE_PAGE_SIZE)
+                            )
+                          }
+                          disabled={currentSignaturePage <= 1}
+                          aria-label="Previous page"
+                          className="rounded-lg p-1 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-700"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <span className="font-medium">
+                          Page {currentSignaturePage} of {signaturePageCount}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSignaturePage(
+                              clampPage(currentSignaturePage + 1, signatureRows.length, SIGNATURE_PAGE_SIZE)
+                            )
+                          }
+                          disabled={currentSignaturePage >= signaturePageCount}
+                          aria-label="Next page"
+                          className="rounded-lg p-1 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-700"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Removing a signature is the only way one ever disappears, and it is recorded in the system log.
+              </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="submit"
-                disabled={savingItem}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
-              >
-                {savingItem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {itemForm.id ? 'Save item' : 'Add item'}
-              </button>
-              {itemForm.id && (
+          )}
+
+          {pendingItemRemoval && (
+            <ConfirmModal
+              title={`Remove “${pendingItemRemoval.label}”?`}
+              message={
+                !isEditing || String(pendingItemRemoval.id).startsWith('staged-')
+                  ? 'It has not been saved yet, so it simply disappears from the list.'
+                  : 'The item disappears from the checklist. If anybody has signed it the server refuses, because a signature must never outlive what it was about.'
+              }
+              confirmLabel={removingItem ? 'Removing…' : 'Remove item'}
+              onConfirm={handleRemoveItem}
+              onCancel={() => setPendingItemRemoval(null)}
+            />
+          )}
+
+          {pendingSignatureRemoval && (
+            // The two are separate records, so the message says which one goes and what stays: a verification can be
+            // removed without touching the signature it confirms, and the reader should not have to guess.
+            <ConfirmModal
+              title={
+                pendingSignatureRemoval.role === 'verifier'
+                  ? `Remove the verification by ${memberLabel(pendingSignatureRemoval.verifiedById)}?`
+                  : `Remove the signature by ${memberLabel(pendingSignatureRemoval.userId)}?`
+              }
+              message={
+                pendingSignatureRemoval.role === 'verifier'
+                  ? `${memberLabel(pendingSignatureRemoval.verifiedById)} confirmed ${memberLabel(
+                      pendingSignatureRemoval.userId
+                    )}${
+                      pendingSignatureRemoval.itemLabel
+                        ? ` on “${pendingSignatureRemoval.itemLabel}”`
+                        : ''
+                    }. Removing it leaves their signature in place, waiting to be verified again. This is recorded in the system log.`
+                  : `${memberLabel(pendingSignatureRemoval.userId)} will be listed as needing to sign ${
+                      pendingSignatureRemoval.itemLabel ? `“${pendingSignatureRemoval.itemLabel}”` : 'this document'
+                    } again. This is recorded in the system log.`
+              }
+              confirmLabel={
+                removingSignature
+                  ? 'Removing…'
+                  : pendingSignatureRemoval.role === 'verifier'
+                    ? 'Remove verification'
+                    : 'Remove signature'
+              }
+              onConfirm={handleRemoveSignature}
+              onCancel={() => setPendingSignatureRemoval(null)}
+            />
+          )}
+
+          {renaming.from && (
+            <form
+              onSubmit={handleRenameFolder}
+              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3"
+            >
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Folder &ldquo;{renaming.from}&rdquo;
+              </h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Renaming moves every document in it. Leave the new name blank to move them to {UNFILED_LABEL}.
+              </p>
+              <input
+                type="text"
+                value={renaming.to}
+                onChange={(event) => setRenaming((current) => ({ ...current, to: event.target.value }))}
+                placeholder={UNFILED_LABEL}
+                aria-label="New folder name"
+                className={fieldClass}
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  className="bg-slate-700 hover:bg-slate-600 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
+                >
+                  Rename folder
+                </button>
                 <button
                   type="button"
-                  onClick={() => setItemForm(EMPTY_ITEM_FORM)}
-                  className="text-sm font-medium text-slate-600 dark:text-slate-300 hover:underline"
+                  onClick={() => setRenaming({ from: '', to: '' })}
+                  className="text-sm font-medium text-slate-500 dark:text-slate-400 hover:underline"
                 >
                   Cancel
                 </button>
-              )}
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* The signature report. Below the editor on purpose: it answers "who has signed this", which is a question
-          about the document rather than part of writing it. A stale signature is one taken before the latest edit
-          and is called out, because a signature that appears to approve text nobody read is the one way this
-          feature can mislead. */}
-      {isEditing && form.is_sign_required && (
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Signatures</h3>
-            {!loadingSignatures && !signaturesError && (
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                {/* Counted from the ROWS, not from the signature records. On a checklist those differ - every
-                    signed item is one row and every verification used to be another - and the heading has to
-                    describe the list beneath it, or a checklist with three signed items claims eleven signatures. */}
-                {signatureRows.length} {signatureCountNoun}
-                {signatureRows.length === 1 ? '' : 's'}
-                {staleSignatureCount > 0
-                  ? ` · ${staleSignatureCount} from before the last edit`
-                  : ''}
-              </span>
-            )}
-          </div>
-
-          {loadingSignatures && (
-            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading the signatures…
-            </div>
+              </div>
+            </form>
           )}
 
-          {!loadingSignatures && signaturesError && (
-            <p className="text-sm font-medium text-red-600 dark:text-red-400">{signaturesError}</p>
-          )}
-
-          {!loadingSignatures && !signaturesError && signatureRows.length === 0 && (
-            <p className="text-sm text-slate-500 dark:text-slate-400">Nobody has signed this document yet.</p>
-          )}
-
-          {!loadingSignatures && !signaturesError && signatureRows.length > 0 && (
-            <>
-              <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-                {signatureRowsOnPage.map((row) => (
-                  <li key={row.key} className="py-2">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                        {memberLabel(row.userId)}
-                      </span>
-                      {row.itemLabel && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{row.itemLabel}</span>
-                      )}
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {signatureDateLabel({ signed_at: row.at }, timeFormat) || 'Signed'}
-                      </span>
-                      {/* A verification is shown ON the row it belongs to, which is the whole point: the item is
-                          listed once and "verified by" is a fact about it rather than a second line the reader has
-                          to connect back to the first. */}
-                      {row.verifiedById && (
-                        <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          verified by {memberLabel(row.verifiedById)}
-                        </span>
-                      )}
-                      {row.verifications.length > 0 && (
-                        <span
-                          className="rounded-full bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400"
-                          title={`Verified on ${row.verifications
-                            .map((verification) => signatureDateLabel(verification, timeFormat) || 'an unknown date')
-                            .join(', ')}`}
-                        >
-                          verified by{' '}
-                          {row.verifications.map((verification) => memberLabel(verification.byUserId)).join(', ')}
-                        </span>
-                      )}
-                      {row.stale && (
-                        <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                          before the last edit
-                        </span>
-                      )}
-
-                      {/* One control per underlying record, and each is named. "remove" alone was ambiguous once
-                          a row can carry both: a signature and a verification are separate rows in the sheet, so
-                          removing one must not look like removing the other. */}
-                      <span className="ml-auto flex flex-wrap items-center gap-x-3">
-                        {row.verifications.map((verification) => (
-                          <button
-                            key={verification.id}
-                            type="button"
-                            onClick={() =>
-                              setPendingSignatureRemoval({
-                                id: verification.id,
-                                userId: row.userId,
-                                itemLabel: row.itemLabel,
-                                role: 'verifier',
-                                verifiedById: verification.byUserId,
-                              })
-                            }
-                            className="text-xs font-medium text-amber-500 dark:text-amber-400 hover:underline"
-                          >
-                            remove verification
-                          </button>
-                        ))}
-                        {row.signatureId && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPendingSignatureRemoval({
-                                id: row.signatureId,
-                                userId: row.userId,
-                                itemLabel: row.itemLabel,
-                                role: 'member',
-                              })
-                            }
-                            className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                          >
-                            remove signature
-                          </button>
-                        )}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-
-              {/* The card is the whole document's signature record, and on a checklist it grows with every member
-                  who signs every item. The pager hides itself on a single page, as the events tables do. */}
-              {signaturePageCount > 1 && (
-                <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                  <span>{pageRangeLabel(signatureRows.length, currentSignaturePage, SIGNATURE_PAGE_SIZE)}</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignaturePage(
-                          clampPage(currentSignaturePage - 1, signatureRows.length, SIGNATURE_PAGE_SIZE)
-                        )
-                      }
-                      disabled={currentSignaturePage <= 1}
-                      aria-label="Previous page"
-                      className="rounded-lg p-1 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-700"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-                    <span className="font-medium">
-                      Page {currentSignaturePage} of {signaturePageCount}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignaturePage(
-                          clampPage(currentSignaturePage + 1, signatureRows.length, SIGNATURE_PAGE_SIZE)
-                        )
-                      }
-                      disabled={currentSignaturePage >= signaturePageCount}
-                      aria-label="Next page"
-                      className="rounded-lg p-1 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-700"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Removing a signature is the only way one ever disappears, and it is recorded in the system log.
-          </p>
-        </div>
-      )}
-
-      {pendingItemRemoval && (
-        <ConfirmModal
-          title={`Remove “${pendingItemRemoval.label}”?`}
-          message={
-            !isEditing || String(pendingItemRemoval.id).startsWith('staged-')
-              ? 'It has not been saved yet, so it simply disappears from the list.'
-              : 'The item disappears from the checklist. If anybody has signed it the server refuses, because a signature must never outlive what it was about.'
-          }
-          confirmLabel={removingItem ? 'Removing…' : 'Remove item'}
-          onConfirm={handleRemoveItem}
-          onCancel={() => setPendingItemRemoval(null)}
-        />
-      )}
-
-      {pendingSignatureRemoval && (
-        // The two are separate records, so the message says which one goes and what stays: a verification can be
-        // removed without touching the signature it confirms, and the reader should not have to guess.
-        <ConfirmModal
-          title={
-            pendingSignatureRemoval.role === 'verifier'
-              ? `Remove the verification by ${memberLabel(pendingSignatureRemoval.verifiedById)}?`
-              : `Remove the signature by ${memberLabel(pendingSignatureRemoval.userId)}?`
-          }
-          message={
-            pendingSignatureRemoval.role === 'verifier'
-              ? `${memberLabel(pendingSignatureRemoval.verifiedById)} confirmed ${memberLabel(
-                  pendingSignatureRemoval.userId
-                )}${
-                  pendingSignatureRemoval.itemLabel
-                    ? ` on “${pendingSignatureRemoval.itemLabel}”`
-                    : ''
-                }. Removing it leaves their signature in place, waiting to be verified again. This is recorded in the system log.`
-              : `${memberLabel(pendingSignatureRemoval.userId)} will be listed as needing to sign ${
-                  pendingSignatureRemoval.itemLabel ? `“${pendingSignatureRemoval.itemLabel}”` : 'this document'
-                } again. This is recorded in the system log.`
-          }
-          confirmLabel={
-            removingSignature
-              ? 'Removing…'
-              : pendingSignatureRemoval.role === 'verifier'
-                ? 'Remove verification'
-                : 'Remove signature'
-          }
-          onConfirm={handleRemoveSignature}
-          onCancel={() => setPendingSignatureRemoval(null)}
-        />
-      )}
-
-      {renaming.from && (
-        <form
-          onSubmit={handleRenameFolder}
-          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3"
-        >
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">
-            Folder &ldquo;{renaming.from}&rdquo;
-          </h3>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Renaming moves every document in it. Leave the new name blank to move them to {UNFILED_LABEL}.
-          </p>
-          <input
-            type="text"
-            value={renaming.to}
-            onChange={(event) => setRenaming((current) => ({ ...current, to: event.target.value }))}
-            placeholder={UNFILED_LABEL}
-            aria-label="New folder name"
-            className={fieldClass}
-          />
-          <div className="flex items-center gap-3">
-            <button
-              type="submit"
-              className="bg-slate-700 hover:bg-slate-600 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
-            >
-              Rename folder
-            </button>
-            <button
-              type="button"
-              onClick={() => setRenaming({ from: '', to: '' })}
-              className="text-sm font-medium text-slate-500 dark:text-slate-400 hover:underline"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+        </ViewportModal>
       )}
 
       {pendingDelete && (

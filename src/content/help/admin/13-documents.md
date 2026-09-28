@@ -7,6 +7,15 @@ Unlike the Help guides — which are files in the app's repository, written by w
 
 ## Writing a document
 
+Press **New document** at the top of the list — or choose a document from it — and the editor opens **over the page**, taking most of the screen. It is not a small dialog: it is the fields below, plus the markdown body, plus — on a checklist — the items and the whole signature record, and all of that needs room. The list behind it is untouched until you save.
+
+**Save and Cancel live in the bar at the top**, which stays put while the rest of the editor scrolls underneath it. That matters on a 40-item checklist: the bottom of the form is a long way from the top of it, and Save should not be. **Delete** is up there too, for a document that already exists.
+
+While a save is in flight the editor is **disabled** — every field, in one go — and the bar shows a spinner saying whether it is saving or still opening. It cannot be dismissed in that moment: Escape, clicking outside and Cancel are all ignored until the write comes back, because a form that vanishes mid-save leaves you with no way to know whether it saved. When it does come back the editor closes, and only then — a save that fails keeps it open with the reason in it, and nothing you typed is lost.
+
+> [!TIP]
+> On a phone the editor is the whole screen, with the toolbar pinned above a scrolling form, so a thumb never has to find a Save button at the bottom of a long checklist.
+
 | Field | What it does |
 |---|---|
 | **Title** | What members see in the list. Required |
@@ -129,7 +138,7 @@ New documents are **visible to members straight away**, so untick *Visible to me
 
 Tick **Members must sign this** and the document appears in each member's list as **to sign**, until they sign it. Signed documents show **Signed** with the date beside the title.
 
-Selecting a document shows a **Signatures** panel underneath the editor:
+Selecting a document shows a **Signatures** panel below its fields, in the same editor:
 
 | What it shows | Notes |
 |---|---|
@@ -151,7 +160,7 @@ On a checklist, **each item appears once per member**. A signature and a verific
 
 A document of type **Checklist** is signed one item at a time. A checklist is **always** open to signing — the **Members must sign this** box is ticked and locked, because the lines are what gets signed, and there is no separate signature for the checklist itself. Choosing *Checklist* as the type turns it on; the server enforces it too, so a checklist cannot be stored in a state where its own items refuse to be ticked.
 
-Set the **Type** to *Checklist* and the **Checklist items** card appears under the editor — **before the document is saved as well as after**, so you can write the whole thing in one sitting:
+Set the **Type** to *Checklist* and the **Checklist items** card appears below the fields in the same editor — **before the document is saved as well as after**, so you can write the whole thing in one sitting:
 
 | Field | What it does |
 |---|---|

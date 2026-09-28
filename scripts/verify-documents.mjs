@@ -1230,10 +1230,66 @@ check('and says which rows are showing', /pageRangeLabel\(signatureRows\.length,
 // Both records on a row are removable, and each says which it is: they are separate rows in the sheet, so
 // removing one must not look like removing the other.
 check('a signature can still be removed from a folded row', /remove signature/.test(documentsTab), true);
-check('and so can each verification', /remove verification by \{memberLabel\(verification\.byUserId\)\}/.test(documentsTab), true);
+// Each verification gets its own control, told apart from the signature's by its wording. (It used to name the
+// verifier here; the label is the tab's own business, so this asserts what the pair has to be - two different
+// controls - rather than its exact text.)
+check('and so can each verification', /remove verification/.test(documentsTab), true);
 check('the confirmation names which one goes', /pendingSignatureRemoval\.role === 'verifier'/.test(documentsTab), true);
 // Reloading the signatures sends the reader back to the first page: a reload is a different list.
 check('a reload returns to the first page', /setSignaturePage\(1\);/.test(documentsTab), true);
+
+// ---------------------------------------------------------------------------
+// The editor is a modal: opened on demand, most of the viewport, with a toolbar that saves and cancels.
+console.log('\n--- the editor modal ---');
+const viewportModal = readFileSync('src/components/ViewportModal.jsx', 'utf8');
+check('the toolbar button opens it', /onClick=\{\(\) => openDocument\(''\)\}/.test(documentsTab), true);
+check('and choosing a document opens it too', /onClick=\{\(\) => openDocument\(row\.id\)\}/.test(documentsTab), true);
+check('it opens before the fetch, so the wait is the modal\'s own', /setEditorOpen\(true\)[\s\S]{0,200}adminFetchDocument/.test(documentsTab), true);
+check('it is mounted only while it is open', /\{editorOpen && \(/.test(documentsTab), true);
+check('with a Save that knows its label', /saveLabel=\{isEditing \? 'Save changes' : 'Create document'\}/.test(documentsTab), true);
+check('and the form it belongs to', /formId=\{EDITOR_FORM_ID\}/.test(documentsTab), true);
+
+// The write is what closes it, and a failed write must leave it open with the error in it.
+check(
+  'it closes once the write is confirmed',
+  /const result = await adminSaveDocument\(form, token\);[\s\S]{0,900}setEditorOpen\(false\);/.test(documentsTab),
+  true
+);
+check(
+  'and stays open when the save fails',
+  /catch \(err\) \{\s*setError\(err\?\.message \|\| 'Could not save the document\.'\);/.test(documentsTab),
+  true
+);
+
+// Busy: the form is disabled, the toolbar says what it is waiting for, and the modal cannot be left mid-write.
+check('the body is disabled while it is busy', /<fieldset disabled=\{busy\}/.test(viewportModal), true);
+check('the toolbar swaps its icon for a spinner', /saving \? <Loader2 className="h-4 w-4 animate-spin" \/>/.test(viewportModal), true);
+check('and says what it is waiting for', /busyLabel/.test(viewportModal) && /Opening the document…/.test(documentsTab), true);
+check('Escape is ignored while a write is in flight', /if \(busy\) return;/.test(viewportModal), true);
+check('and so is the backdrop', /if \(!busy\) dismiss\(\);/.test(viewportModal), true);
+
+// The shell: full screen on a phone, most of the viewport once there is room, toolbar pinned above a body that
+// scrolls - which is what makes Save reachable from the bottom of a long checklist.
+check('the panel is full screen on a phone', /h-full w-full[\s\S]{0,120}sm:h-\[92dvh\]/.test(viewportModal), true);
+check('and most of the viewport on a larger screen', /sm:w-\[94vw\] sm:max-w-6xl/.test(viewportModal), true);
+// The toolbar is what stays put while the body scrolls, so the two are asserted as two facts: the toolbar does not
+// shrink, the body is the flexible scrolling child, and the toolbar comes first.
+check('the toolbar does not shrink', /flex shrink-0 flex-wrap/.test(viewportModal), true);
+check(
+  'the body is the part that scrolls',
+  /min-h-0 flex-1 overflow-y-auto overscroll-contain/.test(viewportModal),
+  true
+);
+check(
+  'and the toolbar is above it',
+  viewportModal.indexOf('flex shrink-0 flex-wrap') < viewportModal.indexOf('min-h-0 flex-1 overflow-y-auto'),
+  true
+);
+check('with the phone safe areas respected', /env\(safe-area-inset-top\)/.test(viewportModal), true);
+// The Save button lives outside the <form>, so it submits through the HTML form attribute.
+check('Save submits the form from the toolbar', /type="submit"[\s\S]{0,200}form=\{formId\}/.test(viewportModal), true);
+// A modal is a tone per open, from the one table.
+check('and it announces itself like every other modal', /modalSoundFor\('documentEditor'\)/.test(viewportModal), true);
 
 const memberItemSignatures = [
   {
@@ -1493,11 +1549,16 @@ checkIs('with a way to start a document', /New document/.test(tabHtml), 'no New 
 checkIs('and no dialog open on arrival', !/role="alertdialog"/.test(tabHtml));
 // The window is on the editor, and it is optional: an empty effective date means "already live", which is how
 // every document written before these columns behaved.
-checkIs('the editor can set an effective date', /id="document-effective-date"/.test(tabHtml));
-checkIs('and an end date', /id="document-end-date"/.test(tabHtml));
-checkIs('and says what an end date does to signatures', /Signatures already on it are kept/.test(tabHtml));
-// Three document types now, and the third one is a link.
-checkIs('the type list offers a Link', />Link</.test(tabHtml));
+// The editor is a MODAL now - opened from the toolbar or by choosing a row - so it is not in the page's HTML at
+// all until then, which is the whole point of the change. Its contents are therefore asserted at the source, the
+// way this file already treats what only exists while a dialog is open.
+checkIs('the editor is not on the page until it is opened', !/id="document-editor-form"/.test(tabHtml), 'the form is rendered with the page again');
+checkIs('the editor can set an effective date', /id="document-effective-date"/.test(documentsTab));
+checkIs('and an end date', /id="document-end-date"/.test(documentsTab));
+checkIs('and says what an end date does to signatures', /Signatures already on it are kept/.test(documentsTab));
+// Three document types now, and the third one is a link. The options are built from DOCUMENT_TYPES (imported
+// above), so this asserts the label the tab gives it rather than the label existing somewhere.
+checkIs('the type list offers a Link', /type === 'link' \? 'Link'/.test(documentsTab));
 
 // A role that may VERIFY but not MANAGE gets the verification view on its own - no editor, and no list to click
 // through to one.
