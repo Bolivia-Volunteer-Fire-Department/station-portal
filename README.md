@@ -28,7 +28,9 @@ Longer design notes live in `docs/`, one file per subject: [`docs/WRITE_SAFETY.m
 password handling), [`docs/FCM_SETUP.md`](docs/FCM_SETUP.md) (push notifications),
 [`docs/SOUNDS.md`](docs/SOUNDS.md) (UI sound), and
 [`docs/FIRESTORE_MODEL.md`](docs/FIRESTORE_MODEL.md) — the design for moving the data off Google
-Sheets onto Firestore, which is a plan rather than a description of what runs today.
+Sheets onto Firestore, which is a plan rather than a description of what runs today. What has to be
+done in the Firebase and Google Cloud consoles to stand that up is
+[`docs/FIREBASE_SETUP.md`](docs/FIREBASE_SETUP.md).
 
 ## Tech Stack
 
