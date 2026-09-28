@@ -13,7 +13,7 @@
  *   - and owning a row does not mean being able to change the field that matters. A member owns their offer; they
  *     still cannot approve it.
  */
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { firebaseAuth, firestore } from '../src/services/firebase.js';
@@ -24,6 +24,7 @@ import {
   clockOut,
   makeOffer,
   saveAvailability,
+  saveScheduleBoard,
   withdrawOffer,
 } from '../src/services/firestoreWrites.js';
 
@@ -135,21 +136,23 @@ const main = async () => {
   check('the offer starts pending', offer.status, 'pending');
   check('against the member who raised it', offer.user_id, 'u2');
   // The hole worth an explicit case: owning the offer must not mean being able to approve it. The first version of
-  // this rule allowed exactly that, because "you own the row" covered every field including the status.
-  await refused('the member cannot approve their own offer', 'permission-denied', () =>
-    approveOffer({ offerId, approverId: 'u2' })
+  // this rule allowed exactly that, because "you own the row" covered every field including the status. Now it is a
+  // function that refuses, so the refusal arrives as a callable error rather than a rules one.
+  await refused('the member cannot approve their own offer', 'functions/permission-denied', () =>
+    approveOffer({ offerId })
   );
 
   // --- an officer approves it, and the shift fills in the same transaction ---
   await signOut(auth);
   console.log('\n--- an officer approves it ---');
   await signIn('jane');
-  await approveOffer({ offerId, approverId: 'u1' });
+  await approveOffer({ offerId });
   check('the offer is approved', (await getDoc(doc(db, 'schedule_offers', offerId))).data().status, 'approved');
   const filled = (await getDoc(doc(db, 'schedule', 's2'))).data();
   check('and the shift went to the member who offered', filled.user_id, 'u2');
   check('with the open flag cleared, so the calendar stops offering it', filled.is_open, false);
-  await refused('approving it twice is refused', 'already-resolved', () => approveOffer({ offerId, approverId: 'u1' }));
+  check('and the row records which officer wrote it', filled.updated_by, 'u1');
+  await refused('approving it twice is refused', 'functions/failed-precondition', () => approveOffer({ offerId }));
 
   // Withdrawing is a delete, which the owner may do.
   await signOut(auth);
@@ -164,10 +167,69 @@ const main = async () => {
   await withdrawOffer(secondOffer);
   check('a member may withdraw their own offer', (await getDoc(doc(db, 'schedule_offers', secondOffer))).exists(), false);
 
-  // The harness's own guard: a section that stopped running would otherwise look like a pass. The number is the
-  // count this file actually reaches, so a section that stops running is caught rather than quietly assumed.
+  // --- the board: the officer's bulk save, its conflict check, and the audit trail ---
+  // Back to the officer: the section above ends signed in as the member, and the board is an officer's tool.
+  await signOut(auth);
+  await signIn('jane');
+  console.log('\n--- the board ---');
+  const board = await saveScheduleBoard({
+    entries: [
+      // A row for the seeded open shift's slot: nobody holds it yet, so this fills it.
+      { id: 's2', date_from: '2026-03-09', date_to: '2026-03-09', assignment_id: 'a1', schedule_template_id: 't1', user_id: 'u1', start_time: '08:00', end_time: '18:00' },
+      // And a fresh row, which the function creates an id for.
+      { date_from: '2026-04-01', date_to: '2026-04-01', assignment_id: 'a1', schedule_template_id: 't1', user_id: '', start_time: '08:00', end_time: '18:00' },
+    ],
+  });
+  check('the filled row kept the id the board sent', board.ids[0], 's2');
+  checkIs('and the new row was given one', !!board.ids[1] && board.ids[1] !== 's2', JSON.stringify(board.ids));
+  check('the filled row now names its member', (await getDoc(doc(db, 'schedule', 's2'))).data().user_id, 'u1');
+  const openRow = (await getDoc(doc(db, 'schedule', board.ids[1]))).data();
+  // A blank user_id is MEANINGFUL - it is what marks an open shift - so it must survive the round trip, and is_open
+  // is derived from it rather than trusted from the client.
+  check('the blank member survived, because that is what "open" means', openRow.user_id, '');
+  check('and is_open was derived from it', openRow.is_open, true);
+
+  // The conflict: a NEW row claiming a slot that is already somebody else's. Sending the same id would be a
+  // hand-over of that row - which the board legitimately does - so this one arrives without an id, which is what a
+  // second slot on an occupied date looks like.
+  await refused('a slot already held cannot be handed to somebody else', 'functions/failed-precondition', () =>
+    saveScheduleBoard({ entries: [{ date_from: '2026-03-09', date_to: '2026-03-09', assignment_id: 'a1', user_id: 'u2' }] })
+  );
+
+  const boardRemoval = await saveScheduleBoard({ deleteIds: [board.ids[1]] });
+  check('the delete count comes back', boardRemoval.deleted, 1);
+  check('and the row is gone', (await getDoc(doc(db, 'schedule', board.ids[1]))).exists(), false);
+
+  // The audit trail, which is one of the reasons this is a function: a client may not write the log at all. Two
+  // rows, because the harness made two calls - one saving, one deleting - and the function reports each as it
+  // happened rather than pretending a save and a delete are one action.
+  const log = await getDocs(collection(db, 'system_log'));
+  const boardRows = log.docs.map((entry) => entry.data()).filter((row) => row.action === 'ADMIN_BULK_SAVE_SCHEDULE');
+  checkIs('the board save left audit rows', boardRows.length >= 2, `${boardRows.length} rows`);
+  check('each naming the officer who did it', [...new Set(boardRows.map((row) => row.user_id))], ['u1']);
+  checkIs(
+    'and saying what it did',
+    boardRows.some((row) => /Saved 2 schedule entries/.test(row.details)) &&
+      boardRows.some((row) => /deleted 1/.test(row.details)),
+    boardRows.map((row) => row.details).join(' | ')
+  );
+
+  // And a member cannot reach the board at all.
+  await signOut(auth);
+  await signIn('bo');
+  await refused('a member cannot save the board', 'functions/permission-denied', () =>
+    saveScheduleBoard({ entries: [{ date_from: '2026-05-01', assignment_id: 'a1', user_id: 'u2' }] })
+  );
+  // Nor write a schedule row directly, now that the function is its only writer.
+  await refused('nor write a schedule row directly', 'permission-denied', () =>
+    setDoc(doc(db, 'schedule', 'sneaky'), { date_from: '2026-05-02', assignment_id: 'a1', user_id: 'u2', is_open: false })
+  );
+
+  // The harness's own guard: a section that stopped running would otherwise look like a pass. The number is a little
+  // under the count this file reaches, so a section that stops running is caught without the guard itself being
+  // brittle about a case being added or removed.
   console.log('\n--- the harness itself ---');
-  checkIs('every case ran', cases >= 23, `only ${cases} cases: a section has stopped running`);
+  checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };
 
 main()

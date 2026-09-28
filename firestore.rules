@@ -207,9 +207,14 @@ service cloud.firestore {
     // Everything about everybody's shifts, readable by any member - deliberately, because the calendar offers a
     // "Show everyone" view and labels other people's pills. The narrowing happens in the query (a date range, my
     // shifts, or open shifts), not here.
+    //
+    // WRITE-DENIED, and that is the point: saveScheduleBoard in functions/index.js is the only writer of a schedule
+    // row, because a board save needs the audit row (which no client may write) and a slot-conflict check against
+    // the rows as they are at that moment (which needs a query inside a transaction - a thing the Admin SDK can do
+    // and the browser SDK cannot). An approved offer reaches the same collection through the same file.
     match /schedule/{scheduleId} {
       allow read: if signedIn();
-      allow write: if permission('can_edit_schedule');
+      allow write: if false;
     }
 
     // One row per member per date: ten thousand a year at station scale. `user_id` is the caller, and that is the

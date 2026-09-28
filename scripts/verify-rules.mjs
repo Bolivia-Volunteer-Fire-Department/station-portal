@@ -156,7 +156,10 @@ const main = async () => {
     role_id: 'r2',
     password: 'HASHED-FORGERY',
   });
-  await write('writes the schedule', true, doc(db, 'schedule', 's2'), {
+  // WRITE-DENIED to clients now, and this assertion flipped to say so: saveScheduleBoard in functions/index.js is
+  // the only writer of a schedule row, because a board save needs an audit row and a conflict check that a browser
+  // cannot do. An officer used to be able to write here directly; that was the second writer.
+  await write('writes the schedule', false, doc(db, 'schedule', 's2'), {
     schedule_template_id: 't1',
     assignment_id: 'a1',
     user_id: 'u2',

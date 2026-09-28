@@ -9,7 +9,8 @@
 //     the coordinates are honest) was never checked by the sheet version either: it validated what the browser sent,
 //     and so does this.
 import { collection, deleteDoc, doc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
-import { firestore } from './firebase.js';
+import { httpsCallable } from 'firebase/functions';
+import { firebaseFunctions, firestore } from './firebase.js';
 
 // The timestamp format the app reads everywhere: 'YYYY-MM-DD HH:MM:SS' in station time. Apps Script had
 // getEasternTimestamp(); this is the same shape and the same timezone, which keeps a clock entry written by one
@@ -120,23 +121,18 @@ export const withdrawOffer = async (offerId) => {
   await deleteDoc(doc(firestore(), 'schedule_offers', String(offerId)));
 };
 
-export const approveOffer = async ({ offerId, approverId }) => {
-  const db = firestore();
+// Approving an offer FILLS the shift, so it writes the schedule row - which makes it a function rather than a
+// transaction here. `schedule` is write-denied to clients and the function is its only writer (one writer per fact);
+// the browser version of this was the second one.
+export const approveOffer = async ({ offerId }) => {
+  const result = await httpsCallable(firebaseFunctions(), 'approveOffer')({ offerId: String(offerId) });
+  return result.data;
+};
 
-  await runTransaction(db, async (transaction) => {
-    const offerRef = doc(db, 'schedule_offers', offerId);
-    const offer = await transaction.get(offerRef);
-    if (!offer.exists()) throw new Error('no-offer');
-
-    const data = offer.data();
-    if (String(data.status) !== 'pending') throw new Error('already-resolved');
-
-    transaction.update(offerRef, { status: 'approved', approved_by: String(approverId || '') });
-    if (data.schedule_id) {
-      transaction.update(doc(db, 'schedule', String(data.schedule_id)), {
-        user_id: String(data.user_id),
-        is_open: false,
-      });
-    }
-  });
+// The officer's schedule board: entries to save and rows to delete, in one call. It is a function for three
+// reasons the browser cannot satisfy - the audit row, a slot-conflict check against the rows as they are at that
+// moment, and doing both in one transaction. See saveScheduleBoard in functions/index.js.
+export const saveScheduleBoard = async ({ entries = [], deleteIds = [] }) => {
+  const result = await httpsCallable(firebaseFunctions(), 'saveScheduleBoard')({ entries, deleteIds });
+  return result.data;
 };
