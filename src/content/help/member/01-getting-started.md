@@ -48,6 +48,15 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added some animations and transitions to the app overall to help this feel fast, as opposed to abrupt.
 * Modified some PWA settings that make the app feel more like a native app instead of just another web app, like taking over the full screen, preventing pinch-to-zoom, etc.
 * Added Certifications, where things like an EMT certification can be tracked. Optionally allowed the representing icon be displayed next to user names (to assist with scheduling).
+* Added more icons.
+* Changed icon dropdown to icon pickers, allowing users to administrators to visually select an icon instead of guessing based on name.
+* Added a print option to Training in the Administration module.
+* Altered training categories.
+* Added a filter for category to Training screens.
+* Added a loading spinner to some areas where you're left wondering what was happening while it's loading.
+* Fixed a bug where completed checklist items in the Administration module showed twice.
+* Transitioned most "new" forms to a modal pop-up format, to save space and streamline modules.
+* Did an AI review of the codebase to look for opportunities to improve efficiency and loading performance - thanks to Cline and Deepseek!
 
 **Version 1.05x**
 * Added sounds.
