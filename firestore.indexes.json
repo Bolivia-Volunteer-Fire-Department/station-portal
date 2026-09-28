@@ -1,0 +1,85 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "schedule",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "date_from", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "schedule",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "is_open", "order": "ASCENDING" },
+        { "fieldPath": "date_from", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "availability",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "date_from", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "timeclock",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "time_in", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "schedule_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "schedule_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "date_from", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "training_signatures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "signed_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "certifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "end_date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "announcements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "audience_roles", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date_from", "order": "ASCENDING" },
+        { "fieldPath": "date_to", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

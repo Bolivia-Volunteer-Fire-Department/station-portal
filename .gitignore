@@ -29,6 +29,11 @@ tmp-test-out
 .env.*
 !.env.example
 
+# Firebase emulator state: the Firestore emulator's local data, and its debug logs (*.log is covered above).
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
 # Service files
 #
 # Code.gs is deliberately TRACKED. It holds no credentials - the FCM service-account key, web config and VAPID

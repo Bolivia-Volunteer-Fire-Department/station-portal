@@ -1,0 +1,222 @@
+rules_version = '2';
+
+// THE ENFORCEMENT, after the move off Google Sheets.
+//
+// Every rule here is a check that lives in Code.gs today: `hasRolePermission`, the projections that hand a member
+// a safe copy of a row, the officer-only actions. Those checks cannot move to Firestore as they are - a rule
+// cannot strip a field or filter a row - so the shapes in docs/FIRESTORE_MODEL.md exist to make each document's
+// whole contents safe for whoever may read it, and this file states who that is.
+//
+// Three things are deliberate, and worth knowing before editing:
+//
+//   1. THE ROLE DOCUMENT IS THE SOURCE OF TRUTH, not the token. `is_admin` and `role_id` also ride in the custom
+//      claims so the client can shape its navigation without a read, but claims refresh about hourly - a rule
+//      that trusted them would let someone keep access for up to an hour after an officer removed it. These rules
+//      read users_private/{uid} then roles/{roleId}: at most four document reads, and a role change takes effect
+//      on the very next request.
+//   2. EVERYTHING IS DENIED UNLESS IT IS WRITTEN HERE. Collections still to come are denied by the catch-all at
+//      the bottom, and each gets its rules in the phase that brings its client code: an untested rule is worse
+//      than a missing one.
+//   3. A COLLECTION THAT IS SAFE FOR EVERY MEMBER IS SIMPLY READABLE. The schedule is the example - members are
+//      meant to see the crew's shifts, so the rule is "any signed-in member" and the *query* narrows it. That is
+//      also why the calendar asks two questions (my shifts, and open shifts) instead of one clever one: each query
+//      is unambiguous, and no rule has to reason about a disjunction.
+//
+// scripts/verify-rules.mjs runs against the emulator: it seeds the demo station, signs in as a member and as an
+// officer, and asserts what each may read and write - including what they may NOT.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // The viewer's role, from the database rather than from a claim. It comes from the ROSTER document -
+    // users/{uid} holds `name`, `rank_id` and `role_id`, because the client needs all three, while the private
+    // half holds the account facts. `exists` guards the two ways this comes up empty (a member whose roster row
+    // has not been written yet, a role that was deleted), because dereferencing a missing document is an
+    // evaluation error rather than a denial.
+    function roleId() {
+      return exists(/databases/$(database)/documents/users/$(uid()))
+        ? get(/databases/$(database)/documents/users/$(uid())).data.role_id
+        : '';
+    }
+
+    function role() {
+      return exists(/databases/$(database)/documents/roles/$(roleId()))
+        ? get(/databases/$(database)/documents/roles/$(roleId())).data
+        : null;
+    }
+
+    // `is_admin` is the master switch: it implies every other permission.
+    function permission(name) {
+      return role() != null && (role().is_admin == true || role()[name] == true);
+    }
+
+    function isAdministrator() {
+      return role() != null && role().is_admin == true;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Identity and access
+    // ---------------------------------------------------------------------------------------------
+
+    // The roster: a name and a rank, and nothing else. Every member reads it, because the schedule stores only
+    // user ids and the calendar has to label other people's shifts with them.
+    match /users/{userId} {
+      allow read: if signedIn();
+      // The officer's own save edits these three fields and no others. The shape of this document IS the
+      // projection that used to be computed on the server: a field that is not listed here does not exist.
+      allow create, update: if permission('can_edit_users')
+        && request.resource.data.keys().hasOnly(['name', 'rank_id', 'role_id']);
+      allow delete: if permission('can_edit_users');
+    }
+
+    // The private half: the username, the account status, the officer notes. Read by the member (it is their own
+    // account) and by officers. Written by NOBODY: creating a member and changing a username or a status goes
+    // through a callable function, which is what stops a client inventing an account or un-suspending itself. The
+    // Admin SDK bypasses this file - that is the point.
+    match /users_private/{userId} {
+      allow read: if signedIn() && (uid() == userId || permission('can_edit_users'));
+      allow write: if false;
+    }
+
+    // The permission table. Every client reads it to shape its navigation; only a role editor writes it. A role
+    // that GRANTS administrator access is special: only an administrator may create or change one, or a role
+    // editor could hand themselves the whole app.
+    match /roles/{roleId} {
+      allow read: if signedIn();
+      allow create, update: if permission('can_edit_roles')
+        && (request.resource.data.is_admin != true || isAdministrator());
+      allow delete: if permission('can_edit_roles') && resource.data.is_admin != true;
+    }
+
+    match /ranks/{rankId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_ranks');
+    }
+
+    // One document per member, keyed by the member's id, so "your own document" is the whole rule. The FCM device
+    // token is NOT here - it lives in push_devices, which is what lets this document be plainly readable.
+    match /user_settings/{userId} {
+      allow read, write: if signedIn() && (uid() == userId || permission('can_edit_users'));
+    }
+
+    // A device token belongs to the member whose browser registered it; an officer reads the collection for the
+    // FCM status tab. user_id is checked on the way IN as well as out, so a member cannot register a device
+    // against somebody else's account.
+    match /push_devices/{deviceId} {
+      allow read: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_edit_notification_settings'));
+      allow create: if signedIn() && request.resource.data.user_id == uid();
+      allow update, delete: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_edit_notification_settings'));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Configuration
+    // ---------------------------------------------------------------------------------------------
+
+    // Public by definition: the department name, the loading messages, the clock-location rules. The login screen
+    // reads the public document before anyone has signed in, which is why that read does not require a session.
+    // The private document is the other half: whoever may change a setting may read it. Nothing sensitive lives in
+    // this collection at all - the FCM credentials moved to function secret storage.
+    match /settings/{settingId} {
+      allow read: if settingId == 'public' || permission('can_edit_system_settings');
+      allow write: if permission('can_edit_system_settings');
+    }
+
+    match /shifts/{shiftId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_schedule');
+    }
+
+    match /apparatus/{apparatusId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_schedule');
+    }
+
+    // The split that keeps an officer's private note off a member's screen: the fields members draw are in
+    // `assignments`, and the note is in a document only officers may read. Not a copy - two disjoint halves.
+    match /assignments/{assignmentId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_assignments');
+    }
+
+    match /assignment_private/{assignmentId} {
+      allow read, write: if permission('can_edit_assignments');
+    }
+
+    match /schedule_templates/{templateId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_schedule_templates');
+    }
+
+    match /schedule_template_private/{templateId} {
+      allow read, write: if permission('can_edit_schedule_templates');
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The schedule and the clock
+    // ---------------------------------------------------------------------------------------------
+
+    // Everything about everybody's shifts, readable by any member - deliberately, because the calendar offers a
+    // "Show everyone" view and labels other people's pills. The narrowing happens in the query (a date range, my
+    // shifts, or open shifts), not here.
+    match /schedule/{scheduleId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_schedule');
+    }
+
+    // One row per member per date: ten thousand a year at station scale. `user_id` is the caller, and that is the
+    // whole rule - the sheet version sent the whole table to everybody and filtered it in the browser.
+    match /availability/{availabilityId} {
+      allow read: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
+      allow create: if signedIn()
+        && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'));
+      allow update, delete: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
+    }
+
+    // Clock entries, written by the clock in/out transaction. A member may open and close their OWN entry and
+    // read it back; an officer may do anything, which is what the Clock Management tab needs.
+    //
+    // `calc_address` is written here by the client for now. In the sheet a formula filled it, and a formula has no
+    // equivalent on this side of the move - see the open questions in docs/FIRESTORE_MODEL.md.
+    match /timeclock/{entryId} {
+      allow read: if signedIn() && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
+      allow create: if signedIn()
+        && (request.resource.data.user_id == uid() || permission('can_edit_timeclock'));
+      allow update, delete: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
+    }
+
+    // Who is on duty, materialized by that same transaction so the two cannot disagree. One small document per
+    // clocked-in member, keyed by their id - which is why the rule is simply "your own key". Readable by everyone,
+    // because the dashboard shows it.
+    match /on_duty/{memberId} {
+      allow read: if signedIn();
+      allow write: if signedIn() && (memberId == uid() || permission('can_edit_timeclock'));
+    }
+
+    // The audit trail. Officers read it; NOBODY writes it from a client, because an audit row a browser can forge
+    // is not an audit row. Functions write it with the Admin SDK, which bypasses this file.
+    match /system_log/{entryId} {
+      allow read: if permission('can_view_system_log');
+      allow write: if false;
+    }
+
+    // Everything not named above is denied, including the collections whose rules arrive with their client code
+    // (offers, training, certifications, documents, announcements, events). This is the default that makes a
+    // missing rule fail closed instead of open.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

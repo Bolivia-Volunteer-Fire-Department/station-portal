@@ -329,6 +329,32 @@ this change.
 > on a network/CORS failure, so the app still boots even if the backend hasn't been
 > redeployed with `doGet` yet.
 
+## Firestore (in progress)
+
+The data is moving off Google Sheets and onto Firestore: it is where the performance and realtime work goes, and
+the design lives in [`docs/FIRESTORE_MODEL.md`](docs/FIRESTORE_MODEL.md) — one writer per fact, one rule per
+collection, and an explicit answer for every place the old server projected a member-safe view of a row.
+
+What exists today is the ground that will be built on, not a running backend:
+
+```bash
+npm run emulators        # Firestore + Auth emulator, with the emulator UI on http://127.0.0.1:4000
+npm run emulators:seed   # a demo station: one administrator, one member, one open shift, one member on duty
+npm run verify:rules     # the rules, exercised by signing in as each of them (35 cases)
+```
+
+`verify:rules` runs as the last step of `npm run verify:all`. It needs a **JDK 21 or above** for the Firestore
+emulator — Java 8 will not do, and `firebase-tools` says so plainly. On a Mac with Homebrew:
+
+```bash
+brew install openjdk@21     # keg-only, so it leaves any older Java alone
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+```
+
+`firestore.rules` is the enforcement now, so read it before changing it: every check that lived in `Code.gs`
+reappears there, and each refused case in the harness is paired with an allowed one — because a rule that *errors*
+and a rule that *denies* are the same `permission-denied` to a client, so only the pair tells them apart.
+
 ## Push Notifications (FCM)
 
 Shift updates are delivered as push notifications through Firebase Cloud

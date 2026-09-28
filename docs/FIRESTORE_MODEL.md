@@ -144,25 +144,21 @@ to try again; a transaction retries itself instead.
 
 ## The open-shift case, worked through
 
-The hardest rule in the app, and the one to settle first because it shapes the query. Today a
-member may see **their own shifts** and **any unfilled shift they are eligible to fill**, and
-eligibility is a rank comparison against the assignment's `rank_order_required`.
+The hardest rule in the app. Today a member may see **their own shifts** and **any unfilled shift they are
+eligible to fill**, and eligibility is a rank comparison against the assignment's `rank_order_required`.
 
-Written naively, the rule would be an OR — `user_id == uid || is_open == true` — and an OR is where
-"the query must be provably safe" bites: Firestore has to be able to prove that *every* document a
-query could return satisfies the rule, and it will not reason its way through a disjunction for
-you. There are two workable shapes, and the choice is a Phase 0 decision:
+One correction to how this document first framed it: a rule along the lines of
+`user_id == uid || is_open == true` would be where "the query must be provably safe" bites, because Firestore
+has to prove that *every* document a query could return satisfies the rule and will not reason through a
+disjunction for you. But the schedule collection is readable by **every** member — that is the design, since the
+calendar draws the whole crew — so the rule stays a single condition and the disjunction never arises. The
+narrowing happens in the query.
 
-1. **Two queries, one per rule.** The calendar asks for `where('user_id','==',uid)` and separately
-   for `where('is_open','==',true)`, with `is_open` maintained by the same write that fills the
-   shift. Each query has its own single, provable condition, and both streams can be listened to.
-2. **One collection per audience.** Open shifts live in `schedule_open/{id}` and filled ones in
-   `schedule/{id}`, moved between them by the write that fills a slot. More moving parts, but each
-   collection has one simple rule and one simple query.
-
-Option 1 is my recommendation — fewer writes, and the two queries are exactly the two things the
-calendar draws anyway. Either way, the emulator test for `can_make_offers` is what proves it, and
-that test is the reason this document exists before the code does.
+**Decided: the calendar asks two questions** — `where('user_id', '==', uid)` and
+`where('is_open', '==', true)` — rather than one clever query. `is_open` is maintained by the same write that
+fills a slot. Both queries are unambiguous, both can be listened to, and the emulator harness runs them as the
+member to prove the rules accept each one as written. If a future change ever narrowed reads to own-plus-open,
+that decision would have to be revisited; the test is what would notice.
 
 ## Collections: training and certifications
 
@@ -305,29 +301,49 @@ port verifiable at all: the UI cannot silently change underneath it.
 
 ## Phase 0, and what "done" means
 
-1. `firebase.json`, `.firebaserc`, `firestore.rules`, `firestore.indexes.json`, and `functions/` in
-   plain JS, matching the repo's conventions.
-2. The emulator wired into `npm run emulators`, plus a `verify:rules` harness added to the
-   `verify:all` chain, in the same style as the existing 48.
-3. `scripts/seed-emulator.mjs`, built from the fixture `verify-bootstrap` already uses — one
-   administrator, one member, one shift on duty — so a demo station exists in seconds.
-4. This document agreed, with the open-shift shape decided.
-5. Guardrails: budget alerts, App Check, and a reads-per-screen budget written down so the free
-   tier is never a surprise.
+1. **Done.** `firebase.json`, `.firebaserc`, `firestore.rules`, `firestore.indexes.json`.
+2. **Done.** The emulator wired into `npm run emulators`, and `verify:rules` added to the `verify:all` chain —
+   35 cases that sign in as the demo station's member and administrator and assert what each may read and write,
+   including what they may not.
+3. **Done.** `scripts/seed-emulator.mjs`, built from the fixture `verify-bootstrap` uses: one administrator, one
+   member, one filled shift, one open shift, one member on duty. It writes over the emulator's REST API with the
+   owner token, which is how it can seed what no client may write.
+4. This document agreed, with the open-shift shape decided (two queries, above).
+5. Guardrails: budget alerts and App Check, still to do in the Firebase console. A reads-per-screen budget is
+   written down here rather than in code: a member's sign-in should read the roster, the settings, the roles, the
+   schedule for its window, its own availability, its own clock history and the on-duty list.
 
-**Exit criteria:** the emulator boots, the seed runs, the rules tests pass in CI, and one thin slice
-works end to end — sign in with a synthetic email and read the dashboard from Firestore. That
-proves the shape before any bulk porting starts, which is the whole point of doing Phase 0 at all.
+**One prerequisite, and it is not obvious:** `firebase-tools` now requires a **JDK 21 or above** for the Firestore
+emulator (Java 8 will not do). On this machine that meant `brew install openjdk@21`, which is keg-only and so
+leaves any older Java alone, and exporting `JAVA_HOME` to it for the emulator commands. The 48 existing harnesses
+need nothing of the sort, so if `verify:rules` fails on Java it is the emulator, not the suite.
+
+**Exit criteria:** the emulator boots, the seed runs, the rules tests pass (`npm run verify:rules` — 35 cases),
+and one thin slice works end to end: sign in with a synthetic email and read the dashboard from Firestore. The
+rules half of that is proven; the slice is what Phase 1 builds.
+
+## What the harness has already caught
+
+Worth recording, because it is the argument for writing tests before the code they test:
+
+- **`role_id` was read from the wrong collection.** The rules looked for it on `users_private/{uid}`, where it does
+  not exist — the roster document holds it. Every officer check failed, and the member checks passed *for the
+  wrong reason*: a rule that errors and a rule that denies both surface as `permission-denied`, so a broken rule
+  can look like a correct refusal. That is why each refused case is paired with an allowed one: the pair is what
+  distinguishes "denied" from "broken".
+- **`settings/private` could not be read by anyone.** The rule granted the write and forgot the read, so an
+  administrator could change a setting but not see it.
 
 ## Open questions
 
-- **The open-shift shape** — two queries or two collections. My recommendation is two queries; the
-  emulator test is what settles it.
-- **The synthetic email domain string**, which is effectively permanent once members exist.
-  `.invalid` is honest about never receiving mail; the department's future domain is more
-  meaningful. Either is defensible, but it should be chosen deliberately rather than by default.
-- **The reporting mirror.** Pulling data into a spreadsheet is a habit worth keeping, and a nightly
-  Function exporting collections to a Sheet is small — but it should be scheduled deliberately
-  rather than discovered as missing after go-live.
-- **Presence**, when chat arrives: Realtime Database's `onDisconnect` is the honest tool for
-  online/offline and typing indicators, and it can live in this same project as a second database.
+- **The synthetic email domain** is decided: `@boliviavfd.invalid`, chosen as RFC-reserved so nothing can ever be
+  delivered and any administrator reading the Auth console can see it is synthetic.
+- **`calc_address` has no successor yet.** In the sheet a formula filled it in from the coordinates. On the
+  Firestore side nothing computes it: for now the client may write it, and the honest options are to drop the
+  column, reverse-geocode in a callable function, or leave it blank. To settle in Phase 3 with the clock work.
+- **The reporting mirror.** Pulling data into a spreadsheet is a habit worth keeping, and a nightly function
+  exporting collections to a Sheet is small — but it should be scheduled deliberately rather than discovered as
+  missing after go-live.
+- **Presence**, when chat arrives: Realtime Database's `onDisconnect` is the honest tool for online/offline and
+  typing indicators, and it can live in this same project as a second database.
+- **App Check and budget alerts** are console work, not code, and neither is done yet.
