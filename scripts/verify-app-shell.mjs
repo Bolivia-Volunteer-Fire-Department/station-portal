@@ -526,5 +526,47 @@ const baseKeys = /const keys = \[([^\]]*)\]/.exec(deferred)?.[1] || '';
 checkIs('and never as a default', !/AdminPanel/.test(baseKeys), baseKeys);
 checkIs('the hidden Runner is never warmed at all', !/keys\.push\('FirefighterRunner'\)/.test(deferred));
 
+// ---------------------------------------------------------------------------
+// 9. The React Compiler is on, and it is actually running
+// ---------------------------------------------------------------------------
+//
+// One line of config enables it; whether it DID anything is invisible. It fails soft by design - a component it
+// cannot prove safe is left exactly as it was - so a version bump, or a plugin that stopped applying, would look
+// like nothing at all. Two halves, then: the config, and evidence from a build that the compiler ran.
+console.log('\n--- the React Compiler ---');
+const viteConfig = readFileSync('vite.config.js', 'utf8');
+checkIs('the build enables the React Compiler', /react\(\{ compiler: true \}\)/.test(viteConfig));
+// The package that provides it, which no file here imports - so it looks like a dependency nobody needs until the
+// build stops with "React Compiler requires the optional `oxc-transform-react` package".
+const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+checkIs(
+  'and the compiler package is a devDependency',
+  !!packageJson.devDependencies?.['oxc-transform-react'],
+  'oxc-transform-react would have to be reinstalled'
+);
+if (!builtCss) {
+  console.log('(no build in dist/, so the compiled output was not checked)');
+} else {
+  // Every component the compiler compiles carries a memo cache, and `memo_cache_sentinel` is the runtime marker
+  // for one. A build with none of them compiled nothing at all.
+  const builtScripts = readdirSync('dist/assets').filter((name) => name.endsWith('.js'));
+  const compiledChunks = builtScripts.filter((name) =>
+    readFileSync(`dist/assets/${name}`, 'utf8').includes('memo_cache_sentinel')
+  );
+  checkIs(
+    `${compiledChunks.length} built chunks carry the compiler's output`,
+    compiledChunks.length > 0,
+    'the compiler produced nothing'
+  );
+  // The load-bearing one: App and the shell live in the first-load chunk, so that is where a config that quietly
+  // stopped applying would show up first.
+  const entryChunk = builtScripts.find((name) => name.startsWith('index-') && !name.startsWith('index.esm'));
+  checkIs(
+    'including the first-load chunk App itself is in',
+    !!entryChunk && compiledChunks.includes(entryChunk),
+    entryChunk
+  );
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
