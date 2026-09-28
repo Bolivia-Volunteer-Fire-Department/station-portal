@@ -48,6 +48,23 @@ export const createWaveReporter = ({ label, total, onProgress, onDone } = {}) =>
     get failed() {
       return failed;
     },
+    // Announced when the wave BEGINS, not only as its tasks land.
+    //
+    // settle() can only report BETWEEN tasks, so a wave of one reported nothing until it was over. That is not an
+    // edge case: every save on every Administration tab triggers a refresh that is now a single request, because
+    // the bootstrap answers all of it at once. The result was exactly what this module was written to prevent -
+    // the button released, nothing appeared for a second or three, and then the screen updated itself - with a
+    // "done" toast at the end that looked like the whole story.
+    //
+    // waveMessage(label, 0, total) already had the wording for this state ("Refreshing views…") and nothing ever
+    // asked for it, so this is the call that was missing rather than a new one.
+    //
+    // Idempotent, and ignored once a task has settled: a wave that starts must not restart, or a second start
+    // would rewind a count the reader is watching.
+    start() {
+      if (finished || settled > 0) return;
+      if (typeof onProgress === 'function') onProgress(waveMessage(label, 0, count), 0, count);
+    },
     settle(ok = true) {
       if (finished) return;
       settled += 1;

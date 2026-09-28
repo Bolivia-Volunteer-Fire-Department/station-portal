@@ -642,12 +642,23 @@ export default function AdminDocumentsTab({
             No documents yet. Create one with <strong>New document</strong>.
           </p>
         ) : (
-          <div className="p-3">
+          <div className="p-3" aria-busy={savingOrder}>
             {/* The list is the drag surface: pick a row up and drop it where it should sit, and pick a folder
                 heading up and drop it in front of another folder. There is no Order box to type into any more -
                 the position is the position you see. */}
+            {/* Letting go is a WRITE, and until it lands the list is frozen: dragging is off and nothing on screen
+                has moved yet. That is the moment this line speaks, in the place the instruction was, because that
+                is where the eye already is. It covers all three drag paths - documents, folders and the checklist
+                items - since they all save through applyOrder. */}
             <p className="px-1 pb-2 text-xs text-slate-500 dark:text-slate-400">
-              Drag a document to reorder it, or a folder heading to move the whole folder.
+              {savingOrder ? (
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-600 dark:text-slate-300">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Saving the new order…
+                </span>
+              ) : (
+                'Drag a document to reorder it, or a folder heading to move the whole folder.'
+              )}
             </p>
             {groups.map((group) => (
               <div key={group.folder} className="mt-3 first:mt-0">

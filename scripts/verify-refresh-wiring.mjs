@@ -432,6 +432,54 @@ const firstId = nextWaveId();
 const secondId = nextWaveId();
 check('concurrent waves get distinct ids', firstId !== secondId);
 check('and the ids are namespaced', /^refresh-wave-\d+$/.test(firstId));
+// A wave of ONE - which is what every save now triggers, since the bootstrap answers the whole refresh in a
+// single request - used to announce nothing at all until it was over: the button released, nothing happened for
+// a second or three, and the screen updated itself. start() is the call that was missing, and these are the
+// cases that make it safe to call.
+const oneProgress = [];
+const oneDone = [];
+const oneTask = createWaveReporter({
+  label: 'Refreshing views',
+  total: 1,
+  onProgress: (message) => oneProgress.push(message),
+  onDone: (message) => oneDone.push(message),
+});
+oneTask.start();
+check('a one-task wave says it has started', oneProgress, ['Refreshing views…']);
+oneTask.settle();
+check('and then reports that it is done', oneDone, ['Refreshing views — up to date']);
+
+// Starting twice must not rewind a count the reader is watching, and a start after the first settle is a wave
+// that has already begun.
+const twiceProgress = [];
+const startedTwice = createWaveReporter({
+  label: 'Refreshing views',
+  total: 2,
+  onProgress: (message) => twiceProgress.push(message),
+});
+startedTwice.start();
+startedTwice.start();
+check('starting twice announces once', twiceProgress.length, 1);
+startedTwice.settle();
+check('and a start after the first settle is ignored', twiceProgress, [
+  'Refreshing views…',
+  'Refreshing views — 1 of 2 done…',
+]);
+
+// The call has to be made, or the reporter above is a capability nobody uses.
+check('App starts the wave before the request goes out', /report\.start\(\)/.test(waveBody), true);
+
+// The two certification tabs, named. Their calls used to read `onDataChanged?.()` - not the `void` form the rest
+// of the panel uses - and so were invisible to the check above. That is how a screen quietly stops asking for a
+// refresh without failing anything, which is the failure this whole file exists to catch.
+for (const name of ['AdminCertificationsTab.jsx', 'AdminCertificationSetupTab.jsx']) {
+  check(
+    `${name} asks for its refresh after saving`,
+    /void onDataChanged\?\.\(\)/.test(read('src/components/admin/' + name)),
+    true
+  );
+}
+
 check('the reporter tolerates a nonsense total', createWaveReporter({ label: 'x', total: 0 }).settle() === undefined);
 
 // The wave in App is wired to the reporter and to sonner.

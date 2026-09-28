@@ -841,6 +841,26 @@ check(
 check('Unfiled is never dragged', reorderFolders(folderFixtures, UNFILED_LABEL, 'Alpha'), []);
 check('nor is anything dragged after it', reorderFolders(folderFixtures, 'Alpha', UNFILED_LABEL), []);
 check('a folder dropped on itself writes nothing', reorderFolders(folderFixtures, 'Alpha', 'Alpha'), []);
+
+// The drop is a WRITE, and the list is frozen until it lands - dragging is off and nothing on screen has moved
+// yet. Without a word on screen that reads as a drop that did nothing, followed by an abrupt jump when the new
+// order arrives. These are source assertions because the saving state cannot be reached in a render: it begins
+// with a drag.
+const dragSurface = readFileSync('src/components/admin/AdminDocumentsTab.jsx', 'utf8');
+check('the drag surface reports that it is busy', /aria-busy=\{savingOrder\}/.test(dragSurface), true);
+check('and says what is happening, where the instruction was', /Saving the new order…/.test(dragSurface), true);
+check(
+  'with a spinner rather than a still frame',
+  /savingOrder \? \(/.test(dragSurface) && /Loader2 className="w-3\.5 h-3\.5 animate-spin"/.test(dragSurface),
+  true
+);
+// Which is what makes the message honest: nothing can be picked up again until the write lands.
+check('and dragging is off until it lands', /draggable=\{!savingOrder\}/.test(dragSurface), true);
+check(
+  'so a second drag cannot be started mid-save',
+  /const startDocumentDrag = \(event, row\) => \{\s*if \(savingOrder\)/.test(dragSurface),
+  true
+);
 check('and a folder with no documents is not a folder', reorderFolders(folderFixtures, 'Ghost', 'Alpha'), []);
 
 console.log('\n--- effective and end dates ---');

@@ -101,9 +101,11 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         return;
       }
       setFormData(EMPTY_FORM);
-      // Not awaited: the save is already confirmed, and the refresh wave is a background reload. Awaiting it
-      // would hold the button for the whole fan-out (see verify:refresh-wiring).
-      onDataChanged?.();
+      // Not awaited: the save is already confirmed, and the refresh is a background reload. Awaiting it would
+      // hold the button for the whole request when nothing depends on the answer. It IS told, though - written
+      // as `void` so this call is greppable, which is how verify-refresh-wiring checks that every saving screen
+      // still asks for its refresh.
+      void onDataChanged?.();
     } catch (err) {
       setError(err.message || 'Could not save this certification.');
     } finally {
@@ -127,7 +129,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         return;
       }
       if (formData.id === target.id) setFormData(EMPTY_FORM);
-      onDataChanged?.();
+      void onDataChanged?.();
     } catch (err) {
       setError(err.message || 'Could not delete this certification.');
     } finally {

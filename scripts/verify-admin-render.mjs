@@ -1116,8 +1116,10 @@ check('it offers to add a training', String(adminTrainingView).includes('Add New
 check('and to delete one', String(adminTrainingView).includes('Delete'));
 check('signatures start collapsed', String(adminTrainingView).includes('Nobody has signed this training yet') === false);
 check('the external marker is only in the administrative form', String(adminTrainingView).includes('Entered into an external system'));
-// A locked training cannot be edited or deleted even here.
-check('a locked training cannot be edited', /disabled=""[^>]*title="Locked[^"]*"[^>]*>Edit/.test(String(adminTrainingView)));
+// A locked training cannot be edited or deleted even here. Asserted with the icons stripped - the Edit button
+// carries a pencil and Delete a bin, and a check for the label directly after the tag would be a check on
+// whether those buttons happen to have icons rather than on whether they are locked.
+check('a locked training cannot be edited', /disabled=""[^>]*title="Locked[^"]*"[^>]*>Edit/.test(withoutIcons(adminTrainingView)));
 check('nor deleted', /disabled=""[^>]*title="Locked[^"]*"[^>]*>\s*Delete/.test(withoutIcons(adminTrainingView)));
 check('and it is the only locked row', (String(adminTrainingView).match(/Locked — entered into an external system/g) || []).length === 2);
 

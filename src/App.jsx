@@ -551,6 +551,9 @@ const getLoadingMessage = () => {
       onProgress: (message) => toast.loading(message, { id: waveId }),
       onDone: (message) => toast.success(message, { id: waveId, duration: 2500 }),
     });
+    // Says so BEFORE the request goes out. This wave is a single task now, and a reporter that only speaks as
+    // tasks settle would say nothing at all until it was finished - see the note on createWaveReporter.start.
+    report.start();
 
     try {
       // The count follows the tasks as they settle, WHETHER THEY SUCCEEDED OR NOT - which is why the wave
