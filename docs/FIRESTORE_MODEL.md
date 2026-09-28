@@ -365,6 +365,37 @@ Sheets. The two halves have to move together — a Firebase session cannot authe
 the login screen switches over in Phase 2, when there is data on the other side to show it. Until then the Firebase
 path is proven by the emulator harness while the live app keeps working untouched.
 
+## Phase 2, part one: the read path
+
+**Done: the member payload, read from Firestore.** `src/services/firestorePayload.js` assembles the same shape
+`memberBootstrapPayload` returns in `Code.gs` — same field names, same projections, same narrowing — because that is
+what lets `api.js` swap its internals without a component changing.
+
+| piece | what it is |
+|---|---|
+| `src/services/firestorePayload.js` | two parallel waves of reads, then the projections: the roster is three columns, on-duty is joined to names, the settings document goes back to key/value rows |
+| `firestore.rules` | the rest of the payload's collections: announcements, events, trainings, signatures, certifications, the catalogue, and offers (read-only until Phase 3 writes them) |
+| `scripts/seed-emulator.mjs` | announcements for everyone / a role / one member, two events, a signature, a certification, an offer |
+| `scripts/verify-firestore-reads.mjs` | 26 cases: the payload's shape and projections, and the audience filtering that used to happen in a server function |
+
+**The audience shape changed, and this is why.** The sheet version stores `role_id`, `rank_id` and `user_id` as
+three columns and ORs them in a function; "this rank or above" compares rank orders. None of that can be turned into
+a query a rule can prove — an OR across three fields has no single condition to check. So the audience is
+**materialized on the document** as one array, `audience_keys`, holding `'*'`, `'role:<id>'`, `'rank:<id>'` and
+`'user:<id>'`, with "this rank or above" expanded to the concrete rank ids when the announcement is written. The
+client asks one question — `array-contains-any` over its own four keys — and the rule answers with `hasAny` over the
+same list. The harness proves the flip: an officer sees the everyone and role announcements, a member sees the
+everyone and personal ones, and neither sees the other's.
+
+**The exit criterion:** a member's whole sign-in payload arrives from Firestore, with their own rows and nobody
+else's, proven by the harness rather than by hand.
+
+**What is deliberately not done yet:** the app still reads its data from Sheets, because the client switch is one
+step and it should happen when there is nothing left in the payload that would be missing. Two things remain before
+it: the admin payload's extra sections (users, the full assignment and template rows, offers, certification records)
+and the computed bits that used to come from the server (`certificationAlerts`, `certificationBadges`). Both are
+listed here so the gap is visible rather than discovered at the switch.
+
 ## Open questions
 
 - **The synthetic email domain** is decided: `@boliviavfd.invalid`, chosen as RFC-reserved so nothing can ever be

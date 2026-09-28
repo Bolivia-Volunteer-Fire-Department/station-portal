@@ -36,21 +36,40 @@ service cloud.firestore {
       return request.auth.uid;
     }
 
-    // The viewer's role, from the database rather than from a claim. It comes from the ROSTER document -
-    // users/{uid} holds `name`, `rank_id` and `role_id`, because the client needs all three, while the private
-    // half holds the account facts. `exists` guards the two ways this comes up empty (a member whose roster row
-    // has not been written yet, a role that was deleted), because dereferencing a missing document is an
-    // evaluation error rather than a denial.
-    function roleId() {
+    // The viewer's own roster row: `name`, `rank_id` and `role_id`. The role comes from here and not from a claim,
+    // because a claim can be an hour stale after an officer changes somebody's role. `exists` guards the two ways
+    // this comes up empty (a roster row not written yet, a deleted account), because dereferencing a missing
+    // document is an evaluation error rather than a denial.
+    //
+    // Worth knowing what this costs: a rule evaluation that needs the role, the rank and the keys makes about six
+    // document reads, all of them cached within the request. The limits are 10 for a single-document request and 20
+    // for a query, so there is room - but a rule that starts reading several more documents per check will not have
+    // any.
+    function viewerRow() {
       return exists(/databases/$(database)/documents/users/$(uid()))
-        ? get(/databases/$(database)/documents/users/$(uid())).data.role_id
-        : '';
+        ? get(/databases/$(database)/documents/users/$(uid())).data
+        : null;
+    }
+
+    function roleId() {
+      return viewerRow() != null ? viewerRow().role_id : '';
+    }
+
+    function rankId() {
+      return viewerRow() != null ? viewerRow().rank_id : '';
     }
 
     function role() {
       return exists(/databases/$(database)/documents/roles/$(roleId()))
         ? get(/databases/$(database)/documents/roles/$(roleId())).data
         : null;
+    }
+
+    // The keys an announcement or an event must carry for this viewer to see it: everyone, or them, or their role,
+    // or their rank. One list, because the client asks ONE question with array-contains-any and the rule answers it
+    // with hasAny - a shape Firestore can prove, unlike an OR across three columns.
+    function viewerKeys() {
+      return ['*', 'user:' + uid(), 'role:' + roleId(), 'rank:' + rankId()];
     }
 
     // `is_admin` is the master switch: it implies every other permission.
@@ -212,9 +231,67 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // The member payload's remaining collections
+    // ---------------------------------------------------------------------------------------------
+
+    // Announcements and events are audience-filtered inside a server function today (announcementMatches,
+    // eventsForViewer). Here the audience is MATERIALIZED on the document as `audience_keys`: one array of strings,
+    // each 'role:<id>', 'rank:<id>', 'user:<id>', or '*' for everyone. The client asks one question -
+    // array-contains-any over its own keys - and the rule checks the same list with hasAny, which is what makes the
+    // query provably safe.
+    //
+    // The sheet version reads three separate columns and ORs them, and an OR cannot be proven for a query. That is
+    // the whole reason this shape changed: "everyone" is '*', and "this rank or above" is expanded to the concrete
+    // rank ids when the announcement is written, because a query cannot compare rank orders either.
+    match /announcements/{announcementId} {
+      allow read: if signedIn() && resource.data.audience_keys.hasAny(viewerKeys());
+      allow write: if permission('can_make_announcements');
+    }
+
+    match /events/{eventId} {
+      allow read: if signedIn() && resource.data.audience_keys.hasAny(viewerKeys());
+      allow write: if permission('can_create_events');
+    }
+
+    // The training list is everyone's; the signatures differ by permission. The permission is a fact about the
+    // READER, which is why the rule reads the role document rather than the row.
+    match /trainings/{trainingId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_trainings');
+    }
+
+    match /training_signatures/{signatureId} {
+      allow read: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_administer_trainings'));
+      allow create: if signedIn() && request.resource.data.user_id == uid() && permission('can_sign_trainings');
+      allow update, delete: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_administer_trainings'));
+    }
+
+    // The catalog everyone reads, and one member's own records: the same shape as the clock and the availability
+    // rows, for the same reason - a record is a per-member row that grows with the roster.
+    match /certification_setup/{typeId} {
+      allow read: if signedIn();
+      allow write: if permission('can_manage_certification_setup');
+    }
+
+    match /certifications/{recordId} {
+      allow read: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_manage_certifications'));
+      allow write: if permission('can_manage_certifications');
+    }
+
+    // Offers: a member's own, and the whole table for whoever approves shifts. The writes arrive with the schedule
+    // work in Phase 3, so this is read-only for now rather than half-tested.
+    match /schedule_offers/{offerId} {
+      allow read: if signedIn()
+        && (resource.data.user_id == uid() || permission('can_approve_shifts') || permission('can_edit_schedule'));
+      allow write: if false;
+    }
+
     // Everything not named above is denied, including the collections whose rules arrive with their client code
-    // (offers, training, certifications, documents, announcements, events). This is the default that makes a
-    // missing rule fail closed instead of open.
+    // (documents and their signatures). This is the default that makes a missing rule fail closed instead of open.
     match /{document=**} {
       allow read, write: if false;
     }

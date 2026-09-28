@@ -6,7 +6,7 @@
 //
 // Everything here is lazy, so importing this module costs nothing until the app is actually configured - until the
 // VITE_FIREBASE_* values exist, the app stays entirely on Apps Script and none of this is reached.
-import { initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
@@ -16,25 +16,32 @@ import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 // throwing where the config is irrelevant.
 const env = import.meta.env || {};
 
+// A Node harness (scripts/verify-firestore-reads.mjs) runs under `firebase emulators:exec`, which exports the
+// emulator host into the environment. That is the signal to configure the demo project rather than throw about a
+// missing config: a test should not need a .env, and the browser path still requires the real one.
+const emulatorHost = typeof process !== 'undefined' ? String(process.env.FIRESTORE_EMULATOR_HOST || '') : '';
+const usingEmulator = env.VITE_FIREBASE_EMULATOR === '1' || Boolean(emulatorHost);
+
 const config = {
-  apiKey: env.VITE_FIREBASE_API_KEY,
+  apiKey: env.VITE_FIREBASE_API_KEY || (usingEmulator ? 'demo-api-key' : undefined),
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: env.VITE_FIREBASE_PROJECT_ID,
-  appId: env.VITE_FIREBASE_APP_ID,
+  projectId:
+    env.VITE_FIREBASE_PROJECT_ID ||
+    (usingEmulator ? String((typeof process !== 'undefined' && process.env.GCLOUD_PROJECT) || 'demo-station-portal') : undefined),
+  appId: env.VITE_FIREBASE_APP_ID || (usingEmulator ? 'demo-app-id' : undefined),
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
 };
 
 // Whether there is anything to talk to. A build without the config is a build that has not moved yet.
 export const firebaseConfigured = () => Boolean(config.apiKey && config.projectId && config.appId);
 
-// The emulator is opted into explicitly, never guessed at from the hostname, so a build cannot reach it by accident
-// and a developer cannot forget they are on it.
-const usingEmulator = env.VITE_FIREBASE_EMULATOR === '1';
-
 let app = null;
 
 export const firebaseApp = () => {
-  if (!app) app = initializeApp(config);
+  // Reuse an app that already exists rather than initialising a second one: a Node harness imports this module after
+  // creating its own, and two apps cannot both be named '[DEFAULT]'. Whoever gets there first wins, and everybody
+  // else shares it - which is also what keeps the auth state and the database instance the same in both.
+  if (!app) app = getApps().length ? getApp() : initializeApp(config);
   return app;
 };
 

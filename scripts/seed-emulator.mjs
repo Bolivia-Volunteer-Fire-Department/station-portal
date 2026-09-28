@@ -173,6 +173,64 @@ export const seed = async () => {
   await put('timeclock/c2', { user_id: 'u2', time_in: '2026-03-01 08:00', time_out: '2026-03-01 17:00', is_manual: false });
   await put('on_duty/u1', { user_id: 'u1', time_in: '2026-03-02 07:55' });
 
+  // --- the training and certification reference data, plus one member's own records ---
+  await put('trainings/tr1', { title: 'SCBA Fit Test' });
+  await put('training_signatures/ts1', { training_id: 'tr1', user_id: 'u2', signed_at: '2026-02-01 09:00:00' });
+  await put('certification_setup/c1', {
+    name: 'EMT',
+    icon: 'heart-pulse',
+    sort_order: 1,
+    warn_days_before: 60,
+    is_renewable: true,
+  });
+  await put('certifications/cr1', {
+    user_id: 'u2',
+    certification_id: 'c1',
+    effective_date: '2025-01-01',
+    end_date: '2027-01-01',
+    notes: '',
+    updated_at: '2025-01-01 08:00:00',
+  });
+
+  // --- announcements and events, with the audience MATERIALIZED as `audience_keys` ---
+  // Three announcements is the point: one for everybody, one for a role, one for a single member. A member's query
+  // asks for all three at once with array-contains-any, and the rules answer with hasAny over the same four keys.
+  await put('announcements/an1', {
+    title: 'Everyone sees this',
+    audience_keys: ['*'],
+    is_visible_on_login: true,
+    created_at: '2026-02-01 08:00:00',
+  });
+  await put('announcements/an2', {
+    title: 'Officers only',
+    audience_keys: ['role:r1'],
+    is_visible_on_login: false,
+    created_at: '2026-02-02 08:00:00',
+  });
+  await put('announcements/an3', {
+    title: 'For Bo',
+    audience_keys: ['user:u2'],
+    is_visible_on_login: false,
+    created_at: '2026-02-03 08:00:00',
+  });
+  await put('events/ev1', { title: 'Everyone', date_from: '2026-03-10', date_to: '2026-03-10', audience_keys: ['*'] });
+  await put('events/ev2', {
+    title: 'Officer and firefighter',
+    date_from: '2026-03-11',
+    date_to: '2026-03-11',
+    audience_keys: ['rank:k1', 'rank:k2'],
+  });
+
+  // --- one offer, so the member's own offers have something to filter ---
+  await put('schedule_offers/of1', {
+    user_id: 'u2',
+    schedule_id: 's2',
+    date_from: '2026-03-09',
+    assignment_id: 'a1',
+    status: 'pending',
+    slot_key: '2026-03-09|a1',
+  });
+
   // --- one audit row, so the rules can show an officer reading it and a member unable to ---
   await put('system_log/l1', {
     user_id: 'u1',
