@@ -198,6 +198,127 @@ exports.completePasswordChange = onCall(async (request) => {
   return { ok: true };
 });
 
+// ---------------------------------------------------------------------------------------------
+// The schedule board, written by functions only
+// ---------------------------------------------------------------------------------------------
+//
+// These two are why `schedule` is write-denied in the rules. A board save has to do three things a client cannot:
+// write the audit row naming the officer (clients may not write the log at all), refuse a slot conflict against
+// the rows as they are AT THAT MOMENT, and do both in one transaction. The Admin SDK can also run a QUERY inside a
+// transaction, which the browser SDK cannot - and a conflict check is a query.
+//
+// One writer per fact, as the design doc puts it: the board and an approved offer are the only things that write a
+// schedule row, and both of them live here.
+
+// The shape a schedule row is stored in, from an entry the board sent. A blank user_id is MEANINGFUL - it is what
+// marks an open shift - so it is trimmed and kept rather than treated as missing.
+const scheduleFieldsFrom = (raw, includeTimes = true) => {
+  const entry = raw || {};
+  const dateFrom = String(entry.date_from || '').trim();
+  if (!dateFrom) return null;
+  const memberId = String(entry.user_id || '').trim();
+  const fields = {
+    schedule_template_id: String(entry.schedule_template_id || ''),
+    assignment_id: String(entry.assignment_id || ''),
+    user_id: memberId,
+    date_from: dateFrom,
+    date_to: String(entry.date_to || dateFrom),
+    is_open: memberId === '',
+  };
+  if (includeTimes) {
+    fields.start_time = String(entry.start_time || '');
+    fields.end_time = String(entry.end_time || '');
+  }
+  return fields;
+};
+
+exports.saveScheduleBoard = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_edit_schedule', 'change the schedule');
+
+  const data = request.data || {};
+  const rawEntries = Array.isArray(data.entries) ? data.entries : [];
+  const deleteIds = (Array.isArray(data.deleteIds) ? data.deleteIds : []).map((id) => String(id));
+
+  const prepared = rawEntries.map((entry) => ({
+    id: String((entry && entry.id) || ''),
+    fields: scheduleFieldsFrom(entry),
+  }));
+  const invalid = prepared.filter((entry) => !entry.fields).length;
+  if (invalid) {
+    throw new HttpsError('invalid-argument', `${invalid} entr${invalid === 1 ? 'y has' : 'ies have'} no date.`);
+  }
+
+  const saved = await db.runTransaction(async (transaction) => {
+    // The conflict check, inside the transaction and after reading the rows: a slot already held by somebody else
+    // cannot be handed to a second member. The sheet version made this check under its script lock.
+    const conflicts = [];
+    for (const entry of prepared) {
+      if (!entry.fields.user_id) continue;
+      const sameSlot = await transaction.get(
+        db
+          .collection('schedule')
+          .where('date_from', '==', entry.fields.date_from)
+          .where('assignment_id', '==', entry.fields.assignment_id)
+      );
+      const taken = sameSlot.docs.find(
+        (row) => row.id !== entry.id && String(row.data().user_id || '') !== '' && String(row.data().user_id) !== entry.fields.user_id
+      );
+      if (taken) conflicts.push(`${entry.fields.date_from} ${entry.fields.assignment_id}`);
+    }
+    if (conflicts.length) {
+      throw new HttpsError('failed-precondition', `Already filled by somebody else: ${conflicts.join(', ')}.`);
+    }
+
+    const stamped = [];
+    prepared.forEach((entry) => {
+      const reference = entry.id ? db.doc(`schedule/${entry.id}`) : db.collection('schedule').doc();
+      transaction.set(reference, { ...entry.fields, updated_by: caller.uid }, { merge: true });
+      stamped.push(reference.id);
+    });
+    deleteIds.forEach((id) => transaction.delete(db.doc(`schedule/${id}`)));
+    return { ids: stamped, deleted: deleteIds.length };
+  });
+
+  await audit(
+    caller.uid,
+    'ADMIN_BULK_SAVE_SCHEDULE',
+    `Saved ${saved.ids.length} schedule entries, deleted ${saved.deleted}`
+  );
+  return saved;
+});
+
+// Approving an offer FILLS the shift, so it writes the row - which is why it lives here rather than in the browser,
+// where the first version had it. Same transaction, same audit trail as the board.
+exports.approveOffer = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_approve_shifts', 'approve a shift offer');
+
+  const offerId = String((request.data || {}).offerId || '');
+  const result = await db.runTransaction(async (transaction) => {
+    const offerRef = db.doc(`schedule_offers/${offerId}`);
+    const offer = await transaction.get(offerRef);
+    if (!offer.exists) throw new HttpsError('not-found', 'That offer no longer exists.');
+    const data = offer.data();
+    if (String(data.status) !== 'pending') throw new HttpsError('failed-precondition', 'already-resolved');
+
+    transaction.update(offerRef, { status: 'approved', approved_by: caller.uid });
+    if (data.schedule_id) {
+      transaction.set(
+        db.doc(`schedule/${String(data.schedule_id)}`),
+        { user_id: String(data.user_id), is_open: false, updated_by: caller.uid },
+        { merge: true }
+      );
+    }
+    return { scheduleId: String(data.schedule_id || '') };
+  });
+
+  await audit(caller.uid, 'ADMIN_APPROVE_OFFER', `Approved an offer for shift ${result.scheduleId}`);
+  return result;
+});
+
 // Suspending somebody has to disable the Auth account too, or the suspension is only as good as the app's own
 // checks - and whatever reads the database next would not check.
 exports.setMemberStatus = onCall(async (request) => {
