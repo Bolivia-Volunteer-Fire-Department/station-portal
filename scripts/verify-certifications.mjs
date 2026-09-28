@@ -375,6 +375,21 @@ checkIs(
   /addEventListener\('scroll', onScroll, true\)/.test(iconPicker),
   'the forms scroll inside <main>, so a bubbling listener would never fire'
 );
+// Hearing EVERY scroll is what makes the capture phase work, and it is also what made the grid unusable: the
+// panel scrolls its own 74 icons, that scroll reached this handler, and the picker shut on the first wheel over
+// it. The handler has to skip its own panel.
+checkIs(
+  'but the panel scrolling itself is not a scroll away',
+  // Matches either shape: the target tested inline, or pulled out into a local first.
+  /panelRef\.current[\s\S]{0,200}contains\((?:event\.)?target\)/.test(iconPicker),
+  'the grid is scrollable by design; closing on its own scroll is the reported bug'
+);
+checkIs('so the panel carries the ref that tells them apart', /ref=\{panelRef\}/.test(iconPicker));
+checkIs(
+  'and the grid does not hand its leftover scroll to the page',
+  /overflow-y-auto overscroll-contain/.test(iconPicker),
+  'without it, reaching the end of the grid scrolls the page - which closes the picker the same way'
+);
 
 const SUMMARY = `\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`;
 console.log(SUMMARY);

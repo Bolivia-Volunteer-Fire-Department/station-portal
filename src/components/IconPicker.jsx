@@ -53,6 +53,8 @@ export default function IconPicker({ value = '', onChange, disabled = false, lab
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState(null);
   const triggerRef = useRef(null);
+  // The panel element, so the scroll-away handler below can tell its own grid's scrolling from the page's.
+  const panelRef = useRef(null);
 
   const iconNames = useMemo(() => Object.keys(RANK_ICON_MAP).sort(), []);
   const filtered = useMemo(() => {
@@ -81,11 +83,16 @@ export default function IconPicker({ value = '', onChange, disabled = false, lab
     close();
   };
 
-  // While the panel is open: Escape closes it, and any scroll does too.
+  // While the panel is open: Escape closes it, and a scroll of the PAGE does too.
   //
   // The scroll listener is in the CAPTURE phase and on the window, because the forms that use this live inside
   // a scrolling <main> rather than the document - a bubbling listener on the document would never hear it, and
   // the panel would sit over whatever had scrolled up to meet it.
+  //
+  // Capture phase means it hears EVERY scroll, including the panel's own grid, which is scrollable by design
+  // (74 icons in a 340px panel). Closing on that made the grid unusable: the first wheel or drag over it shut
+  // the picker. So a scroll whose target is inside the panel is the grid being used and is ignored; anything
+  // else is the page moving under a fixed panel, which is what closes it.
   useEffect(() => {
     if (!open) return undefined;
 
@@ -95,7 +102,13 @@ export default function IconPicker({ value = '', onChange, disabled = false, lab
         close();
       }
     };
-    const onScroll = () => close();
+    const onScroll = (event) => {
+      const panel = panelRef.current;
+      const target = event.target;
+      // `target` is the document for a window scroll, which no panel can contain - so that still closes.
+      if (panel && target instanceof Node && panel.contains(target)) return;
+      close();
+    };
 
     document.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('scroll', onScroll, true);
@@ -133,6 +146,7 @@ export default function IconPicker({ value = '', onChange, disabled = false, lab
             <div className="fixed inset-0 z-40" onClick={close} aria-hidden="true" />
 
             <div
+              ref={panelRef}
               role="dialog"
               aria-label={`Choose an ${label}`}
               className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl origin-top animate-popoverIn dark:border-slate-700 dark:bg-slate-800"
@@ -157,7 +171,7 @@ export default function IconPicker({ value = '', onChange, disabled = false, lab
                 </button>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
                 {/* A number or roman numeral, when one has been typed: the icon set has no digits, so this is
                     the only way to have "Instructor 1" or "Level III" show anything at all. */}
                 {typedIcon && (
