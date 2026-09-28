@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, CalendarRange } from 'lucide-react';
+import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, CalendarRange } from 'lucide-react';
 import { adminSaveScheduleTemplate, adminDeleteScheduleTemplate } from '../../services/api';
 import { toTimeInputValue } from '../../utils/timeInputValue';
 import { toDateKey } from '../../utils/scheduleDate';
@@ -12,12 +12,17 @@ import {
   templateNeedsDate,
 } from '../../utils/scheduleTemplates';
 import { assignmentColor } from '../../utils/assignmentColor';
+import ViewportModal from '../ViewportModal';
 import { choosableAssignments } from '../../utils/assignmentDates';
 import { MINUTES_PER_DAY, layoutWeekDayCards } from '../../utils/weekLayout';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', day_of_week: '', start_time: '', end_time: '', assignment_id: '', nickname: '', effective_date: '', end_date: '' };
+
+// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
+// the HTML `form` attribute - so Enter in a text input still submits the template.
+const TEMPLATE_FORM_ID = 'template-editor-form';
 
 const DAYS = [
   { value: 'monday', label: 'Mon' },
@@ -76,6 +81,8 @@ const cardFor = (template) => {
 
 export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [], assignments = [], onDataChanged, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // Whether the editor modal is open: "a new template" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   // The row whose delete is being confirmed in the modal below.
@@ -86,7 +93,10 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
   const [error, setError] = useState(null);
 
   const isEditing = !!formData.id;
-  const resetForm = () => setFormData(EMPTY_FORM);
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditorOpen(false);
+  };
 
   const assignmentLabel = (id) => {
     if (id === undefined || id === null || id === '') return '—';
@@ -97,6 +107,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
   const dayName = (value) => DAY_NAMES[String(value ?? '').trim().toLowerCase()] || 'Template';
 
   const handleEdit = (template) => {
+    setEditorOpen(true);
     setError(null);
     setFormData({
       id: template.id,
@@ -268,19 +279,24 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
 
   return (
     <div className="space-y-6">
-{/* Add / Edit Schedule Template Card */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? recordHeading('Schedule Template', formData.day_of_week ? `${dayName(formData.day_of_week)} template` : '') : 'Add New Schedule Template'}
-            </h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in a modal that takes most of the viewport - the format every New card in this module uses.
+          The week calendar below is the list, and it is where New template lives: it is what somebody is looking
+          at when they want another one. */}
+      {editorOpen && (
+        <ViewportModal
+          title={
+            isEditing
+              ? recordHeading('Schedule Template', formData.day_of_week ? `${dayName(formData.day_of_week)} template` : '')
+              : 'New schedule template'
+          }
+          subtitle={isEditing ? 'Editing an existing template' : 'Not saved yet'}
+          icon={<CalendarRange className="h-4 w-4" />}
+          formId={TEMPLATE_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add template'}
+          saving={saving}
+          onClose={resetForm}
+        >
+        <form id={TEMPLATE_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
           {error && (
             <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
@@ -404,24 +420,29 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add Template'}
-            </button>
-          </div>
         </form>
-      </div>
+        </ViewportModal>
+      )}
 {/* Visual week calendar */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-            <CalendarRange className="w-4 h-4 text-red-500" /> Weekly Schedule Templates
-          </h3>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+              <CalendarRange className="w-4 h-4 text-red-500" /> Weekly Schedule Templates
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setFormData(EMPTY_FORM);
+                setEditorOpen(true);
+              }}
+              className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+            >
+              <Plus className="h-4 w-4" />
+              New template
+            </button>
+          </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Drag a shift to move it to another day — the drop position sets its start time (15-min steps). Click a shift to edit its details. Overlapping shifts sit side by side so nothing is hidden.
           </p>

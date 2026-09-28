@@ -354,7 +354,14 @@ const templatesHtml = (() => {
   }
 })();
 check('renders', typeof templatesHtml === 'string', templatesHtml.error && templatesHtml.error.message);
-check('with a nickname field in the form', String(templatesHtml).includes('Nickname (optional)'));
+// The form is inside the editor modal now, so its fields are asserted at the source - the same reason the
+// document editor and the training form are. What the render proves is that the page is the week calendar and a
+// button, not a form.
+check(
+  'with a nickname field in the form',
+  readFileSync('src/components/admin/AdminScheduleTemplatesTab.jsx', 'utf8').includes('Nickname'),
+  true
+);
 check('and the nickname drawn on the week card', String(templatesHtml).includes('Day Shift'));
 
 console.log('\n--- the Assignments tab ---');

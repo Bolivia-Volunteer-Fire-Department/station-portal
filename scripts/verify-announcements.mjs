@@ -251,21 +251,21 @@ check('the tab renders its fetched rows', /rows\.map\(/.test(tabSource) && /rows
 check('a load failure is surfaced, not swallowed', /setLoadError/.test(tabSource) && /loadError &&/.test(tabSource), true);
 check('AdminPanel no longer declares an announcements prop', /announcements = \[\]/.test(panelSource), false);
 
-// The add/edit card collapses, matching the Training form: collapsed by default to save screen space,
-// opened by the collapse header or by clicking Edit on a row, and closed again after a save.
-console.log('\n--- the add/edit card is collapsible ---');
-check('the card has an open/closed state', /const \[formOpen, setFormOpen\] = useState\(false\)/.test(tabSource), true);
-check('the header toggles it', /setFormOpen\(\(open\) => !open\)/.test(tabSource), true);
-check('and reports its state to assistive tech', /aria-expanded=\{formOpen\}/.test(tabSource), true);
+// The add/edit form is an editor modal now, matching the Training form: not on the page until it is asked for,
+// opened by New announcement or by clicking Edit on a row, submitted from the modal's toolbar, and closed again
+// after a save. formOpen is the same state it always was - it asked "is the form showing", which is still the
+// question - so the wiring is asserted rather than rewritten.
+console.log('\n--- the editor is a modal ---');
+check('the form has an open/closed state', /const \[formOpen, setFormOpen\] = useState\(false\)/.test(tabSource), true);
 check('the form body renders only when open', /\{formOpen && \(/.test(tabSource), true);
+check('mounted in the viewport modal', /<ViewportModal/.test(tabSource) && /<ViewportModal[\s\S]{0,900}formId=\{ANNOUNCEMENT_FORM_ID\}/.test(tabSource), true);
+check('with the toolbar submitting the form inside', /<form id=\{ANNOUNCEMENT_FORM_ID\}/.test(tabSource), true);
+check('New announcement opens it, on a clean form', /resetForm\(\);\s*setFormOpen\(true\);/.test(tabSource), true);
 check('clicking Edit opens it', /setFormOpen\(true\)/.test(tabSource), true);
 check('a successful save closes it', /setFormOpen\(false\)/.test(tabSource), true);
-// The header became a <button>, so Cancel had to move or it would be a button inside a button.
-// Sliced from the collapse control's own attribute to its closing tag: a naive "<button ... <button"
-// search matches any two buttons anywhere near each other, which is every form on the page.
-const collapseBlock = /aria-expanded=\{formOpen\}[\s\S]*?<\/button>/.exec(tabSource);
-check('the collapse button was found', !!collapseBlock, true);
-check('Cancel is not nested inside the collapse button', collapseBlock ? /<button/.test(collapseBlock[0]) : false, false);
+check('and closing it clears the form', /onClose=\{\(\) => \{\s*resetForm\(\);\s*setFormOpen\(false\);\s*\}\}/.test(tabSource), true);
+// The collapse header is gone with the card: no toggle, and nothing reporting a collapsed state.
+check('there is no collapse control left', /setFormOpen\(\(open\) => !open\)/.test(tabSource), false);
 
 // The creator is shown in the administrator's list, and nowhere else.
 //

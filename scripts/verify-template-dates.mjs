@@ -245,21 +245,27 @@ const templateFormHtml = renderToString(
   })
 );
 const templateFormText = visibleText(templateFormHtml);
-check('the form offers an Effective Date', /Effective Date/.test(templateFormText), true);
-check('and an End Date', /End Date/.test(templateFormText), true);
-// The label wraps "(required)" in a span, so prose assertions need the tags stripped as well as the
-// SSR comment markers that visibleText removes.
-const templateFormProse = templateFormText.replace(/<[^>]*>/g, '');
-// The effective date is now required, so the form marks it as such and the end date stays optional.
-check('the effective date is marked required', /Effective Date \(required\)/.test(templateFormProse), true);
-check('the end date is marked optional', /End Date \(optional\)/.test(templateFormProse), true);
-check('and the input carries the required attribute', /required=""/.test(templateFormHtml), true);
+// The form is inside the editor modal now, and a modal renders through createPortal - which server-side rendering
+// skips entirely - so the form's own markup is asserted at the source. What the render can prove is that the form
+// is NOT on the page until somebody asks for it, which is the change.
+check('the form is not on the page until it is opened', !/template-editor-form/.test(templateFormHtml) && /New template/.test(templateFormHtml), true);
+check('the form offers an Effective Date', /Effective Date/.test(formSource), true);
+check('and an End Date', /End Date/.test(formSource), true);
+// The label wraps "(required)" in a span, so the marker is matched near the label rather than on one line.
+check('the effective date is marked required', /Effective Date[\s\S]{0,160}\(required\)/.test(formSource), true);
+check('the end date is marked optional', /End Date[\s\S]{0,160}\(optional\)/.test(formSource), true);
+check('and the input carries the required attribute', /required/.test(formSource), true);
 // Two optional markers remain (Nickname and End Date), down from three.
-check('two optional fields remain', (templateFormProse.match(/\(optional\)/g) || []).length, 2);
-check('two date inputs', (templateFormHtml.match(/type="date"/g) || []).length, 2);
-check('explaining what the effective date means', /The first date this pattern runs/.test(templateFormProse), true);
-check('and a blank end means it is still running', /still running/.test(templateFormProse), true);
-check('with the inclusive-dates note', /Both dates are inclusive/.test(templateFormProse), true);
+check('two optional fields remain', (formSource.match(/\(optional\)/g) || []).length, 2);
+// Counted inside the form itself: the file has other date inputs (the filters), and the claim is about the form.
+const templateFormRegion = formSource.slice(
+  formSource.indexOf('<form id={TEMPLATE_FORM_ID}'),
+  formSource.indexOf('</form>', formSource.indexOf('<form id={TEMPLATE_FORM_ID}'))
+);
+check('two date inputs', (templateFormRegion.match(/type="date"/g) || []).length, 2);
+check('explaining what the effective date means', /The first date this pattern runs/.test(formSource), true);
+check('and a blank end means it is still running', /still running/.test(formSource), true);
+check('with the inclusive-dates note', /Both dates are inclusive/.test(formSource), true);
 
 // A retired template must be visibly distinct on the grid, and a not-yet-effective one too - the grid is
 // the only place both are listed, since neither produces shifts on the board any more.

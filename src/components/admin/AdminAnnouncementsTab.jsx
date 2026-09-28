@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Megaphone, Send, RefreshCw,
-  ChevronDown, ChevronRight, UserRound,
+  Save, Loader2, Pencil, Trash2, Plus, AlertCircle, Megaphone, Send, RefreshCw,
+  UserRound,
 } from 'lucide-react';
 import { adminDeleteAnnouncement, adminFetchAnnouncements, adminSaveAnnouncement } from '../../services/api';
 import RankIcon from '../RankIcon';
 import IconPicker from '../IconPicker';
+import ViewportModal from '../ViewportModal';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel, userLabel } from '../../utils/displayLabel';
 import { toDateKey } from '../../utils/scheduleDate';
@@ -22,6 +23,8 @@ import {
   announcementVariant,
   announcementValidation,
 } from '../../utils/announcements';
+
+const ANNOUNCEMENT_FORM_ID = 'announcement-editor-form';
 
 const EMPTY_FORM = {
   id: '',
@@ -214,51 +217,27 @@ export default function AdminAnnouncementsTab({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        {/* The header is the collapse control. It stays visible when collapsed so "New Announcement"
-            is always one click away - and it keeps saying "Edit Announcement #N" while an edit is
-            staged, so a collapsed card can't hide work in progress. */}
-        <button
-          type="button"
-          onClick={() => setFormOpen((open) => !open)}
-          aria-expanded={formOpen}
-          className="w-full flex items-start gap-3 p-6 text-left hover:bg-slate-50 dark:hover:bg-slate-900/40 transition"
+      {/* The editor, in the viewport modal every New card in this module now uses. `formOpen` is unchanged: it was
+          the collapse state, and "the form is showing" is the same question asked of a different shell - so the
+          state, both callers and the cancel path all keep working without being touched. */}
+      {formOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Announcement', formData.title) : 'New announcement'}
+          subtitle={
+            isEditing
+              ? 'Saving applies it to whoever it targets.'
+              : 'Write a message for the crew. Choose where it appears, who receives it, and whether it also sends a push.'
+          }
+          icon={<Megaphone className="h-4 w-4" />}
+          formId={ANNOUNCEMENT_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Create announcement'}
+          saving={saving}
+          onClose={() => {
+            resetForm();
+            setFormOpen(false);
+          }}
         >
-          <span className="mt-0.5 text-slate-400 shrink-0">
-            {formOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-          </span>
-          <span className="min-w-0">
-            <span className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
-              <Megaphone className="w-5 h-5 text-red-500" />
-              {isEditing ? recordHeading('Announcement', formData.title) : 'New Announcement'}
-            </span>
-            <span className="block text-sm text-slate-500 dark:text-slate-400">
-              {isEditing
-                ? 'Change this announcement. Saving applies it to whoever it targets.'
-                : 'Write a message for the crew. Choose where it appears, who receives it, and whether it also sends a push.'}
-            </span>
-          </span>
-        </button>
-
-        {formOpen && (
-        <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
-          {/* Cancel lives inside the form rather than the header: the header is a button now, and a
-              button inside a button is invalid markup. */}
-          {isEditing && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  resetForm();
-                  setFormOpen(false);
-                }}
-                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-                Cancel edit
-              </button>
-            </div>
-          )}
+        <form id={ANNOUNCEMENT_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
           {error && (
             <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
@@ -465,8 +444,8 @@ export default function AdminAnnouncementsTab({
             </button>
           </div>
         </form>
-        )}
-      </div>
+        </ViewportModal>
+      )}
 
       {/* Existing announcements, newest first. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -474,6 +453,17 @@ export default function AdminAnnouncementsTab({
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             Announcements ({rows.length})
           </h3>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setFormOpen(true);
+            }}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New announcement
+          </button>
           <button
             type="button"
             onClick={reload}
