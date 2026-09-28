@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Trash2, UserMinus } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Printer, Trash2, UserMinus } from 'lucide-react';
 import { adminBulkSaveTraining, adminRemoveTrainingSignature } from '../../services/api';
 import TrainingBadges from '../training/TrainingBadges';
 import ConfirmModal from '../ConfirmModal';
+import PrintableTraining from '../PrintableTraining';
 import TrainingFilters from '../training/TrainingFilters';
 import TrainingForm from '../training/TrainingForm';
 import TrainingTotals from '../training/TrainingTotals';
@@ -29,7 +30,16 @@ import {
 //
 // The edit form is the same component the member module uses, so the two cannot disagree about
 // what a training is.
-export default function AdminTrainingTab({ token, trainings = [], signatures = [], users = [], onDataChanged }) {
+export default function AdminTrainingTab({
+  token,
+  trainings = [],
+  signatures = [],
+  users = [],
+  currentUserId = '',
+  // For the printed sheet's header, like the schedule's: the station's own name on its own paper.
+  departmentName = '',
+  onDataChanged,
+}) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
@@ -41,6 +51,10 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
   // confirmations this tab needs - locking, deleting, and removing a signature - so there is exactly one dialog
   // and no chance of two stacking.
   const [pending, setPending] = useState(null);
+  // Which sheet is being prepared: null, { mode: 'list' }, or { mode: 'training', training }.
+  // PrintableTraining mounts on this and unmounts itself through onDone, so a print cannot be opened twice
+  // and the sheet never lingers in the DOM after the dialog closes.
+  const [printing, setPrinting] = useState(null);
 
   const allRows = useMemo(() => normalizeTrainingList(trainings), [trainings]);
 
@@ -85,6 +99,12 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
   const counts = useMemo(() => signatureCounts(signatures), [signatures]);
   const memberName = (userId) =>
     users.find((user) => String(user.id) === String(userId))?.name || unnamedLabel('member');
+
+  // Who is printing. A training record outlives whoever produced it, so the sheet names them - the same
+  // reason the calendar sheet does. Empty when the id is not in the roster, which prints nothing rather
+  // than "Unnamed member".
+  const printedByName =
+    users.find((user) => String(user.id) === String(currentUserId))?.name || '';
 
   useEffect(() => {
     if (message?.type === 'success') {
@@ -242,7 +262,23 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
             {signatures.length === 1 ? '' : 's'}
             {rows.length !== allRows.length ? ` (of ${allRows.length} trainings)` : ''}
           </span>
-          <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
+          {/* Prints what the table is showing - the same rows, filtered the same way - so the button is
+              pointless with nothing on screen and says why. */}
+          <button
+            type="button"
+            onClick={() => setPrinting({ mode: 'list' })}
+            disabled={rows.length === 0}
+            title={
+              rows.length === 0
+                ? 'Nothing to print - no trainings match these filters'
+                : 'Print this list, with who signed each training'
+            }
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Print list
+          </button>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
             Expand a training to see who signed it.
           </span>
         </div>
@@ -321,6 +357,17 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
                         )}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
+                        {/* Printing a locked training is allowed on purpose: an external-system record is
+                            exactly the one somebody wants a paper copy of, and printing changes nothing. */}
+                        <button
+                          type="button"
+                          onClick={() => setPrinting({ mode: 'training', training })}
+                          title="Print this training's record, with everyone who signed it"
+                          className="mr-3 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Print
+                        </button>
                         <button
                           type="button"
                           onClick={() => setEditing(editing?.id === id ? null : training)}
@@ -399,6 +446,24 @@ export default function AdminTrainingTab({ token, trainings = [], signatures = [
           </table>
         </div>
       </div>
+
+      {/* The printed sheet, mounted only while a print is being prepared - it calls window.print() itself and
+          unmounts through onDone. It is handed the rows the TABLE is showing, already filtered and sorted, so
+          "print what the filters currently show" is that literally and the sheet cannot disagree with the screen. */}
+      {printing && (
+        <PrintableTraining
+          mode={printing.mode}
+          departmentName={departmentName}
+          memberName={printedByName}
+          rows={rows}
+          filters={filters}
+          sort={sort}
+          training={printing.training || null}
+          signatures={signatures}
+          users={users}
+          onDone={() => setPrinting(null)}
+        />
+      )}
 
       {/* Every confirmation this tab needs. The wording is the same warning the native dialog carried, but it can
           now name what is lost in bold rather than fitting it into a sentence. */}

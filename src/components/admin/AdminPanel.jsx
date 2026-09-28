@@ -496,6 +496,8 @@ export default function AdminPanel({
           trainings={trainings}
           signatures={trainingSignatures}
           users={users}
+          currentUserId={currentUserId}
+          departmentName={departmentName}
           onDataChanged={onAdminDataChanged}
         />
       )}

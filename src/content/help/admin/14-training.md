@@ -77,6 +77,26 @@ Deleting a training **also deletes every signature recorded against it**, which 
 
 Prefer correcting a training over deleting it. Correcting is cheap; re-collecting signatures is not. Only delete one that was created in error, ideally before anybody has signed it.
 
+## Printing
+
+Two prints, both from the toolbar and the rows of the report:
+
+| Button | What comes out |
+|---|---|
+| **Print list** (top right of the report) | Exactly what the filters are showing, as a table, with **who signed each training** listed under it |
+| **Print** (on each row, on the right) | That one training's record: every field, its categories, the narrative, and everyone who signed |
+
+**Print list** prints the report as it stands on screen. The columns are the report's own — date, training (with its time and categories), location, instructors, how many signed, and whether it is filed externally — and under each training is the list of who signed, sorted by name. Nothing the list does not show is added: **the narrative is not on it**, which is the point of it being a list.
+
+The sheet also says **which filters produced it**, because a filtered list is a subset of the record and a printout that does not say so is misleading — e.g. *Category: Hazmat · Location: Station 1 · Sorted by Date (newest first)* — along with the total trainings and training hours, so it agrees with the tiles. It is headed with the station's name and patch, the date it was printed, and who printed it.
+
+**Print** on a row is that training's own record, and it is deliberately the opposite: everything the record holds, including the narrative as written and the categories by their full names. **A training entered into an external system can still be printed** — that is the record most likely to be wanted on paper, and printing changes nothing.
+
+Both prints use dates **with the year** ("Sat, Mar 14, 2026"), which the screen's date column leaves off. Paper outlives the screen it was printed from.
+
+> [!TIP]
+> To print only what one member has signed, set **Member** and **Signed only** and then **Print list** — that is an attendance statement for that member, with a signature count you can hand over.
+
 ## If a member says they cannot sign
 
 1. **Check the training exists here.** Signatures need a training to attach to, which means it must have a date and a title.

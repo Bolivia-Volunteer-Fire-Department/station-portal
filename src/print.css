@@ -50,4 +50,10 @@
   .print-day-row {
     break-inside: avoid;
   }
+
+  /* A printed training and the list of who signed it are one block - the row and its signatures are a
+     <tbody> per training, so a page break cannot come between the record and its names. */
+  .print-training-row {
+    break-inside: avoid;
+  }
 }
