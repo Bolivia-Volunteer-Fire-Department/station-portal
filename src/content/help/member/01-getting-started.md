@@ -40,6 +40,9 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
+**Version 1.10**
+* Migrated from Google Sheets to Firebase Firestore for all kinds of reasons.
+
 **Version 1.06**
 * Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...
 * Added Checklists - used for creating and viewing things like new hire orientation packet lists.
