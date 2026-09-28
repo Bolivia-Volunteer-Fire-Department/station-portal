@@ -53,8 +53,18 @@ jobs:
         run: npm run lint
 
       - name: Build
+        # The Firebase values are the web app's PUBLIC config, passed through as repository secrets because a CI
+        # build has no .env (it is gitignored). They are deliberately NOT required: an unset secret arrives as an
+        # empty string, src/services/firebase.js reports itself unconfigured, and the app stays entirely on Apps
+        # Script - which is exactly what should happen until the login switches over.
         env:
           VITE_APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
           echo "Building with base path /${REPO_NAME}/"

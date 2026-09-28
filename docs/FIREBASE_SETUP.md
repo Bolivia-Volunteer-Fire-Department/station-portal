@@ -21,27 +21,36 @@ than chosen deliberately. Check it against the console and correct it if it is w
 npx firebase use --add        # pick the project; this writes .firebaserc for you
 ```
 
-## 2. Register the web app, and put its config in `.env`
+## 2. Put the web app's config in `.env` and in CI
 
-Project settings → Your apps → **Web** (create one if there is none) → SDK setup and configuration. Copy the values
-into `.env`, which is gitignored; `.env.example` shows the shape.
+**The web app is already registered**, because push notifications needed it - so this is a copy, not a setup. The
+values are in the `system_settings` sheet, where the app reads them today at runtime:
 
-```bash
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_APP_ID=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_VAPID_KEY=        # Cloud Messaging → Web configuration, for push
-```
+| `system_settings` key | environment variable |
+|---|---|
+| `fcm_api_key` | `VITE_FIREBASE_API_KEY` |
+| `fcm_auth_domain` | `VITE_FIREBASE_AUTH_DOMAIN` |
+| `fcm_project_id` | `VITE_FIREBASE_PROJECT_ID` |
+| `fcm_app_id` | `VITE_FIREBASE_APP_ID` |
+| `fcm_messaging_sender_id` | `VITE_FIREBASE_MESSAGING_SENDER_ID` |
+| `fcm_vapid_public_key` | `VITE_FIREBASE_VAPID_KEY` |
 
-These are **not secrets** - a Firebase web config is public by design, and the project is protected by the rules and
-App Check. But the **deployed site needs them too**: GitHub Pages builds in CI, so add each one as a repository
-secret (Settings → Secrets and variables → Actions) exactly as `VITE_APPS_SCRIPT_URL` already is. Without them the
-deployed build has no Firebase to talk to.
+(`fcm_web_config` holds the same values as one JSON blob, if that is easier to read; `fcm_storage_bucket` is not
+needed, because there is no Firebase Storage in this design. In the console the same config is under Project
+settings → Your apps → Web → SDK setup and configuration.)
 
-This also replaces what the app does today: it receives its Firebase config from `system_settings` at runtime, and
-from here on it is baked in at build time.
+For local development, copy `.env.example` to `.env` and paste the values in - or skip it entirely and set
+`VITE_FIREBASE_EMULATOR=1`, which points the app at the local emulators instead and needs no project config at all.
+
+For the **deployed** site the values have to be repository secrets (Settings → Secrets and variables → Actions),
+because a CI build has no `.env` - it is gitignored. The deploy workflow passes all six through to the build. They
+are deliberately optional: an unset secret arrives as an empty string, `src/services/firebase.js` reports itself
+unconfigured, and the app stays entirely on Apps Script until the login switches over.
+
+They are **not secrets** - a Firebase web config is public by design, and the project is protected by the rules and
+App Check. The one thing worth doing to the API key is the restriction the deploy checklist already mentions in the
+README: allow the GitHub Pages host, and `localhost` if you want to develop against the real project rather than the
+emulator.
 
 ## 3. Turn on Authentication
 
