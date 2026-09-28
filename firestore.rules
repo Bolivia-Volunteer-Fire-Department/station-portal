@@ -187,8 +187,8 @@ service cloud.firestore {
     // Clock entries, written by the clock in/out transaction. A member may open and close their OWN entry and
     // read it back; an officer may do anything, which is what the Clock Management tab needs.
     //
-    // `calc_address` is written here by the client for now. In the sheet a formula filled it, and a formula has no
-    // equivalent on this side of the move - see the open questions in docs/FIRESTORE_MODEL.md.
+    // The coordinates are the record of where: the app restricts clocking in and out to a radius, so a resolved
+    // street address was extra data to keep in step for no decision it changed. `calc_address` is gone.
     match /timeclock/{entryId} {
       allow read: if signedIn() && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
       allow create: if signedIn()

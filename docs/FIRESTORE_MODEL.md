@@ -135,7 +135,7 @@ never disagree — a split costs no atomicity.
 
 | collection | fields | written by | read by | option | rule, in words |
 |---|---|---|---|---|---|
-| `timeclock/{id}` | `user_id`, `time_in`, `time_out`, `gps_lat`, `gps_lon`, `is_manual`, `calc_address` | **a transaction** on clock in/out | the member (own rows), officers (all) | A | The one that already stops at the member: My Clock History filters to the signed-in member, and so does the app's "am I clocked in" lookup. In Firestore the rule enforces it instead of the filter. |
+| `timeclock/{id}` | `user_id`, `time_in`, `time_out`, `gps_lat`, `gps_lon`, `is_manual` | **a transaction** on clock in/out | the member (own rows), officers (all) | A | The one that already stops at the member: My Clock History filters to the signed-in member, and so does the app's "am I clocked in" lookup. In Firestore the rule enforces it instead of the filter. |
 
 Clocking in and out is the transaction that also writes `on_duty`, so the two can never disagree:
 either the entry opens and the member appears on duty, or neither happens. This is also where the
@@ -334,13 +334,43 @@ Worth recording, because it is the argument for writing tests before the code th
 - **`settings/private` could not be read by anyone.** The rule granted the write and forgot the read, so an
   administrator could change a setting but not see it.
 
+## Phase 1, and what it built
+
+**Done: identity.** Firebase Auth with the synthetic addresses, the officer-only account work as callables, and the
+client modules that will replace the Apps Script session.
+
+| piece | what it is |
+|---|---|
+| `functions/index.js` | `whoami`, `createMember`, `resetMemberPassword`, `completePasswordChange`, `setMemberStatus` — CommonJS on purpose, because the Functions emulator analyses the codebase with `require()` |
+| `src/services/firebase.js` | the SDK, initialised from `VITE_FIREBASE_*`, with the emulator opted into explicitly rather than guessed from the hostname |
+| `src/services/firebaseAuth.js` | username → synthetic address, sign in and out, the account state, and the officer calls |
+| `scripts/verify-firebase-auth.mjs` | 29 cases against the emulator: the member signs in and reads the dashboard, is refused the officer work, is reset by an officer, changes it themselves, is suspended and reactivated — and every one of those leaves an audit row naming the officer |
+
+**The exit criterion from Phase 0 is met**: sign in with a synthetic email and read the dashboard from
+Firestore, proven by the harness rather than by hand.
+
+Three things worth knowing about this phase:
+
+- **`EMAIL_DOMAIN` lives in two files** — `functions/index.js` creates the account, `src/services/firebaseAuth.js`
+  derives the address to sign in with. The harness asserts the client's rule produces the address the function
+  created, because if they ever disagree nobody can sign in and the cause would be invisible.
+- **Claims are a cache, and `whoami` does not trust them.** The role comes from the database on every call, so an
+  officer changing somebody's role takes effect immediately rather than whenever their token happens to refresh.
+- **~500 lines of password cryptography disappear.** The old `verify-auth-security` harness tested PBKDF2, salts
+  and constant-time comparisons; Auth owns all of that now, so those tests are not ported — they are deleted with
+  the code they tested.
+
+**What is deliberately NOT done yet:** the app still signs in through Apps Script and still reads its data from
+Sheets. The two halves have to move together — a Firebase session cannot authenticate an Apps Script request — so
+the login screen switches over in Phase 2, when there is data on the other side to show it. Until then the Firebase
+path is proven by the emulator harness while the live app keeps working untouched.
+
 ## Open questions
 
 - **The synthetic email domain** is decided: `@boliviavfd.invalid`, chosen as RFC-reserved so nothing can ever be
   delivered and any administrator reading the Auth console can see it is synthetic.
-- **`calc_address` has no successor yet.** In the sheet a formula filled it in from the coordinates. On the
-  Firestore side nothing computes it: for now the client may write it, and the honest options are to drop the
-  column, reverse-geocode in a callable function, or leave it blank. To settle in Phase 3 with the clock work.
+- **`calc_address` is dropped**, decided while planning Phase 1: clocking in and out is already restricted to a
+  radius, so a resolved street address was data to keep in step for no decision it changed. The coordinates stay.
 - **The reporting mirror.** Pulling data into a spreadsheet is a habit worth keeping, and a nightly function
   exporting collections to a Sheet is small — but it should be scheduled deliberately rather than discovered as
   missing after go-live.

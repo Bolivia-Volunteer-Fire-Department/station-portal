@@ -22,8 +22,24 @@ const AUTH = `http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/$
 // mail is ever sent to it - so the shared password below is a fixture, not a credential.
 export const DEMO_PASSWORD = 'demo-passw0rd';
 export const DEMO_ACCOUNTS = [
-  { uid: 'u1', username: 'jane', email: 'jane@boliviavfd.invalid', name: 'Jane Smith', rank: 'k1', role: 'r1' },
-  { uid: 'u2', username: 'bo', email: 'bo@boliviavfd.invalid', name: 'Bo Jones', rank: 'k2', role: 'r2' },
+  {
+    uid: 'u1',
+    username: 'jane',
+    email: 'jane@boliviavfd.invalid',
+    name: 'Jane Smith',
+    rank: 'k1',
+    role: 'r1',
+    claims: { role_id: 'r1', is_admin: true },
+  },
+  {
+    uid: 'u2',
+    username: 'bo',
+    email: 'bo@boliviavfd.invalid',
+    name: 'Bo Jones',
+    rank: 'k2',
+    role: 'r2',
+    claims: { role_id: 'r2', is_admin: false },
+  },
 ];
 
 // Firestore's REST API wants typed values, which is verbose enough to hide a mistake inside a fixture. This maps
@@ -48,7 +64,7 @@ export const put = async (path, data) => {
   }
 };
 
-const createAccount = async ({ uid, email }) => {
+const createAccount = async ({ uid, email, claims }) => {
   const response = await fetch(AUTH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
@@ -57,6 +73,19 @@ const createAccount = async ({ uid, email }) => {
   // A 400 saying EMAIL_EXISTS is what a second run of the seed looks like, and is not a failure.
   if (!response.ok && !(await response.text()).includes('EMAIL_EXISTS')) {
     throw new Error(`Creating ${email} failed: ${response.status}`);
+  }
+  // The custom claims the createMember function would have set: role_id and is_admin, which the client uses for its
+  // own navigation and which the rules deliberately do NOT trust. Seeding them keeps the demo station shaped like
+  // production rather than like a half-migrated one.
+  if (claims) {
+    const claimResponse = await fetch(`${AUTH}:update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({ localId: uid, customAttributes: JSON.stringify(claims) }),
+    });
+    if (!claimResponse.ok) {
+      throw new Error(`Setting claims for ${email} failed: ${claimResponse.status}`);
+    }
   }
 };
 
