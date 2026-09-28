@@ -69,10 +69,20 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  const startNew = () => {
-    setEditorOpen(true);
+  // Opening and closing are two different acts, which is the bug that made a second edit impossible: `startNew`
+  // OPENS the editor (the New button calls it), so it could not also be the close handler. Closing it did nothing
+  // to `editorOpen`, the dismissal animation hid the panel anyway, and the next Edit changed the form data with
+  // nothing on screen to show for it.
+  const closeEditor = () => {
     setFormData(EMPTY_FORM);
     setError(null);
+    setEditorOpen(false);
+  };
+
+  const startNew = () => {
+    setFormData(EMPTY_FORM);
+    setError(null);
+    setEditorOpen(true);
   };
 
   const startEdit = (row) => {
@@ -105,7 +115,9 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         setError(response?.message || 'Could not save this certification.');
         return;
       }
-      setFormData(EMPTY_FORM);
+      // Saved, so the editor closes - the same close the Cancel path uses, which is what makes "the modal closes
+      // when the save lands" true rather than nearly true.
+      closeEditor();
       // Not awaited: the save is already confirmed, and the refresh is a background reload. Awaiting it would
       // hold the button for the whole request when nothing depends on the answer. It IS told, though - written
       // as `void` so this call is greppable, which is how verify-refresh-wiring checks that every saving screen
@@ -133,7 +145,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         setError(response?.message || 'Could not delete this certification.');
         return;
       }
-      if (formData.id === target.id) setFormData(EMPTY_FORM);
+      if (formData.id === target.id) closeEditor();
       void onDataChanged?.();
     } catch (err) {
       setError(err.message || 'Could not delete this certification.');
@@ -154,7 +166,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
           onSave={handleSave}
           saveLabel={formData.id ? 'Save changes' : 'Add certification'}
           saving={saving}
-          onClose={startNew}
+          onClose={closeEditor}
         >
         <div className="space-y-4">
         {error && (

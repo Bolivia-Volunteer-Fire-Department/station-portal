@@ -69,10 +69,18 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   // enforces the other half.
   const endDateOff = !selectedType || !selectedType.is_renewable;
 
+  // Opening and closing are two different acts: `startNew` OPENS the editor (the New record button calls it), so it
+  // could not also be the close handler - closing it left `editorOpen` true, the dismissal animation hid the panel
+  // anyway, and the next Edit changed the form data with nothing on screen to show for it.
+  const closeEditor = () => {
+    setError(null);
+    setEditorOpen(false);
+  };
+
   const startNew = () => {
-    setEditorOpen(true);
     setFormData(EMPTY_FORM);
     setError(null);
+    setEditorOpen(true);
   };
 
   const startEdit = (row) => {
@@ -97,7 +105,8 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         setError(response?.message || 'Could not save this certification.');
         return;
       }
-      setFormData({ ...EMPTY_FORM, user_id: formData.user_id, certification_id: formData.certification_id });
+      // Saved, so the editor closes - the same close the Cancel path uses.
+      closeEditor();
       // Not awaited: the save is confirmed and the refresh is a background reload. Written as `void` so the call
       // is greppable - see verify-refresh-wiring, which checks every saving screen still asks for its refresh.
       void onDataChanged?.();
@@ -121,7 +130,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         setError(response?.message || 'Could not delete this record.');
         return;
       }
-      if (formData.id === target.id) startNew();
+      if (formData.id === target.id) closeEditor();
       void onDataChanged?.();
     } catch (err) {
       setError(err.message || 'Could not delete this record.');
@@ -160,7 +169,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           onSave={handleSave}
           saveLabel={formData.id ? 'Save changes' : 'Record certification'}
           saving={saving}
-          onClose={startNew}
+          onClose={closeEditor}
         >
         <div className="space-y-4">
 

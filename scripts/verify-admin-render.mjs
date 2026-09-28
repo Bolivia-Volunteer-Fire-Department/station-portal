@@ -2141,5 +2141,51 @@ Object.entries(editorModalTabs).forEach(([file, source]) => {
   check(`${file} has a New button in the list header`, /New (rank|shift)/.test(source), true);
 });
 
+console.log('\n--- every editor closes when it is asked to ---');
+// The bug this exists for: AdminCertificationSetupTab wired onClose={startNew}, which looked right and was not.
+// startNew OPENS the editor - the New button calls it - so closing left the open state true, the dismissal
+// animation hid the panel anyway, and the next Edit changed the form data with nothing on screen to show for it.
+// A handler that opens cannot be a handler that closes, and the only way to tell is to look at what it does.
+const CLOSING_TABS = [
+  'AdminRanksTab.jsx',
+  'AdminShiftsTab.jsx',
+  'AdminAnnouncementsTab.jsx',
+  'AdminScheduleTemplatesTab.jsx',
+  'AdminAssignmentsTab.jsx',
+  'AdminCertificationSetupTab.jsx',
+  'AdminCertificationsTab.jsx',
+  'AdminUsersTab.jsx',
+  'AdminClockManagementTab.jsx',
+  'AdminEventsTab.jsx',
+  'AdminRolesTab.jsx',
+  'AdminDocumentsTab.jsx',
+];
+CLOSING_TABS.forEach((file) => {
+  const src = readFileSync(`src/components/admin/${file}`, 'utf8');
+  const named = (/onClose=\{([\w$]+)\}/.exec(src) || [])[1] || '';
+  // A concise or braced arrow that closes is proven by its own pattern.
+  const inline = /onClose=\{\(\) => [\s\S]{0,140}?Open\(false\)/.test(src);
+  check(`${file} says what closes its editor`, named !== '' || inline, true);
+  if (!named) return;
+  // The handler's BODY, not the file after it: searching forward from the definition runs straight into the next
+  // function, which is how an editor whose only sin was a nearby `startNew` looked like it never closed.
+  const body = (
+    new RegExp(`const ${named} = \\(\\) => \\{([\\s\\S]{0,300}?)\\};`).exec(src) || [, '']
+  )[1];
+  check(
+    `${file}'s close handler closes rather than opens`,
+    body === '' || (/Open\(false\)/.test(body) && !/Open\(true\)/.test(body)),
+    true
+  );
+});
+// The training form renders a modal and hands the close to its callers, so they own it - both of them.
+['src/components/admin/AdminTrainingTab.jsx', 'src/components/TrainingModule.jsx'].forEach((file) => {
+  check(
+    `${file} closes the training editor itself`,
+    /onCancel=\{\(\) => \{\s*setEditing\(null\);\s*setEditorOpen\(false\);/.test(readFileSync(file, 'utf8')),
+    true
+  );
+});
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
