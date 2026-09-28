@@ -37,32 +37,38 @@ service cloud.firestore {
     }
 
     // The viewer's own roster row: `name`, `rank_id` and `role_id`. The role comes from here and not from a claim,
-    // because a claim can be an hour stale after an officer changes somebody's role. `exists` guards the two ways
-    // this comes up empty (a roster row not written yet, a deleted account), because dereferencing a missing
-    // document is an evaluation error rather than a denial.
+    // because a claim can be an hour stale after an officer changes somebody's role.
     //
-    // Worth knowing what this costs: a rule evaluation that needs the role, the rank and the keys makes about six
-    // document reads, all of them cached within the request. The limits are 10 for a single-document request and 20
-    // for a query, so there is room - but a rule that starts reading several more documents per check will not have
-    // any.
+    // EVERY segment and EVERY field read on this path is guarded, and that is not defensive padding. An empty path
+    // segment ("users/"), a document that does not exist, or a key that is absent all produce an EVALUATION ERROR in
+    // these rules rather than a false - and a client cannot tell an error apart from a correct denial. `get(key,
+    // default)` is the supported way to read a field that may be missing.
+    //
+    // The cost: a rule that needs the role, the rank and the audience keys makes about six document reads, all cached
+    // within the request. The limits are 10 for a single-document request and 20 for a query, so there is room - but
+    // a rule that starts reading several more documents per check will not have any.
     function viewerRow() {
-      return exists(/databases/$(database)/documents/users/$(uid()))
-        ? get(/databases/$(database)/documents/users/$(uid())).data
-        : null;
+      return uid() == null
+        ? null
+        : (exists(/databases/$(database)/documents/users/$(uid()))
+          ? get(/databases/$(database)/documents/users/$(uid())).data
+          : null);
     }
 
     function roleId() {
-      return viewerRow() != null ? viewerRow().role_id : '';
+      return viewerRow() == null ? '' : viewerRow().get('role_id', '');
     }
 
     function rankId() {
-      return viewerRow() != null ? viewerRow().rank_id : '';
+      return viewerRow() == null ? '' : viewerRow().get('rank_id', '');
     }
 
     function role() {
-      return exists(/databases/$(database)/documents/roles/$(roleId()))
-        ? get(/databases/$(database)/documents/roles/$(roleId())).data
-        : null;
+      return roleId() == ''
+        ? null
+        : (exists(/databases/$(database)/documents/roles/$(roleId()))
+          ? get(/databases/$(database)/documents/roles/$(roleId())).data
+          : null);
     }
 
     // The keys an announcement or an event must carry for this viewer to see it: everyone, or them, or their role,
@@ -202,12 +208,18 @@ service cloud.firestore {
 
     // One row per member per date: ten thousand a year at station scale. `user_id` is the caller, and that is the
     // whole rule - the sheet version sent the whole table to everybody and filtered it in the browser.
+    //
+    // `resource != null` on the update and delete branches is not padding: Firestore checks those branches while
+    // evaluating a CREATE, where `resource` is null, and reading `.data` off it is an evaluation error - which a
+    // client cannot tell apart from a correct refusal. Guarding it is what makes the refusal a refusal.
     match /availability/{availabilityId} {
       allow read: if signedIn()
+        && resource != null
         && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
       allow create: if signedIn()
         && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'));
       allow update, delete: if signedIn()
+        && resource != null
         && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
     }
 
