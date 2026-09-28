@@ -1344,9 +1344,9 @@ export default function AdminDocumentsTab({
                                 verifiedById: verification.byUserId,
                               })
                             }
-                            className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:underline"
+                            className="text-xs font-medium text-amber-500 dark:text-amber-400 hover:underline"
                           >
-                            remove verification by {memberLabel(verification.byUserId)}
+                            remove verification
                           </button>
                         ))}
                         {row.signatureId && (

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Printer, Trash2, UserMinus } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Printer, Trash2, UserMinus } from 'lucide-react';
 import { adminBulkSaveTraining, adminRemoveTrainingSignature } from '../../services/api';
 import TrainingBadges from '../training/TrainingBadges';
 import ConfirmModal from '../ConfirmModal';
@@ -373,8 +373,9 @@ export default function AdminTrainingTab({
                           onClick={() => setEditing(editing?.id === id ? null : training)}
                           disabled={training.locked}
                           title={training.locked ? 'Locked — entered into an external system' : 'Edit this training'}
-                          className="text-xs font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-white mr-3"
+                          className="inline-flex items-center text-xs gap-1.5 font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-white mr-3"
                         >
+                          <Pencil className="w-3.5 h-3.5" />
                           {editing?.id === id ? 'Editing…' : 'Edit'}
                         </button>
                         <button
