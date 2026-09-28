@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-react';
+import { Loader2, Pencil, Clock, Trash2, Plus, AlertCircle } from 'lucide-react';
 import { adminSaveShift, adminDeleteShift } from '../../services/api';
 import { toTimeInputValue } from '../../utils/timeInputValue';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
 import { recordHeading } from '../../utils/displayLabel';
+
+// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
+// the HTML `form` attribute - so Enter in a text input still submits the shift.
+const SHIFT_FORM_ID = 'shift-editor-form';
 
 const EMPTY_FORM = {
   id: '',
@@ -40,9 +45,16 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
   // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
+  // The editor is a modal now, opened by New shift or by choosing a row, so the page behind it is the list.
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const isEditing = !!formData.id;
-  const resetForm = () => setFormData(EMPTY_FORM);
+  // Closing the editor and clearing the form are the same act, so every existing call site - saved, cancelled and
+  // deleted-while-open - carries on working unchanged.
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditorOpen(false);
+  };
 
   const buildFormFromShift = (shift) => ({
     id: shift.id,
@@ -63,6 +75,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
   const handleEdit = (shift) => {
     setError(null);
     setFormData(buildFormFromShift(shift));
+    setEditorOpen(true);
   };
 
   const handleSubmit = async (e) => {
@@ -107,104 +120,113 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
 
   return (
     <div className="space-y-6">
-      {/* Add / Edit Shift Card */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              {isEditing ? recordHeading('Shift', formData.description) : 'Add New Shift'}
-            </h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in a modal that takes most of the viewport - the format every New card in the Administration
+          module uses. A shift has nine fields and a day grid, and the table behind it no longer has to sit under a
+          form that was usually empty. Mounted only while it is open. */}
+      {editorOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Shift', formData.description) : 'New shift'}
+          subtitle={isEditing ? 'Editing an existing shift' : 'Not saved yet'}
+          icon={<Clock className="h-4 w-4" />}
+          formId={SHIFT_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add shift'}
+          saving={saving}
+          onClose={resetForm}
+        >
+          <form id={SHIFT_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
-          {error && (
-            <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
+              {error && (
+                <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-3">
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Description</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Day Shift, Night Shift"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Description</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Day Shift, Night Shift"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Start Time</label>
-              <input
-                type="time"
-                required
-                value={formData.start_time}
-                onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Start Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={formData.start_time}
+                    onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">End Time</label>
-              <input
-                type="time"
-                required
-                value={formData.end_time}
-                onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">End Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={formData.end_time}
+                    onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
 
-            <div className="md:col-span-3">
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                Days of Week <span className="text-slate-500">(the day the shift starts)</span>
-              </label>
-              <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
-                {DAYS.map(({ key, label }) => (
-                  <label
-                    key={key}
-                    className={`flex items-center justify-center cursor-pointer px-2 py-2 rounded-xl text-sm font-medium border transition select-none ${
-                      formData[key]
-                        ? 'bg-red-600 text-white border-red-600 shadow-sm'
-                        : 'bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-600 hover:border-red-400 dark:hover:border-red-500'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={formData[key]}
-                      onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })}
-                    />
-                    {label}
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                    Days of Week <span className="text-slate-500">(the day the shift starts)</span>
                   </label>
-                ))}
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                    {DAYS.map(({ key, label }) => (
+                      <label
+                        key={key}
+                        className={`flex items-center justify-center cursor-pointer px-2 py-2 rounded-xl text-sm font-medium border transition select-none ${
+                          formData[key]
+                            ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                            : 'bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-600 hover:border-red-400 dark:hover:border-red-500'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={formData[key]}
+                          onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add Shift'}
-            </button>
-          </div>
-        </form>
-      </div>
+          </form>
+        </ViewportModal>
+      )}
 
-      {/* Shifts Table */}
+      {/* Shifts Table, with New shift where somebody looks when they want another one. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <Clock className="h-4 w-4 shrink-0 text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Shifts</h3>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setFormData(EMPTY_FORM);
+              setEditorOpen(true);
+            }}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New shift
+          </button>
+        </div>
+
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>

@@ -1,12 +1,17 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X } from 'lucide-react';
+import { Save, Loader2, Pencil, Shield, Trash2, Plus, AlertCircle } from 'lucide-react';
 import { adminSaveRank, adminDeleteRank } from '../../services/api';
 import RankIcon from '../RankIcon';
 import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
 import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', description: '', color: '#ef4444', icon: '', rank_order: '' };
+
+// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
+// the HTML `form` attribute - so Enter in a text input still submits the rank.
+const RANK_FORM_ID = 'rank-editor-form';
 
 export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
@@ -15,12 +20,20 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
   // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
+  // The editor is a modal now, opened by New rank or by choosing a row, so the page behind it is the list.
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const isEditing = !!formData.id;
-  const resetForm = () => setFormData(EMPTY_FORM);
+  // Closing the editor and clearing the form are the same act, which is why every existing call site - saved,
+  // cancelled, and deleted-while-open - carries on working: all three wanted both.
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditorOpen(false);
+  };
 
   const handleEdit = (rank) => {
     setError(null);
+    setEditorOpen(true);
     setFormData({
       id: rank.id,
       // Carried through the form so the backend can refuse a save built on a stale copy.
@@ -75,98 +88,117 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{isEditing ? recordHeading('Rank', formData.description) : 'Add New Rank'}</h3>
-            {isEditing && (
-              <button type="button" onClick={resetForm} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 text-sm">
-                <X className="w-4 h-4" /> Cancel
-              </button>
-            )}
-          </div>
+      {/* The editor, in a modal that takes most of the viewport - the format every New card in the Administration
+          module uses. The rank form is short, but the table behind it was being pushed down the page by a form
+          that was almost always empty, and the modal also gives an unsaved rank somewhere to be abandoned.
+          Mounted only while it is open, so the page is just the list. */}
+      {editorOpen && (
+        <ViewportModal
+          title={isEditing ? recordHeading('Rank', formData.description) : 'New rank'}
+          subtitle={isEditing ? 'Editing an existing rank' : 'Not saved yet'}
+          icon={<Shield className="h-4 w-4" />}
+          formId={RANK_FORM_ID}
+          saveLabel={isEditing ? 'Save changes' : 'Add rank'}
+          saving={saving}
+          onClose={resetForm}
+        >
+          <form id={RANK_FORM_ID} onSubmit={handleSubmit} className="space-y-4">
 
-          {error && (
-            <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
+              {error && (
+                <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Description</label>
-              <input
-                type="text"
-                required
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Description</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Rank Order</label>
-              <input
-                type="number"
-                step="1"
-                value={formData.rank_order}
-                onChange={(e) => setFormData({ ...formData, rank_order: e.target.value })}
-                placeholder="e.g. 1"
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
-                Higher number = higher rank. Members can be scheduled for their own rank and every lower one.
-              </p>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Rank Order</label>
+                  <input
+                    type="number"
+                    step="1"
+                    value={formData.rank_order}
+                    onChange={(e) => setFormData({ ...formData, rank_order: e.target.value })}
+                    placeholder="e.g. 1"
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                    Higher number = higher rank. Members can be scheduled for their own rank and every lower one.
+                  </p>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Color</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={formData.color}
-                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                  className="w-11 h-11 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={formData.color}
-                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-              </div>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={formData.color}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      className="w-11 h-11 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={formData.color}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
 
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Icon</label>
-              <div className="flex items-end gap-3">
-                <IconPicker
-                  value={formData.icon}
-                  onChange={(icon) => setFormData({ ...formData, icon })}
-                />
-                {/* The picker can only show one neutral glyph; this shows the same icon in the rank's colour. */}
-                <div className="shrink-0 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
-                  <RankIcon name={formData.icon} className="w-5 h-5" style={{ color: formData.color }} />
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Icon</label>
+                  <div className="flex items-end gap-3">
+                    <IconPicker
+                      value={formData.icon}
+                      onChange={(icon) => setFormData({ ...formData, icon })}
+                    />
+                    {/* The picker can only show one neutral glyph; this shows the same icon in the rank's colour. */}
+                    <div className="shrink-0 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                      <RankIcon name={formData.icon} className="w-5 h-5" style={{ color: formData.color }} />
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isEditing ? 'Save Changes' : 'Add Rank'}
-            </button>
-          </div>
-        </form>
-      </div>
+          </form>
+        </ViewportModal>
+      )}
 
+      {/* The list, with New rank where somebody looks when they want another one - the same place Documents keeps
+          its New document. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <Shield className="h-4 w-4 shrink-0 text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Ranks</h3>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {(Array.isArray(ranks) ? ranks.length : 0)} rank
+            {(Array.isArray(ranks) ? ranks.length : 0) === 1 ? '' : 's'}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setFormData(EMPTY_FORM);
+              setEditorOpen(true);
+            }}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New rank
+          </button>
+        </div>
+        <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>
@@ -232,6 +264,8 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
             )}
           </tbody>
         </table>
+        </div>
+
       </div>
 
       {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard

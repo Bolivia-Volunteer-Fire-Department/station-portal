@@ -2120,5 +2120,22 @@ const historySource = readFileSync('src/components/MyClockHistory.jsx', 'utf8');
 check('the admin-only sort is excluded deliberately', /value !== 'name_asc'/.test(historySource), true);
 check('the table and the cards read the same list', /logs=\{visibleLogs\}/.test(historySource), true);
 
+// ---------------------------------------------------------------------------
+// A "New X" card is an editor modal: the form is not on the page until it is asked for, it is submitted from the
+// modal's toolbar, and it closes when the save lands. Ranks and Shifts are the first two converted; this is the
+// shape the rest are being brought to, so it is asserted as a shape rather than tab by tab.
+const editorModalTabs = {
+  'AdminRanksTab.jsx': readFileSync('src/components/admin/AdminRanksTab.jsx', 'utf8'),
+  'AdminShiftsTab.jsx': readFileSync('src/components/admin/AdminShiftsTab.jsx', 'utf8'),
+};
+Object.entries(editorModalTabs).forEach(([file, source]) => {
+  check(`${file} mounts its editor only while it is open`, /\{editorOpen && \(/.test(source), true);
+  check(`${file} opens it from a row and from New`, /setEditorOpen\(true\)/.test(source) && /setEditorOpen\(\)/.test(source) === false, true);
+  check(`${file} submits through the toolbar's form id`, /formId=\{[A-Z_]+_FORM_ID\}/.test(source) && /id=\{[A-Z_]+_FORM_ID\}/.test(source), true);
+  check(`${file} closes when the form is reset`, /const resetForm = \(\) => \{\s*setFormData\(EMPTY_FORM\);\s*setEditorOpen\(false\);\s*\};/.test(source), true);
+  check(`${file} says it is saving`, /saving=\{saving\}/.test(source) && /saveLabel=/.test(source), true);
+  check(`${file} has a New button in the list header`, /New (rank|shift)/.test(source), true);
+});
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
