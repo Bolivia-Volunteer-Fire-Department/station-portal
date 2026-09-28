@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Clock, Shield, Menu, X } from 'lucide-react';
+import React, { Suspense, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Clock, Shield, Loader2, Menu, X } from 'lucide-react';
 // Toasts come from our own wrapper, not from sonner: it plays the sound mapped to each toast kind and then
 // delegates, so every toast in the app is audible without its call site knowing about sounds. The Toaster host
 // itself is still sonner's.
@@ -42,25 +42,33 @@ import ClockBlockedModal from './components/ClockBlockedModal';
 import Sidebar from './components/Sidebar';
 import ClockCard from './components/ClockCard';
 import OnDutyCard from './components/OnDutyCard';
-import UserSettings from './components/UserSettings';
 import LoadingOverlay from './components/LoadingOverlay';
-import MyClockHistory from './components/MyClockHistory';
 import {
   MASTER_PERMISSION_KEY,
   permissionGranted,
   roleHasAdministration,
 } from './utils/permissions';
-import ScheduleCalendar from './components/ScheduleCalendar';
-import MyAvailability from './components/MyAvailability';
-import HelpGuides from './components/HelpGuides';
-import DocumentsModule from './components/DocumentsModule';
+// The app's heavy screens arrive when their tab is opened, not before - see utils/deferredModules.js, which also
+// explains the idle prefetch below. The names are unchanged, so no render site in this file had to be edited: a
+// module that is not in this list (the clock, the sidebar, the modals) is still part of the first download.
+import {
+  AdminPanel,
+  CertificationsModule,
+  DocumentsModule,
+  FirefighterRunner,
+  HelpGuides,
+  MyAvailability,
+  MyClockHistory,
+  ScheduleCalendar,
+  TrainingModule,
+  UserSettings,
+  prefetchDeferredModules,
+  prefetchableFor,
+} from './utils/deferredModules';
 import { pageBarLabel } from './utils/pageLabels';
-import TrainingModule from './components/TrainingModule';
-import CertificationsModule from './components/CertificationsModule';
 import CertificationNotice from './components/CertificationNotice';
 import { setCertificationBadges } from './utils/certifications';
 import DigitalClock from './components/DigitalClock';
-import AdminPanel from './components/admin/AdminPanel';
 import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
 import { mergeSavedUser } from './utils/userRow';
@@ -79,7 +87,6 @@ import { stationLogoUrl } from './utils/assets';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
 import { normalizeEventList } from './utils/events';
-import FirefighterRunner from './components/FirefighterRunner/FirefighterRunner';
 
 // Content pages fill the viewport. There is deliberately no max-width on the container itself: a station's
 // schedule and clock tables are dense, and capping them wasted the horizontal space a wide screen has.
@@ -93,6 +100,17 @@ import FirefighterRunner from './components/FirefighterRunner/FirefighterRunner'
 // push the page wider than the viewport and give the app a horizontal scrollbar on a phone or tablet.
 // Letting it shrink keeps the overflow inside each table's own `overflow-x-auto` wrapper, where it
 // belongs. Padding steps up with the screen size so a phone spends its width on content, not margins.
+
+// Stands in while a deferred screen's chunk is in flight. Centred in the space the screen will fill, and the same
+// spinner every other wait in the app shows, so opening a tab does not flash an empty frame. `role="status"` so a
+// screen reader is told something is happening rather than being read a blank page.
+function DeferredScreenFallback() {
+  return (
+    <div className="flex items-center justify-center py-16" role="status" aria-live="polite">
+      <Loader2 className="w-6 h-6 text-red-500 animate-spin" />
+    </div>
+  );
+}
 
 export default function App() {
   const [users, setUsers] = useState([]);
@@ -294,6 +312,47 @@ export default function App() {
   // `adminSubTab` before that `useState` runs is a temporal dead zone error, and it takes the whole app down
   // rather than the screen it belongs to. scripts/verify-app-shell.mjs checks the order.
   const boundedScreen = activeTab === 'help' || activeTab === 'documents' || (activeTab === 'admin' && adminSubTab === 'help');
+
+  // The chunks this member may need, joined into a string so the effect below depends on the SET rather than on an
+  // array that is a fresh object on every render - which would re-arm the idle callback continuously and warm
+  // nothing. The flags passed are the same ones the render sites below gate on; see utils/deferredModules.js.
+  const prefetchKeys = useMemo(
+    () =>
+      prefetchableFor({
+        canUseTimeclock,
+        canViewSchedule,
+        canEditOwnAvailability,
+        canViewDocuments,
+        canSignTrainings,
+        canAdminister,
+      }).join(','),
+    [
+      canUseTimeclock,
+      canViewSchedule,
+      canEditOwnAvailability,
+      canViewDocuments,
+      canSignTrainings,
+      canAdminister,
+    ]
+  );
+
+  useEffect(() => {
+    // Nothing to warm until a member is signed in: that is when a role exists, and so a set of reachable tabs.
+    if (!currentUser || !prefetchKeys) return undefined;
+    // Idle time, and asset fetches only - never an API request, so this costs the Apps Script side nothing. Without
+    // requestIdleCallback the wait is a short timeout: late enough not to compete with the first screen, early
+    // enough to be there before anyone has finished reading the clock.
+    const idle = (callback) =>
+      typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback(callback)
+        : window.setTimeout(callback, 200);
+    const cancel = (handle) =>
+      typeof window.cancelIdleCallback === 'function'
+        ? window.cancelIdleCallback(handle)
+        : window.clearTimeout(handle);
+    const handle = idle(() => prefetchDeferredModules(prefetchKeys.split(',')));
+    return () => cancel(handle);
+  }, [currentUser, prefetchKeys]);
 
   useEffect(() => {
     const heading = pageHeadingRef.current;
@@ -1386,6 +1445,11 @@ const getLoadingMessage = () => {
               </p>
             </div>
 
+            {/* One boundary for every deferred screen in the chain below (see utils/deferredModules.js). It adds
+                no element of its own, so the layout above - and the flex rows on the Help screen - are untouched;
+                while a chunk is in flight the fallback stands in. The page heading is deliberately OUTSIDE it, so
+                the tab that is opening still names itself. */}
+            <Suspense fallback={<DeferredScreenFallback />}>
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
                 {/* Anything about to run out, above everything else: it is the one thing on this screen that is
@@ -1571,6 +1635,7 @@ const getLoadingMessage = () => {
                 soundProfile={runnerSoundProfile}
               />
             )}
+            </Suspense>
           </main>
         </div>
       )}

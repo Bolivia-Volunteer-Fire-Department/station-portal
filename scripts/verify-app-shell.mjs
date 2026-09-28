@@ -338,8 +338,11 @@ checkIs(
 const builtCss = (() => {
   try {
     const dir = 'dist/assets';
-    const file = readdirSync(dir).find((name) => name.endsWith('.css'));
-    return file ? readFileSync(`${dir}/${file}`, 'utf8') : '';
+    // EVERY stylesheet, not the first one found. The app's heavy screens are deferred into their own chunks now
+    // (see utils/deferredModules.js) and Tailwind emits a stylesheet per chunk along with them, so reading one
+    // file would check the utilities of one screen and report every other screen's as typos.
+    const files = readdirSync(dir).filter((name) => name.endsWith('.css'));
+    return files.map((name) => readFileSync(`${dir}/${name}`, 'utf8')).join('\n');
   } catch {
     return '';
   }
@@ -481,6 +484,47 @@ checkIs('the static value is the translucent one', !/apple-mobile-web-app-status
 const lockedEverywhere = viewportMeta.replace('initial-scale=1.0', 'maximum-scale=1, user-scalable=no');
 checkIs('the mutation changed the viewport', lockedEverywhere !== viewportMeta);
 checkIs('and the mutation fails the tab rule', !viewportKeepsPinchZoom(lockedEverywhere));
+
+// ---------------------------------------------------------------------------
+// 8. The heavy screens arrive with their tab, not with the app
+// ---------------------------------------------------------------------------
+//
+// The bundle used to be one 1.08 MB file (293 kB gzipped). Deferring the screens behind a tab cut what a member
+// downloads before the clock appears to 110 kB gzipped - and this is the kind of change one ordinary-looking
+// commit can undo: restoring `import AdminPanel from './components/admin/AdminPanel'` would look perfectly
+// reasonable, and would quietly put 80 kB of gzipped Administration back into everybody's first load.
+console.log('\n--- the heavy screens arrive with their tab ---');
+const deferred = readFileSync('src/utils/deferredModules.js', 'utf8');
+const deferredNames = [...deferred.matchAll(/^\s{2}([A-Za-z]+): \(\) => import\(/gm)].map((m) => m[1]);
+checkIs('the loader list is read', deferredNames.length >= 10, `found ${deferredNames.length}`);
+// Each name has a lazy() built from the same loader object the prefetch walks, so a screen cannot be deferred in
+// one place and eager in the other, and cannot be warmed under a name that does not exist.
+const withoutLazy = deferredNames.filter(
+  (name) => !new RegExp(`export const ${name} = lazy\\(loaders\\.${name}\\);`).test(deferred)
+);
+check('every loader has its lazy export', withoutLazy, []);
+const stillEager = deferredNames.filter((name) => new RegExp(`^import ${name} from '\\./components/`, 'm').test(app));
+check('and App imports none of them eagerly', stillEager, []);
+
+// The boundary, and a fallback that says something is happening. A blank frame is the failure mode being avoided.
+checkIs('App wraps the tab content in a Suspense boundary', /<Suspense fallback=\{<DeferredScreenFallback \/>\}>/.test(app));
+checkIs(
+  'with the app\'s own spinner as the fallback, not an empty box',
+  /function DeferredScreenFallback\(\)[\s\S]{0,400}Loader2 className="[^"]*animate-spin"/.test(app)
+);
+
+// The prefetch, and both halves of the promise made about it. Idle time, because warming during the first render
+// would compete with the screen the member is waiting for; assets only, because anything reaching the API would
+// add an Apps Script round trip per member to save them a chunk fetch.
+checkIs('the prefetch is idle-time work', /window\.requestIdleCallback\(callback\)/.test(app));
+checkIs('and it warms the deferred chunks', /prefetchDeferredModules\(prefetchKeys\.split\(','\)\)/.test(app));
+check('it makes no API call', /apiFetch|apiPost|api\(|fetch\(/.test(deferred), false);
+// Administration is the big one, and it is warmed only for a member who can open it: everybody else would be
+// downloading gzipped tabs they cannot see. The ungated screens stay in the base list.
+checkIs('Administration is warmed only for an administrator', /if \(canAdminister\) keys\.push\('AdminPanel'\);/.test(deferred));
+const baseKeys = /const keys = \[([^\]]*)\]/.exec(deferred)?.[1] || '';
+checkIs('and never as a default', !/AdminPanel/.test(baseKeys), baseKeys);
+checkIs('the hidden Runner is never warmed at all', !/keys\.push\('FirefighterRunner'\)/.test(deferred));
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
