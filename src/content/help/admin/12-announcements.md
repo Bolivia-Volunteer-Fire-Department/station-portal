@@ -5,6 +5,8 @@
 
 ## The fields
 
+Press **New announcement** at the right of the list to add one, or **Edit** on a row. Either opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls, and it closes when the save lands.
+
 | Field | Notes |
 |---|---|
 | **Title** | Required. Shown in bold at the top of the announcement |

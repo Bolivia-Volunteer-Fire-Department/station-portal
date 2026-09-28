@@ -5,6 +5,8 @@
 
 ## The fields
 
+Press **New rank** at the right of the list to add one, or **Edit** on a row. Either opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls; it closes when the save lands.
+
 | Field | Notes |
 |---|---|
 | **Description** | The rank name, such as Firefighter, Driver/Operator, Lieutenant |

@@ -64,9 +64,9 @@ On **My Schedule** it sits beside **Show everyone** in the same strip, because b
 > [!TIP]
 > To retire an event rather than delete it, set its **End date** in the past (or its repeat end, if it repeats). The record stays in the list and re-running it later is a single date change.
 
-## The list below the form
+## The lists
 
-Sorting and filtering sit below the add card and above the lists. You can narrow by **date range** and by who an event **shows to** (*Everyone* for untargeted events, *Targeted* for the ones aimed at a role, rank or member), and sort by date either way or by title. The bar shows how much of the list you are looking at, and **Clear filters** puts it all back.
+Sorting and filtering sit above the lists, with **New event** at the end of the same bar — the editor opens over the page, with Save and Cancel in a bar at the top of it. You can narrow by **date range** and by who an event **shows to** (*Everyone* for untargeted events, *Targeted* for the ones aimed at a role, rank or member), and sort by date either way or by title. The bar shows how much of the list you are looking at, and **Clear filters** puts it all back.
 
 Events are then split into **two cards**:
 

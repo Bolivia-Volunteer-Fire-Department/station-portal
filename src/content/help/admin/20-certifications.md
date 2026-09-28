@@ -7,6 +7,8 @@
 
 ## Recording a certification
 
+Press **New record** at the right of the table, and the editor opens **over the page** — member, certification, dates and notes, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. A row's **Edit** opens the same editor, and it closes when the save lands; a save that fails keeps it open with the reason in it.
+
 Choose the member, the certification, and the dates.
 
 - **Effective date** is when the period started. Leave it blank for one that has always applied.

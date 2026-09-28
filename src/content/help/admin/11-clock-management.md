@@ -32,7 +32,7 @@ Sorting by member name keeps each person's own entries in date order rather than
 
 ## Fixing an entry
 
-- **Add New Timeclock Entry** creates one from scratch — for someone who could not clock in, or for a shift worked before the system existed.
+- **New entry** (top right of the entries card) creates one from scratch — for someone who could not clock in, or for a shift worked before the system existed. The editor opens over the page, with Save and Cancel in a bar at the top of it.
 - **Edit Entry** corrects an existing one, including setting a time out on an entry that was left open.
 
 > [!CAUTION]

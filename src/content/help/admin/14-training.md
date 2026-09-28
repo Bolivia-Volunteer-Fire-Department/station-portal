@@ -9,7 +9,7 @@ Each row is one training: date, title, location, instructors and how many member
 
 **Expand a training** — click the arrow at the left, or the number in the *Signed* column — to see the members who signed it, as a list of names. Each name has a remove button beside it. The training's narrative appears under the list.
 
-Rename or correct a training with **Edit**, which loads it into the form at the top of the page; **Delete** removes it entirely.
+Rename or correct a training with **Edit**, which opens it in the editor — the same one **Add training** opens; **Delete** removes it entirely.
 
 ## Filtering, and totalling training hours
 
@@ -32,7 +32,7 @@ An empty result reads *No trainings match these filters* rather than looking lik
 
 ## Adding and editing trainings
 
-The card at the top of this tab is collapsed until you click it. It is the same form a training manager sees in their own Training module, with one difference: **only here can you set "Entered into an external system"**.
+Press **Add training** at the right of the report toolbar, and the editor opens **over the page** — fields, times, narrative and classification, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. The same editor opens from a row's **Edit**, and it closes when the save lands; a save that fails keeps it open with the reason in it. It is the same form a training manager sees in their own Training module, with one difference: **only here can you set "Entered into an external system"**.
 
 | Field | Notes |
 |---|---|

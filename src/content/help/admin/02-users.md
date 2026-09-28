@@ -29,7 +29,7 @@ Use it for anyone who is not on the roster — new recruits in training, someone
 
 ## Creating and editing
 
-1. Fill in the form and save. For a new member the password is required, since there is nothing to keep.
+1. Press **New member** at the top right of the roster — the editor opens over the page, with Save and Cancel in a bar at the top of it. Fill in the form and save. For a new member the password is required, since there is nothing to keep.
 2. Allow a few seconds — an admin save reloads the whole directory, the schedule, the templates and the offers, so other tabs reflect the change immediately.
 
 > [!NOTE]

@@ -5,7 +5,7 @@ The **Training** module is the department's training record that replaces paper 
 
 ## Adding or editing trainings
 
-Depending on your role, a form appears above the list and each row gains an **Edit** action.
+Depending on your role, the record card gains an **Add training** button and each row gains an **Edit** action. Either one opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls.
 
 - The form takes a date, title, start time, duration in hours, location, instructors and a narrative, plus the classification checkboxes.
 - **A date and a title are required** — without them there is nothing to display or sign, so the form will not save.

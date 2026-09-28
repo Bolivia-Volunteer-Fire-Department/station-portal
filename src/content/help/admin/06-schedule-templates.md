@@ -5,6 +5,8 @@
 
 ## The fields
 
+Press **New template** at the right of the week grid to add one, or click a shift in the grid to edit it. Either opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls.
+
 | Field | Notes |
 |---|---|
 | **Day of Week** | Which day of the week the shift recurs on |

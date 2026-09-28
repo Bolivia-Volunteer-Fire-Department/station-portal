@@ -7,6 +7,8 @@
 
 ## What each certification decides
 
+Press **New certification type** at the right of the table to add one, or **Edit** on a row. Either opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. A certification type that records still use cannot be deleted — see below.
+
 | Field | What it controls |
 |---|---|
 | **Name** | What members and administrators see, on the records and in the sign-in warning |

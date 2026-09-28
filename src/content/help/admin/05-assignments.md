@@ -53,6 +53,8 @@ The icon catalog is the same one the **Ranks** tab uses, so the two look like on
 
 ## Adding an assignment
 
+Press **New assignment** at the right of the list, and the editor opens **over the page** — the fields below, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. A row's **Edit** opens the same editor, and it closes when the save lands; a save that fails keeps it open with the reason in it.
+
 1. **Description** — something members will recognize. This is drawn on every pill for the shift, so keep it short; "Engine 1" reads better than "Engine 1 - Station 2".
 2. **Minimum Rank** — the lowest rank that may take it.
 3. **Color** and **Icon** — as above.
