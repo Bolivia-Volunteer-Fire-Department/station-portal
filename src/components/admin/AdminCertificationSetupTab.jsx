@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, AlertCircle } from 'lucide-react';
+import { Pencil, Trash2, AlertCircle, Award, Plus } from 'lucide-react';
 import { adminSaveCertificationSetup, adminDeleteCertificationSetup } from '../../services/api';
 import RankIcon from '../RankIcon';
 import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
 import { recordHeading } from '../../utils/displayLabel';
 
 // The text fields, in the order they read: the name first, then the two numbers. `warn_days_before` blank is
@@ -61,17 +62,21 @@ const EMPTY_FORM = {
 //   * whether it shows beside the name at all, and only while the certification is current.
 export default function AdminCertificationSetupTab({ token, setup = [], onDataChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // Whether the editor modal is open: "a new type" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
   const startNew = () => {
+    setEditorOpen(true);
     setFormData(EMPTY_FORM);
     setError(null);
   };
 
   const startEdit = (row) => {
+    setEditorOpen(true);
     setFormData({
       id: row.id,
       name: row.name || '',
@@ -139,11 +144,19 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-800">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">
-          {formData.id ? recordHeading('certification', formData.name) : 'Add a certification'}
-        </h3>
-
+      {/* The editor, in the viewport modal every New card in this module now uses. Its body is a div rather than a
+          <form>, so the toolbar's Save calls handleSave through onSave instead of submitting anything. */}
+      {editorOpen && (
+        <ViewportModal
+          title={formData.id ? recordHeading('certification', formData.name) : 'New certification type'}
+          subtitle={formData.id ? 'Editing an existing type' : 'Not saved yet'}
+          icon={<Award className="h-4 w-4" />}
+          onSave={handleSave}
+          saveLabel={formData.id ? 'Save changes' : 'Add certification'}
+          saving={saving}
+          onClose={startNew}
+        >
+        <div className="space-y-4">
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-600 dark:border-red-800/80 dark:bg-red-950/80 dark:text-red-400">
             <AlertCircle className="h-4 w-4 shrink-0" />
@@ -198,21 +211,24 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
           ))}
         </div>
 
-        <div className="mt-5 flex justify-end">
+        </div>
+        </ViewportModal>
+      )}
+
+      {/* The list, with the New button where somebody looks for another one. */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <Award className="h-4 w-4 shrink-0 text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Certification types</h3>
           <button
             type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={startNew}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {formData.id ? 'Save changes' : 'Add certification'}
+            <Plus className="h-4 w-4" />
+            New certification type
           </button>
         </div>
-      </div>
-
-
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">

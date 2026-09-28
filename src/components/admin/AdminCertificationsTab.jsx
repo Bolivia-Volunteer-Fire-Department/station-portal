@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, AlertCircle } from 'lucide-react';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus } from 'lucide-react';
 import { adminSaveCertification, adminDeleteCertification } from '../../services/api';
 import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
 import ConfirmModal from '../ConfirmModal';
+import ViewportModal from '../ViewportModal';
 import { userLabel } from '../../utils/displayLabel';
 import {
   certificationStateLabel,
@@ -43,6 +44,8 @@ const STATE_ORDER = { expiring: 0, expired: 1, active: 2, upcoming: 3 };
 //     have no expiry, and the server blanks the field too, so the rule survives somebody editing the sheet.
 export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], onDataChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // Whether the editor modal is open: "a new record" and "no editor" are both `formData.id === ''`.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -67,11 +70,13 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   const endDateOff = !selectedType || !selectedType.is_renewable;
 
   const startNew = () => {
+    setEditorOpen(true);
     setFormData(EMPTY_FORM);
     setError(null);
   };
 
   const startEdit = (row) => {
+    setEditorOpen(true);
     setFormData({
       id: row.id,
       user_id: row.user_id || '',
@@ -145,21 +150,19 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-800">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-            {formData.id ? 'Edit certification record' : 'Record a certification'}
-          </h3>
-          {formData.id && (
-            <button
-              type="button"
-              onClick={startNew}
-              className="rounded-xl px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              New record
-            </button>
-          )}
-        </div>
+      {/* The editor, in the viewport modal every New card in this module now uses. Its body is a div rather than a
+          <form>, so the toolbar's Save calls handleSave through onSave instead of submitting anything. */}
+      {editorOpen && (
+        <ViewportModal
+          title={formData.id ? 'Edit certification record' : 'New certification record'}
+          subtitle={formData.id ? 'Editing an existing record' : 'Not saved yet'}
+          icon={<Award className="h-4 w-4" />}
+          onSave={handleSave}
+          saveLabel={formData.id ? 'Save changes' : 'Record certification'}
+          saving={saving}
+          onClose={startNew}
+        >
+        <div className="space-y-4">
 
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-600 dark:border-red-800/80 dark:bg-red-950/80 dark:text-red-400">
@@ -253,22 +256,21 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           </label>
         </div>
 
-        <div className="mt-6 flex justify-end border-t border-slate-200 pt-4 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || !formData.user_id || !formData.certification_id}
-            className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {formData.id ? 'Save changes' : 'Record certification'}
-          </button>
         </div>
-      </div>
+        </ViewportModal>
+      )}
 
-
+      {/* The records, with the New button in the filter row - the only header this card has. */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-4 dark:border-slate-700">
+          <button
+            type="button"
+            onClick={startNew}
+            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New record
+          </button>
           {FILTERS.map((option) => (
             <button
               key={option.id}
