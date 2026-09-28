@@ -2207,9 +2207,26 @@ check('large is the default, so the other editors are unchanged', /size = 'large
 check('and an unknown size falls back to large rather than to no frame', /size === 'small' \? 'small' : 'large'/.test(viewportModal), true);
 // The field-count rule lives in one place, beside the component, so it does not have to be re-argued per tab.
 check('the rule is written down once', /SMALL_EDITOR_FIELD_LIMIT = 5/.test(viewportModal) && /export const editorModalSize/.test(viewportModal), true);
+// A frame has a width of its own, so a grid inside it must key off the CONTAINER and not the viewport: this is
+// the bug that squashed the timeclock fields on a desktop, in a panel narrower than the md breakpoint.
+check('the body is a container, so field grids can measure the space they got', /@container relative min-h-0 flex-1 overflow-y-auto/.test(viewportModal), true);
+check('and the small frame is wide enough for two columns', /small: 'sm:h-auto sm:max-h-\[85dvh\] sm:w-\[40rem\]/.test(viewportModal), true);
+const clockTabSource = readFileSync('src/components/admin/AdminClockManagementTab.jsx', 'utf8');
 check(
   'the timeclock editor asks for the small frame',
-  /size="small"/.test(readFileSync('src/components/admin/AdminClockManagementTab.jsx', 'utf8')),
+  /size="small"/.test(clockTabSource),
+  true
+);
+// Sliced to the form itself: the filters card below it has its own three-column grid, which is the right shape
+// for a card that spans the page and says nothing about the editor.
+const clockFormStart = clockTabSource.indexOf('<form id={CLOCK_ENTRY_FORM_ID}');
+const clockFormSource = clockTabSource.slice(
+  clockFormStart,
+  clockTabSource.indexOf('</form>', clockFormStart)
+);
+check(
+  'and lays its fields out by container width, not viewport width',
+  /@md:grid-cols-2/.test(clockFormSource) && !/md:grid-cols-3/.test(clockFormSource),
   true
 );
 

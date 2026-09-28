@@ -48,7 +48,9 @@ export const editorModalSize = (fieldCount) =>
 // The frame, per size. Mobile is the full screen either way: a compact dialog on a phone is a keyboard's worth of
 // scrolling, and the safe-area padding only makes sense against the whole screen.
 const PANEL_SIZE_CLASS = {
-  small: 'sm:h-auto sm:max-h-[85dvh] sm:w-[34rem] sm:max-w-[94vw]',
+  // The small frame is wide enough for a TWO-column field grid (which is the layout the rule below assumes) with
+  // room left over: two columns of a datetime-local input need about 18rem each.
+  small: 'sm:h-auto sm:max-h-[85dvh] sm:w-[40rem] sm:max-w-[94vw]',
   large: 'sm:h-[92dvh] sm:max-h-[92dvh] sm:w-[94vw] sm:max-w-6xl',
 };
 
@@ -184,9 +186,16 @@ export default function ViewportModal({
           </div>
         </div>
 
-        {/* The body: the one part that scrolls. `overscroll-contain` stops the page behind from being dragged
-            along when the reader reaches the end of a long checklist on a touch screen. */}
-        <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {/* The body: the one part that scrolls.
+            `overscroll-contain` stops the page behind from being dragged along when the reader reaches the end of
+            a long checklist on a touch screen.
+
+            `@container` makes this a CONTAINER, and that is what every field grid inside a dialog must key off.
+            The frame has a width of its own - 40rem for a small editor, 94vw for a large one - and a viewport
+            breakpoint knows nothing about it: `md:grid-cols-3` inside a 34rem panel asked for three columns of
+            10rem and squashed a datetime input and its label, on a desktop, because the VIEWPORT was wide. A
+            container variant asks the question that matters: how wide is the space the fields actually got. */}
+        <div className="@container relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {/* A disabled fieldset is what "the form is disabled while saving" means in HTML: every input, select,
               textarea and button inside it stops responding, in one place, rather than one `disabled` per field
               that somebody will eventually forget. */}

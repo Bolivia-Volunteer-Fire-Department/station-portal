@@ -273,8 +273,11 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
+          {/* Two columns of the space the FIELDS actually get, never three: at a 40rem panel three columns are
+              10rem each, which squashes a datetime input and turns its label into a tower. Member takes the full
+              width because a name is the longest thing here. */}
+          <div className="grid grid-cols-1 gap-4 @md:grid-cols-2">
+            <div className="@md:col-span-2">
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Member</label>
               <select
                 required
