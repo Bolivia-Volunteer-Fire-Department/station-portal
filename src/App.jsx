@@ -1222,7 +1222,7 @@ const getLoadingMessage = () => {
   const handlePasswordChange = async (newPassword) => {
     setGlobalLoading({ active: true, message: getLoadingMessage() });
     try {
-      const result = await updateUserPassword(currentUser.id, newPassword, authToken);
+      const result = await updateUserPassword({ newPassword });
       if (result.success) {
         // The server clears the "must change it" flag as part of the save; clearing it here too is what closes
         // the forced-change modal, so the member is not held at it by our own stale copy of their row.

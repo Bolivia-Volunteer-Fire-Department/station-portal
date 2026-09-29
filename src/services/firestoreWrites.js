@@ -274,6 +274,60 @@ export const setPushDisabled = async ({ userId, disabled }) => {
   return { userId: target, disabled: disabled === true, devicesForgotten: disabled ? rows.docs.length : 0 };
 };
 
+// The member's own settings row: a time format, a theme, and which notifications they want.
+//
+// A MERGE, and the merge is the point: the settings form and the "enable notifications on this device" flow are the same
+// call carrying different fields, and a field one of them did not send must be left exactly as it was.
+//
+// Which makes two things mandatory rather than tidy:
+//
+//   UNDEFINED FIELDS ARE DROPPED. Firestore rejects an undefined value outright, and the client sends its absences as
+//   undefined on purpose - "not stated" is a real state here, not a zero.
+//
+//   THE TWO FLAGS BECOME REAL BOOLEANS. The form stringifies them ("false"), and a string is one careless reader away
+//   from meaning the opposite: the push path already compares `is_push_disabled === true` strictly, and a 'false' that
+//   is truthy is exactly the kind of bug that takes an afternoon.
+//
+// Unknown keys PASS THROUGH rather than being filtered against a list. The sheet had a whitelist, and the file that kept
+// one drifted from the catalog twice - a new switch existed in two of three lists and silently did nothing. A document
+// store has no columns to match, so the honest rule is: store what the form sent, and know which keys mean something.
+const BOOLEAN_USER_SETTINGS = new Set([
+  'is_dark_mode',
+  'notify_new_offer',
+  'notify_offer_approved',
+  'notify_offer_declined',
+  'notify_announcements',
+]);
+
+// Stored on the device, not on the member. A token in this document would be a second copy: nothing reads it, and
+// nothing would clear it when the device unregisters - which is the whole reason `push_devices` exists.
+const IGNORED_USER_SETTINGS = new Set(['id', 'action', 'token', 'fcm_token']);
+
+const memberSettingValue = (key, value) => {
+  const raw = value === undefined || value === null ? '' : value;
+  if (BOOLEAN_USER_SETTINGS.has(key)) {
+    const text = String(raw).trim().toUpperCase();
+    return text === 'TRUE' || text === 'YES' || text === '1';
+  }
+  return String(raw);
+};
+
+export const saveMemberSettings = async ({ userId, fields }) => {
+  const target = String(userId || '').trim();
+  if (!target) throw new Error('Which member do these settings belong to?');
+
+  const document = {};
+  Object.entries(fields || {}).forEach(([key, value]) => {
+    if (IGNORED_USER_SETTINGS.has(key)) return;
+    if (value === undefined) return;
+    document[key] = memberSettingValue(key, value);
+  });
+
+  if (!Object.keys(document).length) return { userId: target, changed: 0 };
+  await setDoc(doc(firestore(), 'user_settings', target), document, { merge: true });
+  return { userId: target, changed: Object.keys(document).length };
+};
+
 export const deleteDocument = async ({ collection, id }) => {
   const target = String(id || '');
   if (await clientWritesAreAudited()) {

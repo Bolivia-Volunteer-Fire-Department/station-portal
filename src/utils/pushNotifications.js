@@ -36,8 +36,18 @@ export function notificationPermission() {
   return Notification.permission;
 }
 
-// `fcm_web_config` is stored as JSON in a single system_settings value; we also
-// accept the individual keys as a fallback so either shape works in the sheet.
+// The config the browser needs in order to subscribe, and there are two sources for it.
+//
+// `fcm_web_config` (a JSON blob in system_settings) is the station's own copy, which is how the sheet HAD to do it:
+// Apps Script could not know a browser's config, so an administrator pasted it in. The individual `fcm_*` keys are the
+// same thing split up, kept readable so a station configured that way still works.
+//
+// The app's OWN Firebase config is the fallback, and it is the better half: it is the same project the Auth and
+// Firestore clients already use, so it is present in any build that can sign in at all. Preferring it means push no
+// longer depends on a second copy that has to be kept in step with the first - and a station that never filled the
+// settings in still gets working notifications.
+const envConfig = (typeof import.meta !== 'undefined' && import.meta.env) || {};
+
 export function parseWebConfig(systemSettings) {
   const raw = systemSettings?.fcm_web_config;
 
@@ -65,11 +75,25 @@ export function parseWebConfig(systemSettings) {
     };
   }
 
+  if (envConfig.VITE_FIREBASE_API_KEY && envConfig.VITE_FIREBASE_PROJECT_ID && envConfig.VITE_FIREBASE_APP_ID) {
+    return {
+      apiKey: envConfig.VITE_FIREBASE_API_KEY,
+      authDomain: envConfig.VITE_FIREBASE_AUTH_DOMAIN || '',
+      projectId: envConfig.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: envConfig.VITE_FIREBASE_STORAGE_BUCKET || '',
+      messagingSenderId: envConfig.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+      appId: envConfig.VITE_FIREBASE_APP_ID,
+    };
+  }
+
   return null;
 }
 
 export function vapidKeyFrom(systemSettings) {
-  return String(systemSettings?.fcm_vapid_public_key || '').trim();
+  const fromSettings = String(systemSettings?.fcm_vapid_public_key || '').trim();
+  if (fromSettings) return fromSettings;
+  // The Web Push certificate key, which the app's own config carries for exactly this.
+  return String(envConfig.VITE_FIREBASE_VAPID_KEY || '').trim();
 }
 
 // Registered at the deployed base path (/ locally, /station-portal/ on Pages).

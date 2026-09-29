@@ -198,6 +198,19 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // The member's own settings row: time format, theme, which notifications they want. A client write, because the rules
+  // already allow a member to write their own document and an officer with the notification permission to write
+  // another's.
+  //
+  // Their PASSWORD is deliberately not a route here. It goes to the `changeOwnPassword` callable, which is the only
+  // thing that can set a Firebase password and the only thing that may clear the change-on-next-login claim - see
+  // updateUserPassword in api.js, which no longer has a second path at all.
+  memberSettings: {
+    requires: ['memberPayload'],
+    writes: ['UPDATE_USER_SETTINGS'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -441,6 +454,16 @@ const DISPATCH = {
   },
 
   ADMIN_SEND_TEST_PUSH: async (body) => ok(await callable('sendTestPush', { user_id: body.user_id })),
+
+  // The member's own settings: one merged document, with the two transformations the writer documents (undefined fields
+  // dropped, the flags turned into real booleans).
+  UPDATE_USER_SETTINGS: async (body, uid) => {
+    const { saveMemberSettings } = await writes();
+    const payload = body.payload || {};
+    // The session's own row unless the form named another - which is how an officer edits a member through the same
+    // call. A member sending somebody else's id is refused by the RULES rather than here, which is where that belongs.
+    return ok(await saveMemberSettings({ userId: payload.id || uid, fields: payload }));
+  },
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {
     const { saveScheduleBoard } = await writes();

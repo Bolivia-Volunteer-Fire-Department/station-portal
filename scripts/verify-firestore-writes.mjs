@@ -379,6 +379,33 @@ const main = async () => {
   );
   check('and no row is left behind by the refused batch', forJane.filter((row) => row.date_from === '2026-04-02').length, 0);
 
+  // --- the member's own settings ------------------------------------------------------------------------------------
+  //
+  // A MERGE, and three things about it are asserted because each is a way to be wrong quietly: an absent preference must
+  // stay absent (writing false is how a form that never asked silently unsubscribes somebody), the flags must be real
+  // booleans rather than the strings the form sends, and a device token must not be copied into this document.
+  await signIn('bo');
+  await routeWrite('UPDATE_USER_SETTINGS', {
+    payload: { id: 'u2', time_format: '24', is_dark_mode: 'true', notify_announcements: 'FALSE' },
+  });
+  const boSettings = (await getDoc(doc(firestore(), 'user_settings', 'u2'))).data();
+  check('the settings form writes the member own row', [boSettings.time_format, boSettings.is_dark_mode, boSettings.notify_announcements], ['24', true, false]);
+  check('with the flags as real booleans, not the strings the form sends', [typeof boSettings.is_dark_mode, typeof boSettings.notify_announcements], ['boolean', 'boolean']);
+
+  await routeWrite('UPDATE_USER_SETTINGS', { payload: { id: 'u2', time_format: '12' } });
+  const boAfter = (await getDoc(doc(firestore(), 'user_settings', 'u2'))).data();
+  check('a second save changes only what it sent', boAfter.time_format, '12');
+  check('and an earlier preference survives it', boAfter.notify_announcements, false);
+  check('while a preference nobody ever mentioned is not invented', Object.keys(boAfter).includes('notify_offer_approved'), false);
+
+  await routeWrite('UPDATE_USER_SETTINGS', { payload: { id: 'u2', fcm_token: 'a-device-token' } });
+  check('and a device token is not written into the settings document', Object.keys((await getDoc(doc(firestore(), 'user_settings', 'u2'))).data()).includes('fcm_token'), false);
+
+  // Somebody else's row is refused by the RULES rather than by the dispatcher, which defaults to the session but cannot
+  // stop a hand-made request naming anybody.
+  const janeSettingsAttempt = await routeWrite('UPDATE_USER_SETTINGS', { payload: { id: 'u1', time_format: '24' } });
+  checkIs('and a member cannot write somebody else settings', janeSettingsAttempt && janeSettingsAttempt.success === false, JSON.stringify(janeSettingsAttempt).slice(0, 140));
+
   // --- push devices: the member's own card, and the administrator's switch -----------------------------------------
   //
   // Registering is a CALLABLE, and the assertions here are the reasons why: an ordinary registration is a member writing

@@ -99,12 +99,18 @@ checkIs(
 checkIs('the checkbox writes TRUE when ticked', /is_change_password_on_login: e\.target\.checked \? 'TRUE' : 'FALSE'/.test(usersTabSource));
 checkIs('the list shows which accounts owe a change', /Password change due/.test(usersTabSource));
 
-// The payload, which is where the other flag was lost.
-checkIs('the save sends the flag', /is_change_password_on_login: userData\.is_change_password_on_login/.test(apiSource));
+// The payload, which is where the other flag was lost. It is not a sheet payload any more: the roster fields and the two
+// per-member preferences go onto the `users` document, and the password-change flag goes through `updateMemberAccount`.
+// These assert the path that exists - including the checkbox that once did nothing, and the sound profile that was
+// dropped the same way.
+checkIs('the save carries the password-change flag to the callable that can set it', /account\.isChangePasswordOnLogin = true/.test(apiSource));
 checkIs(
-  'and the exclusion flag that was already being dropped',
-  /exclude_from_scheduling: userData\.exclude_from_scheduling/.test(apiSource),
-  'this payload did not carry exclude_from_scheduling, so that checkbox did nothing'
+  'and the exclusion flag onto the users document',
+  /exclude_from_scheduling: String\(userData\.exclude_from_scheduling \|\| ''\)\.toUpperCase\(\) === 'TRUE'/.test(apiSource)
+);
+checkIs(
+  'and the runner sound profile with it, rather than dropping it',
+  /runner_sound_profile: String\(userData\.runner_sound_profile/.test(apiSource)
 );
 checkIs('the backend accepts the flag', /userFields\.is_change_password_on_login =/.test(codeSource));
 checkIs(

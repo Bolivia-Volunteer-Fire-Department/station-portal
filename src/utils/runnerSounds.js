@@ -1,6 +1,6 @@
 // Which sound files the Firefighter Runner plays.
 //
-// A member's `runner_sound_profile` in user_settings is a PREFIX, not a path: a profile of `bird`
+// A member's `runner_sound_profile` on the USERS document is a PREFIX, not a path: a profile of `bird`
 // means the game looks for `bird-jump.wav`, `bird-die.wav` and `bird-point.wav` next to the
 // defaults. An empty profile (the normal case) means the defaults themselves - `jump.wav`,
 // `die.wav`, `point.wav` - which is why a station that never touches this setting hears exactly

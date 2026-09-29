@@ -899,6 +899,18 @@ checkIs(
   'the check runs before the row is written',
   /stored !== String\(supplied\)\.trim\(\)\) throw rowVersionConflict_/.test(codeSource)
 );
+// The password change is a callable now, with no sheet branch behind it - and it takes a NAMED password rather than a
+// positional one. That is not a style preference: the caller used to pass `(userId, newPassword, token)`, so when the
+// sheet branch went and the function became one argument, that call would have compiled perfectly while using the user
+// ID as the new password and reporting success. Two assertions, because the failure mode needs both halves held down:
+// the function must ask for `newPassword` by name, and the caller must supply it that way.
+checkIs('the password change has no sheet branch to fall back to', /action: 'UPDATE_USER_PASSWORD'/.test(apiSource) === false);
+checkIs('and it takes the password by name, not by position', /updateUserPassword = async \(\{ newPassword \}\)/.test(apiSource));
+checkIs(
+  'which is how the app calls it',
+  /updateUserPassword\(\{ newPassword \}\)/.test(readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8'))
+);
+
 // The user save used to carry `row_version`: the sheet's conflict check, which REFUSED a form filled in before another
 // officer's change rather than silently overwriting it. Firestore does not work that way, and the decision is recorded
 // where the envelope is unpacked - see firestoreWrites.js, which discards `row_version` deliberately and says the app's

@@ -142,11 +142,12 @@ for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
 const NOT_YET_ROUTED = [
   // Push registration and the administrator's push controls: DONE, and deleted from this list as the ledger requires.
   // The member's device card registers, unregisters, transfers and sees the administrator's switch; the officer reads
-  // the per-member device counts and can turn a member off and on. What is NOT done is the sending itself.
+  // the per-member device counts and can turn a member off and on; and the sending itself is three Firestore triggers
+  // with the station's own rules about who hears what.
   //
-  // The member's own settings (time format, dark mode) and their password change.
-  'UPDATE_USER_SETTINGS',
-  'UPDATE_USER_PASSWORD',
+  // The member's own settings and their password change: DONE. The settings save is a client write with a merge, and the
+  // password goes to the `changeOwnPassword` callable with no second path.
+  //
   // Documents and checklists, the area a user found first: signing, the signature report, the verifier's view of
   // somebody else's records, removing a signature, and the folder/order housekeeping.
   'GET_DOCUMENTS',

@@ -267,7 +267,15 @@ export const adminSaveCertification = async (certification, token) =>
 export const adminDeleteCertification = async (id, token) =>
   appScriptFetch({ action: 'ADMIN_DELETE_CERTIFICATION', token, id: String(id || '') });
 
-// The member's own settings row (time format, theme, sounds, which notifications they want).
+// The member's own settings row: time format, theme, and which notifications they want.
+//
+// NO `fcm_token`. That field existed because the sheet kept the device token in this row as well as in `push_devices`,
+// and the Firestore model dropped it deliberately: the rules keep device tokens out of this document, and a copy here
+// would be one nothing reads and nothing clears. A device is registered by REGISTER_PUSH_DEVICE.
+//
+// The notification preferences travel INCLUDING their absences, which is the part that matters: a field the form did not
+// send must not arrive as `false`, because "not stated" means "inherit the station default" - and writing false is how a
+// member ends up silently unsubscribed by a form that never asked about it.
 export const saveUserSettings = async (updatedSettings, token) =>
   appScriptFetch({
     action: 'UPDATE_USER_SETTINGS',
@@ -276,53 +284,43 @@ export const saveUserSettings = async (updatedSettings, token) =>
       id: String(updatedSettings.id),
       time_format: updatedSettings.time_format === undefined ? undefined : String(updatedSettings.time_format),
       is_dark_mode: updatedSettings.is_dark_mode === undefined ? undefined : String(updatedSettings.is_dark_mode),
-      // Push-notification fields. Anything left undefined is ignored by the
-      // backend, so the same call serves the settings form and the
-      // "enable notifications on this device" flow (which only sends
-      // fcm_token + the preference toggles).
-      fcm_token: updatedSettings.fcm_token === undefined ? undefined : String(updatedSettings.fcm_token),
       ...notificationPrefFields(updatedSettings),
     },
   });
 
 // The member's own password change, and it must not fork: two systems would drift and the member would have one
-// password here and another in Firebase. When this session has a Firebase user the change goes THERE, and the
-// callable that follows it is what clears the change-on-next-login flag - only a function may write that flag.
+// password here and another in Firebase. It goes to the `changeOwnPassword` callable, which is the only thing that CAN
+// set a Firebase password - and, as the comment in functions/index.js says, the callable is also what clears the
+// change-on-next-login flag, because only a function may write that claim.
 //
-// A consequence worth knowing: the sheet is not told, so the Apps Script session can no longer be opened for that
-// member by re-using their old password. The console says so when it happens (see loginUser), and it stops mattering
-// as soon as the last call that needs a session moves.
-export const updateUserPassword = async (userId, newPassword, token) => {
-  if (firebaseConfigured() && firebaseAuth().currentUser) {
-    try {
-      await changeOwnPassword(newPassword);
-      return { success: true };
-    } catch (error) {
-      return { success: false, message: error?.message || 'The password could not be changed.' };
-    }
+// The sheet branch that used to answer when Firebase was unconfigured is gone with the sheet, so there is no second
+// path: a build without Firebase cannot change a password at all, which is the truth rather than a quieter fallback.
+// Takes an OBJECT rather than a positional password, deliberately. The caller used to pass `(userId, newPassword,
+// token)` - the sheet's shape - and when this became a one-argument function that call would still have compiled, with
+// the password argument ignored and the user id used AS the password. A named property cannot be mis-ordered, and a
+// positional string passed here reaches the callable as `undefined`, which fails loudly instead of quietly.
+export const updateUserPassword = async ({ newPassword }) => {
+  try {
+    await changeOwnPassword(newPassword);
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: error?.message || 'The password could not be changed.' };
   }
-  return appScriptFetch({
-    action: 'UPDATE_USER_PASSWORD',
-    user_id: userId,
-    password: newPassword,
-    token,
-  });
 };
 // --- Admin: Users ---
 
-// The officer's user editor, translated. The sheet's ONE save is four operations in this model, and two of them are
-// callables that already exist: creating a member (which also makes the Auth account), setting the account status,
-// and resetting a password. The roster fields - name, rank, role - are the only three the rules let an officer write
-// to `users` directly, which is why they are a plain setDoc here.
+// The officer's user editor, translated. The sheet's ONE save is five operations in this model: the roster fields and
+// the two per-member preferences on the `users` document (the rule names exactly those four keys and refuses anything
+// else), then the status, the password and the account facts through the callables that already existed for them.
 //
-// The TWO fields that have nowhere to go are reported rather than dropped: `exclude_from_scheduling` and
-// `is_change_password_on_login` live in users_private, which is writable by NOBODY, and no callable touches them yet.
-// A half-saved form that says it succeeded is the failure mode this whole migration has been arranged to avoid, so
-// this answers success:false with the reason - which is the one path the caller surfaces to the officer.
+// EVERY FIELD THE FORM CARRIES IS SAVED, which is worth stating because it has not always been true. This file used to
+// report `exclude_from_scheduling` and `is_change_password_on_login` as fields with nowhere to go, and the Users tab
+// carries the scar: a checkbox that quietly did nothing because the payload never carried it. Both are written now -
+// the scheduling preference on the roster document, which the rule was extended for, and the password-change flag
+// through `updateMemberAccount`, which is also what moves a username.
 //
-// A username change is the same story, for the same reason, and is reported the same way.
-// `token` is still passed by the caller and no longer needed: the session is Firebase's own, and the branch that used
-// to carry it to the sheet is gone. Left out of the signature rather than accepted and ignored.
+// `token` is still passed by the caller and no longer needed: the session is Firebase's own. Left out of the signature
+// rather than accepted and ignored.
 export const adminSaveUser = async (userData) => {
   if (firebaseConfigured() && firebaseAuth().currentUser) {
     try {
@@ -346,6 +344,10 @@ export const adminSaveUser = async (userData) => {
           rank_id: String(userData.rank_id || ''),
           role_id: String(userData.role_id || ''),
           exclude_from_scheduling: String(userData.exclude_from_scheduling || '').toUpperCase() === 'TRUE',
+          // The runner's own sound profile: which tones their device plays. It lived on the users row in the sheet, and
+          // it belongs here rather than in `user_settings` because it is a fact about the member's PLACE in the station
+          // - the leaderboard draws it - rather than a preference only their own screen reads.
+          runner_sound_profile: String(userData.runner_sound_profile ?? ''),
         },
         { merge: true }
       );
