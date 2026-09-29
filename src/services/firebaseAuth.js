@@ -6,7 +6,8 @@
 // for, and it is also what lets this file offer no reset-by-email path at all.
 import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, updatePassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { firebaseAuth, firebaseConfigured, firebaseFunctions } from './firebase.js';
+import { firebaseAuth, firebaseConfigured, firebaseFunctions, firestore } from './firebase.js';
+import { doc, getDoc } from 'firebase/firestore';
 
 // MUST MATCH EMAIL_DOMAIN in functions/index.js: the function creates the account under this domain, and the client
 // derives the same address to sign in with. Changing one without the other locks everybody out.
@@ -36,6 +37,40 @@ export const signInAlongside = async (username, password) => {
     console.info(`[firebase] signed in to Apps Script but not to Firebase (${reason}) - that feature stays on the sheet.`);
     return { ok: false, reason };
   }
+};
+
+// Signing in FOR REAL: Firebase decides, and the account comes from the database.
+//
+// This returns the shape api.js callers already read - success, user, token - because the login screen hands `user`
+// straight to setCurrentUser and the app reads its roster fields. The roster row and the private half are two
+// documents, and the private one carries `is_change_password_on_login`, which is what raises the change-your-password
+// screen after an officer reset: leaving it out would let a member past a forced change.
+export const signInAsMember = async (username, password) => {
+  await signInWithUsername(username, password);
+
+  const account = await call('whoami', {});
+  const [roster, priv] = await Promise.all([
+    getDoc(doc(firestore(), 'users', account.userId)),
+    getDoc(doc(firestore(), 'users_private', account.userId)),
+  ]);
+  const row = roster.data() || {};
+  const secret = priv.data() || {};
+
+  return {
+    success: true,
+    user: {
+      id: account.userId,
+      name: row.name || '',
+      role_id: row.role_id || account.roleId || '',
+      rank_id: row.rank_id || '',
+      user_name: secret.username || String(username || ''),
+      status: secret.status || 'active',
+      is_change_password_on_login: secret.is_change_password_on_login === true,
+    },
+    // Not a session: the Firebase user IS the session. The caller replaces this with the Apps Script token when one
+    // can still be had (see loginUser), because the calls that have not moved yet need it.
+    token: '',
+  };
 };
 
 // The other half, and the one that matters on a shared station computer: a Firebase session that outlives the app's

@@ -20,7 +20,7 @@ import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import { EMAIL_DOMAIN, accountState, signInAlongside, signOutAlongside, syntheticEmail } from '../src/services/firebaseAuth.js';
+import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail } from '../src/services/firebaseAuth.js';
 import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
 
 let failures = 0;
@@ -221,6 +221,33 @@ const main = async () => {
   const good = await signInAlongside('jane', DEMO_PASSWORD);
   check('one that succeeds says so', good, { ok: true });
   check('and the account it signed in is the one asked for', (await accountState()).username, 'jane');
+
+  // The login itself, which the app now takes from Firebase: the reply is the shape api.js callers read, and the
+  // account is assembled from the roster and the private half - including the change-on-next-login flag, which is
+  // what raises the forced password screen after an officer reset.
+  console.log('\n--- signing in as a member ---');
+  const login = await signInAsMember('jane', DEMO_PASSWORD);
+  check('the login reports success', login.success, true);
+  check('with the roster row the app draws from', login.user.id, 'u1');
+  checkIs('and a name on it', typeof login.user.name === 'string' && login.user.name.length > 0, login.user.name);
+  checkIs(
+    'and the change-on-next-login flag as a real boolean',
+    typeof login.user.is_change_password_on_login === 'boolean',
+    String(login.user.is_change_password_on_login)
+  );
+  checkIs('and no session token of its own - the Firebase user is the session', login.token === '', login.token);
+
+  // A password Firebase does not accept must THROW, because that is what makes loginUser fall back to the sheet for
+  // every member whose Auth account still holds the migration's temporary password.
+  const refusedLogin = await signInAsMember('jane', 'not-the-password').then(
+    () => 'accepted',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'and a password it does not accept throws, so the sheet can answer',
+    refusedLogin.includes('invalid-credential') || refusedLogin.includes('auth/'),
+    refusedLogin
+  );
 
   await signOutAlongside();
   check('and signing out again leaves nobody', await accountState(), null);

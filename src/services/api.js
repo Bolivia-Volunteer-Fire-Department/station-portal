@@ -5,6 +5,8 @@ import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 import { createReadCoalescer, isReadAction, readKey } from '../utils/readCoalescing';
 import { routeRead, routeWrite } from './firestoreRouting.js';
+import { changeOwnPassword, signInAsMember } from './firebaseAuth.js';
+import { firebaseAuth, firebaseConfigured } from './firebase.js';
 
 // The row version a save was based on, when the caller has one.
 //
@@ -198,8 +200,30 @@ export const adminFetchBootstrap = async (token) => {
   return (await routeRead('ADMIN_GET_BOOTSTRAP')) || appScriptFetch(request, { retryOnNetworkError: true });
 };
 
-export const loginUser = async (username, password) =>
-  appScriptFetch({ action: 'LOGIN', username, password });
+export const loginUser = async (username, password) => {
+  // FIREBASE FIRST, and the sheet as the fallback rather than the other way round.
+  //
+  // The order matters because the two hold different passwords while the move is in flight: a member's Auth account
+  // carries the migration's temporary password until they are given it, so their Firebase sign-in fails and the sheet
+  // - which still has their old one - has to be allowed to answer. When it does answer, nothing changes for them.
+  //
+  // When Firebase DOES accept, the Apps Script session is still fetched, quietly, because the calls that have not
+  // moved yet need a token. Its failure is not the login's failure: those calls would fail, and the console says so.
+  if (firebaseConfigured()) {
+    try {
+      const viaFirebase = await signInAsMember(username, password);
+      const sheetSession = await appScriptFetch({ action: 'LOGIN', username, password }).catch((error) => {
+        console.info(`[firebase] signed in, but the Apps Script session could not be opened (${error?.message || error}) - calls that have not moved will fail.`);
+        return null;
+      });
+      return { ...viaFirebase, token: sheetSession?.token || '' };
+    } catch (error) {
+      // A wrong password, a disabled account, a missing Auth user: the sheet decides, exactly as it always did.
+      console.info(`[login] Firebase did not accept this sign-in (${error?.code || error?.message}); asking the sheet.`);
+    }
+  }
+  return appScriptFetch({ action: 'LOGIN', username, password });
+};
 
 export const fetchTimeclockLogs = async (token) =>
   appScriptFetch({ action: 'GET_TIMECLOCK_LOGS', token }, { retryOnNetworkError: true });
@@ -335,13 +359,29 @@ export const saveUserSettings = async (updatedSettings, token) =>
     },
   });
 
-export const updateUserPassword = async (userId, newPassword, token) =>
-  appScriptFetch({
+// The member's own password change, and it must not fork: two systems would drift and the member would have one
+// password here and another in Firebase. When this session has a Firebase user the change goes THERE, and the
+// callable that follows it is what clears the change-on-next-login flag - only a function may write that flag.
+//
+// A consequence worth knowing: the sheet is not told, so the Apps Script session can no longer be opened for that
+// member by re-using their old password. The console says so when it happens (see loginUser), and it stops mattering
+// as soon as the last call that needs a session moves.
+export const updateUserPassword = async (userId, newPassword, token) => {
+  if (firebaseConfigured() && firebaseAuth().currentUser) {
+    try {
+      await changeOwnPassword(newPassword);
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: error?.message || 'The password could not be changed.' };
+    }
+  }
+  return appScriptFetch({
     action: 'UPDATE_USER_PASSWORD',
     user_id: userId,
     password: newPassword,
     token,
   });
+};
 // --- Admin: Users ---
 
 export const adminFetchUsers = async (token) =>
