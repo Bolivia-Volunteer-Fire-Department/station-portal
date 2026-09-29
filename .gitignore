@@ -44,4 +44,6 @@ firestore-debug.log
 # The service-account JSON is a real credential and must never be committed. scripts/check-secrets.py (CI +
 # the pre-commit hook) fails on either file if it ever is.
 fire-clock-76723.json
+/service-account*.json
+/secrets/
 *.pxd

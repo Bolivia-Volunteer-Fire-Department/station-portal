@@ -273,6 +273,17 @@ are improvements worth naming up front: the **refresh wave stops existing** (a l
 change instead of the app re-fetching everything after every save), and retry/patience handling
 simplifies, because a save no longer queues behind a script-wide lock.
 
+**The seam exists now, and it is inert.** `src/services/firestoreRouting.js` holds the table of which actions go to
+Firestore, and the conditions under which any of them may: the feature must be named in `VITE_FIRESTORE_FEATURES`,
+Firebase must be configured, the feature's prerequisites must be switched on too, and **somebody must be signed in
+to Firebase**. That last one is the load-bearing one today, because the app signs in through Apps Script and gets a
+session token - Firebase Auth has no user yet, so every route falls through to Apps Script and nothing about the app
+changes. It also means the login has to move before any of this can be switched on, and that the login is a
+member-facing event rather than a code change: an Auth account has to exist for every member, and since the sheet
+holds hashed passwords rather than plaintext, those accounts arrive with temporary passwords and the officer-driven
+reset flow already in `functions/index.js`. The dispatch is per FEATURE and not per action, deliberately - a write
+and the read that shows it move together, or the write is invisible.
+
 ## Offline
 
 Reads work with no signal: the schedule, the roster and a member's own history all come from cache,

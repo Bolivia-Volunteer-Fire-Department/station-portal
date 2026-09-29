@@ -4,6 +4,7 @@ import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 import { createReadCoalescer, isReadAction, readKey } from '../utils/readCoalescing';
+import { routeWrite } from './firestoreRouting.js';
 
 // The row version a save was based on, when the caller has one.
 //
@@ -729,13 +730,13 @@ export const adminDeleteAssignment = async (assignmentId, token) =>
 // Bulk-saves schedule entries in one request: `entries` are upserted by id
 // (blank id = new row) and `deleteIds` are removed. Used by the Schedule
 // Management tab so all in-memory edits flush in a single Save.
-export const adminBulkSaveSchedule = async ({ entries = [], deleteIds = [] }, token) =>
-  appScriptFetch({
-    action: 'ADMIN_BULK_SAVE_SCHEDULE',
-    token,
-    entries,
-    deleteIds,
-  });
+//
+// Built once and handed to whichever backend: `routeWrite` answers null while the feature is switched off, which
+// is every build until the payload layer lands (see firestoreRouting.js).
+export const adminBulkSaveSchedule = async ({ entries = [], deleteIds = [] }, token) => {
+  const request = { action: 'ADMIN_BULK_SAVE_SCHEDULE', token, entries, deleteIds };
+  return (await routeWrite('ADMIN_BULK_SAVE_SCHEDULE', request)) || appScriptFetch(request);
+};
 
 // --- Shift offers (member request -> admin approval) ---
 
@@ -747,8 +748,8 @@ export const fetchMyShiftOffers = async (token) =>
 
 // Offers to fill an open shift. `schedule_id` links an offer made on an existing
 // unassigned row; template occurrences leave it blank.
-export const submitShiftOffer = async ({ schedule_template_id, date_from, date_to, assignment_id, schedule_id } = {}, token) =>
-  appScriptFetch({
+export const submitShiftOffer = async ({ schedule_template_id, date_from, date_to, assignment_id, schedule_id } = {}, token) => {
+  const request = {
     action: 'SUBMIT_SHIFT_OFFER',
     token,
     schedule_template_id: schedule_template_id || '',
@@ -756,7 +757,9 @@ export const submitShiftOffer = async ({ schedule_template_id, date_from, date_t
     date_to: date_to || '',
     assignment_id: assignment_id || '',
     schedule_id: schedule_id || '',
-  });
+  };
+  return (await routeWrite('SUBMIT_SHIFT_OFFER', request)) || appScriptFetch(request);
+};
 
 // Admin: every offer, so the Schedule Management calendar can flag the slots
 // waiting on approval.
@@ -775,8 +778,11 @@ export const adminFetchSystemLog = async (params = {}, token) =>
 
 // Admin: approve (fills the shift) or decline a single offer. Other pending
 // offers for the same shift are closed out on approval.
-export const adminResolveShiftOffer = async (offerId, decision, token) =>
-  appScriptFetch({ action: 'ADMIN_RESOLVE_SHIFT_OFFER', token, id: offerId, decision });
+export const adminResolveShiftOffer = async (offerId, decision, token) => {
+  const request = { action: 'ADMIN_RESOLVE_SHIFT_OFFER', token, id: offerId, decision };
+  // Only an approval is implemented on the Firestore side; a decline answers null and is sent as it always was.
+  return (await routeWrite('ADMIN_RESOLVE_SHIFT_OFFER', request)) || appScriptFetch(request);
+};
 
 // --- Availability ---
 
@@ -796,13 +802,15 @@ const availabilitySlotFields = (slot) => ({
 // This used to be one call per click, which meant a request - and a full sheet read on the
 // server - for every tick. The screens now hold the edits locally until Save and send only
 // what actually changed, so a month of ticks costs one round trip.
-export const setMyAvailability = async ({ adds = [], removes = [] } = {}, token) =>
-  appScriptFetch({
+export const setMyAvailability = async ({ adds = [], removes = [] } = {}, token) => {
+  const request = {
     action: 'SET_MY_AVAILABILITY',
     token,
     adds: adds.map(availabilitySlotFields),
     removes: removes.map(availabilitySlotFields),
-  });
+  };
+  return (await routeWrite('SET_MY_AVAILABILITY', request)) || appScriptFetch(request);
+};
 
 // Admin: the same batch, for another member.
 export const adminSetAvailability = async (userId, { adds = [], removes = [] } = {}, token) =>

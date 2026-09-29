@@ -173,6 +173,16 @@ happen.
 
 ## 6. Bootstrap the first administrator
 
+**The three documents that describe one member share ONE id, and that id is the member's Auth uid.** Not their
+username, not their name: `users/{uid}`, `users_private/{uid}` and `user_settings/{uid}`, where `uid` is the value in
+the Authentication → Users table. The security rules compare it to `request.auth.uid` and the app's readers look it
+up the same way, so a document filed under a friendly id is a document that nothing can read and no rule will allow.
+
+They are split rather than merged for one reason: **a document is the unit of permission.** The roster row
+(`users`) is what everybody can see, `users_private` holds what only the member and their officers may see, and
+`user_settings` is the member's own preferences. One document holding all three could only be all-public or
+all-private.
+
 Five documents and a user, all in the console, and only the first one. In **Authentication → Users → Add user**,
 create the synthetic address and a temporary password - the address is the username plus the department's reserved
 domain, for example `chief@boliviavfd.invalid`. Write the username down; it is what they type to sign in.
