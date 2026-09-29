@@ -490,7 +490,9 @@ thing to do on its own:
 
 So the phase that has to come first is a **migration**: read the sheets, write Firestore, and keep the script
 runnable, because a feature will be cut over after it and any drift between the copy and the live sheet has to be
-recoverable by running it again. The source can be the app's own payload actions (an officer session already returns
+recoverable by running it again. **`docs/MIGRATION_MAP.md` is the sheet-to-collection mapping, written from a live
+reconnaissance pass**, including the six things that are not a column copy and the gaps that pass found. The source
+can be the app's own payload actions (an officer session already returns
 every collection) or the Sheets API with a service account; that choice is the one open question this section
 leaves.
 
