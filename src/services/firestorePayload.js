@@ -183,7 +183,12 @@ export const diagnoseMemberPayload = async (uid) => {
 export const fetchAdminPayload = async (account) => {
   const db = firestore();
   const payload = await fetchMemberPayload(account);
-  const role = (await getDoc(doc(db, 'roles', account.roleId))).data() || {};
+
+  // The role comes from the member's own DOCUMENT when the caller did not supply it, for the same reason the member
+  // payload does: a claim can be an hour stale after a role change, and these flags decide which sections an officer
+  // gets. It also means either payload can be called with nothing but a uid - which is what a router has.
+  const roleId = account.roleId || String(((await getDoc(doc(db, 'users', account.userId))).data() || {}).role_id || '');
+  const role = roleId ? (await getDoc(doc(db, 'roles', roleId))).data() || {} : {};
   const may = (flag) => role.is_admin === true || role[flag] === true;
 
   if (may('can_edit_users')) {

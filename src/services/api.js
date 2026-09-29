@@ -180,8 +180,12 @@ export const fetchBootstrap = async (token) => {
 // Everything an administration sign-in - and every admin save's background reload - needs, in ONE request. The
 // admin-scoped fields are present only for a role that may have them: a section the caller cannot have is omitted
 // rather than refusing the whole response. See adminBootstrapPayload in Code.gs.
-export const adminFetchBootstrap = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_BOOTSTRAP', token }, { retryOnNetworkError: true });
+export const adminFetchBootstrap = async (token) => {
+  const request = { action: 'ADMIN_GET_BOOTSTRAP', token };
+  // The officer's whole sign-in in ONE request, from Firestore once that payload is switched on and from the sheet
+  // otherwise - the same arrangement as the member bootstrap, and the same fallback.
+  return (await routeRead('ADMIN_GET_BOOTSTRAP')) || appScriptFetch(request, { retryOnNetworkError: true });
+};
 
 export const loginUser = async (username, password) =>
   appScriptFetch({ action: 'LOGIN', username, password });

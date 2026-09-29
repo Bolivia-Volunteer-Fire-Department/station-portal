@@ -94,10 +94,10 @@ export const ROUTED_FEATURES = {
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   adminPayload: {
     requires: ['memberPayload'],
-    // GET_ADMIN_BOOTSTRAP arrives above: the admin payload reads thirty-odd collections and its own harness comes
-    // first. Naming it here without a dispatcher would be a route that throws.
+    // The administrator's payload: the member one plus the sections an officer's tabs read, each gated in the reader
+    // on the permission its tab needs.
     writes: [],
-    reads: [],
+    reads: ['ADMIN_GET_BOOTSTRAP'],
     switchReads: ['ADMIN_GET_BOOTSTRAP'],
   },
 };
@@ -209,6 +209,10 @@ const READ_DISPATCH = {
   GET_BOOTSTRAP: async (uid) => {
     const { fetchMemberPayload } = await import('./firestorePayload.js');
     return ok(await fetchMemberPayload({ userId: uid }));
+  },
+  ADMIN_GET_BOOTSTRAP: async (uid) => {
+    const { fetchAdminPayload } = await import('./firestorePayload.js');
+    return ok(await fetchAdminPayload({ userId: uid }));
   },
 };
 

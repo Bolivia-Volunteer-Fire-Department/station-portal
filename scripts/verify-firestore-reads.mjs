@@ -142,7 +142,7 @@ const main = async () => {
   // `data.success` to decide whether a bootstrap loaded, and the whole read was dropped as a failed refresh. It
   // looked exactly like the read never moving to Firestore at all.
   console.log('\n--- through the router ---');
-  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload';
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,adminPayload';
   const { routeRead } = await import('../src/services/firestoreRouting.js');
 
   await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
@@ -155,6 +155,17 @@ const main = async () => {
     JSON.stringify(Object.keys(routed || {}).slice(0, 8))
   );
   checkIs('and the member availability rows with it', Array.isArray(routed.availability), 'no availability');
+
+  // The officer's payload through the same route. It is the member payload PLUS the tab sections, each gated in the
+  // reader on the permission its tab needs, so this is also a check that the gating did not take the whole thing down.
+  const adminRouted = await routeRead('ADMIN_GET_BOOTSTRAP');
+  checkIs('the officer payload routes too', adminRouted !== null, 'nothing was routed');
+  check('and in the same shape', adminRouted.success, true);
+  checkIs(
+    'carrying the officer-only sections',
+    Array.isArray(adminRouted.users) && Array.isArray(adminRouted.certificationRecords),
+    JSON.stringify(Object.keys(adminRouted || {}).slice(0, 10))
+  );
   await signOut(firebaseAuth());
 
   // The kill switch, which has to work whatever else is true.
