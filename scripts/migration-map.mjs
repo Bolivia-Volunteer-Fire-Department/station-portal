@@ -81,6 +81,9 @@ export const TAB_MAP = {
     drop: ['password'], // a credential: it goes to Auth or nowhere
     rename: { user_name: 'username' }, // the readers say username
     toPrivate: ['username', 'status', 'is_change_password_on_login'],
+    // A member's role and rank ARE references, and a typo in either is invisible: the member keeps a row, signs in,
+    // and has no permissions or no rank on the roster. Nothing else in this file would notice.
+    foreignKeys: { role_id: 'roles', rank_id: 'ranks' },
     key: 'id',
   },
   roles: { collections: ['roles'], key: 'id' },
@@ -91,6 +94,7 @@ export const TAB_MAP = {
     // credential-looking refusal below does not mistake the collection's whole point for a leak.
     keeps: ['token'],
     key: 'id',
+    foreignKeys: { user_id: 'users' },
   },
   user_settings: {
     collections: ['user_settings'],
@@ -140,8 +144,15 @@ export const TAB_MAP = {
     privateExtras: { admin_note: '' },
     key: 'id',
   },
-  schedule: { collections: ['schedule'], derive: { is_open: isOpenFrom }, key: 'id' },
-  availability: { collections: ['availability'], key: 'id' },
+  schedule: {
+    collections: ['schedule'],
+    derive: { is_open: isOpenFrom },
+    key: 'id',
+    // An EMPTY user_id is what "open shift" means, and the check skips empties - so this catches only a row pointing
+    // at a member who is not there, which is a shift nobody can be found for.
+    foreignKeys: { user_id: 'users' },
+  },
+  availability: { collections: ['availability'], key: 'id', foreignKeys: { user_id: 'users' } },
   timeclock: { collections: ['timeclock'], junk: [JUNK_HEADER], key: 'id', foreignKeys: { user_id: 'users' } },
   schedule_offers: {
     collections: ['schedule_offers'],
@@ -149,13 +160,25 @@ export const TAB_MAP = {
     key: 'id',
     foreignKeys: { user_id: 'users', schedule_id: 'schedule', assignment_id: 'assignments' },
   },
-  events: { collections: ['events'], audience: { rankAndAbove: true }, key: 'id' },
-  announcements: { collections: ['announcements'], audience: { rankAndAbove: false }, key: 'id' },
+  events: {
+    collections: ['events'],
+    audience: { rankAndAbove: true },
+    key: 'id',
+    // rank_id is checked by the audience expansion (which names the rank), so a bad ROLE is what is left: an event
+    // targeting a role that does not exist is an event nobody sees.
+    foreignKeys: { role_id: 'roles' },
+  },
+  announcements: {
+    collections: ['announcements'],
+    audience: { rankAndAbove: false },
+    key: 'id',
+    foreignKeys: { role_id: 'roles' },
+  },
   documents: {
     collections: ['documents'],
     audience: { rankAndAbove: false },
     key: 'id',
-    foreignKeys: { author_user_id: 'users' },
+    foreignKeys: { author_user_id: 'users', role_id: 'roles' },
   },
   document_checklist_items: {
     collections: ['document_checklist_items'],

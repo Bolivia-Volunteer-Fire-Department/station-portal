@@ -105,6 +105,22 @@ checkIs(
     !JSON.stringify(usersPlan.collections).includes('hash')
 );
 
+// A role or a rank that is not in the sheet: the member keeps a row, signs in, and has no permissions or no rank on
+// the roster. Nothing else in the mapping would notice, which is why these two are foreign keys.
+const badRefs = planForTab({
+  tab: 'users',
+  spec: TAB_MAP.users,
+  rows: userRows,
+  ranks,
+  knownIds: { users: new Set(['u1']), roles: new Set(['member']), ranks: new Set(['r1']) },
+});
+check('a user pointing at a role and a rank that do not exist is reported once, listing both', badRefs.problems.length, 1);
+checkIs(
+  'naming both the role and the rank',
+  badRefs.problems.some((problem) => problem.includes('role_id=officer')) &&
+    badRefs.problems.some((problem) => problem.includes('rank_id=r2'))
+);
+
 const assignmentRows = [{ id: 'a1', description: 'Engine', color: '#f00', icon: 'truck', rank_order_required: '2' }];
 const assignmentPlan = planForTab({ tab: 'assignments', spec: TAB_MAP.assignments, rows: assignmentRows });
 check('the public half is the calendar pill', Object.keys(assignmentPlan.collections.assignments[0]).sort(), [
