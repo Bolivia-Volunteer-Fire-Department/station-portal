@@ -39,6 +39,21 @@ export const signInAlongside = async (username, password) => {
   }
 };
 
+// A document read that is allowed to hiccup once. Firestore's first getDoc after a sign-in opens a Listen channel,
+// and that channel failing is an ordinary event - the SDK re-establishes it - so a single retry turns "the login did
+// not work" into "the login worked".
+const readWithRetry = async (read, attempts = 2) => {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
 // Signing in FOR REAL: Firebase decides, and the account comes from the database.
 //
 // This returns the shape api.js callers already read - success, user, token - because the login screen hands `user`
@@ -49,18 +64,33 @@ export const signInAsMember = async (username, password) => {
   await signInWithUsername(username, password);
 
   const account = await call('whoami', {});
-  const [roster, priv] = await Promise.all([
-    getDoc(doc(firestore(), 'users', account.userId)),
-    getDoc(doc(firestore(), 'users_private', account.userId)),
-  ]);
-  const row = roster.data() || {};
-  const secret = priv.data() || {};
+
+  // The account is what matters and it is already in hand. These two documents are cosmetic by comparison - the
+  // payload that loads next carries the roster - so a hiccup here must NOT fail the login, which would push the
+  // member back to the sheet and their old password. It logs instead, and the name falls back to the username.
+  let row = {};
+  let secret = {};
+  try {
+    const [roster, priv] = await readWithRetry(() =>
+      Promise.all([
+        getDoc(doc(firestore(), 'users', account.userId)),
+        getDoc(doc(firestore(), 'users_private', account.userId)),
+      ])
+    );
+    row = roster.data() || {};
+    secret = priv.data() || {};
+  } catch (error) {
+    console.info(
+      `[firebase] signed in, but the roster documents could not be read (${error?.code || error?.message}). ` +
+        'The payload fills them in a moment.'
+    );
+  }
 
   return {
     success: true,
     user: {
       id: account.userId,
-      name: row.name || '',
+      name: row.name || String(username || ''),
       role_id: row.role_id || account.roleId || '',
       rank_id: row.rank_id || '',
       user_name: secret.username || String(username || ''),
