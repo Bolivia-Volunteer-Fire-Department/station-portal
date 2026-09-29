@@ -148,7 +148,16 @@ export const routeRead = async (action) => {
   try {
     return await READ_DISPATCH[action](uid);
   } catch (error) {
-    console.info(`[firestore] ${action} could not be read from Firestore (${(error && error.code) || error.message}); using the sheet.`);
+    // LOUD on purpose. A routed read that fails is a step of the migration not working, and the fallback that keeps
+    // the app usable is exactly what hides it - a console.info nobody reads is how "still using Apps Script" becomes
+    // a mystery. So this says what failed, and then asks the reader which collection refused.
+    console.error(`[firestore] ${action} could not be read from Firestore (${(error && error.code) || error.message}). The sheet is being used instead, so the app still works - but this read has NOT moved.`);
+    if (action === 'GET_BOOTSTRAP') {
+      const { diagnoseMemberPayload } = await import('./firestorePayload.js');
+      const { refused, failed } = await diagnoseMemberPayload(uid);
+      if (refused.length) console.error(`[firestore] refused: ${refused.join(', ')}`);
+      if (failed.length) console.error(`[firestore] failed for another reason: ${failed.join(', ')}`);
+    }
     return null;
   }
 };

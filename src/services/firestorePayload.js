@@ -130,6 +130,49 @@ export const fetchMemberPayload = async (account) => {
   };
 };
 
+// WHICH read was refused, for the case the generic error cannot describe.
+//
+// The payload runs fourteen reads in parallel, so a `permission-denied` from any one of them arrives without saying
+// which - and "the member payload cannot be read" is not a diagnosis. This re-runs them ONE AT A TIME and names every
+// collection the caller may not read, which costs a handful of extra reads and only ever happens after a failure.
+export const diagnoseMemberPayload = async (uid) => {
+  const db = firestore();
+  const probes = [
+    ['users', () => rowsOf(collection(db, 'users'))],
+    ['roles', () => rowsOf(collection(db, 'roles'))],
+    ['ranks', () => rowsOf(collection(db, 'ranks'))],
+    ['shifts', () => rowsOf(collection(db, 'shifts'))],
+    ['assignments', () => rowsOf(collection(db, 'assignments'))],
+    ['schedule_templates', () => rowsOf(collection(db, 'schedule_templates'))],
+    ['schedule', () => rowsOf(collection(db, 'schedule'))],
+    ['settings/public', () => getDoc(doc(db, 'settings', 'public'))],
+    ['user_settings', () => getDoc(doc(db, 'user_settings', uid))],
+    ['availability', () => rowsFor('availability', 'user_id', uid)],
+    ['timeclock', () => rowsFor('timeclock', 'user_id', uid)],
+    ['on_duty', () => rowsOf(collection(db, 'on_duty'))],
+    ['schedule_offers', () => rowsOf(collection(db, 'schedule_offers'))],
+    ['trainings', () => rowsOf(collection(db, 'trainings'))],
+    ['training_signatures', () => rowsOf(collection(db, 'training_signatures'))],
+    ['certifications', () => rowsOf(collection(db, 'certifications'))],
+    ['certification_setup', () => rowsOf(collection(db, 'certification_setup'))],
+    ['certification_badges', () => rowsOf(collection(db, 'certification_badges'))],
+    ['announcements', () => audienceRows('announcements', ['*'])],
+    ['events', () => audienceRows('events', ['*'])],
+  ];
+
+  const refused = [];
+  const failed = [];
+  for (const [name, probe] of probes) {
+    try {
+      await probe();
+    } catch (error) {
+      const code = String((error && error.code) || '');
+      (code.includes('permission-denied') ? refused : failed).push(`${name} (${code || error.message})`);
+    }
+  }
+  return { refused, failed };
+};
+
 // The administrator's payload: the member payload PLUS the sections an officer's tabs read, each gated on the
 // permission its tab needs.
 //
