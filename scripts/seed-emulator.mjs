@@ -177,6 +177,41 @@ export const seed = async () => {
   await put('settings/public', { department_name: 'Bolivia Volunteer Fire Department' });
   await put('settings/private', { clock_location_radius_m: 250 });
 
+  // The system log's fixtures, straight through the REST API because the rules make the log unwritable by any client -
+  // which is also why reading it is a callable: no client may write a row, and the reader has to answer with counts and
+  // facets for the whole log rather than for one page.
+  //
+  // Between them they cover what the reader has to get right: two rows share a date and differ in time, one carries an
+  // ISO `created_at` and NO `timestamp` (the shape the audit writer produced before it wrote both), and one has a
+  // lowercase action, which is what the case-insensitive action filter exists for.
+  await put('system_log/log1', {
+    user_id: 'u1',
+    action: 'USER_LOGIN',
+    details: 'signed in',
+    created_at: '2026-03-04T14:05:00.000Z',
+    timestamp: '2026-03-04 09:05:00',
+  });
+  await put('system_log/log2', {
+    user_id: 'u2',
+    action: 'CLOCK_IN',
+    details: 'engine bay',
+    created_at: '2026-03-04T19:00:00.000Z',
+    timestamp: '2026-03-04 14:00:00',
+  });
+  await put('system_log/log3', {
+    user_id: 'u1',
+    action: 'user_login',
+    details: 'older row, ISO only',
+    created_at: '2026-03-02T12:00:00.000Z',
+  });
+  await put('system_log/log4', {
+    user_id: 'u2',
+    action: 'SIGN_IN_FAILED',
+    details: 'wrong password',
+    created_at: '2026-03-06T10:00:00.000Z',
+    timestamp: '2026-03-06 05:00:00',
+  });
+
   // --- reference data for the schedule, with the private halves the member must never see ---
   await put('shifts/d1', { description: 'Day', start_time: '08:00', end_time: '18:00' });
   await put('apparatus/a1', { description: 'Engine 1' });

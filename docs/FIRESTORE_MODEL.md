@@ -205,7 +205,7 @@ document at a time — so this is a straight port with the split made explicit i
 |---|---|---|---|---|---|
 | `announcements/{id}` | `title`, body fields, the three `is_visible_on_*` flags, and `audience_roles`, `audience_ranks`, `audience_users`, `audience_locations` | officer with `can_make_announcements` | whoever the audience arrays name | D | Today `announcementRowsFor` filters in the function. Here the audience is **materialized as arrays the client queries and the rule checks**, because a rule cannot filter rows for you: the query must be able to say `array-contains` the viewer's role, and the rule has to accept exactly that. |
 | `events/{id}` | `title`, `date_from`, `date_to`, `author_user_id`, audience fields as above | officer with `can_create_events` | as above | D | Same treatment, for the same reason. |
-| `system_log/{id}` | `user_id`, `action`, `details`, `created_at` | **Functions only** — never a client | officers with `can_view_system_log` | A | The audit trail. Making the client unable to write it is the point: an audit row that a browser can forge is not an audit row. |
+| `system_log/{id}` | `user_id`, `action`, `details`, `created_at`, `timestamp` | **Functions only** — never a client | officers with `can_view_system_log` | A | The audit trail. Making the client unable to write it is the point: an audit row that a browser can forge is not an audit row. Two timestamps deliberately: `created_at` is the exact instant, `timestamp` is the station-time text the tab reads and sorts by. |
 | ~~`id_migration`~~ | — | — | — | — | Dropped entirely. It existed to rewrite ids in place in a spreadsheet; Firestore documents have stable ids from birth. |
 
 ## Indexes
@@ -227,7 +227,7 @@ console.
 | my certifications | `certifications`: `user_id`, `end_date` |
 | announcements for me | `announcements`: `audience_roles` (array-contains), `created_at` descending |
 | events in a range | `events`: `date_from`, `date_to` |
-| the audit trail | `system_log`: `created_at` descending |
+| ~~the audit trail~~ | **None, deliberately.** The log's reads go through the `readSystemLog` callable, which cannot work from an index anyway: the response carries the counts and the filter dropdown's facets for the WHOLE log, not one page, because a dropdown offering only the values on the current page could never select the value somebody is looking for. It scans, filters, sorts and pages in memory - a few hundred documents per request at a station's scale - and reproduces the sheet's semantics exactly, including the two a Firestore query would differ on (case-sensitive matching, and missing values sorting first). If the log ever outgrows that, the facets are the piece to denormalize: only functions write the log, so they can. |
 
 ## Auth
 

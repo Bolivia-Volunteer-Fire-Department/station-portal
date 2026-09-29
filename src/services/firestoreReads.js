@@ -75,6 +75,26 @@ export const READERS = {
   ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
   ADMIN_GET_DOCUMENTS: () => rowsOf(collection(firestore(), 'documents')).then((documents) => ({ documents })),
 
+  // The system log, one page at a time - and the one officer read that is a callable rather than a query, for reasons
+  // that come from the shape of the contract rather than from convenience: the response carries the counts and the
+  // filter dropdown's facets for the WHOLE log, which no page can supply, and the log names members and records failed
+  // sign-ins. See readSystemLog in functions/index.js, where the permission is checked server-side and the sheet's
+  // filtering, sorting and paging are reproduced exactly - including the two things a Firestore query would do
+  // differently (case-sensitive matching, and missing values sorting first).
+  ADMIN_GET_SYSTEM_LOG: async (uid, body) => {
+    const query = {
+      page: (body && body.page) || 1,
+      page_size: (body && body.page_size) || '',
+      sort: (body && body.sort) || '',
+      from: (body && body.from) || '',
+      to: (body && body.to) || '',
+      action_filter: (body && body.action_filter) || '',
+      member: (body && body.member) || '',
+    };
+    const answer = await httpsCallable(firebaseFunctions(), 'readSystemLog')(query);
+    return answer.data || {};
+  },
+
 // The pre-login payload: what the loading screen needs before anybody has signed in.
 //
 // It reads what it can and OMITS what it cannot, rather than failing: the rules let anybody read `settings/public`,

@@ -345,6 +345,73 @@ const main = async () => {
   // come through with the `functions/` prefix.
   await refused('an unsigned caller cannot ask whose device a token is', 'functions/unauthenticated', () => pushDeviceOwner({ token: 'token-of-bo' }));
 
+  // The system log, one page at a time: the last read in the app, and the one whose answer is more than a page. The
+  // fixtures live in March 2026 while the audit rows this harness provokes are written "now", so a date range that stops
+  // in March isolates the fixtures from everything else in the collection - which is what makes these deterministic
+  // rather than hopeful.
+  const readSystemLog = httpsCallable(firebaseFunctions(), 'readSystemLog');
+  const march = { from: '2026-03-01', to: '2026-03-31' };
+  await signIn('jane');
+
+  const firstPage = await readSystemLog({ ...march, page_size: 2 });
+  check('the log answers the contract version the tab checks', firstPage.data.api, 2);
+  check('the fixtures page in timestamp order, newest first', firstPage.data.rows.map((row) => row.id), ['log4', 'log2']);
+  // Five rows in March, not four: the seed has an audit row of its own (l1, 2026-03-02 08:00:00), and it is welcome here
+  // - it holds station-time text in `created_at`, which is the OTHER legacy shape, and it sorts between log1 and log3.
+  check('and the counts describe the filtered set', [firstPage.data.total, firstPage.data.total_pages, firstPage.data.page], [5, 3, 1]);
+
+  const secondPage = await readSystemLog({ ...march, page_size: 2, page: 2 });
+  check('the second page holds the rest', secondPage.data.rows.map((row) => row.id), ['log1', 'l1']);
+  const thirdPage = await readSystemLog({ ...march, page_size: 2, page: 3 });
+  const pastTheEnd = await readSystemLog({ ...march, page_size: 2, page: 99 });
+  checkIs('a page past the end is clamped to the last page rather than rendering empty', pastTheEnd.data.page === 3 && pastTheEnd.data.rows.length === 1, String(pastTheEnd.data.page));
+
+  // The two legacy timestamps, both CONVERTED or normalized rather than trimmed:
+  //   log3 carries an ISO `created_at` and no `timestamp` at all, and 12:00 UTC is 07:00 in station time in March -
+  //   rendering it as 12:00 would look like a real time rather than like a bug.
+  //   l1 carries station-time text in `created_at` (what a row written before both fields existed looks like), which
+  //   has to be read as it stands rather than re-parsed as if it were UTC.
+  check('an ISO timestamp is converted to station time', thirdPage.data.rows[0].timestamp, '2026-03-02 07:00:00');
+  check('and station-time text in created_at is taken as it stands', secondPage.data.rows[1].timestamp, '2026-03-02 08:00:00');
+
+  // The action filter is case-INSENSITIVE, as the sheet matched it: a station whose log holds both 'USER_LOGIN' and
+  // 'user_login' sees one group rather than two. Whole value, though - not a prefix.
+  const lowercase = await readSystemLog({ ...march, action_filter: 'user_login' });
+  check('the action filter matches a differently-cased action', lowercase.data.rows.map((row) => row.id).sort(), ['log1', 'log3']);
+  check('and it matches the whole value rather than a prefix', (await readSystemLog({ ...march, action_filter: 'CLOCK' })).data.total, 0);
+
+  const byMember = await readSystemLog({ ...march, member: 'u2' });
+  check('the member filter matches on the id', byMember.data.rows.map((row) => row.id), ['log4', 'log2']);
+
+  const oneDay = await readSystemLog({ from: '2026-03-04', to: '2026-03-04' });
+  check('a one-day range includes both of that day\u2019s rows', oneDay.data.rows.map((row) => row.id), ['log2', 'log1']);
+
+  const byMemberAsc = await readSystemLog({ ...march, sort: 'member_asc' });
+  check('member order sorts by id, newest first within it', byMemberAsc.data.rows.map((row) => row.id), ['log1', 'l1', 'log3', 'log4', 'log2']);
+  const byActionAsc = await readSystemLog({ ...march, sort: 'action_asc' });
+  check('action order sorts by action, newest first within it', byActionAsc.data.rows.map((row) => row.id), ['log2', 'l1', 'log4', 'log1', 'log3']);
+  check('an unknown sort falls back to the default rather than to unsorted', (await readSystemLog({ ...march, sort: 'nonsense' })).data.sort, 'timestamp_desc');
+
+  // The facets come from the WHOLE log rather than the page, because a dropdown offering only the values on the current
+  // page could never select the value somebody is looking for.
+  check(
+    'the action facets cover the whole log',
+    // Case-insensitive on purpose: the facets carry the RAW values, which is what lets this list hold both 'USER_LOGIN'
+    // and 'user_login' - and a case-sensitive filter here would silently skip the lowercase one and prove nothing.
+    firstPage.data.actions.filter((action) => /login|clock|sign_in/i.test(action)).sort(),
+    ['CLOCK_IN', 'SIGN_IN_FAILED', 'USER_LOGIN', 'user_login']
+  );
+  check('and the member facets are ids, which the roster puts names to', firstPage.data.members.includes('u2'), true);
+  checkIs('and the log total counts every row, not just the filtered ones', firstPage.data.log_total >= 4, String(firstPage.data.log_total));
+
+  // The permission, checked where it cannot be talked around: the tab is officer-only, and the log names members and
+  // records failed sign-ins. Bo is a firefighter, and the seed gives that role no `can_view_system_log`.
+  await signOut(firebaseAuth());
+  await refused('nobody signed in cannot read the log at all', 'functions/unauthenticated', () => readSystemLog({ ...march }));
+  await signIn('bo');
+  await refused('a member without the permission cannot read the log', 'functions/permission-denied', () => readSystemLog({ ...march }));
+  await signIn('jane');
+
   // The audit toggle, asserted BOTH ways because the wrong default here is invisible: the save succeeds either way,
   // and only the audit row differs. Off unless an officer asks for it is the owner's decision, so 'off' is a case
   // rather than a comment. Written last, and switched back off, so nothing above it is affected.

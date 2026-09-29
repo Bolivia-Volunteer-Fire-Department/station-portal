@@ -35,7 +35,7 @@ this document exists.
 | `training_signatures` | `training_signatures` | Straight copy. |
 | `certifications` | `certifications` | Straight copy. |
 | `certification_setup` | `certification_setup` | Straight copy. |
-| `system_log` | `system_log` | Straight copy, 688 rows of history. |
+| `system_log` | `system_log` | **Not migrated, deliberately**: the rows were development noise rather than the station's history, so the collection starts empty and fills with real audit rows. `mintIds` for the first write's sake. |
 | `id_migration` | *nothing* | 444 rows that record a one-off rewrite of every id. History, not data - and see the referential check below. |
 
 ## The six things that are not a column copy
@@ -151,6 +151,28 @@ readable from Firestore. "Whose alerts arrive on THIS browser" is not a query Fi
 their own `push_devices` rows and nobody else's, so another member's token reads as nothing at all and a shared
 computer looks like the signed-in member's own. The `pushDeviceOwner` callable answers it server-side, exactly as the
 sheet did, and returns only whose device it is and on which device - nothing else about the row.
+
+## Every read that has a caller is now Firestore's
+
+The **system log** was the last one, and it is moved. It is a callable rather than a query, and that is a decision
+rather than a shortcut: the response is not a page. It carries the counts for the footer and the facets for the filter
+dropdowns, and those come from the WHOLE log - a dropdown offering only the values on the current page could never
+select the value somebody is looking for - and the log names members and records failed sign-ins, so the permission
+belongs on the server. It reproduces the sheet's `systemLogPage` exactly, down to the contract version the tab checks,
+including two behaviours a Firestore query would have changed silently: the sheet's action filter is case-insensitive,
+and a missing value sorts last in both directions where Firestore sorts it first in ascending order. The cost is a scan
+per request instead of a bounded page, which is why `docs/FIRESTORE_MODEL.md` records the upgrade path.
+
+Writing it turned up the thing that had been wrong since the functions started writing audit rows at all: they wrote
+`created_at` as an ISO instant, and the tab's contract is `timestamp` in station time. Sorting can only happen on a
+stored field, so that gap could not be papered over at read time - the writer now writes both, and the reader converts
+ISO rows that predate it. An ISO instant rendered as station time is four or five hours wrong in a way that looks like
+a real time rather than like a bug, which is the worst kind.
+
+What is left on the sheet is three actions **nothing in the app calls** - `ADMIN_GET_USERS`,
+`ADMIN_GET_CERTIFICATIONS`, `ADMIN_GET_SCHEDULE_TEMPLATES`, all named in `switchReads` - and the bootstrap payloads,
+which are routed and keep the sheet only as the fallback for a failed read. Deleting Apps Script from `api.js` is the
+next step, and after it the sheet is a fallback that never fires.
 
 ## Two things the login work found, and what each needs
 

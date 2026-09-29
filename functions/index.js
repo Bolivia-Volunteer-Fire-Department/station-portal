@@ -51,14 +51,38 @@ const requirePermission = async (uid, flag, what) => {
   }
 };
 
+// The station's own clock, in the format the whole app stores and sorts by: 'YYYY-MM-DD HH:mm:ss' in station time.
+// Mirrors stationTimestamp in src/services/firestoreWrites.js - same shape, same timezone - because a function and a
+// browser both write rows the other side has to read.
+const stationTimestamp = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const at = (type) => parts.find((part) => part.type === type).value;
+  return `${at('year')}-${at('month')}-${at('day')} ${at('hour')}:${at('minute')}:${at('second')}`;
+};
+
 // The audit trail: every one of these functions leaves a row naming who did it and to whom. An officer-driven
 // password reset is only accountable if the officer's name is written down with it.
+//
+// TWO timestamps, deliberately. `created_at` is the exact instant, which is what an investigation wants; `timestamp`
+// is the station-time text the System Log tab reads and sorts by, which is the format the whole app uses. Writing only
+// the ISO instant left the tab's own contract unsatisfied by the app writing it - and an ISO instant rendered as
+// station time is four or five hours wrong in a way that looks like a real time rather than like a bug.
 const audit = (userId, action, details) =>
   db.collection('system_log').add({
     user_id: userId,
     action,
     details,
     created_at: new Date().toISOString(),
+    timestamp: stationTimestamp(),
   });
 
 // Claims carry role_id and is_admin so the client can shape its own navigation without a read. The RULES never
@@ -457,6 +481,187 @@ exports.saveDocumentWithAudit = onCall(async (request) => {
   await db.doc(`${collection}/${id}`).set(document, { merge: true });
   await audit(caller.uid, 'ADMIN_SAVE_ROW', `${collection}/${id}`);
   return { id };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// The system log: one page at a time, and the last read in the app.
+// -------------------------------------------------------------------------------------------------------------
+//
+// WHY A CALLABLE rather than a client query, since this is the one place that is a genuine choice:
+//
+//   1. The response is not a page. It carries `total`/`total_pages` for the footer and `actions`/`members` for the
+//      filter dropdowns, and the facets come from the WHOLE log - a dropdown offering only the values on the current
+//      page could never select the value somebody is looking for. No single page can supply that.
+//   2. The log names members and records failed sign-ins, so the permission is checked here, on the server, where the
+//      rules cannot be talked around.
+//
+// And WHY IT SCANS rather than paging with a Firestore query, which it could:
+//
+//   The tab asks for any combination of four sorts and four filters. Native paging would need a composite index for
+//   every filtered sort - around eight of them - and it would still behave differently from the sheet in two ways a
+//   reader would notice: Firestore matches strings case-sensitively, where the sheet's action filter is
+//   case-insensitive, and it treats a missing value as lowest rather than last in both directions.
+//
+//   The facets already require reading the whole log, so the page and the counts ride along on that same read for
+//   nothing. At a station's scale that is a few hundred documents per request. If this log ever grows past that, the
+//   facets are the piece to denormalize at write time - they can be, because ONLY this file writes the log - and then
+//   the page can move to a query with the indexes it needs.
+const LOG_SORTS = ['timestamp_desc', 'timestamp_asc', 'action_asc', 'member_asc'];
+const LOG_SORT_DEFAULT = 'timestamp_desc';
+const LOG_PAGE_SIZE_DEFAULT = 20;
+const LOG_PAGE_SIZE_MAX = 100;
+// The contract version, matching SYSTEM_LOG_API_VERSION in src/utils/systemLog.js and Code.gs. The tab compares the two
+// and says so when they differ, because the failure is otherwise invisible: a backend reading the action filter under
+// an older name answers an empty page, which looks exactly like an empty log.
+const SYSTEM_LOG_API_VERSION = 2;
+
+const logCellText = (value) => String(value === undefined || value === null ? '' : value).trim();
+
+// The timestamp as the app stores it: 'YYYY-MM-DD HH:mm:ss' in station time.
+//
+// An ISO instant is CONVERTED rather than trimmed, and that is the whole reason this cannot be left to the client: the
+// tab parses this text and displays it, so an ISO string would render its UTC hour as if it were station time - four or
+// five hours wrong, and looking like a real time rather than a bug.
+const logTimestampText = (value) => {
+  const raw = logCellText(value);
+  if (raw === '') return '';
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw)) return raw.slice(0, 19);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) {
+    const parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? raw.replace('T', ' ').slice(0, 19) : stationTimestamp(parsed);
+  }
+  return raw;
+};
+
+// One row in the shape the tab reads - the same fields the sheet's reader returned, derived the same way. Rows written
+// before the audit writer wrote both timestamps carry only `created_at`, which is why the conversion above exists.
+const normalizeLogEntry = (id, row) => {
+  const source = row || {};
+  const timestamp = logTimestampText(source.timestamp || source.created_at);
+  return {
+    id: String(id || ''),
+    timestamp,
+    date_key: /^\d{4}-\d{2}-\d{2}/.test(timestamp) ? timestamp.slice(0, 10) : '',
+    user_id: logCellText(source.user_id),
+    action: logCellText(source.action),
+    details: logCellText(source.details),
+  };
+};
+
+// Missing values sort last in EITHER direction, so an unreadable timestamp is never presented as the newest entry.
+const compareLogText = (aValue, bValue, direction) => {
+  const a = String(aValue || '');
+  const b = String(bValue || '');
+  if (a === b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return (a < b ? -1 : 1) * direction;
+};
+
+// The id breaks a tie last, so the order is total: paging over an order two rows can share is how a boundary repeats
+// one row and drops another.
+const compareLogTimestamp = (a, b, direction) => {
+  const aKey = a.timestamp || '';
+  const bKey = b.timestamp || '';
+  if (!aKey && !bKey) return compareLogText(a.id, b.id, direction);
+  if (!aKey) return 1;
+  if (!bKey) return -1;
+  if (aKey !== bKey) return (aKey < bKey ? -1 : 1) * direction;
+  return compareLogText(a.id, b.id, direction);
+};
+
+const sortLogEntries = (entries, sort) => {
+  const mode = LOG_SORTS.includes(String(sort || '')) ? String(sort) : LOG_SORT_DEFAULT;
+  return entries.slice().sort((a, b) => {
+    if (mode === 'timestamp_asc') return compareLogTimestamp(a, b, 1);
+    if (mode === 'action_asc') return compareLogText(a.action, b.action, 1) || compareLogTimestamp(a, b, -1);
+    if (mode === 'member_asc') return compareLogText(a.user_id, b.user_id, 1) || compareLogTimestamp(a, b, -1);
+    return compareLogTimestamp(a, b, -1);
+  });
+};
+
+// A row against the filter set. A blank filter is ignored rather than matching nothing - the one mistake that would make
+// an empty table look exactly like an empty log.
+const logEntryMatches = (entry, filters) => {
+  if (!entry) return false;
+
+  if (filters.from || filters.to) {
+    // A row with no readable date cannot be inside a date range, whichever end is open.
+    if (!entry.date_key) return false;
+    if (filters.from && entry.date_key < filters.from) return false;
+    if (filters.to && entry.date_key > filters.to) return false;
+  }
+
+  // Whole value and case-insensitive, as the sheet matched it: 'user_login' and 'USER_LOGIN' are one group rather than
+  // two. The dropdown offers the stored values, so in practice this is an exact match.
+  if (filters.action && entry.action.toUpperCase() !== filters.action.toUpperCase()) return false;
+  if (filters.member && entry.user_id !== filters.member) return false;
+
+  return true;
+};
+
+// One page of rows plus the numbers the footer and the pager need. The page is CLAMPED, so asking for page 99 of a
+// 3-page result returns the last page rather than an empty table - which is what would otherwise happen after narrowing
+// a filter.
+const paginateLogEntries = (entries, page, pageSize) => {
+  const size = Math.min(LOG_PAGE_SIZE_MAX, Math.max(1, parseInt(pageSize, 10) || LOG_PAGE_SIZE_DEFAULT));
+  const total = entries.length;
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(1, parseInt(page, 10) || 1), totalPages);
+
+  return {
+    rows: entries.slice((current - 1) * size, (current - 1) * size + size),
+    page: current,
+    page_size: size,
+    total,
+    total_pages: totalPages,
+  };
+};
+
+// Every distinct action and member id in the log, for the filter dropdowns. From the WHOLE log rather than the page, and
+// as ids - the client already has the roster to put names to them, and the log holds ids that are not members too, since
+// a failed sign-in is recorded against the username that was typed.
+const logFacets = (entries) => {
+  const actions = new Set();
+  const members = new Set();
+  entries.forEach((entry) => {
+    if (entry.action) actions.add(entry.action);
+    if (entry.user_id) members.add(entry.user_id);
+  });
+  return { actions: [...actions].sort(), members: [...members].sort() };
+};
+
+exports.readSystemLog = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_view_system_log', 'read the system log');
+
+  const data = request.data || {};
+  const filters = {
+    from: logCellText(data.from),
+    to: logCellText(data.to),
+    // `action_filter`, not `action`: `action` is the RPC envelope's own key, so the log's action FILTER has to travel
+    // under a different name. Reading data.action here would filter every page on 'ADMIN_GET_SYSTEM_LOG' and answer
+    // nothing - which is what broke this tab once already, on the client side of the same collision.
+    action: logCellText(data.action_filter),
+    member: logCellText(data.member),
+  };
+  const sort = LOG_SORTS.includes(logCellText(data.sort)) ? logCellText(data.sort) : LOG_SORT_DEFAULT;
+
+  const snapshot = await db.collection('system_log').get();
+  const all = snapshot.docs.map((entry) => normalizeLogEntry(entry.id, entry.data()));
+  const matched = all.filter((entry) => logEntryMatches(entry, filters));
+  const paged = paginateLogEntries(sortLogEntries(matched, sort), data.page, data.page_size);
+  const facets = logFacets(all);
+
+  return {
+    api: SYSTEM_LOG_API_VERSION,
+    ...paged,
+    // Echoed back, so the client can trust what was APPLIED rather than what it asked for.
+    sort,
+    actions: facets.actions,
+    members: facets.members,
+    log_total: all.length,
+  };
 });
 
 // Identity Platform's own guard on account creation. The app creates members with the Admin SDK from an officer's
