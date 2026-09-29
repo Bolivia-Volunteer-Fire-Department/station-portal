@@ -60,6 +60,9 @@ jobs:
         env:
           VITE_APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          # Which features read and write Firestore instead of the sheet. Unset - the safe default - routes nothing,
+          # so a build without this secret behaves exactly as it did before any of the move existed.
+          VITE_FIRESTORE_FEATURES: ${{ secrets.VITE_FIRESTORE_FEATURES }}
           VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
