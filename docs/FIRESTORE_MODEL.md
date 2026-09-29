@@ -480,10 +480,13 @@ thing to do on its own:
   on one side of a read is invisible - and it looks like data loss, not like a half-finished migration. Save
   availability into Firestore while the sign-in still reads the sheet and the member's save disappears on reload.
   Clock in on the client path while the dashboard still reads `timeclock_logs` and the roster shows an empty station.
-- **Some checks live in the server, not in the client or the rules.** Clocking in is the sharpest example: the
-  station geofence is enforced in `Code.gs`, and a client-side Firestore write would not enforce it at all - the
-  rules cannot do the arithmetic and the browser's own check is advisory. Moving clock-in means moving that check
-  with it, which is the same reasoning that made the schedule board a callable rather than a client write.
+- **One check was deliberately left in the browser.** Clocking in used to be checked twice: the station boundary in
+  `Code.gs` and again in `src/utils/clockLocation.js`. The Firestore path keeps only the browser half, and that is a
+  decision rather than an oversight. The rules cannot do the arithmetic; a callable could, and the schedule board is
+  a callable for exactly that kind of reason. But the risk being weighed here is a member lying about their own
+  location on their own timesheet, which the station judged not worth a server round trip on every clock press. What
+  did NOT move is the part that protects the data: the entry and the `on_duty` row are still written in one
+  transaction, so nobody can be on duty with no entry, or have two open shifts at once.
 
 So the phase that has to come first is a **migration**: read the sheets, write Firestore, and keep the script
 runnable, because a feature will be cut over after it and any drift between the copy and the live sheet has to be

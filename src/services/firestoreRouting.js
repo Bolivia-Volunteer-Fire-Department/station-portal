@@ -46,10 +46,19 @@ const featureIsOn = (name) => {
 // read actions that have to move with it - recorded even while they are unwired, because an unlisted one is how
 // this gets got wrong.
 //
-// `clock` is deliberately ABSENT. The station geofence is enforced in Code.gs and the browser's own check is
-// advisory, so a clock-in routed to the client path would silently drop a real check. It belongs in a callable,
-// like the schedule board; until that exists, clocking in stays where the fence is.
+// `clock` is a feature like any other, and its fence is a DECISION rather than an oversight: the station boundary is
+// checked in the browser (src/utils/clockLocation.js) and in Code.gs today, and the owner has chosen to keep it in
+// the browser only. Rules cannot do the arithmetic and a callable would be the robust answer - but the risk here is
+// a member lying about their own location on their own timesheet, and that is not a risk this station judges worth a
+// server round trip on every clock press. What is NOT lost: the entry and the on_duty row are still written in one
+// transaction, so nobody can be on duty without an entry or have two open at once.
 export const ROUTED_FEATURES = {
+  // Clocking in and out. The fence stays in the browser by decision (above); the transaction is what matters here.
+  clock: {
+    requires: ['memberPayload'],
+    writes: ['CLOCK_IN', 'CLOCK_OUT'],
+    switchReads: ['GET_ON_DUTY', 'GET_TIMECLOCK_LOGS'],
+  },
   // A member's own availability: one batch write, one read, rules already proven by the harness.
   availability: {
     requires: ['memberPayload'],
@@ -134,6 +143,27 @@ export const routingBlocker = async (action) => {
 const writes = () => import('./firestoreWrites.js');
 
 const DISPATCH = {
+  // CLOCK OUT needs the open entry's id, which the sheet backend found for itself. The Firestore side reads the
+  // member's own open entry for it (`time_out == ''`), and the transaction in clockOut re-checks everything that
+  // matters - it is the same document the clock-in guard watches.
+  CLOCK_IN: async (body, uid) => {
+    const { clockIn } = await writes();
+    const id = await clockIn({
+      userId: uid,
+      gps: body.gps_lat ? { latitude: body.gps_lat, longitude: body.gps_lon } : null,
+      isManual: body.is_manual === true || body.is_manual === 'true',
+    });
+    return ok({ id });
+  },
+
+  CLOCK_OUT: async (body, uid) => {
+    const { clockOut, openClockEntryFor } = await writes();
+    const open = await openClockEntryFor(uid);
+    if (!open) return fail('You are not clocked in.', 'REFUSED');
+    await clockOut({ userId: uid, entryId: open.id });
+    return ok({ id: open.id });
+  },
+
   SET_MY_AVAILABILITY: async (body, uid) => {
     const { saveAvailability } = await writes();
     return ok(await saveAvailability({ userId: uid, adds: body.adds || [], removes: body.removes || [] }));

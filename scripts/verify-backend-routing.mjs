@@ -37,10 +37,20 @@ const check = (label, actual, expected) => {
 
 const apiSource = readFileSync(new URL('../src/services/api.js', import.meta.url), 'utf8');
 
+// Actions whose call site passes the action NAME as a variable rather than as a literal, with the exact call to
+// look for. The clock is the only one: `submitClockAction(action, ...)` serves both directions, so it cannot spell
+// either name. Listed explicitly so a second one has to be added here on purpose rather than slipping past.
+const DYNAMIC_WIRING = {
+  CLOCK_IN: 'routeWrite(action, request)',
+  CLOCK_OUT: 'routeWrite(action, request)',
+};
+
 // Whether an action is both named in api.js and dispatched through routeWrite there. A pure function of the source,
 // so the mutation below can break it on purpose.
 const actionIsWired = (action, source) =>
-  source.includes(`action: '${action}'`) && source.includes(`routeWrite('${action}'`);
+  DYNAMIC_WIRING[action]
+    ? source.includes(DYNAMIC_WIRING[action]) && source.includes(`'${action}'`)
+    : source.includes(`action: '${action}'`) && source.includes(`routeWrite('${action}'`);
 // --- the table, before any environment is set: this is the default build ----------------------------------------
 process.env.VITE_FIRESTORE_FEATURES = '';
 const { ROUTED_FEATURES, ROUTED_WRITES, routingBlocker, routeWrite, failureFor, ok } = await import(
@@ -52,7 +62,12 @@ checkIs(
   'the table names the two payloads as features',
   features.includes('memberPayload') && features.includes('adminPayload')
 );
-checkIs('clock is not a routed feature (the geofence lives in Code.gs)', !features.includes('clock'));
+checkIs('clock is a routed feature (its fence is the browser\'s, by decision)', features.includes('clock'));
+check(
+  'and it moves only with the reads that show it',
+  ROUTED_FEATURES.clock.requires,
+  ['memberPayload']
+);
 
 const requiresAreReal = features.every((name) =>
   ROUTED_FEATURES[name].requires.every((dependency) => features.includes(dependency))
@@ -96,7 +111,7 @@ const mutated = apiSource.replace("routeWrite('SET_MY_AVAILABILITY'", "routeWrit
 checkIs('the wiring check bites (mutation)', mutated !== apiSource && !actionIsWired('SET_MY_AVAILABILITY', mutated));
 
 // --- the gates, in the order they are consulted ------------------------------------------------------------------
-check('an action no feature writes is not routed at all', await routingBlocker('CLOCK_IN'), 'not-a-routed-action');
+check('an action no feature writes is not routed at all', await routingBlocker('PING'), 'not-a-routed-action');
 check('switched off by default', await routingBlocker('SET_MY_AVAILABILITY'), 'feature-off');
 check('and routeWrite answers null, so the caller keeps doing what it did', await routeWrite('SET_MY_AVAILABILITY'), null);
 
@@ -123,7 +138,11 @@ const childScript = `
   const second = await import('./src/services/firestoreRouting.js');
   const withoutUser = await second.routingBlocker('SET_MY_AVAILABILITY');
   const sent = await second.routeWrite('SET_MY_AVAILABILITY', { adds: [] });
-  console.log(JSON.stringify({ withoutPrerequisite, withoutUser, sent }));
+  // The clock is behind the same gates as everything else, and CLOCK_OUT is the one that needs a lookup first.
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,clock';
+  const clockIn = await second.routingBlocker('CLOCK_IN');
+  const clockOut = await second.routingBlocker('CLOCK_OUT');
+  console.log(JSON.stringify({ withoutPrerequisite, withoutUser, sent, clockIn, clockOut }));
 `;
 const childOut = execFileSync(process.execPath, ['--input-type=module', '-e', childScript], { encoding: 'utf8' });
 const child = JSON.parse(childOut.trim().split('\n').pop());
@@ -137,6 +156,10 @@ check(
 // the state the app is in today: it signs in through Apps Script, and Firebase Auth has no user yet.
 check('prerequisite on and configured, but no Firebase user', child.withoutUser, 'not-signed-in-to-firebase');
 check('so it still goes to Apps Script', child.sent, null);
+check('the clock answers the same way, both directions', [child.clockIn, child.clockOut], [
+  'not-signed-in-to-firebase',
+  'not-signed-in-to-firebase',
+]);
 
 // --- the reply shape the screens already read ---------------------------------------------------------------------
 check('a success reply carries success', ok({ added: 1 }).success, true);

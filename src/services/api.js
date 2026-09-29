@@ -202,15 +202,20 @@ export const fetchUserSchedule = async (token) =>
 export const fetchRoster = async (token) =>
   appScriptFetch({ action: 'GET_ROSTER', token }, { retryOnNetworkError: true });
 
-export const submitClockAction = async (action, userId, coords = {}, token) =>
-  appScriptFetch({
+export const submitClockAction = async (action, userId, coords = {}, token) => {
+  const request = {
     action, // 'CLOCK_IN' or 'CLOCK_OUT'
     user_id: userId,
     gps_lat: coords.latitude || '',
     gps_lon: coords.longitude || '',
     is_manual: false,
     token,
-  });
+  };
+  // The station boundary is checked in the browser before this is ever called (utils/clockLocation.js), which is
+  // why the Firestore path never answers OUT_OF_RANGE_CODE: it cannot be reached from a routed clock action. The
+  // server-side half of that check stays on Apps Script with the rest of Code.gs, by decision.
+  return (await routeWrite(action, request)) || appScriptFetch(request);
+};
 
 // Push devices. Registration is per DEVICE (see the Push devices section of Code.gs): a member's
 // phone and computer each hold their own row, so enabling one never disturbs the other.
