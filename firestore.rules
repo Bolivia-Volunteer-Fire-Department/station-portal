@@ -149,7 +149,15 @@ service cloud.firestore {
     // One document per member, keyed by the member's id, so "your own document" is the whole rule. The FCM device
     // token is NOT here - it lives in push_devices, which is what lets this document be plainly readable.
     match /user_settings/{userId} {
-      allow read, write: if signedIn() && (uid() == userId || permission('can_edit_users'));
+      // The member's own, and the two officer permissions that have business here: `can_edit_users` for the user
+      // editor, and `can_edit_notification_settings` for the notifications tab - which lists every member's
+      // preferences and toggles the push flag, exactly as the sheet's version did. What lives here is a time format, a
+      // dark-mode preference, notification preferences and the push flag: nothing sensitive, and all of it something
+      // those officers already read.
+      allow read, write: if signedIn()
+        && (uid() == userId
+          || permission('can_edit_users')
+          || permission('can_edit_notification_settings'));
     }
 
     // A device token belongs to the member whose browser registered it; an officer reads the collection for the

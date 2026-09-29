@@ -140,13 +140,10 @@ for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
 // permission slip - it may shrink and it may not grow, and a run prints what is left in it. Fixing one means deleting
 // its line here, which is what keeps the list honest.
 const NOT_YET_ROUTED = [
-  // Push registration and the administrator's push controls (the member's device card, and the FCM tab).
-  'REGISTER_PUSH_DEVICE',
-  'UNREGISTER_PUSH_DEVICE',
-  'ADMIN_GET_PUSH_STATUS',
-  'ADMIN_GET_FCM_STATUS',
-  'ADMIN_SET_PUSH_DISABLED',
-  'ADMIN_SEND_TEST_PUSH',
+  // Push registration and the administrator's push controls: DONE, and deleted from this list as the ledger requires.
+  // The member's device card registers, unregisters, transfers and sees the administrator's switch; the officer reads
+  // the per-member device counts and can turn a member off and on. What is NOT done is the sending itself.
+  //
   // The member's own settings (time format, dark mode) and their password change.
   'UPDATE_USER_SETTINGS',
   'UPDATE_USER_PASSWORD',

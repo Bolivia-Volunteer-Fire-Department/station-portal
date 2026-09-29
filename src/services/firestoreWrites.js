@@ -246,6 +246,34 @@ export const saveAudienceDocument = async ({ collection: name, id, body, rankAnd
   return saveDocument({ collection: name, id, body, extra });
 };
 
+// A member's own device, gone. The rules decide whether this caller may - their own row, or an officer's permission -
+// and the row is found BY TOKEN because that is what a browser holds: it has no idea what id the row was given, and a
+// stale token must not be able to leave a row behind that keeps delivering.
+export const removePushDevice = async ({ token }) => {
+  const wanted = String(token || '').trim();
+  if (!wanted) return { removed: false };
+  const found = await getDocs(query(collection(firestore(), 'push_devices'), where('token', '==', wanted)));
+  await Promise.all(found.docs.map((row) => deleteDoc(row.ref)));
+  return { removed: found.docs.length > 0 };
+};
+
+// An administrator's switch, in both directions, and the two directions are NOT symmetrical.
+//
+// Turning notifications OFF forgets the member's devices AND sets a flag, because the member's own card re-registers
+// any subscription the browser still holds the moment User Settings is opened - without the flag the switch would
+// quietly undo itself on that person's next visit. Lifting it clears the flag only: each device has to be enabled again
+// from the device, which is the only place its push subscription can be turned back on.
+export const setPushDisabled = async ({ userId, disabled }) => {
+  const target = String(userId || '').trim();
+  if (!target) throw new Error('Which member?');
+
+  const rows = await getDocs(query(collection(firestore(), 'push_devices'), where('user_id', '==', target)));
+  if (disabled) await Promise.all(rows.docs.map((row) => deleteDoc(row.ref)));
+
+  await setDoc(doc(firestore(), 'user_settings', target), { is_push_disabled: disabled === true }, { merge: true });
+  return { userId: target, disabled: disabled === true, devicesForgotten: disabled ? rows.docs.length : 0 };
+};
+
 export const deleteDocument = async ({ collection, id }) => {
   const target = String(id || '');
   if (await clientWritesAreAudited()) {

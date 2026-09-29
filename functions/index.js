@@ -4,14 +4,18 @@
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
 
-// WHAT BELONGS IN A FUNCTION, and why these four do:
+// WHAT BELONGS IN A FUNCTION, and why:
 //
-// Everything a client may do directly lives in firestore.rules. What is here is the work that needs the Admin SDK:
-// creating an Auth account, setting a password, suspending one, and writing the audit row that names the officer
-// who did it. A browser cannot do any of those things, and `users_private` is write-denied in the rules so that it
-// cannot try.
+// Everything a client may do directly lives in firestore.rules. What is here is work that needs the Admin SDK, and the
+// list has grown past the four it started as: creating an Auth account, setting a password, suspending one, writing the
+// audit row that names the officer who did it (users_private is write-denied in the rules so a browser cannot try);
+// saving the schedule board and approving an offer, which both write several documents that must agree; the assignment
+// audience keys; reading the system log, whose paging and facets no single page can supply; answering which member a
+// device belongs to; moving a device between members, which the rules must refuse because the refusal cannot name the
+// owner; and the FCM status and test send, which need the runtime's own credentials.
 //
 // These are also the reason the Blaze plan is required: callable functions do not exist on Spark.
 
@@ -481,6 +485,152 @@ exports.saveDocumentWithAudit = onCall(async (request) => {
   await db.doc(`${collection}/${id}`).set(document, { merge: true });
   await audit(caller.uid, 'ADMIN_SAVE_ROW', `${collection}/${id}`);
   return { id };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// Push devices: the one door into the device list.
+// -------------------------------------------------------------------------------------------------------------
+//
+// The rules already make the ordinary case safe - a member may only create a row for themselves - so why is this a
+// callable at all? Two reasons, and both are the sheet's reasons as well:
+//
+//   1. A TRANSFER is a member writing a row that belongs to somebody else, which the rules must refuse. The refusal
+//      also has to say WHOSE device it is, because the settings card offers a button that moves it - and Firestore's
+//      permission-denied carries no such detail.
+//   2. A device changing hands is security-relevant for BOTH members and neither can see it from their own side: one
+//      has lost a notification target, the other has gained one. The audit log is the only place the two are recorded
+//      together, and only a function may write there.
+exports.registerPushDevice = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+
+  const uid = request.auth.uid;
+  const data = request.data || {};
+  const token = String(data.device_token || '').trim();
+  const label = String(data.device_label || '').trim().slice(0, 80);
+  const transfer = data.transfer === true;
+  if (!token) return { success: false, message: 'No device token was supplied.' };
+
+  // An administrator's switch outranks the member's own browser: every path into this list - the Enable button, the
+  // card's self-healing re-registration, a transfer - ends up here, so the block cannot be walked around by opening
+  // the right screen. The member's card reads the same flag and says so before offering anything.
+  const settings = await db.doc(`user_settings/${uid}`).get();
+  if (settings.exists && (settings.data() || {}).is_push_disabled === true) {
+    return {
+      success: false,
+      code: 'PUSH_DISABLED_BY_ADMIN',
+      message: 'An administrator has turned notifications off for your account.',
+    };
+  }
+
+  const found = await db.collection('push_devices').where('token', '==', token).limit(1).get();
+  const stamp = stationTimestamp();
+
+  if (found.empty) {
+    await db.collection('push_devices').add({ user_id: uid, token, device_label: label, updated_at: stamp });
+    return { success: true, owner_name: '' };
+  }
+
+  const row = found.docs[0];
+  const ownerId = String((row.data() || {}).user_id || '').trim();
+
+  // Somebody else's device, and no transfer asked for: REFUSED, and named. This is what stops signing in on a shared
+  // station computer from quietly making it yours.
+  if (ownerId && ownerId !== uid && !transfer) {
+    const owner = await db.doc(`users/${ownerId}`).get();
+    const ownerData = (owner.exists && owner.data()) || {};
+    return {
+      success: false,
+      owner_id: ownerId,
+      owner_name: String(ownerData.name || ownerData.user_name || '').trim() || 'another member',
+    };
+  }
+
+  await row.ref.set({ user_id: uid, device_label: label, updated_at: stamp }, { merge: true });
+
+  if (ownerId && ownerId !== uid) {
+    await audit(uid, 'PUSH_DEVICE_TRANSFERRED', `${ownerId} -> ${uid} (${label || 'unnamed device'})`);
+    return { success: true, owner_name: '', transferred_from: ownerId };
+  }
+
+  return { success: true, owner_name: '' };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// The FCM half: what the notifications tab needs from the SERVER.
+// -------------------------------------------------------------------------------------------------------------
+//
+// Both of these existed on the sheet for one reason: sending a push needs credentials, and the Apps Script project
+// had to be GIVEN them (the service-account key was a script property, write-only, and adminFetchFcmStatus reported
+// which of them were present). A Cloud Function does not need giving: the runtime service account the function already
+// runs as is the same credential FCM accepts, so "is it configured?" has one honest answer, and the tab is told where
+// that credential comes from rather than being shown fields to fill in.
+exports.fcmStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_edit_notification_settings', 'read the notification setup');
+
+  // The device count rides along because "ready" and "ready, and nobody has registered a device" are very different
+  // answers to an administrator wondering why nothing arrives.
+  const devices = await db.collection('push_devices').count().get();
+
+  return {
+    ready: true,
+    transport: 'firebase-admin',
+    credential: 'the Cloud Functions runtime service account - nothing is stored for this',
+    devices: devices.data().count,
+  };
+});
+
+// One push to one member, so an administrator can prove the setup end to end rather than infer it from a status page.
+//
+// Deliberately sent to EVERY device the member has: the question is whether their phone buzzes, and which device
+// answered it is not the point. Also the one place dead tokens are cleaned up - FCM tells us when a token is no longer
+// registered, and a row that will never deliver is worse than no row at all, because it makes a member look reachable.
+exports.sendTestPush = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_edit_notification_settings', 'send a test notification');
+
+  const userId = String((request.data || {}).user_id || '').trim();
+  if (!userId) throw new HttpsError('invalid-argument', 'Which member?');
+
+  const rows = await db.collection('push_devices').where('user_id', '==', userId).get();
+  const devices = rows.docs
+    .map((row) => ({ ref: row.ref, token: String((row.data() || {}).token || '').trim() }))
+    .filter((device) => device.token);
+
+  if (!devices.length) {
+    return { success: false, message: 'That member has no registered device, so there is nothing to send to.' };
+  }
+
+  const answer = await getMessaging().sendEachForMulticast({
+    tokens: devices.map((device) => device.token),
+    notification: {
+      title: 'Test notification',
+      body: 'If you can read this, notifications are working on this device.',
+    },
+  });
+
+  const dead = answer.responses
+    .map((result, index) => ({ result, device: devices[index] }))
+    .filter((entry) => !entry.result.success && /not-registered|invalid-argument|invalid-registration/.test(String((entry.result.error && entry.result.error.code) || '')));
+
+  await Promise.all(dead.map((entry) => entry.device.ref.delete()));
+
+  if (!answer.successCount) {
+    const first = answer.responses.find((result) => !result.success);
+    return {
+      success: false,
+      message: 'The notification could not be delivered.',
+      // FCM's own words. A test send is exactly where somebody needs them rather than a reassurance.
+      detail: String((first && first.error && first.error.message) || '').slice(0, 200),
+    };
+  }
+
+  return {
+    success: true,
+    message:
+      `Sent to ${answer.successCount} of ${devices.length} device${devices.length === 1 ? '' : 's'}.` +
+      (dead.length ? ` ${dead.length} stale registration${dead.length === 1 ? '' : 's'} removed.` : ''),
+  };
 });
 
 // -------------------------------------------------------------------------------------------------------------

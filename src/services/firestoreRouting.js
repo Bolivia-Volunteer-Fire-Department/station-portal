@@ -183,6 +183,21 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // Push devices and the notifications tab: the member's own device card, and the officer's view of it.
+  //
+  // The two doors are deliberately different. REGISTER is a callable because a TRANSFER is a member writing a row that
+  // belongs to somebody else - which the rules must refuse, and whose refusal has to name the owner so the card can
+  // offer to move it. UNREGISTER is an ordinary client delete of the member's own row, which the rules already allow.
+  // ADMIN_SET_PUSH_DISABLED is a client write too: forgetting a member's device rows and setting the flag on their
+  // settings is exactly what `can_edit_notification_settings` is for. The FCM pair are callables because sending a
+  // push needs the credentials the runtime has and a browser never will.
+  push: {
+    requires: ['memberPayload'],
+    writes: ['REGISTER_PUSH_DEVICE', 'UNREGISTER_PUSH_DEVICE', 'ADMIN_SET_PUSH_DISABLED', 'ADMIN_SEND_TEST_PUSH'],
+    reads: ['ADMIN_GET_PUSH_STATUS', 'ADMIN_GET_FCM_STATUS'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -333,6 +348,19 @@ export const routingBlocker = async (action) => {
 // `firestoreWrites` is imported lazily: with the switch off, none of the Firebase SDK is ever fetched.
 const writes = () => import('./firestoreWrites.js');
 
+// The callables this file needs to reach directly, for the routes where the work IS a function rather than a write:
+// registering a device (a transfer has to be refused with the owner's name, which the rules cannot say), and the FCM
+// pair, which need the runtime's credentials. Imported lazily for the same reason the writers are - a screen that never
+// opens the notifications tab never loads the Functions SDK.
+const callable = async (name, data) => {
+  const [{ httpsCallable }, { firebaseFunctions }] = await Promise.all([
+    import('firebase/functions'),
+    import('./firebase.js'),
+  ]);
+  const answer = await httpsCallable(firebaseFunctions(), name)(data);
+  return answer.data || {};
+};
+
 // The read dispatchers. GET_BOOTSTRAP is the member's whole sign-in payload, and it needs nothing but the uid: the
 // reader resolves the member's own role and rank from their document, because a claim can be an hour stale.
 //
@@ -387,6 +415,32 @@ const DISPATCH = {
     const { saveAvailability } = await writes();
     return ok(await saveAvailability({ userId: target, adds: body.adds || [], removes: body.removes || [] }));
   },
+
+  // A device registering itself. The callable is the door - see registerPushDevice in functions/index.js - and `ok()`
+  // puts success:true in front of its answer, where the answer's own success:false WINS. That matters: a refusal keeps
+  // its code ('PUSH_DISABLED_BY_ADMIN'), its message and the owner's name, which is what the settings card branches on.
+  REGISTER_PUSH_DEVICE: async (body) =>
+    ok(
+      await callable('registerPushDevice', {
+        device_token: body.device_token,
+        device_label: body.device_label,
+        transfer: body.transfer === true,
+      })
+    ),
+
+  UNREGISTER_PUSH_DEVICE: async (body) => {
+    const { removePushDevice } = await writes();
+    return ok(await removePushDevice({ token: body.device_token }));
+  },
+
+  // The administrator's switch, both ways. Turning it off forgets the member's devices as well as setting the flag,
+  // which is the asymmetry documented on the writer.
+  ADMIN_SET_PUSH_DISABLED: async (body) => {
+    const { setPushDisabled } = await writes();
+    return ok(await setPushDisabled({ userId: body.user_id, disabled: body.disabled === true }));
+  },
+
+  ADMIN_SEND_TEST_PUSH: async (body) => ok(await callable('sendTestPush', { user_id: body.user_id })),
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {
     const { saveScheduleBoard } = await writes();

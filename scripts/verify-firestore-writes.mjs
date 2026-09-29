@@ -18,7 +18,7 @@ import { httpsCallable } from 'firebase/functions';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { firebaseAuth, firebaseFunctions, firestore } from '../src/services/firebase.js';
-import { routeWrite } from '../src/services/firestoreRouting.js';
+import { routeRead, routeWrite } from '../src/services/firestoreRouting.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
 import {
@@ -378,6 +378,77 @@ const main = async () => {
     query(collection(firestore(), 'availability'), where('user_id', '==', 'u1'))
   );
   check('and no row is left behind by the refused batch', forJane.filter((row) => row.date_from === '2026-04-02').length, 0);
+
+  // --- push devices: the member's own card, and the administrator's switch -----------------------------------------
+  //
+  // Registering is a CALLABLE, and the assertions here are the reasons why: an ordinary registration is a member writing
+  // their own row, a device that belongs to somebody else is refused WITH THEIR NAME (which the rules cannot say), and
+  // a transfer is allowed, logged, and visible in the audit trail - because neither member can see it from their side.
+  await signIn('bo');
+  const boRegister = await routeWrite('REGISTER_PUSH_DEVICE', {
+    device_token: 'token-of-jane-phone',
+    device_label: 'Shared station phone',
+  });
+  checkIs('a member registers their own device', boRegister && boRegister.success === true, JSON.stringify(boRegister).slice(0, 140));
+
+  // Jane tries to claim the same browser without asking for a transfer: refused, and told whose it is.
+  await signIn('jane');
+  const stolen = await routeWrite('REGISTER_PUSH_DEVICE', {
+    device_token: 'token-of-jane-phone',
+    device_label: "Jane's laptop",
+  });
+  checkIs('another member cannot take it without a transfer', stolen && stolen.success === false, JSON.stringify(stolen).slice(0, 140));
+  checkIs('and the refusal names the owner so the card can offer the button', stolen.owner_name === 'Bo Jones', String(stolen.owner_name));
+
+  // With the transfer the card's button sends, it moves - and the move is audited, which is the second reason this is a
+  // function: a client cannot write a log row at all.
+  const moved = await routeWrite('REGISTER_PUSH_DEVICE', {
+    device_token: 'token-of-jane-phone',
+    device_label: "Jane's laptop",
+    transfer: true,
+  });
+  checkIs('a transfer moves it', moved && moved.success === true, JSON.stringify(moved).slice(0, 140));
+  const transferRows = await rowsOf(query(collection(firestore(), 'system_log'), where('action', '==', 'PUSH_DEVICE_TRANSFERRED')));
+  checkIs('and is recorded in the audit log', transferRows.length >= 1, `${transferRows.length} rows`);
+  const afterMove = await rowsOf(query(collection(firestore(), 'push_devices'), where('token', '==', 'token-of-jane-phone')));
+  check('with the new owner on the row', afterMove.map((row) => row.user_id), ['u1']);
+
+  // The administrator's switch, and its asymmetry: turning it off FORGETS the devices as well as setting the flag,
+  // because the member's card re-registers any subscription its browser still holds the moment settings are opened.
+  const turnedOff = await routeWrite('ADMIN_SET_PUSH_DISABLED', { user_id: 'u1', disabled: true });
+  checkIs('an officer turns notifications off for a member', turnedOff && turnedOff.success === true, JSON.stringify(turnedOff).slice(0, 140));
+  const devicesAfter = await rowsOf(query(collection(firestore(), 'push_devices'), where('user_id', '==', 'u1')));
+  check('and that member device rows are forgotten', devicesAfter.length, 0);
+  const flagRow = await getDoc(doc(firestore(), 'user_settings', 'u1'));
+  check('with the flag set on their settings', flagRow.data().is_push_disabled, true);
+
+  // The block holds at the DOOR, not at the card: a member whose browser still holds a subscription cannot register it
+  // again while an administrator has switched them off.
+  await signIn('jane');
+  const blocked = await routeWrite('REGISTER_PUSH_DEVICE', {
+    device_token: 'token-of-jane-phone',
+    device_label: 'Try again',
+  });
+  checkIs('and the member cannot register a device again', blocked.code === 'PUSH_DISABLED_BY_ADMIN', JSON.stringify(blocked).slice(0, 140));
+
+  // Lifting it clears the flag only: the device has to be enabled again from the device itself.
+  await routeWrite('ADMIN_SET_PUSH_DISABLED', { user_id: 'u1', disabled: false });
+  check('turning it back on clears the flag', (await getDoc(doc(firestore(), 'user_settings', 'u1'))).data().is_push_disabled, false);
+
+  // Unregistering is an ordinary client delete of the member's own row, which the rules allow without a function.
+  const boAgain = await routeWrite('REGISTER_PUSH_DEVICE', { device_token: 'token-of-bo-tablet', device_label: 'Tablet' });
+  checkIs('a device registers for bo again', boAgain && boAgain.success === true, JSON.stringify(boAgain).slice(0, 140));
+  const removed = await routeWrite('UNREGISTER_PUSH_DEVICE', { device_token: 'token-of-bo-tablet' });
+  checkIs('and the member can forget it', removed && removed.success === true, JSON.stringify(removed).slice(0, 140));
+  const gone = await rowsOf(query(collection(firestore(), 'push_devices'), where('token', '==', 'token-of-bo-tablet')));
+  check('leaving no row behind', gone.length, 0);
+
+  // The FCM status, which is the runtime answering for itself: there is nothing to configure on Firebase, so the honest
+  // answer is "ready" plus the device count - and this also proves the count aggregation works in the deployed runtime,
+  // which no other assertion touches.
+  const fcm = await routeRead('ADMIN_GET_FCM_STATUS');
+  checkIs('the runtime reports that it can send notifications', fcm.ready === true, JSON.stringify(fcm).slice(0, 140));
+  checkIs('with the device count alongside it', typeof fcm.devices === 'number', String(fcm.devices));
 
   // The system log, one page at a time: the last read in the app, and the one whose answer is more than a page. The
   // fixtures live in March 2026 while the audit rows this harness provokes are written "now", so a date range that stops

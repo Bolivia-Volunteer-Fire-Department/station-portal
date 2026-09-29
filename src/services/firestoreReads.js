@@ -52,7 +52,16 @@ export const READERS = {
   MY_ANNOUNCEMENTS: async (uid) => ({ announcements: await audienceRows('announcements', await keysFor(uid)) }),
   GET_EVENTS: async (uid) => ({ events: await audienceRows('events', await keysFor(uid)) }),
   MY_PUSH_DEVICES: async (uid, body) => {
-    const devices = await rowsFor('push_devices', 'user_id', uid);
+    const [devices, settings] = await Promise.all([
+      rowsFor('push_devices', 'user_id', uid),
+      getDoc(doc(firestore(), 'user_settings', uid)),
+    ]);
+
+    // An administrator's switch outranks everything else on the card, so it travels WITH the devices rather than being
+    // asked for separately: the card makes one call and needs one answer. The sheet kept this flag in
+    // `user_settings.is_push_disabled` and never sent it to the member, so the block could be set and never shown -
+    // the card's "an administrator turned this off" branch had nothing to fire on.
+    const pushDisabled = settings.exists() && (settings.data() || {}).is_push_disabled === true;
 
     // The second half of this read, and the reason it needed a callable: "whose device is this browser?" is a
     // question the browser cannot answer, because a member may read their own rows and nobody else's - so another
@@ -61,10 +70,14 @@ export const READERS = {
     //
     // The token is the one this browser's own service worker holds, passed in by the card that asks the question.
     const deviceToken = String((body && body.device_token) || '').trim();
-    if (!deviceToken) return { devices, device_owner: null };
+    if (!deviceToken) return { devices, push_disabled: pushDisabled, device_owner: null };
 
     const answer = await httpsCallable(firebaseFunctions(), 'pushDeviceOwner')({ token: deviceToken });
-    return { devices, device_owner: (answer.data && answer.data.device_owner) || null };
+    return {
+      devices,
+      push_disabled: pushDisabled,
+      device_owner: (answer.data && answer.data.device_owner) || null,
+    };
   },
 
   // The officer-only reads, in the same reply shape their callers already read: `result.announcements`,
@@ -139,6 +152,49 @@ export const READERS = {
   // One line, and it was missing - the tab was refreshing from the sheet after each approval, which is exactly the sort
   // of "it works today" that the two-direction check now makes visible.
   ADMIN_GET_SCHEDULE_OFFERS: () => rowsOf(collection(firestore(), 'schedule_offers')).then((offers) => ({ offers })),
+
+  // The notifications tab's per-member picture, which the sheet built from three sheets and this builds from three
+  // collections: the member's row (for the name), their settings (for the preferences the table shows) and the device
+  // rows (for the counts). One read rather than three round trips, and the device count is the honest answer to "why is
+  // nothing arriving" - one silent device is a device problem, none is a member who never set one up.
+  ADMIN_GET_PUSH_STATUS: async () => {
+    const [users, settings, devices] = await Promise.all([
+      rowsOf(collection(firestore(), 'users')),
+      rowsOf(collection(firestore(), 'user_settings')),
+      rowsOf(collection(firestore(), 'push_devices')),
+    ]);
+
+    const settingsById = new Map(settings.map((row) => [String(row.id || ''), row]));
+    const counts = new Map();
+    devices.forEach((device) => {
+      const id = String(device.user_id || '');
+      if (id) counts.set(id, (counts.get(id) || 0) + 1);
+    });
+
+    return {
+      users: users.map((user) => {
+        const id = String(user.id || '');
+        const prefs = settingsById.get(id) || {};
+        const count = counts.get(id) || 0;
+        return {
+          ...user,
+          ...prefs,
+          id,
+          device_count: count,
+          device_registered: count > 0,
+          push_disabled: prefs.is_push_disabled === true,
+        };
+      }),
+    };
+  },
+
+  // Whether this deployment can send pushes at all, answered by the runtime rather than inferred by the browser: the
+  // credential is the Cloud Functions service account, which is why there is nothing for an administrator to fill in on
+  // Firebase and why the sheet's four script-property fields have no counterpart here.
+  ADMIN_GET_FCM_STATUS: async () => {
+    const answer = await httpsCallable(firebaseFunctions(), 'fcmStatus')({});
+    return answer.data || {};
+  },
 
   // The system log, one page at a time - and the one officer read that is a callable rather than a query, for reasons
   // that come from the shape of the contract rather than from convenience: the response carries the counts and the
