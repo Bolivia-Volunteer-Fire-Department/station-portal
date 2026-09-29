@@ -11,6 +11,7 @@
 import { collection, deleteDoc, doc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
+import { rowsOf } from './firestorePayload.js';
 
 // The timestamp format the app reads everywhere: 'YYYY-MM-DD HH:MM:SS' in station time. Apps Script had
 // getEasternTimestamp(); this is the same shape and the same timezone, which keeps a clock entry written by one
@@ -156,6 +157,60 @@ export const saveDocument = async ({ collection, id, body, extra = {} }) => {
   const target = String(id || '').trim() || doc(collection(firestore(), collection)).id;
   await setDoc(doc(firestore(), collection, target), { ...withoutEnvelope(body), ...extra }, { merge: true });
   return { id: target };
+};
+
+// The audience list, computed AS the document is written - option D in the model, and it cannot be skipped: the
+// member payload asks `array-contains-any` against its own keys, so a document without this list is a document nobody
+// sees. That failure looks like an empty screen, not like a bad save.
+//
+// The rules are the sheet's, and two of them are easy to get wrong:
+//
+//   - The sheet ANDs the three targeting columns - "fill one and only that group sees it" - and an array cannot
+//     express an AND. So a form that fills more than one is REFUSED rather than widened to anyone matching either.
+//   - ANNOUNCEMENTS and DOCUMENTS target the rank exactly, while EVENTS target that rank AND ABOVE. That is why the
+//     expansion needs the rank DOCUMENTS rather than just the id, and why this reads them.
+export const audienceKeysForWrite = ({ roleId, rankId, userId, ranks = [], rankAndAbove = false }) => {
+  const role = String(roleId || '').trim();
+  const rank = String(rankId || '').trim();
+  const member = String(userId || '').trim();
+  const filled = [role, rank, member].filter(Boolean);
+
+  if (filled.length > 1) throw new Error('That form targets more than one audience, which no single list can express.');
+  if (!filled.length) return ['*'];
+  if (role) return [`role:${role}`];
+  if (member) return [`user:${member}`];
+  if (!rankAndAbove) return [`rank:${rank}`];
+
+  const orderOf = (id) => {
+    const found = ranks.find((candidate) => String(candidate.id) === String(id));
+    const order = parseInt(found?.rank_order, 10);
+    return Number.isFinite(order) ? order : null;
+  };
+  const required = orderOf(rank);
+  if (required === null) throw new Error('That rank does not exist, so nobody could be shown this.');
+  return ranks
+    .filter((candidate) => {
+      const order = parseInt(candidate.rank_order, 10);
+      return Number.isFinite(order) && order >= required;
+    })
+    .map((candidate) => `rank:${candidate.id}`);
+};
+
+// A save for the three collections a member sees by audience. It reads the ranks, computes the list, and writes it
+// with the document - and it stamps the author on CREATE only, which is what the sheet's server did rather than
+// letting an edit rewrite who wrote it.
+export const saveAudienceDocument = async ({ collection: name, id, body, rankAndAbove = false, authorId = '' }) => {
+  const ranks = await rowsOf(collection(firestore(), 'ranks'));
+  const audience_keys = audienceKeysForWrite({
+    roleId: body.role_id,
+    rankId: body.rank_id,
+    userId: body.user_id,
+    ranks,
+    rankAndAbove,
+  });
+  const extra = { audience_keys };
+  if (authorId && !String(id || '').trim()) extra.author_user_id = authorId;
+  return saveDocument({ collection: name, id, body, extra });
 };
 
 export const deleteDocument = async ({ collection, id }) => {

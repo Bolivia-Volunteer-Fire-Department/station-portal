@@ -20,6 +20,7 @@ import { firebaseAuth, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import {
   approveOffer,
+  audienceKeysForWrite,
   clockIn,
   clockOut,
   makeOffer,
@@ -229,6 +230,48 @@ const main = async () => {
   // under the count this file reaches, so a section that stops running is caught without the guard itself being
   // brittle about a case being added or removed.
   console.log('\n--- the harness itself ---');
+  // --- the audience list, computed as the document is written -------------------------------------------------------
+  //
+  // This is the one piece of the admin writes that is LOGIC rather than a field copy, and getting it wrong is silent:
+  // the row saves, and then nobody can see it. So each rule the sheet had is asserted here.
+  console.log('\n--- the audience list ---');
+  const ranks = [
+    { id: 'r-a', rank_order: '1' },
+    { id: 'r-b', rank_order: '2' },
+    { id: 'r-c', rank_order: '3' },
+  ];
+  check('nobody targeted means everybody', audienceKeysForWrite({ ranks }), ['*']);
+  check('a role audience', audienceKeysForWrite({ roleId: 'officer', ranks }), ['role:officer']);
+  check('a personal audience', audienceKeysForWrite({ userId: 'u9', ranks }), ['user:u9']);
+  check('an announcement targets one rank', audienceKeysForWrite({ rankId: 'r-b', ranks }), ['rank:r-b']);
+  check(
+    'and an event targets that rank and above, which needs the ranks themselves',
+    audienceKeysForWrite({ rankId: 'r-b', ranks, rankAndAbove: true }),
+    ['rank:r-b', 'rank:r-c']
+  );
+  const twoAudiences = (() => {
+    try {
+      audienceKeysForWrite({ roleId: 'officer', rankId: 'r-b', ranks });
+      return 'accepted';
+    } catch (error) {
+      return String(error.message || '');
+    }
+  })();
+  checkIs(
+    'two audiences are refused, because no single list can express an AND',
+    twoAudiences.includes('more than one audience'),
+    twoAudiences
+  );
+  const ghostRank = (() => {
+    try {
+      audienceKeysForWrite({ rankId: 'nobody-has-this', ranks, rankAndAbove: true });
+      return 'accepted';
+    } catch (error) {
+      return String(error.message || '');
+    }
+  })();
+  checkIs('and a rank that does not exist is refused rather than hiding the row', ghostRank.includes('does not exist'), ghostRank);
+
   checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };
 

@@ -98,6 +98,9 @@ export const ROUTED_FEATURES = {
       'ADMIN_SAVE_SHIFT',
       'ADMIN_SAVE_CERTIFICATION_SETUP',
       'ADMIN_SAVE_CHECKLIST_ITEM',
+      'ADMIN_SAVE_ANNOUNCEMENT',
+      'ADMIN_SAVE_DOCUMENT',
+      'ADMIN_SAVE_EVENT',
       'ADMIN_DELETE_ROLE',
       'ADMIN_DELETE_RANK',
       'ADMIN_DELETE_SHIFT',
@@ -381,6 +384,15 @@ const DOCUMENT_DELETES = {
   ADMIN_DELETE_EVENT: 'events',
 };
 
+// The three collections a member sees by AUDIENCE, whose saves carry a materialized `audience_keys` list computed as
+// they are written - which is why they are not in the plain table above. Events are the one that expands to "this
+// rank and above"; announcements and documents target the rank exactly.
+const AUDIENCE_SAVES = {
+  ADMIN_SAVE_ANNOUNCEMENT: { collection: 'announcements', rankAndAbove: false },
+  ADMIN_SAVE_DOCUMENT: { collection: 'documents', rankAndAbove: false },
+  ADMIN_SAVE_EVENT: { collection: 'events', rankAndAbove: true },
+};
+
 // The document saves and deletes share one implementation, so they share one loop rather than a hand-written entry
 // each - which also keeps the table and the dispatchers in step by construction. An action named in a feature with
 // nothing here would be a route that throws, and the harness asserts the table in both directions.
@@ -395,6 +407,13 @@ Object.entries(DOCUMENT_DELETES).forEach(([action, collection]) => {
   DISPATCH[action] = async (body) => {
     const { deleteDocument } = await writes();
     return ok(await deleteDocument({ collection, id: body.id }));
+  };
+});
+
+Object.entries(AUDIENCE_SAVES).forEach(([action, { collection, rankAndAbove }]) => {
+  DISPATCH[action] = async (body, uid) => {
+    const { saveAudienceDocument } = await writes();
+    return ok(await saveAudienceDocument({ collection, id: body.id, body, rankAndAbove, authorId: uid }));
   };
 });
 
