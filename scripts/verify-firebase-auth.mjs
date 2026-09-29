@@ -20,7 +20,7 @@ import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail } from '../src/services/firebaseAuth.js';
+import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail, updateMemberAccount } from '../src/services/firebaseAuth.js';
 import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
 
 let failures = 0;
@@ -269,6 +269,22 @@ const main = async () => {
 
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
   console.log('\n--- the harness itself ---');
+  // The private half of an account: a username, which moves the Auth address with it, and the change-on-next-login
+  // flag. Both are facts a client must not write - and the rename has to move the address, or the member would type a
+  // username that no longer matches their account. Signing in under the new one is the proof of that.
+  console.log('\n--- the private half of an account ---');
+  await signIn('jane');
+  const renamed = await updateMemberAccount({ userId: 'u2', username: 'bo-renamed', isChangePasswordOnLogin: true });
+  check('the new username comes back', renamed.username, 'bo-renamed');
+  const priv = await getDoc(doc(db, 'users_private', 'u2'));
+  check('and is written to the private half', priv.data().username, 'bo-renamed');
+  check('with the flag as a real boolean', priv.data().is_change_password_on_login, true);
+  const renamedSignIn = await signInWithEmailAndPassword(auth, `bo-renamed@${EMAIL_DOMAIN}`, DEMO_PASSWORD).then(
+    () => 'signed in',
+    (error) => String(error.code || '')
+  );
+  check('and the Auth address moved with it, which is the whole point', renamedSignIn, 'signed in');
+
   checkIs('every case ran', cases >= 28, `only ${cases} cases: a section has stopped running`);
 };
 

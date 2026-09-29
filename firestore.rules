@@ -111,8 +111,14 @@ service cloud.firestore {
       allow read: if signedIn();
       // The officer's own save edits these three fields and no others. The shape of this document IS the
       // projection that used to be computed on the server: a field that is not listed here does not exist.
+      // The officer's own save edits these fields and no others. The shape of this document IS the
+      // projection that used to be computed on the server: a field that is not listed here does not exist.
+      // `exclude_from_scheduling` joined the list when the Users tab needed it - it is a scheduling preference about
+      // a member rather than a secret about them, and it lives on this document. Everything else about an account (the
+      // username, the status, the password-change flag) still goes through a callable, because those are the facts a
+      // client must not be able to rewrite about itself.
       allow create, update: if permission('can_edit_users')
-        && request.resource.data.keys().hasOnly(['name', 'rank_id', 'role_id']);
+        && request.resource.data.keys().hasOnly(['name', 'rank_id', 'role_id', 'exclude_from_scheduling']);
       allow delete: if permission('can_edit_users');
     }
 

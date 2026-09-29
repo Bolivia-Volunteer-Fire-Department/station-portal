@@ -11,6 +11,7 @@ import {
   resetMemberPassword,
   setMemberStatus,
   signInAsMember,
+  updateMemberAccount,
 } from './firebaseAuth.js';
 import { firebaseAuth, firebaseConfigured, firestore } from './firebase.js';
 import { doc, setDoc } from 'firebase/firestore';
@@ -407,7 +408,6 @@ export const adminFetchUsers = async (token) =>
 // A username change is the same story, for the same reason, and is reported the same way.
 export const adminSaveUser = async (userData, token) => {
   if (firebaseConfigured() && firebaseAuth().currentUser) {
-    const notSaved = [];
     try {
       if (!userData.id) {
         const created = await createMember({
@@ -420,13 +420,15 @@ export const adminSaveUser = async (userData, token) => {
         return { success: true, id: created?.id || created?.userId || '' };
       }
 
-      // The three fields the rules allow, in one write.
+      // The three fields the rules allow, in one write - plus the scheduling preference, which the rules allow there
+      // too and which the tab has a checkbox for.
       await setDoc(
         doc(firestore(), 'users', String(userData.id)),
         {
           name: String(userData.name || ''),
           rank_id: String(userData.rank_id || ''),
           role_id: String(userData.role_id || ''),
+          exclude_from_scheduling: String(userData.exclude_from_scheduling || '').toUpperCase() === 'TRUE',
         },
         { merge: true }
       );
@@ -436,15 +438,16 @@ export const adminSaveUser = async (userData, token) => {
         await resetMemberPassword({ userId: String(userData.id), temporaryPassword: String(userData.password) });
       }
 
-      if (['TRUE', 'FALSE'].includes(String(userData.exclude_from_scheduling || '')) ||
-          ['TRUE', 'FALSE'].includes(String(userData.is_change_password_on_login || ''))) {
-        notSaved.push('the scheduling and password-change flags');
-      }
-      if (userData.user_name) notSaved.push('a username change');
+      // The private half: a username (which moves the Auth address with it) and the change-on-next-login flag. Sent
+      // only when the form actually carries them, because either one is a real change rather than a restatement.
+      const account = {};
+      if (userData.user_name) account.username = String(userData.user_name);
+      const changeFlag = String(userData.is_change_password_on_login || '').toUpperCase();
+      if (changeFlag === 'TRUE') account.isChangePasswordOnLogin = true;
+      if (changeFlag === 'FALSE') account.isChangePasswordOnLogin = false;
+      if (Object.keys(account).length) await updateMemberAccount({ userId: String(userData.id), ...account });
 
-      return notSaved.length
-        ? { success: false, id: String(userData.id), message: `Saved the name, rank, role, status and password. Not saved: ${notSaved.join(', ')} - that needs a callable that does not exist yet.` }
-        : { success: true, id: String(userData.id) };
+      return { success: true, id: String(userData.id) };
     } catch (error) {
       return { success: false, id: String(userData.id || ''), message: error?.message || 'The member could not be saved.' };
     }

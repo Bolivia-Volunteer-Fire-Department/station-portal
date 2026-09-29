@@ -155,3 +155,6 @@ export const fetchAccountState = () => call('whoami', {});
 export const createMember = (data) => call('createMember', data);
 export const resetMemberPassword = (data) => call('resetMemberPassword', data);
 export const setMemberStatus = (data) => call('setMemberStatus', data);
+// The username and the password-change flag: the two facts about an account that a browser must not write, and a
+// rename has to move the Auth address with it.
+export const updateMemberAccount = (data) => call('updateMemberAccount', data);

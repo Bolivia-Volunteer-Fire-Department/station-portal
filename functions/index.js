@@ -339,6 +339,49 @@ exports.setMemberStatus = onCall(async (request) => {
   return { userId, status };
 });
 
+// The two things about a member that a browser must not write, in one callable because they are one kind of fact: the
+// private half - the username, and the flag that forces a password change - and, for a rename, the Auth address.
+//
+// THE EMAIL IS THE REASON THIS CANNOT BE A CLIENT WRITE AT ALL. A member's sign-in address is their username plus the
+// station domain, so a rename that did not move the address would leave them typing a username that no longer
+// matches their account, and `users_private` is `allow write: if false` on purpose - a client that could rewrite its
+// own username could rename itself to somebody else's.
+exports.updateMemberAccount = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_edit_users', 'change a member account');
+
+  const data = request.data || {};
+  const userId = String(data.userId || '');
+  if (!userId) throw new HttpsError('invalid-argument', 'A member id is required.');
+
+  const changes = {};
+  const described = [];
+
+  if (data.username !== undefined) {
+    const username = cleanUsername(data.username);
+    const email = syntheticEmail(username);
+    const taken = await auth.getUserByEmail(email).catch(() => null);
+    if (taken && taken.uid !== userId) {
+      throw new HttpsError('already-exists', `The username ${username} is already taken.`);
+    }
+    await auth.updateUser(userId, { email });
+    changes.username = username;
+    described.push(`username ${username}`);
+  }
+
+  if (data.isChangePasswordOnLogin !== undefined) {
+    changes.is_change_password_on_login = data.isChangePasswordOnLogin === true;
+    described.push(`change-password-on-next-login ${data.isChangePasswordOnLogin === true ? 'on' : 'off'}`);
+  }
+
+  if (!described.length) throw new HttpsError('invalid-argument', 'Nothing was asked for.');
+
+  await db.doc(`users_private/${userId}`).set(changes, { merge: true });
+  await audit(caller.uid, 'ADMIN_UPDATE_ACCOUNT', `${described.join(', ')} for ${userId}`);
+  return { userId, ...changes };
+});
+
 // ---------------------------------------------------------------------------------------------
 // The only way an account may come into existence
 // ---------------------------------------------------------------------------------------------

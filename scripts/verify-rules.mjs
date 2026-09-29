@@ -228,6 +228,20 @@ const main = async () => {
   );
   checkIs('and cannot sign as another member', forged.includes('permission-denied'), forged);
 
+  // The Users-tab save now writes one more field on the roster document, so the rules have to allow it - and allow
+  // nothing else with it. `exclude_from_scheduling` is a scheduling preference; the status is not.
+  await asUser('u1');
+  const flagWrite = await setDoc(doc(db, 'users', 'u2'), { exclude_from_scheduling: true }, { merge: true }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('an officer may set the scheduling flag on the roster', flagWrite, 'written');
+  const smuggled = await setDoc(doc(db, 'users', 'u2'), { status: 'suspended' }, { merge: true }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('but still not the status, which is a callable business', smuggled.includes('permission-denied'), smuggled);
+
   checkIs('every case ran', cases >= 27, `only ${cases} cases: a section has stopped running`);
 };
 
