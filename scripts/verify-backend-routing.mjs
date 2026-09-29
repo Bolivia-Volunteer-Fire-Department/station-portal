@@ -155,9 +155,10 @@ const NOT_YET_ROUTED = [
   // Training signatures: DONE, and deleted from this list. The batch from the session, the lock that means its
   // signatures as well as its fields, and the removal behind its own permission.
   //
-  // The administrator's timeclock edits, deleting a user, and the runner's leaderboard.
-  'ADMIN_SAVE_TIMECLOCK_ENTRY',
-  'ADMIN_DELETE_TIMECLOCK_ENTRY',
+  // The administrator's timeclock edits: DONE, and deleted from this list. They keep `on_duty` in step with the entry in
+  // both directions, which is the pairing the member's own clock-in maintains.
+  //
+  // Deleting a user, and the runner's leaderboard.
   'ADMIN_DELETE_USER',
   'GET_RUNNER_LEADERBOARD',
   'SAVE_RUNNER_SCORE',

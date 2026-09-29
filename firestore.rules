@@ -255,11 +255,20 @@ service cloud.firestore {
     // street address was extra data to keep in step for no decision it changed. `calc_address` is gone.
     match /timeclock/{entryId} {
       allow read: if signedIn() && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
-      // An entry OPENS with no time_out and belongs to the caller: a member cannot open a shift for somebody else,
-      // and cannot open one that is already closed.
+      // An entry OPENS with no time_out and belongs to the caller: a member cannot open a shift for somebody else, and
+      // cannot open one that is already closed.
+      //
+      // AN OFFICER IS THE OTHER DOOR, which is why this has two branches: the Clock Management tab exists to add an
+      // entry somebody forgot to clock in for, and that is by definition an entry for another member - and a manual one
+      // carries both times at once, because whoever writes it knows when the shift ended.
+      //
+      // `get(key, default)` rather than `data.key`: a row that omits a field would make this rule ERROR, and an error is
+      // indistinguishable from a denial in a log.
       allow create: if signedIn()
-        && request.resource.data.user_id == uid()
-        && request.resource.data.time_out == '';
+        && ((request.resource.data.get('user_id', '') == uid()
+              && request.resource.data.get('time_out', 'closed') == '')
+            || (request.resource.data.get('user_id', '') != ''
+              && permission('can_edit_timeclock')));
       // Closing it is the same document again, by its owner; an officer may do anything, which is the Clock
       // Management tab.
       allow update, delete: if signedIn()

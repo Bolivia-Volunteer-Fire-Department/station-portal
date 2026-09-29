@@ -67,7 +67,7 @@ export const ROUTED_FEATURES = {
   // Clocking in and out. The fence stays in the browser by decision (above); the transaction is what matters here.
   clock: {
     requires: ['memberPayload'],
-    writes: ['CLOCK_IN', 'CLOCK_OUT'],
+    writes: ['CLOCK_IN', 'CLOCK_OUT', 'ADMIN_SAVE_TIMECLOCK_ENTRY', 'ADMIN_DELETE_TIMECLOCK_ENTRY'],
     switchReads: ['GET_ON_DUTY', 'GET_TIMECLOCK_LOGS'],
   },
   // A member's own availability, and the officer's edit of somebody else's - one batch write each, through the SAME
@@ -544,6 +544,18 @@ const DISPATCH = {
   ADMIN_REMOVE_TRAINING_SIGNATURE: async (body) => {
     const { removeTrainingSignature } = await writes();
     return ok(await removeTrainingSignature({ id: body.signature_id || body.id }));
+  },
+
+  // The officer's clock management. Both keep `on_duty` in step with the entry, which is the pairing the member's own
+  // clock-in and clock-out already maintain - see the writers for why that is worth a transaction in both directions.
+  ADMIN_SAVE_TIMECLOCK_ENTRY: async (body) => {
+    const { saveTimeclockEntry } = await writes();
+    return ok(await saveTimeclockEntry({ id: body.id, userId: body.user_id, timeIn: body.time_in, timeOut: body.time_out }));
+  },
+
+  ADMIN_DELETE_TIMECLOCK_ENTRY: async (body) => {
+    const { deleteTimeclockEntry } = await writes();
+    return ok(await deleteTimeclockEntry({ id: body.id }));
   },
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {

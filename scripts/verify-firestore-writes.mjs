@@ -491,6 +491,48 @@ const main = async () => {
   checkIs('an officer removes one', removedTraining.success === true, JSON.stringify(removedTraining).slice(0, 140));
   check('and the row is gone', (await getDoc(doc(firestore(), 'training_signatures', 'ts1'))).exists(), false);
 
+  // --- the officer's clock management, and the on_duty row it has to keep in step -----------------------------------
+  //
+  // The interesting assertions here are not about the entry: they are about `on_duty`, because an officer's correction is
+  // a second door onto the pair the member's own clock-in writes in a transaction. A correction that closes somebody's
+  // entry and leaves them "on duty" is the dashboard lying, which is the bug that pairing exists to prevent.
+  await signIn('jane');
+  const closedEntry = await routeWrite('ADMIN_SAVE_TIMECLOCK_ENTRY', {
+    id: 'c1',
+    user_id: 'u1',
+    time_in: '2026-03-02 07:55',
+    time_out: '2026-03-02 17:00',
+  });
+  checkIs('an officer corrects an entry', closedEntry.success === true && closedEntry.id === 'c1', JSON.stringify(closedEntry).slice(0, 140));
+  const closedRow = (await getDoc(doc(firestore(), 'timeclock', 'c1'))).data();
+  check('and the entry is marked as written by a person', closedRow.is_manual, true);
+  check('while closing it takes the member OFF duty', (await getDoc(doc(firestore(), 'on_duty', 'u1'))).exists(), false);
+
+  // Reopening it puts them back, from the entry's own time rather than from now.
+  await routeWrite('ADMIN_SAVE_TIMECLOCK_ENTRY', { id: 'c1', user_id: 'u1', time_in: '2026-03-02 07:55', time_out: '' });
+  const backOnDuty = await getDoc(doc(firestore(), 'on_duty', 'u1'));
+  check('and reopening it puts them back on duty', [backOnDuty.exists(), backOnDuty.data().time_in], [true, '2026-03-02 07:55']);
+
+  // Deleting the only open entry is the same promise from the other direction.
+  const deletedEntry = await routeWrite('ADMIN_DELETE_TIMECLOCK_ENTRY', { id: 'c1' });
+  checkIs('an officer deletes an entry', deletedEntry.success === true, JSON.stringify(deletedEntry).slice(0, 140));
+  check('and that takes them off duty too', (await getDoc(doc(firestore(), 'on_duty', 'u1'))).exists(), false);
+  check('with the row gone', (await getDoc(doc(firestore(), 'timeclock', 'c1'))).exists(), false);
+
+  const missingEntry = await routeWrite('ADMIN_DELETE_TIMECLOCK_ENTRY', { id: 'an-entry-that-is-gone' });
+  checkIs('deleting what is not there is answered rather than thrown', missingEntry.success === false, JSON.stringify(missingEntry).slice(0, 140));
+
+  // A member cannot write somebody else's clock: the rules, not the writer - which is what stops the management tab's
+  // power being available to anyone who can open a console.
+  await signIn('bo');
+  const memberEntry = await routeWrite('ADMIN_SAVE_TIMECLOCK_ENTRY', {
+    id: '',
+    user_id: 'u1',
+    time_in: '2026-03-03 08:00',
+    time_out: '2026-03-03 16:00',
+  });
+  checkIs('and a member cannot add an entry for somebody else', memberEntry.success === false, JSON.stringify(memberEntry).slice(0, 140));
+
   // --- the member's own settings ------------------------------------------------------------------------------------
   //
   // A MERGE, and three things about it are asserted because each is a way to be wrong quietly: an absent preference must

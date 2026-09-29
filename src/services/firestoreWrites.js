@@ -644,6 +644,98 @@ export const removeTrainingSignature = async ({ id }) => {
   return { removed: 1 };
 };
 
+// The officer's clock management: correcting a member's entry, or removing one.
+//
+// IT KEEPS `on_duty` IN STEP, which is the one thing this action could quietly break. The member's own clock-in and
+// clock-out write the entry AND the on_duty row in a transaction, because a dashboard showing somebody on duty with no
+// entry - or an entry nobody can see - is the bug that pairing exists to prevent. An officer correcting an entry is a
+// write to the same pair through a different door, so this recomputes on_duty from the member's remaining OPEN entries
+// rather than guessing: one open entry means on duty, none means not.
+//
+// (The member's own two paths still do this inline. They are asserted by the write harness, which is why they are left
+// alone here - unifying all three is a small job to do deliberately rather than as a side effect of adding a tab.)
+// The pairing is maintained with DOCUMENT reads only, no query, and that is not an accident - it is what the member's own
+// clock-in and clock-out do, for the reason the emulator was happy to demonstrate: a query inside a transaction is a
+// different kind of read, and the write paths here are the last place to discover that.
+//
+// What makes it possible is the invariant the clock-in already enforces: A member has AT MOST ONE OPEN ENTRY. So the
+// `on_duty` row IS the answer to "is this entry the live one" - it carries the time_in the member went on duty at - and an
+// officer closing a historical entry must not take them off duty.
+const onDutyMatches = (onDuty, timeIn) => {
+  if (!onDuty) return false;
+  const live = String(onDuty.time_in || '').trim();
+  const entry = String(timeIn || '').trim();
+  return !!live && !!entry && live === entry;
+};
+
+// Writes the entry and the on_duty row for it, from the two documents the transaction has already read.
+
+export const saveTimeclockEntry = async ({ id, userId, timeIn, timeOut }) => {
+  const member = String(userId || '').trim();
+  const at = (value) => String(value === undefined || value === null ? '' : value).trim();
+  // The sheet's two required fields, and its message for them.
+  if (!member || !at(timeIn)) return { success: false, message: 'User and time in are required.' };
+
+  const db = firestore();
+  const entryId = String(id || '').trim() || doc(collection(db, 'timeclock')).id;
+  // `is_manual` is what tells the record a PERSON wrote this rather than the clock: the member's own entries come from
+  // the clock-in transaction and never carry it.
+  const fields = { user_id: member, time_in: at(timeIn), time_out: at(timeOut), is_manual: true };
+
+  await runTransaction(db, async (transaction) => {
+    const entryRef = doc(db, 'timeclock', entryId);
+    const onDutyRef = doc(db, 'on_duty', member);
+    // Both reads BEFORE any write: a transaction refuses a read after a write, and the on_duty decision needs what the
+    // entry looks like now.
+    const [existing, onDuty] = await Promise.all([transaction.get(entryRef), transaction.get(onDutyRef)]);
+    const previousTimeIn = existing.exists() ? String((existing.data() || {}).time_in || '') : '';
+    const onDutyRow = onDuty.exists() ? onDuty.data() : null;
+
+    transaction.set(entryRef, fields, { merge: true });
+
+    if (fields.time_out === '') {
+      // Still open: on duty from this entry's time_in, whether it is new or corrected.
+      transaction.set(onDutyRef, { user_id: member, time_in: fields.time_in });
+      return;
+    }
+    // Closed: off duty only if this was the entry they were on duty FROM. An officer tidying up an old entry must not
+    // sign somebody out of a shift they are still on.
+    if (onDutyMatches(onDutyRow, previousTimeIn)) transaction.delete(onDutyRef);
+  });
+
+  return { success: true, id: entryId };
+};
+
+// Deleting an entry is the other half of the same promise: removing a member's only OPEN entry takes them off duty,
+// rather than leaving the dashboard showing somebody at the station whose entry no longer exists.
+export const deleteTimeclockEntry = async ({ id }) => {
+  const entryId = String(id || '').trim();
+  if (!entryId) return { success: false, message: 'Entry not found.' };
+
+  const db = firestore();
+  const removed = await runTransaction(db, async (transaction) => {
+    const target = doc(db, 'timeclock', entryId);
+    const snapshot = await transaction.get(target);
+    if (!snapshot.exists()) return false;
+
+    const row = snapshot.data() || {};
+    const member = String(row.user_id || '').trim();
+    const onDutyRef = member ? doc(db, 'on_duty', member) : null;
+    const onDuty = onDutyRef ? await transaction.get(onDutyRef) : null;
+
+    transaction.delete(target);
+    // Off duty only if the entry being removed is the one they were on duty from - which the on_duty row itself says,
+    // by carrying the time_in they went on duty at.
+    if (onDutyRef && onDutyMatches(onDuty && onDuty.exists() ? onDuty.data() : null, String(row.time_in || ''))) {
+      transaction.delete(onDutyRef);
+    }
+    return true;
+  });
+
+  // The sheet's shape: a boolean rather than a thrown error, and a message either way.
+  return removed ? { success: true, message: 'Entry deleted.' } : { success: false, message: 'Entry not found.' };
+};
+
 export const deleteDocument = async ({ collection, id }) => {
   const target = String(id || '');
   if (await clientWritesAreAudited()) {
