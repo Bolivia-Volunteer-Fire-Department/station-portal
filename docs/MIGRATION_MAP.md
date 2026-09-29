@@ -107,9 +107,17 @@ And one thing the plan proved rather than assumed: **no announcement, event or d
 column.** That was the case an `array-contains-any` query cannot express, so it would have needed a different design -
 it turned out not to exist.
 
-The settings split still needs a decision: 20 of the 21 keys landed in `settings/private`, because the public list was
-written from the reader's expectations rather than the sheet's key names. The plan now prints every key and the side
-it lands on, which is the input for fixing that list.
+The settings split is now explicit rather than guessed. Reading the real key names settled it: **18 of the 21 keys are
+read by the browser** - the loading messages, the theme, the time format, the idle timeout, and the clock location the
+fence is checked against - so they are named as public, and **private is the default** for anything added later. The
+four `fcm_*` keys are not copied at all: they are the web config the browser used to be handed at runtime, and after
+the move it comes from the build. `fcm_service_account_private_key` is refused outright.
+
+The plan now separates the two kinds of line, because the first run put 107 of them under one heading for four
+findings, which is how a report stops being read to the end. **Notes** are what the plan *decided*: a junk column
+ignored, the settings split by name, the audit rows kept as history, the id minted per row. **Problems** are what is
+*wrong*: a reference that does not resolve, an id appearing twice, a credential under an undeclared column, a document
+over 1 MiB, a tab with no mapping at all.
 
 ## What the migration does, in order
 

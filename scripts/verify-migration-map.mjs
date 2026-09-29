@@ -122,7 +122,7 @@ const clockPlan = planForTab({
 check('the junk columns do not travel', Object.keys(clockPlan.collections.timeclock[0]).sort(), [
   'id', 'time_in', 'time_out', 'user_id',
 ]);
-check('they are reported', clockPlan.problems.filter((p) => p.includes('junk')).length, 1);
+check('they are noted, not flagged', clockPlan.notes.filter((n) => n.includes('junk')).length, 1);
 checkIs(
   'a foreign key that does not resolve is reported',
   clockPlan.problems.some((p) => p.includes('user_id=ghost'))
@@ -191,12 +191,16 @@ const logPlan = planForTab({
   tab: 'system_log', spec: TAB_MAP.system_log, rows: logRows, knownIds: { users: new Set(['u1']) },
 });
 check('a duplicated row-counter id is not reported as a duplicate', logPlan.problems.filter((p) => p.includes('more than once')).length, 0);
-checkIs('the writer is told to mint ids', logPlan.problems.some((p) => p.includes('mints an id')));
+checkIs('the writer is told to mint ids', logPlan.notes.some((n) => n.includes('mints an id')));
 checkIs(
   'and a stale username is history rather than a broken reference',
-  logPlan.problems.some((p) => p.includes('historical row(s)')) &&
+  logPlan.notes.some((n) => n.includes('historical row(s)')) &&
     logPlan.problems.filter((p) => p.includes('does not resolve')).length === 0
 );
+
+// The distinction the first run taught: a decision is not a problem. The plan reports both, separately, because 107
+// lines for four findings is a report nobody reads to the end.
+checkIs('nothing decided is also a problem', !logPlan.notes.some((n) => logPlan.problems.includes(n)));
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

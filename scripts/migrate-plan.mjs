@@ -41,6 +41,10 @@ export const rowsFrom = (values) => {
 // Pure, so the harness can hand it a fixture sheet and check the answers.
 export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
   const problems = [];
+  // Notes are things the plan DECIDED, not things that are wrong: a junk column ignored, the settings split by name,
+  // an audit row kept as history. Mixing them with the problems is how a report stops being read - the first real run
+  // had 107 lines for four real findings.
+  const notes = [];
   const collections = {};
   const push = (name, document) => {
     (collections[name] = collections[name] || []).push(document);
@@ -66,18 +70,20 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
     const publicKeys = new Set(spec.publicKeys || []);
     const sides = { public: {}, private: {} };
     const landed = { public: [], private: [] };
+    const refused = [];
     const dropped = [];
     rows.forEach((row) => {
       const key = String(row[spec.pair.key] || '').trim();
       if (!key) return;
       if (isSecretKey(key)) {
-        dropped.push(`${key} (a credential)`);
+        // The one thing here that is a real refusal rather than a decision: a credential in system_settings.
+        refused.push(key);
         return;
       }
       if (key.startsWith('fcm_')) {
         // The Firebase web config the browser used to be handed at runtime. After the move it comes from the build
         // (see docs/FIREBASE_SETUP.md), so copying it into the database would be copying yesterday's mechanism.
-        dropped.push(`${key} (build-time config now)`);
+        dropped.push(key);
         return;
       }
       const side = publicKeys.has(key) ? 'public' : 'private';
@@ -86,12 +92,13 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
     });
     push('settings/public', sides.public);
     push('settings/private', sides.private);
-    if (dropped.length) problems.push(`${tab}: not copied - ${dropped.join(', ')}`);
-    // Printed because the split is by NAME and the names came from the reader, not from the sheet. A key on the
-    // wrong side is a setting the app cannot read, or one the whole station can.
-    if (landed.public.length) problems.push(`${tab}: PUBLIC (${landed.public.length}): ${landed.public.join(', ')}`);
-    if (landed.private.length) problems.push(`${tab}: private (${landed.private.length}): ${landed.private.join(', ')}`);
-    return { collections, problems, headers };
+    if (refused.length) problems.push(`${tab}: REFUSED as credential-looking - ${refused.join(', ')}`);
+    if (dropped.length) notes.push(`${tab}: not copied, build-time config now - ${dropped.join(', ')}`);
+    if (landed.private.length) {
+      notes.push(`${tab}: PRIVATE (${landed.private.length}): ${landed.private.join(', ')}`);
+    }
+    notes.push(`${tab}: public (${landed.public.length}): ${landed.public.join(', ')}`);
+    return { collections, problems, notes, headers };
   }
 
   const seenIds = new Set();
@@ -110,19 +117,21 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
   if (spec.mintIds) {
     // The sheet's id column is a row counter here (35 duplicates in system_log), so using it as a document id would
     // silently overwrite rows. Firestore mints one per row instead and the sheet's id is kept as a field.
-    problems.push(`${tab}: ${rows.length} row(s) - the writer mints an id for each (the sheet's is not unique)`);
+    notes.push(`${tab}: ${rows.length} row(s) - the writer mints an id for each (the sheet's is not unique)`);
   }
   if (duplicated.size) problems.push(`${tab}: ${duplicated.size} id(s) appear more than once`);
 
   const junk = headers.filter(isJunk);
-  if (junk.length) problems.push(`${tab}: ${junk.length} junk column(s) ignored (${junk.join(', ')})`);
+  if (junk.length) notes.push(`${tab}: ${junk.length} junk column(s) ignored (${junk.join(', ')})`);
 
   // Undeclared columns: carried, and counted rather than listed - a column added to the sheet later should be
   // visible, but forty lines of "carried as-is" is how a report stops being read.
   const undeclared = headers.filter((header) => !declared.has(header) && !isJunk(header));
   const refused = undeclared.filter(isSecretKey);
   const carried = undeclared.filter((header) => !isSecretKey(header));
-  if (carried.length) problems.push(`${tab}: ${carried.length} column(s) not in the map, carried as-is (${carried.slice(0, 6).join(', ')}${carried.length > 6 ? ', …' : ''})`);
+  if (carried.length) {
+    notes.push(`${tab}: ${carried.length} column(s) carried as-is (not named in the map)`);
+  }
   if (refused.length) problems.push(`${tab}: REFUSED as credential-looking - ${refused.join(', ')}`);
 
   // Foreign keys: `id_migration` exists because every id in this sheet was rewritten once, so nothing is assumed.
@@ -145,7 +154,7 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
   if (broken.length) problems.push(`${tab}: ${broken.length} reference(s) that do not resolve - ${broken.slice(0, 5).join(', ')}`);
   const stale = unresolvable(spec.softForeignKeys);
   if (stale.length) {
-    problems.push(`${tab}: ${stale.length} historical row(s) name a user that no longer exists (kept as history)`);
+    notes.push(`${tab}: ${stale.length} historical row(s) name a user that no longer exists (kept as history)`);
   }
 
   // The settings pair: one document per side, not one per row.
@@ -224,7 +233,7 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
     }
   });
 
-  return { collections, problems };
+  return { collections, problems, notes };
 };
 
 // --- the run -----------------------------------------------------------------------------------------------------
@@ -248,6 +257,7 @@ export const planForTabs = ({ tabs }) => {
   const ranks = rowsByTab.ranks || [];
   const totals = {};
   const problems = [];
+  const notes = [];
   const lines = [];
 
   const mapped = tabs.filter(({ title }) => TAB_MAP[title] && !TAB_MAP[title].skip);
@@ -255,9 +265,9 @@ export const planForTabs = ({ tabs }) => {
 
   mapped.forEach(({ title }) => {
     const spec = TAB_MAP[title];
-    const { collections, problems: found } = planForTab({
+    const { collections, problems: found, notes: decided } = planForTab({
       tab: title,
-      spec: spec.skip ? {} : spec,
+      spec,
       rows: rowsByTab[title],
       ranks,
       knownIds: idsByTab,
@@ -268,13 +278,14 @@ export const planForTabs = ({ tabs }) => {
     });
     lines.push(`${title}  -  ${rowsByTab[title].length} row(s)  ->  ${parts.join(', ')}`);
     problems.push(...found);
+    notes.push(...decided);
   });
 
   if (unknown.length) problems.push(`tabs with no mapping at all: ${unknown.join(', ')}`);
   const skipped = skippedTabs();
   if (skipped.length) lines.push(`skipped by design: ${skipped.join(', ')}`);
 
-  return { lines, totals, problems };
+  return { lines, totals, problems, notes };
 };
 
 const main = async () => {
@@ -283,7 +294,7 @@ const main = async () => {
   console.log(`Reading with ${account.clientEmail}`);
   const token = await accessTokenFor(account);
   const { title, tabs } = await tabValues({ spreadsheetId, token });
-  const { lines, totals, problems } = planForTabs({ tabs });
+  const { lines, totals, problems, notes } = planForTabs({ tabs });
 
   console.log(`\nSpreadsheet: ${title}`);
   console.log(`${tabs.length} tab(s)\n`);
@@ -297,6 +308,9 @@ const main = async () => {
   console.log(`\nNeeds attention (${problems.length}):`);
   if (problems.length === 0) console.log('  nothing');
   problems.forEach((problem) => console.log(`  - ${problem}`));
+
+  console.log(`\nDecided (${notes.length}), for the record:`);
+  notes.forEach((note) => console.log(`  - ${note}`));
 
   console.log('\nNOTHING WAS WRITTEN. The next step is the writer, which runs as the Admin SDK.');
 };

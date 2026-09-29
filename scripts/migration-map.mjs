@@ -98,22 +98,34 @@ export const TAB_MAP = {
     key: 'id',
   },
   system_settings: {
-    // Key/value, split by key. The split is by NAME, because the model's wording ("every other setting") is not a
-    // list - so the plan prints which side every key lands on, where it can be argued with.
+    // Key/value, split by key. PUBLIC IS BY NAMING and private is the default, so a setting added later is readable
+    // by officers until somebody decides it belongs to everyone - the safe way round for a document any signed-in
+    // member can read.
+    //
+    // Every key below is public because the BROWSER reads it: the loading messages and the theme and the time format
+    // are drawn on screen, and the clock location is checked client-side by decision (see firestoreRouting.js), which
+    // is only possible if the member's browser can read the boundary it is checking against.
     collections: ['settings/public', 'settings/private'],
     pair: { key: 'key', value: 'value' },
     publicKeys: [
       'station_name',
-      'timezone',
-      'loading_messages',
-      'clock_location_enabled',
-      'clock_location_lat',
-      'clock_location_lon',
-      'clock_location_margin_feet',
-      'calendar_events_enabled',
-      'push_enabled',
-      'documents_enabled',
-      'default_time_format',
+      'department_name',
+      'loading_message0',
+      'loading_message1',
+      'loading_message2',
+      'loading_message3',
+      'loading_message4',
+      'loading_message5',
+      'loading_message6',
+      'loading_message7',
+      'loading_message8',
+      'loading_message9',
+      'required_clock_latitude',
+      'required_clock_longitude',
+      'gps_margin_of_error',
+      'session_timeout',
+      'is_dark_mode',
+      'time_format',
     ],
   },
   shifts: { collections: ['shifts'], key: 'id' },
