@@ -1,7 +1,13 @@
 # The Firestore Model
 
-**Status: design, not implemented.** This document is the thing to argue with before any code
-exists. It describes what replaces the Google Sheets backend: one Firestore collection per thing
+**Status: implemented in phases, and nothing is routed to it yet.** Phases 0-3 are real - `firestore.rules`,
+indexes, the client-side write paths in `src/services/firestoreWrites.js`, the payload readers in
+`src/services/firestorePayload.js`, and eight Cloud Functions - and all of it is verified against the emulators. Two
+things are still true, and they are why the app itself is unchanged: **the sheets' data has not been copied to
+Firestore**, and **the client seam has not been switched over**. The sections written as future tense below are the
+design; the phase sections at the end each say what actually exists.
+
+What follows is the thing to argue with before any more code exists: one Firestore collection per thing
 the app stores, who writes each one, what rule replaces each server-side check, and which index
 each query needs.
 
@@ -9,6 +15,11 @@ Decisions already taken, so they are not re-litigated here:
 
 - **Firestore only**, in the existing Firebase project (Blaze, for Cloud Functions). Realtime
   Database stays in our back pocket for presence and typing indicators when chat arrives.
+- **Presence is not the duty status, and the two get different homes.** `on_duty` lives in Firestore,
+  written by the same transaction as the clock entry, because it is a fact about WORK: it survives the
+  app being closed, and it is what the roster and the dashboard read. RTDB's `onDisconnect` is the
+  right tool for who is *online* and the wrong one for who is *on duty* - it would silently clock
+  people out when they closed a tab, which is the one thing a timeclock must never do.
 - **`src/services/api.js` stays the client's only door.** The same exported functions — 87 of them,
   84 of which name a server action — with their internals swapped, so no component changes in the
   first four phases.
@@ -280,6 +291,30 @@ lines.
 into rules and transactions. Both will need a rewrite saying where each guarantee now lives, and
 that rewrite belongs in the same commit as the code that moves it.
 
+## The rule of the rules file, learned three times
+
+**A rule that errors is indistinguishable from a rule that denies.** The caller is refused either way, and so is a
+reviewer reading the file: an exception thrown while evaluating a rule arrives as `permission-denied`, with nothing
+anywhere saying that the rule was never really consulted. Three separate writes were refused this way during Phase 3
+before anyone suspected the rules rather than their own code:
+
+1. **A missing role flag.** The rule read a boolean that the seeded role document did not have, so the evaluation
+   threw rather than comparing `false`.
+2. **A null path segment.** A request for a path with an empty id leaves the wildcard `undefined`, and comparing it
+   to a string throws.
+3. **`resource.data` on a document that does not exist.** On a create there is no `resource` at all, so reading a
+   field from it throws - and that is the *normal* case for the first write to any document.
+
+So the file's rule is this: **every rule must be written so that a missing fact denies, never so that a missing fact
+throws.** In practice that means guarding the variable itself before reading from it (`resource != null` before
+`resource.data`, a type check before comparing a path wildcard) and giving every map read a default
+(`role.get('is_officer', false)` rather than `role.is_officer`). Each guard is commented where it appears, because a
+bare `resource != null` looks redundant until you have been caught by it once.
+
+One performance note that came out of the same work: a `get()` inside a rule costs a read, and a rule evaluation
+stores what it reads, so the same document fetched twice in one evaluation is one read. That is why the cascade of
+role and rank checks was flattened - not to save reads, but so that the file says what it does once.
+
 ## Verification
 
 The rules become the enforcement, so the harnesses that proved enforcement are rewritten as
@@ -396,7 +431,62 @@ it: the admin payload's extra sections (users, the full assignment and template 
 and the computed bits that used to come from the server (`certificationAlerts`, `certificationBadges`). Both are
 listed here so the gap is visible rather than discovered at the switch.
 
+## Phase 3, and what it built
+
+**Done: every write the app makes has a Firestore path and a rule that polices it.** None of it is called from the
+app yet - `api.js` still sends every action to Apps Script - but the other side of the seam exists and is verified.
+
+| piece | what it is |
+|---|---|
+| `src/services/firestoreWrites.js` | the member's writes: clock in and out (one transaction, writing the entry and the `on_duty` row together), availability (one batch per save), offers (raise and withdraw) |
+| `functions/index.js` | seven callables - `createMember`, `resetMemberPassword`, `completePasswordChange`, `whoami`, `setMemberStatus`, `saveScheduleBoard`, `approveOffer` - plus the `beforeUserCreated` Auth trigger, eight deployed functions in all |
+| `firestore.rules` | the write side: `timeclock`, `on_duty`, `availability`, `schedule_offers`, the audit log, and `users_private`. `schedule` is deliberately **write-denied** - a board save now goes through the callable |
+| `scripts/seed-emulator.mjs` | the seed the writes need: all 30 permission flags, and nested maps |
+| `scripts/verify-firestore-writes.mjs` | 38 cases, wired into `verify:all`: each write path run as the member who may, and refused for the member who may not |
+| `scripts/verify-rules.mjs` | the schedule assertion flipped to prove the new denial |
+
+**Two shapes were forced, and both are worth keeping.** A client Firestore transaction cannot run a query, which is
+why the "am I already clocked in?" check reads the `on_duty` document rather than searching the entries - the two are
+written together, so the document is the same fact as a single reference. And the board save had to become a
+callable, because validating the whole board means querying the open shifts, which the Admin SDK can do and a client
+transaction cannot.
+
+**What is deliberately not done yet:** nothing in the app calls any of this, and the sheets' data has not been copied
+across. Those two are the same step, and the next section is about why.
+
+## The next phase: the data has to move, per feature
+
+Every write path the app needs exists in `firestoreWrites.js`, every read payload exists in
+`firestorePayload.js`, and the rules that police both are verified against the emulators. What is missing is the
+obvious thing, and it is worth writing down because it is easy to assume otherwise: **Firestore is empty.** The
+database was created for the project and the only data ever put in it was the emulator's seed on a developer's
+machine. The station's real data is still in the sheets.
+
+That has a consequence for how the seam gets switched, and it is the reason "wire the write paths" is not the next
+thing to do on its own:
+
+- **A feature has to move with both halves at once.** The two backends are live side by side, so a write that lands
+  on one side of a read is invisible - and it looks like data loss, not like a half-finished migration. Save
+  availability into Firestore while the sign-in still reads the sheet and the member's save disappears on reload.
+  Clock in on the client path while the dashboard still reads `timeclock_logs` and the roster shows an empty station.
+- **Some checks live in the server, not in the client or the rules.** Clocking in is the sharpest example: the
+  station geofence is enforced in `Code.gs`, and a client-side Firestore write would not enforce it at all - the
+  rules cannot do the arithmetic and the browser's own check is advisory. Moving clock-in means moving that check
+  with it, which is the same reasoning that made the schedule board a callable rather than a client write.
+
+So the phase that has to come first is a **migration**: read the sheets, write Firestore, and keep the script
+runnable, because a feature will be cut over after it and any drift between the copy and the live sheet has to be
+recoverable by running it again. The source can be the app's own payload actions (an officer session already returns
+every collection) or the Sheets API with a service account; that choice is the one open question this section
+leaves.
+
+Once the data is there, a feature is switched by naming it in one place, and the first candidate is whichever
+feature has the smallest blast radius: a member's own availability is one batch write and one read, already covered
+by the rules harness. The schedule board is the other candidate - officer-only, already a callable, and the highest
+payoff - and it is the one that needs the transaction and the materialized open-shift flag to be right first.
+
 ## Open questions
+
 
 - **The synthetic email domain** is decided: `@boliviavfd.invalid`, chosen as RFC-reserved so nothing can ever be
   delivered and any administrator reading the Auth console can see it is synthetic.
