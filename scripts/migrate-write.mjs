@@ -56,6 +56,15 @@ export const temporaryPassword = (random = Math.random) => {
   return Array.from({ length: 16 }, pick).join('');
 };
 
+// A collection name, or a full document path. `settings/public` and `settings/private` are DOCUMENTS - one document
+// per side of the settings split - and Firestore rejects a two-segment path handed to collection(), which is exactly
+// what an earlier version of this file did. Resolving them here means everything downstream (the writer, the orphan
+// report, the counts) only ever deals in collection + id.
+const splitPath = (path) => {
+  const parts = String(path).split('/');
+  return parts.length === 2 ? { collection: parts[0], id: parts[1] } : { collection: path, id: null };
+};
+
 // What the plan says, turned into (collection, id, document) triples. Pure, so a harness can assert the ids.
 export const writeList = ({ tabs, ranks }) => {
   const idsByTab = {};
@@ -81,13 +90,14 @@ export const writeList = ({ tabs, ranks }) => {
       });
       problems.push(...found);
       notes.push(...decided);
-      Object.entries(collections).forEach(([collection, documents]) => {
+      Object.entries(collections).forEach(([path, documents]) => {
+        const { collection, id: fixedId } = splitPath(path);
         (byCollection[collection] = byCollection[collection] || []).push(
           ...documents.map((document, index) => ({
             collection,
             // Row numbers are 1-based over the sheet INCLUDING its header, so row 1 of the data is sheet row 2 - the
             // number somebody would see in the sheet's own row gutter.
-            id: documentIdFor({ tab: title, spec, row: rows[index], rowNumber: index + 2 }),
+            id: fixedId || documentIdFor({ tab: title, spec, row: rows[index], rowNumber: index + 2 }),
             document,
           }))
         );
@@ -119,6 +129,24 @@ export const writeCollections = async ({ db, byCollection, apply = false }) => {
   return results;
 };
 
+// What is in Firestore but NOT in the sheet. Read-only on purpose: a migration that deletes is a migration that can
+// empty a collection because a tab was renamed or a read came back short, and the failure is unrecoverable. Naming
+// the orphans is enough - a person decides what they mean.
+//
+// This is a PRE-CUTOVER check and the output says so. While the app still writes through Apps Script, the sheet is
+// the only writer, so anything in Firestore that the sheet does not have is a leftover: a document whose row was
+// deleted, or one written by an earlier run of this tool under an id that has since changed. After cutover the app
+// writes both places' worth of new data and this report becomes noise - by design, not by accident.
+export const orphanReport = async ({ db, byCollection }) => {
+  const orphans = {};
+  for (const [collection, entries] of Object.entries(byCollection).sort()) {
+    const wanted = new Set(entries.map(({ id }) => id));
+    const refs = await db.collection(collection).listDocuments();
+    const missing = refs.map((ref) => ref.id).filter((id) => !wanted.has(id)).sort();
+    if (missing.length) orphans[collection] = missing;
+  }
+  return orphans;
+};
 // The members' Auth accounts. Created rather than updated: an account that already exists is left alone, which is
 // what makes a second run a no-op - and the reason this does not touch an existing account's password.
 //
@@ -202,6 +230,19 @@ const main = async () => {
     if (skipped) return console.log(`  ${String(0).padStart(5)}  ${collection}  (nothing writable)`);
     console.log(`  ${String(written).padStart(5)}  ${collection}${empty ? `  (+${empty} empty, not writable)` : ''}`);
   });
+
+  // The drift report. Read only: these are named, never deleted.
+  const orphans = await orphanReport({ db, byCollection });
+  const orphanCount = Object.values(orphans).reduce((sum, ids) => sum + ids.length, 0);
+  console.log(`\nIn Firestore but not in the sheet (${orphanCount}):`);
+  if (!orphanCount) console.log('  nothing - the two agree');
+  Object.entries(orphans).forEach(([collection, ids]) => {
+    console.log(`  ${collection}: ${ids.slice(0, 8).join(', ')}${ids.length > 8 ? `, +${ids.length - 8} more` : ''}`);
+  });
+  if (orphanCount) {
+    console.log('  These are NOT deleted. Before cutover they mean a row was removed or an id changed; after cutover');
+    console.log('  the same list will include data the app has created since, so read it with that in mind.');
+  }
 
   if (!skipAuth) {
     const { created, existing, mismatched } = await createAccounts({ auth: getAuth(), users, apply });

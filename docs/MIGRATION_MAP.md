@@ -129,6 +129,10 @@ over 1 MiB, a tab with no mapping at all.
 5. Only then, and only when asked, **write**. Written by the **Admin SDK**, not the browser SDK, so it bypasses
    `firestore.rules` entirely - which is exactly why steps 3 and 4 exist, and why the map has to be right rather than
    merely plausible.
+6. **Report what is in Firestore but not in the sheet.** Named, never deleted: a migration that deletes is one bad
+   read away from emptying a collection, and a person can decide what an orphan means. It is a **pre-cutover** check -
+   while the app still writes through Apps Script, the sheet is the only writer, so an orphan is a row that was
+   removed or an id that changed. After cutover the same list will include everything the app has created since.
 
 The Auth accounts are a separate step in the same tool: every member in `users` needs an account before anything else
 can move, the sheet holds only a hashed password, so each arrives with a temporary password and the officer-driven

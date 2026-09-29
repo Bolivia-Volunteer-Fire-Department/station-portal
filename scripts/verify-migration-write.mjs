@@ -24,6 +24,7 @@ import {
   createAccounts,
   documentIdFor,
   isWritable,
+  orphanReport,
   temporaryPassword,
   writeCollections,
   writeList,
@@ -78,7 +79,7 @@ const { byCollection } = writeList({
   ranks: [],
 });
 check('the write list is built by collection', Object.keys(byCollection).sort(), [
-  'settings/private', 'settings/public', 'users', 'users_private',
+  'settings', 'users', 'users_private',
 ]);
 check('with the password nowhere in it', byCollection.users[0].document, { id: 'u1', name: 'J Doe' });
 
@@ -110,7 +111,7 @@ const fixture = {
     { collection: 'users', id: 'u1', document: { id: 'u1', name: 'J Doe', role_id: 'officer', rank_id: 'r2' } },
     { collection: 'users', id: 'u2', document: { id: 'u2', name: 'A Member', role_id: 'member', rank_id: 'r1' } },
   ],
-  'settings/private': [{ collection: 'settings/private', id: 'private', document: {} }],
+  settings: [{ collection: 'settings', id: 'private', document: {} }],
   system_log: [{ collection: 'system_log', id: 'system_log-row-2', document: { id: '7', action: 'LOGIN' } }],
 };
 
@@ -118,11 +119,11 @@ const first = await writeCollections({ db, byCollection: fixture, apply: true })
 check(
   'two users and one log row are written, and the empty one is not',
   first.map(({ collection, written }) => `${collection}:${written}`),
-  ['settings/private:0', 'system_log:1', 'users:2']
+  ['settings:0', 'system_log:1', 'users:2']
 );
 checkIs(
   'and the empty document is counted as unwritable',
-  first.find((result) => result.collection === 'settings/private').empty === 1
+  first.find((result) => result.collection === 'settings').empty === 1
 );
 
 check('the emulator has the users', (await db.collection('users').get()).size, 2);
@@ -132,10 +133,55 @@ check('with the fields the mapping produced', (await db.doc('users/u1').get()).d
 checkIs('the empty document does not exist', !(await db.doc('settings/private').get()).exists);
 checkIs('and the made-up id landed where it was told to', (await db.doc('system_log/system_log-row-2').get()).exists);
 
+// The path bug the harness caught: settings/public and settings/private are DOCUMENTS in the settings collection.
+// Handing that path to collection() throws, and an earlier version of writeList did exactly that - which the fixture
+// above hid, because it built the entries by hand instead of asking the mapping for them.
+//
+// `session_timeout` is deliberately NOT used here as the private example: it is on the public list, because the
+// browser enforces the idle timeout. `some_officer_setting` is nobody's.
+const pair = writeList({
+  tabs: [
+    {
+      title: 'system_settings',
+      values: [['key', 'value'], ['station_name', 'Bolivia VFD'], ['some_officer_setting', 'x']],
+    },
+  ],
+  ranks: [],
+});
+check('the settings pair resolves to one collection, two documents', Object.keys(pair.byCollection), ['settings']);
+check('with the ids Firestore expects', pair.byCollection.settings.map((entry) => entry.id), ['public', 'private']);
+await writeCollections({ db, byCollection: pair.byCollection, apply: true });
+check('the public side is written', (await db.doc('settings/public').get()).data(), { station_name: 'Bolivia VFD' });
+check('and the private side', (await db.doc('settings/private').get()).data(), { some_officer_setting: 'x' });
+
 // The property the whole drift-check story rests on: run it again, twice.
 await writeCollections({ db, byCollection: fixture, apply: true });
 await writeCollections({ db, byCollection: fixture, apply: true });
 check('re-running writes the same documents, not more of them', (await db.collection('users').get()).size, 2);
+
+// --- what is in Firestore but not in the sheet ------------------------------------------------------------------
+
+// A document that the sheet no longer has: written by an earlier run, or its row was deleted. It has to be NAMED,
+// and it has to still be there afterwards - a migration that deletes is one bad read away from emptying a collection.
+await db.doc('users/gone-from-the-sheet').set({ id: 'gone-from-the-sheet', name: 'Deleted Member' });
+const orphans = await orphanReport({ db, byCollection: fixture });
+// `settings` is here too: the pair test above wrote settings/public, and the fixture only claims settings/private.
+check('an orphan is reported, with the collection it is in', Object.keys(orphans), ['settings', 'users']);
+check('and named', orphans.users, ['gone-from-the-sheet']);
+checkIs('the orphan is not deleted', (await db.doc('users/gone-from-the-sheet').get()).exists);
+checkIs(
+  'and the documents the sheet does have are not reported as orphans',
+  !JSON.stringify(orphans).includes('"u1"')
+);
+
+await db.doc('users/u9').set({ id: 'u9', name: 'Also Gone' });
+const both = await orphanReport({ db, byCollection: fixture });
+check('orphans are sorted, so the report reads the same twice', both.users, ['gone-from-the-sheet', 'u9']);
+
+// A sheet with nothing to say about a collection leaves everything in it orphaned - which is why the report is a
+// report and not a cleanup.
+const untouched = await orphanReport({ db, byCollection: { users: [] } });
+check('every document is an orphan when the sheet has no rows', untouched.users.length, 4);
 
 // --- the Auth accounts ------------------------------------------------------------------------------------------
 
