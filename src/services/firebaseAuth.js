@@ -6,7 +6,7 @@
 // for, and it is also what lets this file offer no reset-by-email path at all.
 import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, updatePassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { firebaseAuth, firebaseFunctions } from './firebase.js';
+import { firebaseAuth, firebaseConfigured, firebaseFunctions } from './firebase.js';
 
 // MUST MATCH EMAIL_DOMAIN in functions/index.js: the function creates the account under this domain, and the client
 // derives the same address to sign in with. Changing one without the other locks everybody out.
@@ -16,6 +16,39 @@ export const syntheticEmail = (username) => `${String(username || '').trim().toL
 
 export const signInWithUsername = (username, password) =>
   signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(username), password);
+
+// Signing in to Firebase ALONGSIDE the app's own session, and never failing the login because of it.
+//
+// The move is phased: the app still signs in through Apps Script and still reads everything from the sheet, and
+// features are switched to Firestore one at a time. So a Firebase sign-in that does not succeed means "that feature
+// is not available yet", not "you cannot sign in" - and it must never be able to produce the second message. The
+// likeliest reason it will not succeed during the move is mundane: a member's Auth account holds the temporary
+// password from the migration while the sheet still holds their old one, so the app accepts a password Firebase does
+// not. That is expected until the password flows move (see docs/MIGRATION_MAP.md), and it is logged rather than
+// shown.
+export const signInAlongside = async (username, password) => {
+  if (!firebaseConfigured()) return { ok: false, reason: 'unconfigured' };
+  try {
+    await signInWithUsername(username, password);
+    return { ok: true };
+  } catch (error) {
+    const reason = String((error && (error.code || error.message)) || 'unknown');
+    console.info(`[firebase] signed in to Apps Script but not to Firebase (${reason}) - that feature stays on the sheet.`);
+    return { ok: false, reason };
+  }
+};
+
+// The other half, and the one that matters on a shared station computer: a Firebase session that outlives the app's
+// logout would leave the next person holding a token the rules still honour. Never throws, and does nothing when
+// nobody is signed in.
+export const signOutAlongside = async () => {
+  if (!firebaseConfigured()) return;
+  try {
+    await signOut();
+  } catch (error) {
+    console.info(`[firebase] sign-out did not complete (${(error && error.code) || 'unknown'}).`);
+  }
+};
 
 export const signOut = () => firebaseSignOut(firebaseAuth());
 

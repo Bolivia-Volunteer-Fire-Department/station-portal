@@ -33,6 +33,7 @@ import {
   unregisterPushDevice,
   fetchMyPushDevices
 } from './services/api';
+import { signInAlongside, signOutAlongside } from './services/firebaseAuth.js';
 
 import LoginScreen from './components/LoginScreen';
 import ReauthModal from './components/ReauthModal';
@@ -836,6 +837,10 @@ const getLoadingMessage = () => {
       const result = await loginUser(username, password);
 
       if (result.success) {
+        // Signed in to the app: now sign in to Firebase with the same credentials, so the features already moved to
+        // Firestore have a user to act as. It cannot fail the login - a member whose Auth password is still the
+        // migration's temporary one signs in exactly as before and simply has those features on the sheet.
+        await signInAlongside(username, password);
         setCurrentUser(result.user);
         applyToken(result.token);
 
@@ -895,6 +900,11 @@ const getLoadingMessage = () => {
     setReauthReason(null);
     setCurrentUser(null);
     applyToken(null);
+
+    // Every path that drops the app session drops the Firebase one with it: a token that outlived a sign-out would
+    // leave the next person at this computer holding the last one's identity, which the rules would honour.
+    void signOutAlongside();
+
     setIsSidebarOpen(false);
     setActiveTab('dashboard');
     // A refusal modal belongs to the session that hit it, so it must not survive a sign-out - the
@@ -914,6 +924,11 @@ const getLoadingMessage = () => {
     setReauthReason(null);
     setCurrentUser(null);
     applyToken(null);
+
+    // Every path that drops the app session drops the Firebase one with it: a token that outlived a sign-out would
+    // leave the next person at this computer holding the last one's identity, which the rules would honour.
+    void signOutAlongside();
+
     setIsSidebarOpen(false);
     setActiveTab('dashboard');
     applyIdleWarning(null);
@@ -996,6 +1011,9 @@ const getLoadingMessage = () => {
         return { success: false, message: 'Those credentials belong to a different account. Please use your own.' };
       }
 
+      // The reauth exists because a session expired. Firebase's may have expired with it, or may never have been
+      // established - either way the features on Firestore need it back before an interrupted action is replayed.
+      await signInAlongside(username, password);
       setCurrentUser(result.user);
       applyToken(result.token);
 

@@ -15,11 +15,12 @@
  *   - and every one of those wrote an audit row naming the officer, because accountability was the reason resets
  *     are officer-driven at all.
  */
+import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import { EMAIL_DOMAIN, syntheticEmail } from '../src/services/firebaseAuth.js';
+import { EMAIL_DOMAIN, accountState, signInAlongside, signOutAlongside, syntheticEmail } from '../src/services/firebaseAuth.js';
 import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
 
 let failures = 0;
@@ -194,6 +195,50 @@ const main = async () => {
   const resetRow = rows.find((row) => row.action === 'ADMIN_RESET_PASSWORD');
   check('and the reset row names the officer who did it', resetRow.user_id, 'u1');
   checkIs('with the member it was done to in its details', /recruit/.test(resetRow.details), resetRow.details);
+
+  // --- signing in alongside the app's own session --------------------------------------------------------------
+  //
+  // The app signs in through Apps Script AND signs in to Firebase with the same credentials, so the features already
+  // moved to Firestore have a user to act as. The property that matters is that it can never fail the login: a member
+  // whose Auth password is still the migration's temporary one must get into the app exactly as before.
+  console.log('\n--- alongside the app session ---');
+
+  // Signs out FIRST, so what earlier sections did cannot colour this: they create members, suspend them and reset
+  // their passwords, and one of them leaves an officer signed in. `jane` is the seeded officer whose password no
+  // section changes.
+  await signOutAlongside();
+  check('signing out quietly leaves nobody signed in', await accountState(), null);
+
+  const wrongPassword = await signInAlongside('jane', 'not-the-password');
+  check('a Firebase sign-in that fails reports it', wrongPassword.ok, false);
+  checkIs(
+    'and says why, rather than throwing at the login',
+    typeof wrongPassword.reason === 'string' && wrongPassword.reason.length > 0,
+    wrongPassword.reason
+  );
+  checkIs('and nobody is signed in afterwards', (await accountState()) === null);
+
+  const good = await signInAlongside('jane', DEMO_PASSWORD);
+  check('one that succeeds says so', good, { ok: true });
+  check('and the account it signed in is the one asked for', (await accountState()).username, 'jane');
+
+  await signOutAlongside();
+  check('and signing out again leaves nobody', await accountState(), null);
+
+  // Both halves are wired into the app, and the sign-OUT count is the one worth asserting: every path that drops the
+  // app's session has to drop Firebase's too, and there is more than one such path - which is how this check earned
+  // its place, by failing on the first version that wired only the obvious one.
+  const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  checkIs(
+    'the login signs in alongside, and so does the reauth',
+    (appSource.match(/signInAlongside\(/g) || []).length >= 2,
+    'login and reauth'
+  );
+  checkIs(
+    'and every session drop signs out',
+    (appSource.match(/signOutAlongside\(/g) || []).length >= 2,
+    'both logout paths'
+  );
 
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
   console.log('\n--- the harness itself ---');
