@@ -176,6 +176,36 @@ export const READERS = {
     return { success: true, document: { id: snapshot.id, ...snapshot.data() } };
   },
 
+  // A verifier's view of ONE member's paperwork: the documents that MEMBER can see, and their signatures. The same
+  // shape as GET_DOCUMENTS, aimed at somebody else - which is what the can_verify_documents permission is for: reading
+  // people's paperwork in order to confirm it.
+  //
+  // The documents are filtered by the MEMBER's audience rather than the verifier's, deliberately: the verifier is looking
+  // at what this member was shown, so a document aimed at a rank they do not hold has no business appearing in their
+  // records. What stops a member reading anybody else's is the RULES: the read rule allows can_verify_documents, so this
+  // query is provable for a verifier and refused for everyone else.
+  GET_MEMBER_DOCUMENT_RECORDS: async (uid, body) => {
+    const memberId = String((body && body.user_id) || '').trim();
+    if (!memberId) return { success: false, message: 'Which member?' };
+
+    const member = await getDoc(doc(firestore(), 'users', memberId));
+    if (!member.exists()) return { success: false, message: 'That member no longer exists.' };
+
+    const row = member.data() || {};
+    const keys = audienceKeysFor({
+      userId: memberId,
+      roleId: String(row.role_id || ''),
+      rankId: String(row.rank_id || ''),
+    });
+
+    const [visible, signatures] = await Promise.all([
+      audienceRows('documents', keys),
+      rowsFor('document_signatures', 'user_id', memberId),
+    ]);
+    const today = stationDateKey();
+    return { documents: visible.filter((document) => documentIsLive(document, today)), signatures };
+  },
+
   // A document's checklist items and the signatures taken on it: the one read the Documents tab makes per document.
   //
   // It was NOT ROUTED until an officer opened the tab and got "GET_DOCUMENT_SIGNATURES was not routed". The collections,

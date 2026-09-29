@@ -219,6 +219,20 @@ const main = async () => {
   check('a member reads their own devices', devices.devices.map((row) => row.id), ['dev-own']);
   check('and no owner is claimed when the browser passed no token', devices.device_owner, null);
 
+  // A verifier's view of another member's records: the documents THAT MEMBER can see, and their signatures. The
+  // permission is the rules' - which is why a member is refused and an officer is not.
+  await signIn('jane');
+  const boRecords = await routeRead('GET_MEMBER_DOCUMENT_RECORDS', { user_id: 'u2' });
+  check('a verifier reads another member records', boRecords.documents.map((entry) => entry.id).sort(), ['doc1', 'doc5', 'doc6']);
+  checkIs('with that member own signatures', boRecords.signatures.every((row) => row.user_id === 'u2'), JSON.stringify(boRecords.signatures).slice(0, 100));
+  check('and a member who does not exist is reported rather than throwing', (await routeRead('GET_MEMBER_DOCUMENT_RECORDS', { user_id: 'nobody' })).message, 'That member no longer exists.');
+
+  await signIn('bo');
+  checkIs(
+    'while a member without the permission reads nothing at all',
+    (await routeRead('GET_MEMBER_DOCUMENT_RECORDS', { user_id: 'u1' })) === null
+  );
+
   // The member's library: the AUDIENCE and the two flags, because a document can be aimed at exactly the right people
   // and still not be available yet. Four fixtures, one per rule.
   await signIn('bo');

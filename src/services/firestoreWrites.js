@@ -499,6 +499,76 @@ export const verifyChecklistRemaining = async ({ verifierId, documentId, memberI
   return { success: true, verified: pending.length, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
 };
 
+// The two limits the sheet enforced, kept at the same numbers: a reorder is one batch request, and a folder name is a
+// label rather than a document body.
+const DOCUMENT_REORDER_LIMIT = 500;
+const DOCUMENT_FOLDER_LIMIT = 80;
+
+// Removing a signature is an ADMINISTRATOR's action, and it is the only way one goes: a member cannot withdraw their
+// own acknowledgment, which is why the signing writers refuse a request that carries removals rather than ignoring it.
+export const removeDocumentSignature = async ({ id }) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which signature?');
+  await deleteDoc(doc(firestore(), 'document_signatures', wanted));
+  return { removed: 1 };
+};
+
+// A folder is a NAME on the documents rather than a record of its own, so renaming one is a write to every document that
+// carries it - and ONLY to the folder field, because this must never be a way to save a document.
+export const renameDocumentFolder = async ({ from, to }) => {
+  const name = String(from || '').trim();
+  if (!name) throw new Error('No folder was named.');
+  const replacement = String(to === undefined || to === null ? '' : to).trim().slice(0, DOCUMENT_FOLDER_LIMIT);
+  // Renaming a folder to itself is not a failure and not a write.
+  if (name === replacement) return { renamed: 0 };
+
+  const documents = await rowsOf(collection(firestore(), 'documents'));
+  const inFolder = documents.filter((document) => String(document.folder || '').trim() === name);
+  if (!inFolder.length) return { renamed: 0 };
+
+  const batch = writeBatch(firestore());
+  inFolder.forEach((document) => {
+    batch.set(doc(firestore(), 'documents', document.id), { folder: replacement }, { merge: true });
+  });
+  await batch.commit();
+  return { renamed: inFolder.length };
+};
+
+// Drag-and-drop ordering.
+//
+// The pairs are worked out by the CLIENT's own pure helper (utils/documents.reorderDocuments), deliberately: "what does
+// dropping A onto B mean" is a rule a person can see and a test can pin down, and it has no business being restated in a
+// language that cannot be unit-tested.
+//
+// What this owns is that the request is HONEST: rows that exist, whole numbers, and only `sort_order` written. A drag
+// can therefore never rewrite a title, a body or - above all - a signature, which is the property the sheet's version
+// was built to protect and the reason it is worth stating again here.
+export const reorderDocuments = async ({ order }) => {
+  const pairs = Array.isArray(order) ? order : [];
+  if (!pairs.length) throw new Error('No order was given.');
+  if (pairs.length > DOCUMENT_REORDER_LIMIT) {
+    throw new Error(`That is too many documents to reorder at once (${DOCUMENT_REORDER_LIMIT} at most).`);
+  }
+
+  const existing = new Set((await rowsOf(collection(firestore(), 'documents'))).map((document) => document.id));
+  const batch = writeBatch(firestore());
+  let moved = 0;
+
+  pairs.forEach((pair) => {
+    const id = String((pair && pair.id) || '').trim();
+    const position = parseInt(pair && pair.sort_order, 10);
+    // A row that is not there, or a position that is not a whole number, is SKIPPED rather than failing the drag: a
+    // page open while somebody else deleted a document should still be able to move the others, and a partially applied
+    // order is still an order.
+    if (!id || !existing.has(id) || !Number.isFinite(position)) return;
+    batch.set(doc(firestore(), 'documents', id), { sort_order: position }, { merge: true });
+    moved += 1;
+  });
+
+  if (moved) await batch.commit();
+  return { moved };
+};
+
 export const deleteDocument = async ({ collection, id }) => {
   const target = String(id || '');
   if (await clientWritesAreAudited()) {

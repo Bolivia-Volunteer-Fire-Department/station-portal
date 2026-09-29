@@ -430,6 +430,38 @@ const main = async () => {
   const memberVerifies = await routeWrite('VERIFY_CHECKLIST_ITEM', { document_id: 'doc5', item_id: 'it4', user_id: 'u1' });
   checkIs('and a member without the permission cannot write the row either', memberVerifies.success === false, JSON.stringify(memberVerifies).slice(0, 140));
 
+  // --- the administrator's half of documents: removal, folders, and a drag -------------------------------------------
+  await signIn('jane');
+  check('the signature is there to remove', (await getDoc(doc(firestore(), 'document_signatures', 'sg1'))).exists(), true);
+  const removedSignature = await routeWrite('ADMIN_REMOVE_DOCUMENT_SIGNATURE', { id: 'sg1' });
+  checkIs('an officer removes a signature', removedSignature.success === true, JSON.stringify(removedSignature).slice(0, 140));
+  check('and the row is gone', (await getDoc(doc(firestore(), 'document_signatures', 'sg1'))).exists(), false);
+
+  // A member cannot, even their own: the rules are the permission, not the writer.
+  await signIn('bo');
+  const memberRemoval = await routeWrite('ADMIN_REMOVE_DOCUMENT_SIGNATURE', { id: 'sg2' });
+  checkIs('and a member cannot remove one', memberRemoval.success === false, JSON.stringify(memberRemoval).slice(0, 140));
+
+  // A folder renames every document carrying it - and touches NOTHING else. That second half is the property the sheet's
+  // version was built to protect, so it is asserted rather than assumed: the title is the witness.
+  await signIn('jane');
+  await routeWrite('ADMIN_SAVE_DOCUMENT', { id: 'doc6', title: 'New Policy Acknowledgement', folder: 'Policies', body: 'Read it.' });
+  const renamed = await routeWrite('ADMIN_RENAME_DOCUMENT_FOLDER', { from: 'Policies', to: 'Standing Orders' });
+  checkIs('a folder renames every document carrying it', renamed.renamed === 1, JSON.stringify(renamed).slice(0, 140));
+  const renamedDocument = (await getDoc(doc(firestore(), 'documents', 'doc6'))).data();
+  check('and nothing else about those documents moves', [renamedDocument.folder, renamedDocument.title], ['Standing Orders', 'New Policy Acknowledgement']);
+  checkIs('renaming a folder to itself is not a write', (await routeWrite('ADMIN_RENAME_DOCUMENT_FOLDER', { from: 'Standing Orders', to: 'Standing Orders' })).renamed === 0);
+
+  // A drag writes `sort_order` and nothing else. The pairs come from the client's own pure helper; what is asserted here
+  // is that an honest request stays honest, including a row that is not there and a position that is not a number -
+  // both skipped rather than failing the drag.
+  const drag = await routeWrite('ADMIN_REORDER_DOCUMENTS', {
+    order: [{ id: 'doc6', sort_order: 3 }, { id: 'a-row-that-is-gone', sort_order: 4 }, { id: 'doc1', sort_order: 'not a number' }],
+  });
+  check('a drag moves the rows it can name', drag.moved, 1);
+  const draggedDocument = (await getDoc(doc(firestore(), 'documents', 'doc6'))).data();
+  check('writing only the position', [draggedDocument.sort_order, draggedDocument.title], [3, 'New Policy Acknowledgement']);
+
   // --- the member's own settings ------------------------------------------------------------------------------------
   //
   // A MERGE, and three things about it are asserted because each is a way to be wrong quietly: an absent preference must

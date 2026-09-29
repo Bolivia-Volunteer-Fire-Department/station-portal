@@ -183,11 +183,15 @@ export const ROUTED_FEATURES = {
       'SIGN_CHECKLIST_ITEM',
       'VERIFY_CHECKLIST_ITEM',
       'VERIFY_CHECKLIST_REMAINING',
+      'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
+      'ADMIN_RENAME_DOCUMENT_FOLDER',
+      'ADMIN_REORDER_DOCUMENTS',
     ],
     reads: [
       'GET_DOCUMENTS',
       'GET_DOCUMENT',
       'ADMIN_GET_DOCUMENT',
+      'GET_MEMBER_DOCUMENT_RECORDS',
       'GET_DOCUMENT_SIGNATURES',
     ],
     switchReads: [],
@@ -503,6 +507,24 @@ const DISPATCH = {
   VERIFY_CHECKLIST_REMAINING: async (body, uid) => {
     const { verifyChecklistRemaining } = await writes();
     return ok(await verifyChecklistRemaining({ verifierId: uid, documentId: body.document_id, memberId: body.user_id }));
+  },
+
+  // The administrator's half of documents: removing a signature, and the two pieces of housekeeping. All three are
+  // ordinary writes - the rules are the permission (`can_manage_documents`) - and each writes as little as it can: one
+  // row deleted, a `folder` field, a `sort_order`, so none of them can be a way to save a document.
+  ADMIN_REMOVE_DOCUMENT_SIGNATURE: async (body) => {
+    const { removeDocumentSignature } = await writes();
+    return ok(await removeDocumentSignature({ id: body.id }));
+  },
+
+  ADMIN_RENAME_DOCUMENT_FOLDER: async (body) => {
+    const { renameDocumentFolder } = await writes();
+    return ok(await renameDocumentFolder({ from: body.from, to: body.to }));
+  },
+
+  ADMIN_REORDER_DOCUMENTS: async (body) => {
+    const { reorderDocuments } = await writes();
+    return ok(await reorderDocuments({ order: body.order }));
   },
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {
