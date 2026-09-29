@@ -143,7 +143,7 @@ const main = async () => {
   // `data.success` to decide whether a bootstrap loaded, and the whole read was dropped as a failed refresh. It
   // looked exactly like the read never moving to Firestore at all.
   console.log('\n--- through the router ---');
-  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,memberReads,adminPayload,adminReads';
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,memberReads,adminPayload,adminReads,documents';
   const { routeRead } = await import('../src/services/firestoreRouting.js');
 
   await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
@@ -218,6 +218,27 @@ const main = async () => {
   const devices = await routeRead('MY_PUSH_DEVICES');
   check('a member reads their own devices', devices.devices.map((row) => row.id), ['dev-own']);
   check('and no owner is claimed when the browser passed no token', devices.device_owner, null);
+
+  // The Documents tab's per-document read: the checklist items and the signatures taken on it. It is the read that
+  // failed in the field - "GET_DOCUMENT_SIGNATURES was not routed" - because the collections and the rules existed and
+  // only the reader was missing, which nothing noticed while the sheet was still answering.
+  await signIn('jane');
+  const documentSignatures = await routeRead('GET_DOCUMENT_SIGNATURES', { id: 'doc1' });
+  check('a document’s checklist items come back in order', documentSignatures.items.map((item) => item.id), ['it1', 'it2']);
+  check('and its signatures newest first', documentSignatures.signatures.map((entry) => entry.id), ['sg2', 'sg1']);
+  // Staleness is decided against the document's CURRENT revision, the way the sheet decided it and for the same reason:
+  // every screen must show the same judgment. sg2 is the NEWER signature and still stale, because it was taken against
+  // revision 1 - so this asserts the rule rather than the clock.
+  check('a signature taken before the wording changed is stale', documentSignatures.signatures[0].stale, true);
+  check('and one taken against the current revision is not', documentSignatures.signatures[1].stale, false);
+
+  // The RULES decide who may read somebody's paperwork, not the reader: a member with neither document permission gets
+  // nothing back at all, because the query cannot be proven.
+  await signIn('bo');
+  checkIs(
+    'a member without the document permissions gets nothing',
+    (await routeRead('GET_DOCUMENT_SIGNATURES', { id: 'doc1' })) === null
+  );
 
   // The pre-login read, with NOBODY signed in - which is the whole point of it and the only read in the app that
   // works that way. The asymmetry asserted here is the design: the station's own settings are readable by anybody,

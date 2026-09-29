@@ -75,6 +75,71 @@ export const READERS = {
   ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
   ADMIN_GET_DOCUMENTS: () => rowsOf(collection(firestore(), 'documents')).then((documents) => ({ documents })),
 
+  // A document's checklist items and the signatures taken on it: the one read the Documents tab makes per document.
+  //
+  // It was NOT ROUTED until an officer opened the tab and got "GET_DOCUMENT_SIGNATURES was not routed". The collections,
+  // the rules and the client all existed - only this reader and the table entry were missing, and nothing complained
+  // while the sheet was still answering. That is the whole shape of the gap the routing table's two-direction check
+  // now closes.
+  //
+  // `items` travel with the signatures because the panel shows the checklist's rows: reading the labels separately would
+  // mean a verifier could hold the signatures but not the words they signed. The document's TEXT is never included.
+  //
+  // `stale` is decided HERE, against the document as it stands now - the same judgment the sheet made in the same
+  // place, and for the same reason: a document whose wording changed under a signature must read the same way on every
+  // screen, rather than each screen deciding for itself.
+  GET_DOCUMENT_SIGNATURES: async (uid, body) => {
+    const documentId = String((body && body.id) || '').trim();
+    if (!documentId) return { items: [], signatures: [] };
+
+    const [items, signatures, document] = await Promise.all([
+      rowsFor('document_checklist_items', 'document_id', documentId),
+      rowsFor('document_signatures', 'document_id', documentId),
+      getDoc(doc(firestore(), 'documents', documentId)),
+    ]);
+
+    const revision = (row) => {
+      const value = parseInt(row && row.content_revision, 10);
+      return Number.isFinite(value) ? value : null;
+    };
+    // `.exists()` is a METHOD in the client SDK - the Admin SDK is where it is a property, and the two are easy to
+    // confuse. This read worked by accident with the property form (a function reference is truthy), which is exactly
+    // the sort of thing that works until the day the document is missing.
+    const currentRevision = revision(document.exists() ? document.data() : null);
+
+    return {
+      items: items
+        .map((item) => ({
+          id: String(item.id || ''),
+          document_id: String(item.document_id || ''),
+          sort_order: parseInt(item.sort_order, 10) || 0,
+          section: String(item.section || ''),
+          label: String(item.label || ''),
+        }))
+        .sort((a, b) => a.sort_order - b.sort_order || (a.id < b.id ? -1 : 1)),
+      // Newest first, which is the order the sheet sent them in. The id breaks a tie so the order is total.
+      signatures: signatures
+        .map((signature) => ({
+          ...signature,
+          stale:
+            currentRevision !== null &&
+            revision(signature) !== null &&
+            revision(signature) < currentRevision,
+        }))
+        .sort((a, b) => {
+          const aAt = String(a.signed_at || '');
+          const bAt = String(b.signed_at || '');
+          if (aAt !== bAt) return aAt < bAt ? 1 : -1;
+          return String(a.id || '') < String(b.id || '') ? -1 : 1;
+        }),
+    };
+  },
+
+  // The officer's pending-approvals list: every offer, whole, which is why the rules give the permission its own branch.
+  // One line, and it was missing - the tab was refreshing from the sheet after each approval, which is exactly the sort
+  // of "it works today" that the two-direction check now makes visible.
+  ADMIN_GET_SCHEDULE_OFFERS: () => rowsOf(collection(firestore(), 'schedule_offers')).then((offers) => ({ offers })),
+
   // The system log, one page at a time - and the one officer read that is a callable rather than a query, for reasons
   // that come from the shape of the contract rather than from convenience: the response carries the counts and the
   // filter dropdown's facets for the WHOLE log, which no page can supply, and the log names members and records failed

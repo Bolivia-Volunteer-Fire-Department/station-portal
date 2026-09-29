@@ -18,6 +18,7 @@ import { httpsCallable } from 'firebase/functions';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { firebaseAuth, firebaseFunctions, firestore } from '../src/services/firebase.js';
+import { routeWrite } from '../src/services/firestoreRouting.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
 import {
@@ -344,6 +345,39 @@ const main = async () => {
   // The callable's own code, as the client sees it: the app's custom codes come through bare, and the SDK's own
   // come through with the `functions/` prefix.
   await refused('an unsigned caller cannot ask whose device a token is', 'functions/unauthenticated', () => pushDeviceOwner({ token: 'token-of-bo' }));
+
+  // The officer's availability edit: the SAME write as a member's own, for the member the form names. The permission is
+  // the rules' - an officer with can_edit_member_availability may write another member's rows, and a member may not - so
+  // these assert the rules rather than the dispatcher, which deliberately does not repeat the check. This is the
+  // assumption the dispatcher was written on, and it is worth proving.
+  await signIn('jane');
+  await routeWrite('ADMIN_SET_AVAILABILITY', {
+    user_id: 'u2',
+    adds: [{ schedule_template_id: 't1', date_from: '2026-04-01', date_to: '2026-04-01' }],
+    removes: [],
+  });
+  const forBo = await rowsOf(query(collection(firestore(), 'availability'), where('user_id', '==', 'u2')));
+  checkIs('an officer adds availability for another member', forBo.some((row) => row.date_from === '2026-04-01'));
+
+  await signIn('bo');
+  const boAttempt = await routeWrite('ADMIN_SET_AVAILABILITY', {
+    user_id: 'u1',
+    adds: [{ schedule_template_id: 't1', date_from: '2026-04-02', date_to: '2026-04-02' }],
+    removes: [],
+  });
+  checkIs(
+    'but a member cannot write somebody else\u2019s',
+    boAttempt && boAttempt.success === false,
+    JSON.stringify(boAttempt).slice(0, 140)
+  );
+  // Asked as an OFFICER, which is the only way it can be asked: a member cannot even list another member's availability
+  // (the read rule needs `user_id == uid()` or the permission), which is why this query came back permission-denied when
+  // it was run as bo - the rules refusing the read of somebody else's rows, exactly as they refused the write.
+  await signIn('jane');
+  const forJane = await rowsOf(
+    query(collection(firestore(), 'availability'), where('user_id', '==', 'u1'))
+  );
+  check('and no row is left behind by the refused batch', forJane.filter((row) => row.date_from === '2026-04-02').length, 0);
 
   // The system log, one page at a time: the last read in the app, and the one whose answer is more than a page. The
   // fixtures live in March 2026 while the audit rows this harness provokes are written "now", so a date range that stops

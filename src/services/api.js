@@ -321,7 +321,9 @@ export const updateUserPassword = async (userId, newPassword, token) => {
 // this answers success:false with the reason - which is the one path the caller surfaces to the officer.
 //
 // A username change is the same story, for the same reason, and is reported the same way.
-export const adminSaveUser = async (userData, token) => {
+// `token` is still passed by the caller and no longer needed: the session is Firebase's own, and the branch that used
+// to carry it to the sheet is gone. Left out of the signature rather than accepted and ignored.
+export const adminSaveUser = async (userData) => {
   if (firebaseConfigured() && firebaseAuth().currentUser) {
     try {
       if (!userData.id) {
@@ -368,28 +370,20 @@ export const adminSaveUser = async (userData, token) => {
     }
   }
 
-  return appScriptFetch({
-    action: 'ADMIN_SAVE_USER',
-    token,
-    id: userData.id || '',
-    // Refuses the write if the row moved on since this form was filled in.
-    row_version: rowVersionField(userData),
-    user_name: userData.user_name,
-    name: userData.name,
-    password: userData.password || '',
-    status: userData.status,
-    role_id: userData.role_id,
-    rank_id: userData.rank_id,
-    // An administrator-managed attribute on the users sheet. Sent with the rest of the row so a
-    // save is ONE request; the backend ignores it unless the caller has is_admin.
-    runner_sound_profile: String(userData.runner_sound_profile ?? ''),
-    // The two per-member flags. Both are sent every time, because the backend normalizes each to TRUE/FALSE and
-    // writes only the ones it is given - so omitting one here would leave it silently unwritable. It was:
-    // "Exclude from scheduling" had a checkbox, a badge in the list and backend support, and this payload did
-    // not carry it, so ticking it changed nothing.
-    exclude_from_scheduling: userData.exclude_from_scheduling,
-    is_change_password_on_login: userData.is_change_password_on_login,
-  });
+  // THE SHEET BRANCH THAT USED TO BE HERE IS GONE.
+  //
+  // It could only be reached with Firebase unconfigured or nobody signed in - and by then it was a request to a backend
+  // that no longer exists, so it was dead code that still looked like a fallback. Deleting it is also what takes
+  // ADMIN_SAVE_USER off the routing harness's list of actions the app calls but nothing routes.
+  //
+  // What it wrote, for the record: the row's own fields, the row-version guard, the two per-member flags and the
+  // runner's sound profile. All of that is handled above; the two flags that live in `users_private`, which no client
+  // may write, are reported to the officer rather than dropped, and the caller surfaces that message.
+  return {
+    success: false,
+    id: String(userData.id || ''),
+    message: 'This build has no Firebase configuration, so nothing could be saved.',
+  };
 };
 
 export const adminDeleteUser = async (userId, token) =>

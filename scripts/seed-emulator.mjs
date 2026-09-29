@@ -305,7 +305,47 @@ export const seed = async () => {
     audience_keys: ['rank:k1', 'rank:k2'],
   });
 
-  // --- one offer, so the member's own offers have something to filter ---
+  // --- one document with a checklist, and two signatures, so the Documents tab's per-document read has something to
+  // answer with. It is the read that failed in the field: the collections and rules existed, the reader did not.
+  //
+  // The two signatures are deliberately different in TWO dimensions: sg1 is the older signature taken against the
+  // current revision (content_revision 2, so not stale), and sg2 is the newer signature taken against revision 1 -
+  // so it is stale even though it is more recent. That is the point of the staleness rule: it is about the document's
+  // wording having changed under a signature, not about how long ago somebody signed.
+  await put('documents/doc1', {
+    title: 'Annual SOG Acknowledgement',
+    audience_keys: ['*'],
+    content_revision: 2,
+    is_active: true,
+  });
+  await put('document_checklist_items/it1', {
+    document_id: 'doc1',
+    sort_order: 1,
+    section: 'Section A',
+    label: 'I have read the SOG',
+  });
+  await put('document_checklist_items/it2', {
+    document_id: 'doc1',
+    sort_order: 2,
+    section: 'Section A',
+    label: 'I will follow it',
+  });
+  await put('document_signatures/sg1', {
+    document_id: 'doc1',
+    user_id: 'u2',
+    checklist_item_id: '',
+    signature_role: 'member',
+    content_revision: 2,
+    signed_at: '2026-02-01 09:00:00',
+  });
+  await put('document_signatures/sg2', {
+    document_id: 'doc1',
+    user_id: 'u1',
+    checklist_item_id: '',
+    signature_role: 'member',
+    content_revision: 1,
+    signed_at: '2026-03-01 09:00:00',
+  });
   await put('schedule_offers/of1', {
     user_id: 'u2',
     schedule_id: 's2',

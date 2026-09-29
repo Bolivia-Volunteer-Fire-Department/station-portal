@@ -70,11 +70,13 @@ export const ROUTED_FEATURES = {
     writes: ['CLOCK_IN', 'CLOCK_OUT'],
     switchReads: ['GET_ON_DUTY', 'GET_TIMECLOCK_LOGS'],
   },
-  // A member's own availability: one batch write, one read, rules already proven by the harness.
+  // A member's own availability, and the officer's edit of somebody else's - one batch write each, through the SAME
+  // writer, because the rules already distinguish the two: `can_edit_member_availability` lets an officer write another
+  // member's rows, and the writer builds exactly the rows either path needs.
   availability: {
     requires: ['memberPayload'],
-    writes: ['SET_MY_AVAILABILITY'],
-    switchReads: ['GET_AVAILABILITY', 'ADMIN_SET_AVAILABILITY'],
+    writes: ['SET_MY_AVAILABILITY', 'ADMIN_SET_AVAILABILITY'],
+    switchReads: ['GET_AVAILABILITY'],
   },
   // Offers: raised, withdrawn, approved. The approval fills the shift, so it is the callable.
   offers: {
@@ -163,6 +165,24 @@ export const ROUTED_FEATURES = {
   // `reads` is what the router DISPATCHES today; `switchReads` is the fuller list of reads that have to move with the
   // feature before it can be switched on - a read named there and not here is a step still to take, which is the
   // difference between a plan and a claim.
+  // The Documents tab's per-document read: a document's checklist items and the signatures taken on it.
+  //
+  // It is here rather than in adminReads because the member's own DocumentsModule asks for it as well - the SHEET
+  // refused that call for anyone without can_manage_documents or can_verify_documents, and Firestore refuses it in the
+  // same place, through the rules. So a member still gets a refusal; it arrives as a thrown error rather than as the
+  // sheet's `{success: false, message: 'Unauthorized.'}`, which is the one behavioural difference and is covered by the
+  // callers' own error handling.
+  //
+  // A feature of its own because that is what it is: the collections, the rules and the client all existed before this,
+  // and only the reader and this line were missing. Nothing complained while the sheet answered - which is exactly the
+  // gap the two-direction check below the table now closes.
+  documents: {
+    requires: ['memberPayload'],
+    writes: [],
+    reads: ['GET_DOCUMENT_SIGNATURES'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -175,7 +195,7 @@ export const ROUTED_FEATURES = {
   adminReads: {
     requires: ['adminPayload'],
     writes: [],
-    reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS', 'ADMIN_GET_SYSTEM_LOG'],
+    reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS', 'ADMIN_GET_SYSTEM_LOG', 'ADMIN_GET_SCHEDULE_OFFERS'],
     switchReads: [],
   },
 
@@ -355,6 +375,17 @@ const DISPATCH = {
   SET_MY_AVAILABILITY: async (body, uid) => {
     const { saveAvailability } = await writes();
     return ok(await saveAvailability({ userId: uid, adds: body.adds || [], removes: body.removes || [] }));
+  },
+
+  // The officer's half of the same write: the same rows, for the member the form names. The rules decide whether this
+  // caller may - `can_edit_member_availability` - so the permission is not repeated here where it could drift.
+  ADMIN_SET_AVAILABILITY: async (body) => {
+    const target = String(body.user_id || '').trim();
+    // Refused rather than written with an empty owner: a batch of availability rows with no user_id is invisible to
+    // every member AND to the officer who just saved it, which is the worst kind of "saved successfully".
+    if (!target) throw new Error('Which member is this availability for?');
+    const { saveAvailability } = await writes();
+    return ok(await saveAvailability({ userId: target, adds: body.adds || [], removes: body.removes || [] }));
   },
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {

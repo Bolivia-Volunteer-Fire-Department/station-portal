@@ -129,8 +129,60 @@ for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
   }
 }
 
-// The mutation: rename an action in the source and the same check must fail, which proves it is reading the wiring
-// rather than agreeing with itself.
+// --- THE OTHER DIRECTION, which did not exist and cost a live bug ------------------------------------------------
+//
+// Everything above asks whether what the table ROUTES is really wired. None of it asked the opposite question: is every
+// action the APP calls actually routed? So twenty-three of them were still being answered by the sheet with nothing
+// anywhere recording that they had never moved - and the day the sheet was removed, every one of them became a screen
+// that throws. GET_DOCUMENT_SIGNATURES was the first a real user hit.
+//
+// So: every action api.js names must be routed, unless it is in the ledger below. The ledger is a TO-DO LIST, not a
+// permission slip - it may shrink and it may not grow, and a run prints what is left in it. Fixing one means deleting
+// its line here, which is what keeps the list honest.
+const NOT_YET_ROUTED = [
+  // Push registration and the administrator's push controls (the member's device card, and the FCM tab).
+  'REGISTER_PUSH_DEVICE',
+  'UNREGISTER_PUSH_DEVICE',
+  'ADMIN_GET_PUSH_STATUS',
+  'ADMIN_GET_FCM_STATUS',
+  'ADMIN_SET_PUSH_DISABLED',
+  'ADMIN_SEND_TEST_PUSH',
+  // The member's own settings (time format, dark mode) and their password change.
+  'UPDATE_USER_SETTINGS',
+  'UPDATE_USER_PASSWORD',
+  // Documents and checklists, the area a user found first: signing, the signature report, the verifier's view of
+  // somebody else's records, removing a signature, and the folder/order housekeeping.
+  'GET_DOCUMENTS',
+  'GET_DOCUMENT',
+  'ADMIN_GET_DOCUMENT',
+  'SIGN_DOCUMENT',
+  'GET_MEMBER_DOCUMENT_RECORDS',
+  'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
+  'ADMIN_RENAME_DOCUMENT_FOLDER',
+  'ADMIN_REORDER_DOCUMENTS',
+  'SIGN_CHECKLIST_ITEM',
+  'VERIFY_CHECKLIST_ITEM',
+  'VERIFY_CHECKLIST_REMAINING',
+  // Training signatures, and the administrator's removal of one.
+  'SIGN_TRAINING',
+  'ADMIN_REMOVE_TRAINING_SIGNATURE',
+  // The administrator's timeclock edits, deleting a user, and the runner's leaderboard.
+  'ADMIN_SAVE_TIMECLOCK_ENTRY',
+  'ADMIN_DELETE_TIMECLOCK_ENTRY',
+  'ADMIN_DELETE_USER',
+  'GET_RUNNER_LEADERBOARD',
+  'SAVE_RUNNER_SCORE',
+];
+
+const calledActions = new Set([...apiSource.matchAll(/action: '([A-Z_]+)'/g)].map((match) => match[1]));
+const routedActions = new Set([...Object.keys(ROUTED_READS), ...Object.keys(ROUTED_WRITES)]);
+const unrouted = [...calledActions].filter((action) => routedActions.has(action) === false).sort();
+
+check('the actions the app calls are all accounted for', unrouted, [...NOT_YET_ROUTED].sort());
+if (unrouted.length) {
+  // Printed on every run, because a list in a source file is easy to stop reading.
+  console.log(`\n  STILL ON THE SHEET - these actions answer nothing now, so the screens using them fail:\n    ${unrouted.join(', ')}\n`);
+}
 const mutated = apiSource.replace("routeWrite('SET_MY_AVAILABILITY'", "routeWrite('SET_MY_AVAILABILTY'");
 checkIs('the wiring check bites (mutation)', mutated !== apiSource && !actionIsWired('SET_MY_AVAILABILITY', mutated));
 
