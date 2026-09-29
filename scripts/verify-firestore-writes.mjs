@@ -698,6 +698,98 @@ const main = async () => {
   await refused('a member without the permission cannot read the log', 'functions/permission-denied', () => readSystemLog({ ...march }));
   await signIn('jane');
 
+  // --- the runner: a personal best, and the board that shows it ---
+  console.log('\n--- the runner ---');
+  await signIn('bo');
+  // The seed leaves u2 with no runner_score, so the first run is the first personal best.
+  check('a first run is stored', await routeWrite('SAVE_RUNNER_SCORE', { score: 120 }), { success: true, best: 120, improved: true });
+  // A worse run is not a personal best: nothing is written, and the answer carries the score that still stands, which is
+  // what lets the game say "your best is 120" without a second read.
+  check('a worse run changes nothing', await routeWrite('SAVE_RUNNER_SCORE', { score: 90 }), { success: true, best: 120, improved: false });
+  check('so the stored score is untouched', (await getDoc(doc(db, 'users', 'u2'))).data().runner_score, 120);
+  check('and an equal run is not a new best either', await routeWrite('SAVE_RUNNER_SCORE', { score: 120 }), {
+    success: true,
+    best: 120,
+    improved: false,
+  });
+
+  // The clamp, which is the whole reason this is a callable rather than a client write: the board is SHARED, so an
+  // impossible number must not reach it. 999999 becomes the station's ceiling rather than a refusal, because a doctored
+  // request is not an error worth explaining to whoever sent it.
+  check('an impossible score is clamped to the ceiling', await routeWrite('SAVE_RUNNER_SCORE', { score: 999999 }), {
+    success: true,
+    best: 100000,
+    improved: true,
+  });
+  check('and the ceiling is what is stored', (await getDoc(doc(db, 'users', 'u2'))).data().runner_score, 100000);
+  // A refusal here is a REPLY rather than a throw: routed writes catch their errors and answer with failureFor(), which
+  // is what the app's screens branch on. So these assert the reply, not an exception.
+  const notANumber = await routeWrite('SAVE_RUNNER_SCORE', { score: 'lots' });
+  checkIs('a score that is not a number is refused', notANumber.success === false, JSON.stringify(notANumber));
+  checkIs('and the reason says what a score has to be', /number/i.test(notANumber.message || ''), JSON.stringify(notANumber));
+
+  // The board, read as bo - a plain firefighter with no permission at all, which is the claim: "anyone who can play can
+  // see the board". The projection matters as much as the contents: an id to highlight your own row, a name, a score,
+  // and nothing else out of anybody's personnel record.
+  // Named runnerBoard rather than board: the schedule board's section above owns that name, and this harness runs in one
+  // scope.
+  const runnerBoard = await routeRead('GET_RUNNER_LEADERBOARD', {});
+  check('a member with no permission reads the board', runnerBoard.leaderboard.map((row) => row.id), ['u2']);
+  check('carrying a name rather than just an id', runnerBoard.leaderboard[0].name, 'Bo Jones');
+  check('and the score', runnerBoard.leaderboard[0].score, 100000);
+  check('and the total counts everybody with a score', runnerBoard.total, 1);
+  check('and the row is exactly three fields', Object.keys(runnerBoard.leaderboard[0]).sort(), ['id', 'name', 'score']);
+  checkIs(
+    'a member with no score is left off the board entirely',
+    runnerBoard.leaderboard.every((row) => row.score > 0),
+    JSON.stringify(runnerBoard.leaderboard)
+  );
+
+  // --- deleting a member: the account, the documents, and what is deliberately kept ---
+  console.log('\n--- deleting a member ---');
+  await signIn('bo');
+  const boDelete = await routeWrite('ADMIN_DELETE_USER', { id: 'u1' });
+  checkIs('a member cannot delete anybody', boDelete.success === false, JSON.stringify(boDelete));
+  // Refused for WHO HE IS rather than for what he asked: the answer names the permission, and the roster row is untouched.
+  checkIs('and the reason is the permission, not the record', /permission/i.test(boDelete.message || ''), JSON.stringify(boDelete));
+  check('and the other member is still there', (await getDoc(doc(db, 'users', 'u1'))).exists(), true);
+
+  await signIn('jane');
+  // Yourself: the surest way to leave a station with nobody who can administer it, and there is no undoing it. (The
+  // same hole - the LAST administrator - is guarded too, but a seed with one administrator cannot reach it: this case
+  // is the one that fires first here, and with more than one administrator the other is what protects the station.)
+  const selfDelete = await routeWrite('ADMIN_DELETE_USER', { id: 'u1' });
+  checkIs('an officer cannot delete their own account', selfDelete.success === false, JSON.stringify(selfDelete));
+  checkIs('and is told why', /your own account/i.test(selfDelete.message || ''), JSON.stringify(selfDelete));
+  // Somebody who is not there is answered rather than thrown, because the members tab shows the message.
+  check('deleting somebody who does not exist is answered', await routeWrite('ADMIN_DELETE_USER', { id: 'u404' }), {
+    success: false,
+    message: 'User not found.',
+  });
+
+  // A real deletion, on a seeded member, because the seed is re-run at the top of every run. Bo's records are what make
+  // this worth doing: the clock entry from the section at the top of this file is HISTORY, and it has to survive him.
+  await signIn('bo');
+  await routeWrite('REGISTER_PUSH_DEVICE', { device_token: 'device-to-be-orphaned', device_label: 'Delete me' });
+  await signIn('jane');
+  check('the member is deleted', await routeWrite('ADMIN_DELETE_USER', { id: 'u2' }), { success: true, message: 'User deleted.' });
+  check('so the roster row is gone', (await getDoc(doc(db, 'users', 'u2'))).exists(), false);
+  check('and any on-duty row with it', (await getDoc(doc(db, 'on_duty', 'u2'))).exists(), false);
+  // The device: a row that outlives its member keeps delivering a departed member's alerts to a phone nobody in the
+  // roster owns any more.
+  check(
+    'and their push devices, so nothing is delivered to a stranger',
+    (await rowsOf(query(collection(db, 'push_devices'), where('user_id', '==', 'u2')))).length,
+    0
+  );
+  // ...and the records stay. This is the deliberate half: who was on duty that night does not stop being true because
+  // somebody has left, and the sheet kept them too.
+  check('but the clock entry they made is kept as history', (await getDoc(doc(db, 'timeclock', entryId))).exists(), true);
+  check('and deleting them again says so rather than failing', await routeWrite('ADMIN_DELETE_USER', { id: 'u2' }), {
+    success: false,
+    message: 'User not found.',
+  });
+
   // The audit toggle, asserted BOTH ways because the wrong default here is invisible: the save succeeds either way,
   // and only the audit row differs. Off unless an officer asks for it is the owner's decision, so 'off' is a case
   // rather than a comment. Written last, and switched back off, so nothing above it is affected.

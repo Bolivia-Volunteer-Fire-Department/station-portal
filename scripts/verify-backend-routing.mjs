@@ -139,30 +139,31 @@ for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
 // So: every action api.js names must be routed, unless it is in the ledger below. The ledger is a TO-DO LIST, not a
 // permission slip - it may shrink and it may not grow, and a run prints what is left in it. Fixing one means deleting
 // its line here, which is what keeps the list honest.
-const NOT_YET_ROUTED = [
-  // Push registration and the administrator's push controls: DONE, and deleted from this list as the ledger requires.
-  // The member's device card registers, unregisters, transfers and sees the administrator's switch; the officer reads
-  // the per-member device counts and can turn a member off and on; and the sending itself is three Firestore triggers
-  // with the station's own rules about who hears what.
-  //
-  // The member's own settings and their password change: DONE. The settings save is a client write with a merge, and the
-  // password goes to the `changeOwnPassword` callable with no second path.
-  //
-  // Documents and checklists, the area a user found first: DONE, and deleted from this list. The reads (the library,
-  // opening one document, the officer's unfiltered view, a verifier's view of a member's records) and the seven writes
-  // (signing, the checklist batch, the two verifications, removing a signature, the folder rename, the drag).
-  //
-  // Training signatures: DONE, and deleted from this list. The batch from the session, the lock that means its
-  // signatures as well as its fields, and the removal behind its own permission.
-  //
-  // The administrator's timeclock edits: DONE, and deleted from this list. They keep `on_duty` in step with the entry in
-  // both directions, which is the pairing the member's own clock-in maintains.
-  //
-  // Deleting a user, and the runner's leaderboard.
-  'ADMIN_DELETE_USER',
-  'GET_RUNNER_LEADERBOARD',
-  'SAVE_RUNNER_SCORE',
-];
+// EMPTY, and it stays that way.
+//
+// There is nothing left on the sheet: every action api.js calls is answered by Firestore, and the wrapper that used to be
+// the fallback now either writes to Firestore or refuses. This list existed for exactly one migration, and that migration
+// is finished - so what it held is recorded here rather than only in a diff nobody will read:
+//
+//   push registration and the administrator's push controls - the device card, the per-member counts, the switch, and
+//   three triggers that do the sending
+//   the member's own settings, and their password change (no second path: the callable is the only one)
+//   documents and checklists in full - four reads, seven writes
+//   training signatures - the batch, the lock, and the removal behind its own permission
+//   the administrator's timeclock edits, keeping `on_duty` in step in both directions
+//
+// The last three, which is where this list ends:
+//
+//   GET_RUNNER_LEADERBOARD - a reader. `users` is readable by any signed-in member and the board is three fields, so the
+//     game needs no callable to draw a score.
+//   SAVE_RUNNER_SCORE - a CALLABLE. The clamp that stops a doctored request from topping a SHARED board has to be
+//     server-side; the sheet had it there for the same reason.
+//   ADMIN_DELETE_USER - a callable, for the one thing no client can do: close a Firebase Auth account. On the sheet this
+//     action deleted a spreadsheet row, because the row WAS the account. There is no row to delete any more.
+//
+// What this must never become again is a parking space for an action nobody finished. Every entry here is a screen that
+// throws for a real user, and GET_DOCUMENT_SIGNATURES - the first one a real user hit - is why it exists.
+const NOT_YET_ROUTED = [];
 
 const calledActions = new Set([...apiSource.matchAll(/action: '([A-Z_]+)'/g)].map((match) => match[1]));
 const routedActions = new Set([...Object.keys(ROUTED_READS), ...Object.keys(ROUTED_WRITES)]);

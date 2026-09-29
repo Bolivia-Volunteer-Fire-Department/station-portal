@@ -499,6 +499,113 @@ exports.saveDocumentWithAudit = onCall(async (request) => {
 });
 
 // -------------------------------------------------------------------------------------------------------------
+// Deleting a member, which is no longer one row.
+// -------------------------------------------------------------------------------------------------------------
+//
+// On the sheet this action deleted a spreadsheet row and nothing else: there was no separate account to delete, so the
+// row WAS the account. That is not enough here, and the gap is a hole rather than a detail: an Auth user left behind can
+// still sign in, and a signed-in user whose profile is gone still satisfies every `signedIn()` rule in the file.
+//
+// So this closes the account and removes the documents that make somebody a member: the roster row, the private half,
+// their settings, their certification badges, their on-duty row, and their push devices.
+//
+// WHAT IT DELIBERATELY KEEPS: their RECORDS. Clock entries, signatures, availability and offers are the station's
+// history - who was on duty that night does not stop being true because somebody has left - and the sheet kept them too.
+// The roster is the list of people; the records are the record.
+//
+// TWO THINGS THE SHEET DID NOT GUARD, and this does. Deleting YOURSELF is the surest way to lock a station out of its
+// own administration. And deleting the LAST ADMIN is the same hole by another route - suspending the last admin is not
+// guarded either, but suspension is reversible and this is not.
+exports.deleteMember = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_edit_users', 'delete a member');
+
+  const userId = String((request.data || {}).userId || '');
+  if (!userId) throw new HttpsError('invalid-argument', 'Which member?');
+  if (userId === caller.uid) {
+    throw new HttpsError('failed-precondition', 'You cannot delete your own account.');
+  }
+
+  const user = await db.doc(`users/${userId}`).get();
+  if (!user.exists) return { success: false, message: 'User not found.' };
+
+  // The last administrator: refusing here is the only way a station cannot end up with nobody who can administer it.
+  const [roles, users] = await Promise.all([db.collection('roles').get(), db.collection('users').get()]);
+  const adminRoles = new Set(roles.docs.filter((entry) => (entry.data() || {}).is_admin === true).map((entry) => entry.id));
+  if (adminRoles.has(String((user.data() || {}).role_id || ''))) {
+    const others = users.docs.filter(
+      (entry) => entry.id !== userId && adminRoles.has(String((entry.data() || {}).role_id || ''))
+    );
+    if (!others.length) {
+      return {
+        success: false,
+        message: 'That is the last administrator, so nobody would be left who can administer the station.',
+      };
+    }
+  }
+
+  // The documents, by id, so each removal is one write and a missing one is not an error.
+  const owned = ['users', 'users_private', 'user_settings', 'certification_badges', 'on_duty'];
+  await Promise.all(owned.map((name) => db.doc(`${name}/${userId}`).delete()));
+
+  // Devices separately, because they are a QUERY rather than a known document: a row that outlives its member keeps
+  // delivering a departed member's alerts to a phone the roster no longer knows about.
+  const devices = await db.collection('push_devices').where('user_id', '==', userId).get();
+  await Promise.all(devices.docs.map((entry) => entry.ref.delete()));
+
+  // The Auth account LAST, so the documents go first and the door closes behind them. An account that is already gone is
+  // not a failure - the point is that it is gone.
+  await auth.deleteUser(userId).catch((error) => {
+    console.info(`[members] the Auth account for ${userId} was not deleted: ${error.code || error.message}`);
+  });
+
+  await audit(caller.uid, 'ADMIN_DELETE_USER', `Deleted ${userId} (${(user.data() || {}).name || 'unnamed'})`);
+  return { success: true, message: 'User deleted.' };
+});
+
+// The runner's score: a personal best, and only ever upwards.
+//
+// The game is an easter egg, but the leaderboard is SHARED, so the clamp is server-side for the same reason the sheet's
+// was - "guard rail against a doctored request" - and the arithmetic lives here rather than in the writer that calls it,
+// because a browser cannot be trusted with the one number everybody compares.
+//
+// A run that does not beat your best is not a personal best, so this answers with the score still on file and says
+// whether anything changed: the game can call it after every run without the board ever going backwards.
+const RUNNER_SCORE_MAX = 100000;
+
+exports.saveRunnerScore = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+
+  const parsed = parseInt((request.data || {}).score, 10);
+  if (!Number.isFinite(parsed)) throw new HttpsError('invalid-argument', 'A score is a number.');
+  const score = Math.max(0, Math.min(parsed, RUNNER_SCORE_MAX));
+
+  const reference = db.doc(`users/${request.auth.uid}`);
+  const saved = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    // A member who is gone is an ERROR rather than a reply: their browser is mid-session and there is no score to report.
+    if (!snapshot.exists) throw new HttpsError('not-found', 'That member no longer exists.');
+
+    const previous = Number((snapshot.data() || {}).runner_score) || 0;
+    if (score <= 0 || score <= previous) return { best: previous, improved: false };
+
+    transaction.update(reference, { runner_score: score });
+    return { best: score, improved: true };
+  });
+
+  // `success` is not in here on purpose: the route wraps this in ok(), which is the single place it comes from. A second
+  // copy of it in the payload is how a refusal ends up wearing a true.
+  //
+  // `improved` rather than `changed` because the game's own code reads it that way
+  // (FirefighterRunner.jsx: `result.improved ? 'improved' : 'kept'`): this reply was designed by the sheet handler and the
+  // component was written against it, so the name is the contract rather than a preference.
+  // Logged only when it IS a personal best: a row per run would bury the log in an easter egg.
+  if (saved.improved) await audit(request.auth.uid, 'SAVE_RUNNER_SCORE', `Runner personal best ${saved.best}`);
+  return { best: saved.best, improved: saved.improved };
+});
+//
+// -------------------------------------------------------------------------------------------------------------
 // Push devices: the one door into the device list.
 // -------------------------------------------------------------------------------------------------------------
 //

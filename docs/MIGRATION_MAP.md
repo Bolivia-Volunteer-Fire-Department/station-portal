@@ -248,3 +248,18 @@ no reference anywhere has to be rewritten.
 An account created by hand in the console is the one case that does not: it has a uid of Firebase's choosing and the
 right address, so the migration cannot fix it and must not ignore it. The writer reports every such account by name,
 with both ids, and exits non-zero - because the failure it prevents is a member who can sign in and see nothing.
+
+## The ledger is empty
+
+The routing harness (`npm run verify:backend-routing`) carries a TO-DO list of the actions `api.js` still asks the sheet
+for, and asserts that every action the app calls is either routed to Firestore or written down in that list. It went from
+twenty-three entries to none over this migration. The last three were:
+
+| action | what it became | why it is not a column copy |
+|---|---|---|
+| `GET_RUNNER_LEADERBOARD` | a reader | Personal bests above zero, highest first, capped at the 25 rows the game draws, with `total` counting everybody who has scored. No permission, deliberately - "anyone who can play can see the board" - and no `orderBy`: see the Indexes section of `docs/FIRESTORE_MODEL.md` for why a query on this field would drop exactly the members who have never played. |
+| `SAVE_RUNNER_SCORE` | a callable | The sheet clamped the score server-side - its own comment called it a "guard rail against a doctored request" - and only ever upwards. That has to stay server-side here for the same reason it was there: the board is SHARED, so an impossible number at the top of it is visible to everybody. It answers with the score still on file when a run was not a personal best, so the game can call it after every run. |
+| `ADMIN_DELETE_USER` | a callable | The one action that could not be a column copy at all. The sheet deleted a spreadsheet row, because the row WAS the account. Here there is an Auth account to close, six documents to remove, records that must be kept, and two foot-guns the sheet never had at all: deleting yourself, and deleting the last administrator. See `deleteMember` in `functions/index.js`. |
+
+What is left on the sheet is the station's **data** rather than its code, and that is the migration script's job - the
+steps above. Nothing the app does is answered by Apps Script any more.

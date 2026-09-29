@@ -232,6 +232,26 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // The runner's score and its board. The score is a CALLABLE, because the clamp is the point - the board is shared, so
+  // a doctored request must not be able to put an impossible number at the top of everybody's screen. The board itself is
+  // a READER: `users` is readable by any signed-in member and the projection is the three fields the game draws, so no
+  // callable is warranted for a number in a side-scroller.
+  runner: {
+    requires: ['memberPayload'],
+    writes: ['SAVE_RUNNER_SCORE'],
+    reads: ['GET_RUNNER_LEADERBOARD'],
+    switchReads: [],
+  },
+
+  // Deleting a member: the one action that cannot be anything but a callable, because it closes a Firebase Auth account
+  // and no client can do that. It also removes the documents that made somebody a member, and deliberately KEEPS their
+  // records - clock entries, signatures, availability - which are the station's history rather than their profile.
+  memberAccounts: {
+    requires: ['adminPayload'],
+    writes: ['ADMIN_DELETE_USER'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -473,6 +493,21 @@ const DISPATCH = {
     const { setPushDisabled } = await writes();
     return ok(await setPushDisabled({ userId: body.user_id, disabled: body.disabled === true }));
   },
+
+  // The runner's personal best. `best` comes back even when nothing was written, so the game can say "your best is 120"
+  // after a worse run without a second read - and `improved` is what tells it whether to celebrate or to keep the score
+  // it already had. Both names come from the sheet handler the component was written against.
+  SAVE_RUNNER_SCORE: async (body) => ok(await callable('saveRunnerScore', { score: body.score })),
+
+  // Deleting a member. The callable does all of it - the documents, the devices and the Auth account - and answers with
+  // the { success, message } shape the members tab already branches on. `id` is the sheet's field name, kept here
+  // because that is what api.js sends.
+  //
+  // DELIBERATELY NOT WRAPPED IN ok(). That helper is `(data) => ({ success: true, ...data })`, which is right for a reply
+  // that only ever succeeds - and this one has a refusal that is an ANSWER rather than an error: "User not found." is
+  // shown to the officer by the members tab. Wrapped, that false would be overwritten by a true and the tab would report
+  // that somebody who does not exist had been deleted. The callable's own shape IS the contract here.
+  ADMIN_DELETE_USER: async (body) => callable('deleteMember', { userId: body.id }),
 
   ADMIN_SEND_TEST_PUSH: async (body) => ok(await callable('sendTestPush', { user_id: body.user_id })),
 

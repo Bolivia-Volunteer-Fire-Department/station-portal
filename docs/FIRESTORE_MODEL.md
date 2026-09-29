@@ -103,7 +103,7 @@ hold *different facts*, so the roster needs no copy at all.
 
 | collection | fields | written by | read by | option | rule, in words |
 |---|---|---|---|---|---|
-| `users/{id}` | `name`, `rank_id`, `role_id` | officer Functions (create), and the officer's own save | **any signed-in member** | B | The roster is not sensitive: a member needs names to label other people's shifts. This document holds nothing else, so there is nothing to strip. |
+| `users/{id}` | `name`, `rank_id`, `role_id`, `runner_score` | officer Functions (create), and the officer's own save | **any signed-in member** | B | The roster is not sensitive: a member needs names to label other people's shifts. This document holds nothing else but `runner_score` — the game's personal best, which is the one field a member owns here, because it is a score in a shared leaderboard rather than a fact about a person. The clamp that keeps a doctored request off that board is the `saveRunnerScore` callable, so nothing writes it directly. |
 | `users_private/{id}` | `username`, `status`, `created_at`, `notes` | officer Functions only | the member (own doc) and officers | B | The username is not secret, but the app deliberately withholds it from members, so it cannot live in the roster document. |
 | `roles/{id}` | `description`, `is_admin`, and the 30 permission flags | officer with `can_edit_roles`; a role with `is_admin` only by an administrator | **any signed-in member** | A | The client needs the flag list to shape its own navigation, and the rules read it to decide what a caller may do — see "Claims are a cache" below. |
 | `ranks/{id}` | `description`, `rank_order`, `color`, `icon` | officer with `can_edit_ranks` | any signed-in member | A | Reference data for labels and the crew ordering. |
@@ -228,6 +228,7 @@ console.
 | announcements for me | `announcements`: `audience_roles` (array-contains), `created_at` descending |
 | events in a range | `events`: `date_from`, `date_to` |
 | ~~the audit trail~~ | **None, deliberately.** The log's reads go through the `readSystemLog` callable, which cannot work from an index anyway: the response carries the counts and the filter dropdown's facets for the WHOLE log, not one page, because a dropdown offering only the values on the current page could never select the value somebody is looking for. It scans, filters, sorts and pages in memory - a few hundred documents per request at a station's scale - and reproduces the sheet's semantics exactly, including the two a Firestore query would differ on (case-sensitive matching, and missing values sorting first). If the log ever outgrows that, the facets are the piece to denormalize: only functions write the log, so they can. |
+| ~~the runner's leaderboard~~ | **None, deliberately, and this one is a trap rather than a preference.** `orderBy('runner_score')` would DROP every member who has never played, because a document without the field is not in the index at all - so a board built on a query would silently omit exactly the new members who most need to see it. `GET_RUNNER_LEADERBOARD` filters and sorts the roster in memory instead (25 rows are sent; `total` counts everybody with a score), which costs one read of a collection three other readers already read whole. |
 
 ## Auth
 
@@ -239,6 +240,14 @@ console.
   officer and the member. The member then walks through the change screen that already exists.
 - **Creating a member** is the same kind of Function: it creates the Auth user and writes `users`,
   `users_private` and `user_settings` in one batch, so a half-created member is impossible.
+- **Deleting a member is the mirror, and it is the one action that could not come across as it was.** On the sheet this
+  deleted a row, because the row *was* the account: there was no separate credential. Here the callable
+  (`deleteMember`) closes the Auth account and removes what made somebody a member — the roster row, `users_private`,
+  `user_settings`, `certification_badges`, `on_duty` and their `push_devices`, since a device row that outlives its
+  member keeps delivering a departed member's alerts to a phone nobody in the roster owns. It **keeps their records**:
+  clock entries, signatures, availability and offers are the station's history, and who was on duty that night does not
+  stop being true because somebody has left. Two guards the sheet did not have, because deletion here cannot be undone:
+  an officer cannot delete their own account, and the last administrator cannot be deleted at all.
 - **Claims are a cache.** `role_id` and `is_admin` ride in the token so the client can shape its own
   navigation without a read. The *rules* never trust them for access: they read
   `users_private/{uid}.role_id` and then `roles/{roleId}`, so removing somebody's access takes
@@ -466,6 +475,12 @@ transaction cannot.
 across. Those two are the same step, and the next section is about why.
 
 ## The next phase: the data has to move, per feature
+
+**The app has now finished moving.** As of the last three actions - the game's leaderboard and score, and deleting a
+member - nothing in `src/services/api.js` is answered by Apps Script: the routing harness keeps a ledger of actions that
+are still on the sheet, and that ledger is empty. What follows is about the DATA, which is a different move and the one
+that is left: the code has no sheet left to fall back to, the station's rows are still in the spreadsheet, and the two
+have to meet.
 
 Every write path the app needs exists in `firestoreWrites.js`, every read payload exists in
 `firestorePayload.js`, and the rules that police both are verified against the emulators. What is missing is the

@@ -96,6 +96,10 @@ export const visibleDocumentFor = async (uid, id) => {
   return document;
 };
 
+// The rows the game draws. The board is capped at this and `total` is not, which is the difference that matters: 25 rows
+// and "of 40" tells a member who has not played yet that there is a board to join.
+const RUNNER_LEADERBOARD_LIMIT = 25;
+
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
   GET_ROSTER: () => rosterRows().then((roster) => ({ roster })),
@@ -304,6 +308,34 @@ export const READERS = {
         };
       }),
     };
+  },
+
+  // The station leaderboard: personal bests above zero, highest first, capped at the rows the game draws.
+  //
+  // NO PERMISSION, deliberately - "anyone who can play can see the board" - and that is also why it is a reader rather
+  // than a callable: `users` is readable by any signed-in member, and the projection is the board's own three fields, an
+  // id (to highlight your own row), a name and a score. Nobody needs an officer's read of anybody's personnel record to
+  // see a number in a side-scroller.
+  //
+  // `total` counts everybody with a score; the board itself is capped. The two differing is not a bug, it is how the game
+  // says "you are 30th of 40" without shipping 40 rows to a phone.
+  //
+  // THERE IS NO ORDER BY IN A QUERY HERE, and that is not a shortcut. A Firestore `orderBy('runner_score')` DROPS every
+  // member who has never played, because a document without the field is not in the index at all - so "everybody who has
+  // played, highest first" would come back as "everybody who has played, with the newly joined missing". Filtering here
+  // costs one read of a collection this file already reads whole in three other readers.
+  GET_RUNNER_LEADERBOARD: async () => {
+    const users = await rowsOf(collection(firestore(), 'users'));
+    const scored = users
+      .map((user) => ({
+        id: String(user.id || ''),
+        name: String(user.name || '').trim(),
+        score: Number(user.runner_score) || 0,
+      }))
+      .filter((entry) => entry.id && entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return { leaderboard: scored.slice(0, RUNNER_LEADERBOARD_LIMIT), total: scored.length };
   },
 
   // Whether this deployment can send pushes at all, answered by the runtime rather than inferred by the browser: the
