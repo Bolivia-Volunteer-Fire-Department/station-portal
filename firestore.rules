@@ -281,12 +281,23 @@ service cloud.firestore {
     // the whole reason this shape changed: "everyone" is '*', and "this rank or above" is expanded to the concrete
     // rank ids when the announcement is written, because a query cannot compare rank orders either.
     match /announcements/{announcementId} {
-      allow read: if signedIn() && resource.data.audience_keys.hasAny(viewerKeys());
+      // The officer branch comes FIRST and is not decoration: the Announcements tab reads the WHOLE collection, and
+      // Firestore refuses a query it cannot prove safe. For a member the audience list is the proof; for an officer
+      // the permission is. The `resource != null` guard is this file's own rule of the road - a get by id on a
+      // document that does not exist evaluates the read rule with resource null, and `.data` off null is an
+      // evaluation error, which a client sees as permission-denied.
+      allow read: if signedIn()
+        && (permission('can_make_announcements')
+          || (resource != null && resource.data.audience_keys.hasAny(viewerKeys())));
       allow write: if permission('can_make_announcements');
     }
 
     match /events/{eventId} {
-      allow read: if signedIn() && resource.data.audience_keys.hasAny(viewerKeys());
+      // Events the same way: the calendar's admin view reads every event, so the officer branch is what makes that
+      // query provable. See the note on announcements above for why it comes first, and the null guard.
+      allow read: if signedIn()
+        && (permission('can_create_events')
+          || (resource != null && resource.data.audience_keys.hasAny(viewerKeys())));
       allow write: if permission('can_create_events');
     }
 
@@ -350,6 +361,39 @@ service cloud.firestore {
     match /certification_badges/{memberId} {
       allow read: if signedIn();
       allow write: if permission('can_manage_certifications');
+    }
+
+    // Documents: the guides members read and sign, and the items they are signed against.
+    //
+    // These three arrived with their client code rather than with the rest, and until now the catch-all denied them -
+    // which is why no screen could read them at all. The read rule is the announcements shape (an audience list a
+    // query can prove) with the two officer branches first, because the Documents tab reads the whole collection and
+    // a whole-collection read has to be provable.
+    match /documents/{documentId} {
+      allow read: if signedIn()
+        && (permission('can_manage_documents')
+          || permission('can_verify_documents')
+          || (resource != null && resource.data.audience_keys.hasAny(viewerKeys())));
+      allow write: if permission('can_manage_documents');
+    }
+
+    match /document_checklist_items/{itemId} {
+      // The labels a signature is collected against. They carry no audience of their own and are always read
+      // alongside the document they belong to, so any signed-in member may read them; only a manager may change them.
+      allow read: if signedIn();
+      allow write: if permission('can_manage_documents');
+    }
+
+    match /document_signatures/{signatureId} {
+      // A signature belongs to the member who gave it - the same shape as training_signatures. There is no
+      // `can_sign_documents` flag in the role table, and there should not be: signing is what every member does, and
+      // the rule that matters is that nobody can sign as somebody else.
+      allow read: if signedIn()
+        && (resource.data.user_id == uid()
+          || permission('can_verify_documents')
+          || permission('can_manage_documents'));
+      allow create: if signedIn() && request.resource.data.user_id == uid();
+      allow update, delete: if permission('can_manage_documents');
     }
 
     // Everything not named above is denied, including the collections whose rules arrive with their client code

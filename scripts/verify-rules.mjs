@@ -177,6 +177,57 @@ const main = async () => {
 
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
   console.log('\n--- the harness itself ---');
+  // --- the rules the officer tabs needed, and the ones they must not open ------------------------------------------
+  console.log('\n--- documents, and the officer branches ---');
+
+  // The same sign-in the sections above use, declared here because theirs is scoped to their own block.
+  const asUser = (uid) =>
+    signInWithEmailAndPassword(auth, DEMO_ACCOUNTS.find((entry) => entry.uid === uid).email, DEMO_PASSWORD);
+
+  await asUser('u1');
+  // The Documents tab reads the WHOLE collection, which the audience rule alone could not prove - this is the first
+  // half of the check.
+  await setDoc(doc(db, 'documents', 'doc-r2'), { id: 'doc-r2', title: 'Guide for firefighters', audience_keys: ['role:r2'] });
+  await setDoc(doc(db, 'documents', 'doc-r1'), { id: 'doc-r1', title: 'Guide for officers', audience_keys: ['role:r1'] });
+  const allDocuments = await getDocs(collection(db, 'documents'));
+  checkIs('an officer reads the whole documents collection', allDocuments.size >= 2, `${allDocuments.size} document(s)`);
+  const allAnnouncements = await getDocs(collection(db, 'announcements'));
+  checkIs('and the whole announcements collection', allAnnouncements.size >= 1, `${allAnnouncements.size} announcement(s)`);
+
+  // The second half: a member still sees only what their keys match. `bo` is the firefighter (role r2).
+  await asUser('u2');
+  const myDocument = await getDoc(doc(db, 'documents', 'doc-r2')).then(
+    (snapshot) => (snapshot.exists() ? 'read' : 'missing'),
+    (error) => String(error.code || '')
+  );
+  checkIs('a member reads the document aimed at their role', myDocument, 'read');
+  const theirs = await getDoc(doc(db, 'documents', 'doc-r1')).then(
+    () => 'read',
+    (error) => String(error.code || '')
+  );
+  checkIs('and is refused the one aimed at another role', theirs.includes('permission-denied'), theirs);
+
+  // Signatures: everyone gives their own, nobody gives somebody else's.
+  await setDoc(doc(db, 'document_signatures', 'sig-bo'), { id: 'sig-bo', user_id: 'u2' });
+  const ownSignature = await getDoc(doc(db, 'document_signatures', 'sig-bo')).then(
+    (snapshot) => (snapshot.exists() ? 'read' : 'missing'),
+    (error) => String(error.code || '')
+  );
+  checkIs('a member reads their own signature', ownSignature, 'read');
+  await asUser('u1');
+  await setDoc(doc(db, 'document_signatures', 'sig-jane'), { id: 'sig-jane', user_id: 'u1' });
+  await asUser('u2');
+  const someoneElses = await getDoc(doc(db, 'document_signatures', 'sig-jane')).then(
+    () => 'read',
+    (error) => String(error.code || '')
+  );
+  checkIs("and is refused somebody else's", someoneElses.includes('permission-denied'), someoneElses);
+  const forged = await setDoc(doc(db, 'document_signatures', 'sig-forged'), { id: 'sig-forged', user_id: 'u1' }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('and cannot sign as another member', forged.includes('permission-denied'), forged);
+
   checkIs('every case ran', cases >= 27, `only ${cases} cases: a section has stopped running`);
 };
 
