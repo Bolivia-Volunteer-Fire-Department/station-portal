@@ -137,8 +137,21 @@ if (app) {
   check('the client geofence refusal raises it', /if \(!locationCheck\.allowed\)[\s\S]{0,400}setClockNotice\(/.test(app));
   check('the server refusal raises it', /result\.code === OUT_OF_RANGE_CODE[\s\S]{0,300}setClockNotice\(/.test(app));
   check('a new attempt clears the previous notice', /const handleClockAction = async[\s\S]{0,300}setClockNotice\(null\)/.test(app));
-  check('signing out clears it', /const handleLogout = \(\) => \{[\s\S]{0,400}setClockNotice\(null\)/.test(app));
-  check('and so does an idle sign-out', /const endSession = useCallback[\s\S]{0,500}setClockNotice\(null\)/.test(app));
+  // These two used to be counted in characters - `{0,400}` after the function opened - which broke the moment a
+  // comment grew: the behaviour was intact and the assertion failed anyway. A fixed window measures the prose around
+  // the code rather than the code, so this asks the question that was meant: does the NOTICE get cleared inside the
+  // function that ends the session? It reads to the closing brace of that function, so a `setClockNotice(null)`
+  // somewhere later in the file cannot satisfy it.
+  const clearsNoticeIn = (declaration, source) => {
+    const start = source.indexOf(declaration);
+    if (start === -1) return false;
+    const end = source.indexOf('\n  };', start);
+    if (end === -1) return false;
+    return /setClockNotice\(null\)/.test(source.slice(start, end));
+  };
+
+  check('signing out clears it', clearsNoticeIn('const handleLogout = () => {', app));
+  check('and so does an idle sign-out', clearsNoticeIn('const endSession = useCallback', app));
   // The bug: the refusal used to go somewhere invisible.
   check(
     'and the geofence refusal no longer writes to statusMessage',

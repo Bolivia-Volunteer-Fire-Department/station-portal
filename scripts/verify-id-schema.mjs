@@ -408,8 +408,17 @@ checkIs(
   'the refusal records which request was refused and which token',
   /setReauthReason\(\{\s*\n\s*action: \(reply && reply\.requestAction\)/.test(appSource)
 );
-checkIs('and the api attaches the action to a refused reply', /data\.requestAction = body\.action;/.test(apiSource));
-checkIs('and logs it for the console', /\[reauth\] \$\{body\.action\} was refused/.test(apiSource));
+// The API used to attach the refused action, and the token it was sent with, to the reply - and log both - so the
+// reauthentication prompt could explain itself. That plumbing belonged to the sheet twice over: a refusal arrived as a
+// REPLY with code UNAUTHORIZED, and the action name was the only way to tell one refusal from another. Firestore
+// refusals arrive as thrown errors and are mapped by the routed writers, and the one path that still opens the prompt
+// is the local idle timeout, which needs no explaining because it is the thing that fired.
+// checkIs takes a CONDITION too, so the negation goes inside it rather than into a third argument.
+checkIs('and nothing in the api pretends to explain a server refusal any more', /requestAction/.test(apiSource) === false);
+checkIs(
+  'so the prompt explains itself from the idle path instead',
+  /setReauthReason\(\{[\s\S]{0,200}reason: /.test(appSource) || /reason=\{reauthReason\}/.test(appSource)
+);
 checkIs(
   'the modal shows the reason',
   /reason=\{reauthReason\}/.test(appSource) && /reasonText/.test(readFileSync('src/components/ReauthModal.jsx', 'utf8'))

@@ -62,7 +62,12 @@ const hasIdColumn = (line) => /<th[^>]*>\s*[Ii][Dd]\s*<\/th>/.test(line);
 const rendersIdText = (line) => />\s*\{[^}]*\.(id|user_id|[a-z]+_id)\s*\}/.test(line);
 // A name falling back to an id, which is how it came back everywhere else - a table cell, a filter option, a
 // printed sheet. Each one looked like a local decision.
-const idFallback = (line) => /\{[^}]*(name|title|description|user_name)[^}]*\|\|[^}]*\.(id|user_id|[a-z]+_id)\b/.test(line);
+// The FALLBACK VALUE has to BE the id, not merely an id somewhere else on the same line. `name: nameById[row.id] || ''`
+// was flagged for years of this rule's life: it falls back to an EMPTY NAME, and the only id on the line is the key it
+// looks the name up by - which is the fix, not the bug. Requiring the id on the right of the `||` keeps the teeth for
+// the shape this exists to catch (`name: row.name || row.user_id`).
+const idFallback = (line) =>
+  /\{[^}]*(name|title|description|user_name)[^}]*\|\|\s*[^,{}]*\.(id|user_id|record_id|[a-z]+_id)\b/.test(line);
 // A tooltip whose value is an id - the shape a hover hint takes when it is fed the raw record instead of a label.
 // Deliberately narrowed to that: `title={[assignmentLabel(x.assignment_id), …]}` also mentions an id, but passes it
 // to a helper that returns a description, and a rule that flagged that would be flagging the fix.

@@ -1951,14 +1951,29 @@ check('it re-checks when the tab becomes visible', /addEventListener\('visibilit
 check('it signs the user out when the state expires', /idleState\(lastActivityRef.current, now, sessionConfig\)/.test(timeoutAppSource) && /endSession\(idleLogoutMessage/.test(timeoutAppSource), true);
 check('the warning banner renders', /Still there\? You will be signed out in/.test(timeoutAppSource), true);
 check('with a stay-signed-in action', /Stay signed in/.test(timeoutAppSource) && /handleStaySignedIn/.test(timeoutAppSource), true);
-check('which pings the server rather than only a local timer', /void pingSession\(authToken\)/.test(timeoutAppSource), true);
+// The button used to push the SERVER session window out as well, or it would have dismissed the warning while the
+// session quietly lapsed anyway. There is no server session now - the SDK refreshes the Firebase session itself - so
+// what is asserted is what the button actually does: reset the timer the warning reads.
+check(
+  'which resets the idle clock the warning reads',
+  /const handleStaySignedIn = \(\) => \{[\s\S]*?lastActivityRef\.current = Date\.now\(\)/.test(timeoutAppSource) &&
+    /handleStaySignedIn[\s\S]*?applyIdleWarning\(null\)/.test(timeoutAppSource),
+  true
+);
+// The call, not the word: the comment in handleStaySignedIn names pingSession deliberately, to say what it was for.
+check('and has no server session left to push', /pingSession\(/.test(timeoutAppSource) === false);
 check('and an explicit sign-out action', /Sign out now/.test(timeoutAppSource), true);
 check('listeners are removed on cleanup', /removeEventListener\(event, markActive\)/.test(timeoutAppSource) && /clearInterval\(timer\)/.test(timeoutAppSource), true);
 
 const apiSource = readFileSync('src/services/api.js', 'utf8');
-check('the PING action exists client-side', /action: 'PING'/.test(apiSource), true);
+// The PING action is gone from the client: it existed to push the Apps Script session window out, and there is no such
+// window now. The sheet still carries it, and that is worth keeping asserted - Code.gs is the record of how the app
+// behaved, so a reader comparing the two can see what the client stopped doing and when.
+// `check` here takes a CONDITION, not an (actual, expected) pair - so the negation belongs inside it. Passing `false`
+// as a third argument reads as "and here is the detail to print", not as "this must be false".
+check('the PING action is gone from the client', /action: 'PING'/.test(apiSource) === false);
 const codeForPing = readFileSync('src/services/Code.gs', 'utf8');
-check('and server-side', /case "PING"/.test(codeForPing), true);
+check('though the sheet still carries it, as the record of what it did', /case "PING"/.test(codeForPing), true);
 check('guarded by a session like every other action', /case "PING"[\s\S]{0,400}?getAuthContext\(ss, data\)/.test(codeForPing), true);
 
 // --- the clock-refusal modal, actually rendered -------------------------------------------------
