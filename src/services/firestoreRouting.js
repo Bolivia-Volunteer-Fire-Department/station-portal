@@ -118,6 +118,21 @@ export const ROUTED_FEATURES = {
   // feature before it can be switched on - a read named there and not here is a step still to take, which is the
   // difference between a plan and a claim.
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
+  // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
+  // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
+  // is why the rules had to grow an officer branch before any of this could work.
+  //
+  // What is left is named rather than hidden: the system log is paged and sorted by the sheet server, so its reader
+  // is a design step rather than a line; and the other three actions (users, certifications, templates) have no
+  // caller anywhere in the app - they are api.js exports nothing invokes. They stay on the sheet until either a
+  // caller appears or they are deleted.
+  adminReads: {
+    requires: ['adminPayload'],
+    writes: [],
+    reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS'],
+    switchReads: ['ADMIN_GET_SYSTEM_LOG', 'ADMIN_GET_USERS', 'ADMIN_GET_CERTIFICATIONS', 'ADMIN_GET_SCHEDULE_TEMPLATES'],
+  },
+
   adminPayload: {
     requires: ['memberPayload'],
     // The administrator's payload: the member one plus the sections an officer's tabs read, each gated in the reader

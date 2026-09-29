@@ -142,7 +142,7 @@ const main = async () => {
   // `data.success` to decide whether a bootstrap loaded, and the whole read was dropped as a failed refresh. It
   // looked exactly like the read never moving to Firestore at all.
   console.log('\n--- through the router ---');
-  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,memberReads,adminPayload';
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,memberReads,adminPayload,adminReads';
   const { routeRead } = await import('../src/services/firestoreRouting.js');
 
   await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
@@ -189,6 +189,19 @@ const main = async () => {
 
   // A read that is NOT routed still answers null, so the hook in api.js leaves it alone.
   check('a read with no route still answers null', await routeRead('GET_SYSTEM_SETTINGS'), null);
+
+  // The officer-only reads the tabs make for themselves, which is what the rules pass was for: without the officer
+  // branch these were permission-denied, and the whole-collection read is exactly what the branch makes provable.
+  const allAnnouncements = await routeRead('ADMIN_GET_ANNOUNCEMENTS');
+  checkIs(
+    'an officer reads every announcement, not just their own audience',
+    allAnnouncements.success === true && Array.isArray(allAnnouncements.announcements) && allAnnouncements.announcements.length > 0,
+    JSON.stringify(allAnnouncements && Object.keys(allAnnouncements))
+  );
+  const allEvents = await routeRead('ADMIN_GET_EVENTS');
+  checkIs('and every event', Array.isArray(allEvents.events), 'no events');
+  const allDocuments = await routeRead('ADMIN_GET_DOCUMENTS');
+  checkIs('and the documents collection, which had no rules at all until now', Array.isArray(allDocuments.documents), 'no documents');
   await signOut(firebaseAuth());
 
   // The kill switch, which has to work whatever else is true.

@@ -47,6 +47,15 @@ export const READERS = {
   MY_ANNOUNCEMENTS: async (uid) => ({ announcements: await audienceRows('announcements', await keysFor(uid)) }),
   GET_EVENTS: async (uid) => ({ events: await audienceRows('events', await keysFor(uid)) }),
   MY_PUSH_DEVICES: (uid) => rowsFor('push_devices', 'user_id', uid).then((devices) => ({ devices })),
+
+  // The officer-only reads, in the same reply shape their callers already read: `result.announcements`,
+  // `result.documents`, `result.events`. They return the WHOLE collection rather than an audience-filtered slice,
+  // which is what makes them officer reads and why the rules carry an officer branch first - a whole-collection read
+  // against an audience rule is a query Firestore refuses to prove.
+  ADMIN_GET_ANNOUNCEMENTS: () => rowsOf(collection(firestore(), 'announcements')).then((announcements) => ({ announcements })),
+  ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
+  ADMIN_GET_DOCUMENTS: () => rowsOf(collection(firestore(), 'documents')).then((documents) => ({ documents })),
+
   GET_INITIAL_DATA: async () => {
     const [settings, roles] = await Promise.all([
       getDoc(doc(firestore(), 'settings', 'public')),
