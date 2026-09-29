@@ -121,6 +121,30 @@ ignored, the settings split by name, the audit rows kept as history, the id mint
 *wrong*: a reference that does not resolve, an id appearing twice, a credential under an undeclared column, a document
 over 1 MiB, a tab with no mapping at all.
 
+## What the officer surface needs from the rules before it can move
+
+The member side is now running on Firestore: the sign-in payload, the officer payload, and the ten refresh reads.
+The officer-only reads (users, certifications, templates, announcements, documents, events) cannot follow yet, and
+the reason is in the rules rather than in the readers:
+
+1. **Three collections have no rules at all.** `documents`, `document_checklist_items` and `document_signatures` are
+   in the model and in the reads, and there is no `match` for them. The catch-all denies them, so an
+   `ADMIN_GET_DOCUMENTS` routed today would answer `permission-denied` and fall back - correctly, but pointlessly.
+2. **An officer's whole-collection read is not provable against an audience rule.** `announcements` and `events` are
+   readable when the viewer's keys match the document's `audience_keys`, which is exactly right for a member and
+   exactly wrong for the Announcements tab: it reads EVERY announcement, and Firestore refuses a query it cannot
+   prove safe. The rules need an officer branch - `permission('can_make_announcements')` reads the collection whole -
+   before that tab can leave the sheet.
+
+So the next piece of work is a rules pass, not a reader: write the three document rules, add the officer branch to the
+audience-bearing collections, and extend `scripts/verify-rules.mjs` to assert both halves - that a member still sees
+only what they may, and that an officer's whole-collection read is allowed. The readers behind them are a few lines
+each once that is true.
+
+The two member-facing exceptions are unchanged and named in the routing table: `MY_PUSH_DEVICES` (it also answers
+which device this browser is, which this side cannot work out yet) and `GET_INITIAL_DATA` (it runs before anyone
+signs in, so a route needing a Firebase user could never fire).
+
 ## What the migration does, in order
 
 1. **Read** every tab (read-only, service account, no writes at all).
