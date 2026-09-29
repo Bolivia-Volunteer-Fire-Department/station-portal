@@ -175,7 +175,10 @@ const FAILURE_MESSAGES = {
 // The one entry point api.js uses for a read. null means "not routed", which is the signal to fetch it the way the
 // code always did. A read that FAILS answers null too, deliberately: the sheet still has the same data, so falling
 // back is both safe and better than an error - and unlike a write there is nothing to duplicate by trying.
-export const routeRead = async (action) => {
+//
+// `body` travels with it because a read can have parameters: the device card asks "whose is THIS token", and a
+// reader that cannot see the request cannot answer it.
+export const routeRead = async (action, body = {}) => {
   const blocker = await routingBlocker(action);
   if (blocker) {
     if (blocker !== 'feature-off' && blocker !== 'not-a-routed-action') {
@@ -190,9 +193,9 @@ export const routeRead = async (action) => {
     // The two payloads have their own dispatchers, because each is a whole shape to assemble. Everything else that
     // is routed as a read answers from firestoreReads.js, one slice at a time - which is how ten refresh reads are
     // moved by one entry in the table rather than ten wrappers in api.js.
-    if (READ_DISPATCH[action]) return await READ_DISPATCH[action](uid);
+    if (READ_DISPATCH[action]) return await READ_DISPATCH[action](uid, body);
     const { READERS } = await import('./firestoreReads.js');
-    if (READERS[action]) return ok(await READERS[action](uid));
+    if (READERS[action]) return ok(await READERS[action](uid, body));
     // Named as routed with nothing to route it: a mistake in the table, and worth saying rather than failing quietly.
     console.error(`[firestore] ${action} is routed but has no reader, so it is being read from the sheet.`);
     return null;

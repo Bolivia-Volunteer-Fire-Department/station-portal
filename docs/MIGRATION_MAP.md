@@ -145,6 +145,26 @@ The two member-facing exceptions are unchanged and named in the routing table: `
 which device this browser is, which this side cannot work out yet) and `GET_INITIAL_DATA` (it runs before anyone
 signs in, so a route needing a Firebase user could never fire).
 
+## Two things the login work found, and what each needs
+
+**An officer's password reset has no route of its own.** `resetMemberPassword` exists as a callable - it takes a
+temporary password, sets the must-change flag, records who reset whose password on the member's own record and writes
+an audit row - but **nothing in the app calls it**. The reset rides on `adminSaveUser`, which is a composite: profile
+fields, a username, a password and a status in one save. Half-routing that would split one save across two systems
+with two different outcomes, so it moves as a whole with the admin writes, and its password part goes to the callable
+when it does. A username *change* has nothing to route to at all: `users_private` is writable by nobody, and no
+callable updates a username after creation.
+
+**"Whose device is this browser?" cannot be answered by a member.** The device card asks exactly that - it has to, or
+a member on a shared computer is told their alerts are set up when they are set up for the person before them - and
+`push_devices` lets a member read only their *own* row. A token belonging to somebody else therefore reads as
+nothing, and `device_owner` would come back null: the wrong answer rather than no answer. This needs either a callable
+(a server may read it) or a rule that allows reading a device row by its token, which is a different shape from "your
+own rows" and wants deciding rather than doing.
+
+**Neither blocks the station.** A member's Auth account already holds the migration's temporary password, so the
+passwords in `secrets/temp-passwords.txt` can be handed out today, and the login already prefers Firebase.
+
 ## What the migration does, in order
 
 1. **Read** every tab (read-only, service account, no writes at all).

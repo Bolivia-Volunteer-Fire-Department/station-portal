@@ -163,7 +163,7 @@ function appScriptFetch(body, options) {
   //
   // `routeRead` answers null for anything unrouted, which is most actions, and it decides that from the table before
   // touching the network - so the hook costs a lookup for reads that have not moved.
-  return routeRead(body.action).then((routed) => {
+  return routeRead(body.action, body).then((routed) => {
     if (routed) return routed;
     const key = readKey(body);
     const joined = readsInFlight.join(key);
