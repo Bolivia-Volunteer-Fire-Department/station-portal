@@ -3,7 +3,7 @@ import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 import { isReadAction } from '../utils/readCoalescing';
-import { routeRead, routeWrite } from './firestoreRouting.js';
+import { routeRead, routeWrite, routingBlocker } from './firestoreRouting.js';
 import {
   changeOwnPassword,
   createMember,
@@ -68,15 +68,24 @@ export const notificationPrefFields = (settings) => {
 //
 // An action with no route THROWS rather than being swallowed or asked of somewhere else: there is no second backend
 // now, and a screen that quietly receives nothing is the failure this module exists to prevent.
-const noRoute = (action) => {
-  const error = new Error(`No Firestore route for '${action}'.`);
-  error.code = 'UNROUTED_ACTION';
-  return error;
-};
-
-const noAnswer = (action) => {
-  const error = new Error(`Firestore did not answer ${action}. The console says which read failed.`);
-  error.code = 'READ_FAILED';
+// WHY IT WAS NOT ANSWERED, ASKED RATHER THAN ASSUMED.
+//
+// The first version of this said "Firestore did not answer X", which sends the reader looking for a failing query when
+// the real answer can be "this route is switched off". VITE_FIRESTORE_FEATURES pins a LIST of routes when it is set,
+// and anything left out of that list is simply not routed - so the honest message needs the blocker, and the blocker
+// knows what it is. This is the difference between an afternoon spent hunting a phantom Firestore failure and one
+// console line that says which route is off.
+const notAnswered = async (action) => {
+  const blocker = await routingBlocker(action);
+  const error = new Error(
+    blocker
+      ? `${action} was not routed (${blocker}), and there is no sheet behind it any more, so nothing answered it.` +
+        (blocker === 'feature-off'
+          ? ' VITE_FIRESTORE_FEATURES pins a list of routes when it is set, and this route is not in it - leave it unset for every route.'
+          : '')
+      : `Firestore did not answer ${action}. The console says which read failed.`
+  );
+  error.code = blocker ? 'ROUTE_NOT_TAKEN' : 'READ_FAILED';
   return error;
 };
 
@@ -85,17 +94,17 @@ function appScriptFetch(body) {
 
   // Reads answer from firestoreReads.js, one slice at a time.
   if (isReadAction(action)) {
-    return routeRead(action, body).then((routed) => {
+    return routeRead(action, body).then(async (routed) => {
       if (routed) return routed;
-      throw noAnswer(action);
+      throw await notAnswered(action);
     });
   }
 
   // Writes go to their own dispatcher: the admin tabs' simple saves reach here through the one hook, and everything
   // with a dedicated routeWrite call never does.
-  return routeWrite(action, body).then((routed) => {
+  return routeWrite(action, body).then(async (routed) => {
     if (routed) return routed;
-    throw noRoute(action);
+    throw await notAnswered(action);
   });
 }
 
@@ -117,7 +126,7 @@ export const fetchBootstrap = async () => {
   // loading state as an error rather than being rendered as an empty station - which is exactly what a fallback to a
   // backend that no longer exists would produce. routeRead logs which read failed, by name, before this throws.
   const payload = await routeRead('GET_BOOTSTRAP');
-  if (!payload) throw noAnswer('GET_BOOTSTRAP');
+  if (!payload) throw await notAnswered('GET_BOOTSTRAP');
   return payload;
 };
 
@@ -128,7 +137,7 @@ export const adminFetchBootstrap = async () => {
   // The officer's whole sign-in in ONE read, the same arrangement as the member bootstrap and the same refusal to
   // answer with a silent null.
   const payload = await routeRead('ADMIN_GET_BOOTSTRAP');
-  if (!payload) throw noAnswer('ADMIN_GET_BOOTSTRAP');
+  if (!payload) throw await notAnswered('ADMIN_GET_BOOTSTRAP');
   return payload;
 };
 

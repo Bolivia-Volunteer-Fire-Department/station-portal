@@ -141,7 +141,26 @@ check('an action no feature writes is not routed at all', await routingBlocker('
 process.env.VITE_FIRESTORE_FEATURES = 'off';
 check('`off` switches everything off', await routingBlocker('SET_MY_AVAILABILITY'), 'feature-off');
 check('including reads', await routingBlocker('GET_BOOTSTRAP'), 'feature-off');
-check('and routeRead answers null, so it is read from the sheet exactly as before', await routeRead('GET_BOOTSTRAP'), null);
+check('and routeRead answers null', await routeRead('GET_BOOTSTRAP'), null);
+
+// Null means the caller now FAILS, so a blocked route must not be silent. This is the assertion that would have turned
+// an afternoon of "the admin wave is missing" into one line naming the route and the variable that switched it off:
+// with the sheet gone, a route that is not taken is a screen that cannot load.
+const warnings = [];
+const realWarn = console.warn;
+try {
+  console.warn = (...args) => warnings.push(args.join(' '));
+  await routeRead('GET_BOOTSTRAP');
+} finally {
+  console.warn = realWarn;
+}
+checkIs(
+  'and says so out loud, naming the route and the flag',
+  warnings.some(
+    (line) => line.includes('GET_BOOTSTRAP') && line.includes('feature-off') && line.includes('VITE_FIRESTORE_FEATURES')
+  ),
+  warnings.join(' | ') || 'nothing was logged'
+);
 
 // Then the default: no config, no variable - and an unconfigured build cannot route, which is what keeps a build
 // without the VITE_FIREBASE_* values behaving exactly as it did before any of the move existed.

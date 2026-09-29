@@ -656,8 +656,15 @@ check('a failed read is not left holding the key', failedRead.size() === 0, Stri
 // dispatchers rather than to the readers:
 const fetchLayerSource = read('src/services/api.js');
 check('reads and writes take different doors', /if \(isReadAction\(action\)\)/.test(fetchLayerSource), 'the split is gone');
-check('and a read that is not answered is reported, not swallowed', /throw noAnswer\(action\)/.test(fetchLayerSource));
-check('while an unrouted write is named', /throw noRoute\(action\)/.test(fetchLayerSource));
+check(
+  'and a read that is not answered is reported, not swallowed',
+  /throw await notAnswered\(action\)/.test(fetchLayerSource)
+);
+check(
+  'and the report asks the router WHY rather than blaming Firestore',
+  /const blocker = await routingBlocker\(action\)/.test(fetchLayerSource) &&
+    /VITE_FIRESTORE_FEATURES pins a list of routes/.test(fetchLayerSource)
+);
 check(
   'and nothing in the fetch layer reaches the sheet any more',
   // Matched with the call paren, because the comments in api.js deliberately still NAME the function they replaced -

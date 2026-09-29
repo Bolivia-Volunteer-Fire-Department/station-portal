@@ -6,21 +6,24 @@
 // reload. That reads as data loss, not as half a finished migration. So a feature is named here together with the
 // reads it depends on, and it routes ONLY when those are routed too.
 //
-// Four conditions, all of which must hold before anything goes anywhere but Apps Script:
+// Four conditions, all of which must hold before a route is taken:
 //
-//   1. `VITE_FIRESTORE_FEATURES` names the feature (or is `*`). Nothing is routed by default, which is what keeps
-//      this file inert in every build that has not been switched on.
-//   2. Firebase is configured at all (`firebaseConfigured()`) - so a build without the VITE_FIREBASE_* values
-//      cannot route anything, whatever the features list says.
+//   1. `VITE_FIRESTORE_FEATURES` does not name `off`/`none`, and names this feature if it names anything at all. UNSET
+//      means every feature whose prerequisites are met - enabledFeatures below writes the three states out.
+//   2. Firebase is configured at all (`firebaseConfigured()`) - so a build without the VITE_FIREBASE_* values cannot
+//      route anything, whatever the features list says.
 //   3. The feature's `requires` list is enabled as well. This is the guard against half a feature.
-//   4. Somebody is signed in to FIREBASE, not just to Apps Script. Those are separate: the app still signs in
-//      through Apps Script and gets a session token, and a Firestore write with no Firebase user has no uid to
-//      write and no rule to satisfy. **Until the login is wired to Firebase Auth, every route here falls through to
-//      Apps Script** - which is why this can land safely before the login does.
+//   4. Somebody is signed in to Firebase, because a write with no Firebase user has no uid to write as and no rule to
+//      satisfy. The single exception is GET_INITIAL_DATA, which runs before anybody has signed in and whose reader
+//      omits whatever the rules refuse to a stranger.
 //
-// When it does not route it says so once in the console and returns null, so the caller does what it always did.
-// Nothing here falls back AFTER a Firestore attempt: a write that failed may still have landed (the same reasoning
-// as the BUSY retry in api.js), so routing is decided before the request, never after it.
+// A route that is not taken returns null. Nothing falls back AFTER a Firestore attempt - a write that failed may still
+// have landed, so routing is decided before the request, never after it.
+//
+// AND SINCE THE SHEET WENT, null means the caller FAILS. That turns this file's feature list from a convenience into a
+// trap: a list of names switches off everything not in it, and there is nothing behind those routes to catch the fall.
+// So every blocked route is now said out loud, feature-off included, and the message names the route and says what to
+// do about it - silence here is what let "the admin wave is missing" arrive with no line explaining why.
 import { firebaseConfigured } from './firebase.js';
 
 // `import.meta.env` is Vite's and `process.env` is Node's, so a harness can exercise this module as well as Vite
@@ -224,9 +227,16 @@ const FAILURE_MESSAGES = {
 export const routeRead = async (action, body = {}) => {
   const blocker = await routingBlocker(action);
   if (blocker) {
-    if (blocker !== 'feature-off' && blocker !== 'not-a-routed-action') {
-      console.info(`[firestore] ${action} is still read from the sheet (${blocker}).`);
-    }
+    // SAID OUT LOUD, INCLUDING feature-off. While the sheet was still a fallback, a route that was switched off was a
+    // normal state and saying so on every refresh would have been noise. There is no fallback now: a route that is off
+    // is a screen that cannot load, so silence here is the worst possible answer - it was silence that made an
+    // afternoon of "the admin wave is missing" arrive without a line saying why.
+    console.warn(
+      `[firestore] ${action} is NOT routed (${blocker}), and there is no sheet to ask any more - so this read fails.` +
+        (blocker === 'feature-off'
+          ? ' VITE_FIRESTORE_FEATURES is pinning a list of routes; unset it, or add this route, or set it to `off` deliberately.'
+          : '')
+    );
     return null;
   }
 
@@ -503,11 +513,14 @@ Object.entries(BADGE_REFRESHING_SAVES).forEach(([action, { collection, kind }]) 
 export const routeWrite = async (action, body = {}) => {
   const blocker = await routingBlocker(action);
   if (blocker) {
-    // The interesting case is switched on but unusable, which is exactly what happens before the login is wired to
-    // Firebase. Naming it in the console is how somebody finds out why nothing changed.
-    if (blocker !== 'feature-off' && blocker !== 'not-a-routed-action') {
-      console.info(`[firestore] ${action} stays on Apps Script (${blocker}).`);
-    }
+    // Loud, and for the same reason as routeRead: with no sheet behind it, a route that is not taken is a save that
+    // silently does nothing. `feature-off` used to be the quiet case on purpose, because the sheet would have answered.
+    console.warn(
+      `[firestore] ${action} was NOT routed (${blocker}), and there is no sheet behind it any more - so this write fails.` +
+        (blocker === 'feature-off'
+          ? ' VITE_FIRESTORE_FEATURES pins a list of routes when it is set; this one is not in it.'
+          : '')
+    );
     return null;
   }
 
