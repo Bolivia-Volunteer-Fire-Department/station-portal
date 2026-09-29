@@ -404,6 +404,64 @@ exports.updateMemberAccount = onCall(async (request) => {
 //     free at this scale. See docs/FIREBASE_SETUP.md.
 const { beforeUserCreated } = require('firebase-functions/v2/identity');
 
+// The audit toggle's other half: the same save, done by a function so an audit row can be written first.
+//
+// IT IS NOT AN ARBITRARY WRITER, and that is the whole design. The collection has to be in the table below, and the
+// table names the permission each one needs - the caller's own role decides, read from the database exactly as the
+// rules do. A client that routes its saves through here gains an audit row and nothing else: without the permission
+// it is refused, and a collection not in the table cannot be reached at all.
+//
+// The table duplicates the client's routing table ON PURPOSE. This is a security boundary, so it does not trust the
+// client to have named the right collection, and a permission that exists only on the other side of a network call is
+// not a permission.
+const AUDITED_COLLECTIONS = {
+  roles: 'can_edit_roles',
+  ranks: 'can_edit_ranks',
+  shifts: 'can_edit_schedule',
+  certification_setup: 'can_manage_certification_setup',
+  certifications: 'can_manage_certifications',
+  document_checklist_items: 'can_manage_documents',
+  documents: 'can_manage_documents',
+  assignments: 'can_edit_assignments',
+  schedule_templates: 'can_edit_schedule_templates',
+  trainings: 'can_administer_trainings',
+  announcements: 'can_make_announcements',
+  events: 'can_create_events',
+};
+
+exports.saveDocumentWithAudit = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+
+  const data = request.data || {};
+  const collection = String(data.collection || '');
+  const permission = AUDITED_COLLECTIONS[collection];
+  if (!permission) throw new HttpsError('permission-denied', `There is no audited save for ${collection}.`);
+  await requirePermission(caller.uid, permission, `change ${collection}`);
+
+  const id = String(data.id || '');
+  if (!id) throw new HttpsError('invalid-argument', 'An id is required.');
+
+  if (data.remove === true) {
+    await db.doc(`${collection}/${id}`).delete();
+    await audit(caller.uid, 'ADMIN_DELETE_ROW', `${collection}/${id}`);
+    return { id };
+  }
+
+  const document = data.document;
+  if (!document || typeof document !== 'object' || Array.isArray(document)) {
+    throw new HttpsError('invalid-argument', 'A document is required.');
+  }
+
+  // set with merge, exactly as the client write would have done - the audit row is the ONLY difference.
+  await db.doc(`${collection}/${id}`).set(document, { merge: true });
+  await audit(caller.uid, 'ADMIN_SAVE_ROW', `${collection}/${id}`);
+  return { id };
+});
+
+// Identity Platform's own guard on account creation. The app creates members with the Admin SDK from an officer's
+// callable, and the console creates them by hand; anything else - a browser trying to sign up to our domain - is
+// refused before it exists.
 exports.beforeUserCreated = beforeUserCreated((event) => {
   const fromBrowser = Boolean(event.ipAddress) || Boolean(event.userAgent);
   if (fromBrowser) {

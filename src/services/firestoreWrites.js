@@ -8,7 +8,7 @@
 //   - What the rules can check, they check - a member may only open a shift for themselves. What they cannot (that
 //     the coordinates are honest) was never checked by the sheet version either: it validated what the browser sent,
 //     and so does this.
-import { collection, deleteDoc, doc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
 import { rowsOf } from './firestorePayload.js';
@@ -140,6 +140,28 @@ export const saveScheduleBoard = async ({ entries = [], deleteIds = [] }) => {
   return result.data;
 };
 
+// The one thing about the move that a station has to DECIDE: whether an officer's straightforward saves are audited.
+//
+// On the sheet they were, because the server did the work and wrote the row. Firestore has no audit log, and a client
+// cannot write one - an audit row a browser can forge is not an audit row - so the choice is between no record and a
+// callable that writes one before it writes the document.
+//
+// DEFAULT OFF, which is the owner's decision: the rules record who MAY write, and that is enough for a station that
+// trusts its officers. An officer turns it on by adding the setting `audit_client_writes` = TRUE in the System
+// Settings tab's table, which is public because the CLIENT has to read it to know which way to write.
+//
+// Read per save rather than cached: it is one small document read, and a station that has just switched this on
+// should not have to wait for a cache to expire to believe it.
+export const clientWritesAreAudited = async () => {
+  try {
+    const settings = await getDoc(doc(firestore(), 'settings', 'public'));
+    const value = (settings.data() || {}).audit_client_writes;
+    return value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';
+  } catch {
+    return false;
+  }
+};
+
 // A save that is ONE DOCUMENT, which is what most of the admin tabs are. The action's own fields become the document:
 // the sheet's columns were already the document's field names, so there is nothing to translate, and `action` /
 // `token` / `row_version` are the envelope and the sheet's conflict check rather than data. Firestore has no
@@ -157,7 +179,16 @@ export const saveDocument = async ({ collection, id, body, extra = {} }) => {
   // An empty id means CREATE, exactly as it did on the sheet - and Firestore mints the id the sheet's generated
   // column used to. It has to be this way round: the caller awaits the reply and puts the new id in its table.
   const target = String(id || '').trim() || doc(collection(firestore(), collection)).id;
-  await setDoc(doc(firestore(), collection, target), { ...withoutEnvelope(body), ...extra }, { merge: true });
+  const document = { ...withoutEnvelope(body), ...extra };
+
+  // One decision, in one place, covering every straightforward save in the app: straight to the document, or through
+  // the callable that writes an audit row first. See clientWritesAreAudited above.
+  if (await clientWritesAreAudited()) {
+    const result = await httpsCallable(firebaseFunctions(), 'saveDocumentWithAudit')({ collection, id: target, document });
+    return { id: result.data?.id || target };
+  }
+
+  await setDoc(doc(firestore(), collection, target), document, { merge: true });
   return { id: target };
 };
 
@@ -216,8 +247,13 @@ export const saveAudienceDocument = async ({ collection: name, id, body, rankAnd
 };
 
 export const deleteDocument = async ({ collection, id }) => {
-  await deleteDoc(doc(firestore(), collection, String(id || '')));
-  return { id: String(id || '') };
+  const target = String(id || '');
+  if (await clientWritesAreAudited()) {
+    await httpsCallable(firebaseFunctions(), 'saveDocumentWithAudit')({ collection, id: target, remove: true });
+    return { id: target };
+  }
+  await deleteDoc(doc(firestore(), collection, target));
+  return { id: target };
 };
 
 // The bulk training save: rows upserted (a blank id creates one) and rows removed, in ONE commit - the same shape as

@@ -177,6 +177,19 @@ callable that audits before writing, or to have the audit written by the same cl
 and for a good reason: an audit row a browser can forge is not an audit row. It is written here because it is a real
 change in what the station can answer for, and it is not the kind of thing to discover during an enquiry.
 
+**Decided, and it is a toggle rather than one of the three.** The owner's answer was to let the station choose, with
+#1 as the default, which is what is live now: nothing about an officer's straightforward save has changed, and no
+audit row is written for one. An officer who wants #2 adds the setting `audit_client_writes` = TRUE in the System
+Settings tab's own table - the tab already edits any key, so there is no new screen - and from then on every one of
+those saves goes through the `saveDocumentWithAudit` callable, which checks the caller's permission from the database
+before it writes and writes an audit row alongside. Slower, always accountable, and reversible by setting it back to
+FALSE. The setting is public because the CLIENT has to read it to know which way to write; the read is one small
+document, and it is read per save rather than cached so a station that has just switched it on does not have to wait.
+
+The callable is not a general writer, which is the only reason it is safe to have one: the collection must be in its
+table, that table names the permission each collection needs, and the table duplicates the client's routing on
+purpose. A permission that exists only on the other side of a network call is not a permission.
+
 ## What the migration does, in order
 
 1. **Read** every tab (read-only, service account, no writes at all).

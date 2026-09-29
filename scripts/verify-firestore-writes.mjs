@@ -23,6 +23,7 @@ import {
   approveOffer,
   audienceKeysForWrite,
   badgeForRecord,
+  clientWritesAreAudited,
   clockIn,
   clockOut,
   makeOffer,
@@ -301,6 +302,20 @@ const main = async () => {
   check('a setting nobody outside the office needs is private', settingSide('some_officer_thing'), 'private');
   check('and a setting added later starts private, which is the safe way round', settingSide('a_key_nobody_named_yet'), 'private');
   check('whitespace does not change the answer', settingSide('  station_name  '), 'public');
+
+  // The audit toggle, asserted BOTH ways because the wrong default here is invisible: the save succeeds either way,
+  // and only the audit row differs. Off unless an officer asks for it is the owner's decision, so 'off' is a case
+  // rather than a comment. Written last, and switched back off, so nothing above it is affected.
+  //
+  // Jane writes it because the setting needs can_edit_system_settings - and bo, who is a plain member here, is
+  // refused by the rules at exactly that line. The READ is open to anybody, which is why the client can consult it.
+  const settingsDoc = doc(firestore(), 'settings', 'public');
+  check('the audit toggle is off unless an officer asks for it', await clientWritesAreAudited(), false);
+  await signIn('jane');
+  await setDoc(settingsDoc, { audit_client_writes: 'TRUE' }, { merge: true });
+  check('and it turns on as soon as the setting says so', await clientWritesAreAudited(), true);
+  await setDoc(settingsDoc, { audit_client_writes: 'FALSE' }, { merge: true });
+  check('and off again when it is set to anything but TRUE', await clientWritesAreAudited(), false);
 
   checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };

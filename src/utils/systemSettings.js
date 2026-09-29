@@ -74,6 +74,11 @@ export const PUBLIC_SETTING_KEYS = [
   'session_timeout',
   'is_dark_mode',
   'time_format',
+  // Not a secret: a POLICY flag, and the client has to read it to know which way to write. Off unless an officer sets
+  // it, which is the default in docs/MIGRATION_MAP.md: the straightforward admin saves go straight to Firestore, and
+  // nothing is audited for them because Firestore has no audit log. Switch this on and those saves are routed through
+  // a callable that writes an audit row first - slower, always accountable.
+  'audit_client_writes',
 ];
 
 // Which document a setting belongs in: 'public' or 'private'.
