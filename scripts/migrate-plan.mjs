@@ -75,15 +75,17 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
     rows.forEach((row) => {
       const key = String(row[spec.pair.key] || '').trim();
       if (!key) return;
-      if (isSecretKey(key)) {
-        // The one thing here that is a real refusal rather than a decision: a credential in system_settings.
-        refused.push(key);
+      // The fcm_ keys are checked FIRST, and that ordering is deliberate: the FCM credential is a service-account key
+      // sitting in this tab, so the credential rule below would catch it and report it as a problem every single run -
+      // when what is actually happening is that the browser's old runtime config is not being copied. Namespaced
+      // build-time config is a note; anything else that looks like a credential is still a refusal.
+      if (key.startsWith('fcm_')) {
+        dropped.push(key);
         return;
       }
-      if (key.startsWith('fcm_')) {
-        // The Firebase web config the browser used to be handed at runtime. After the move it comes from the build
-        // (see docs/FIREBASE_SETUP.md), so copying it into the database would be copying yesterday's mechanism.
-        dropped.push(key);
+      if (isSecretKey(key)) {
+        // The one thing here that is a real refusal rather than a decision: a credential nobody declared.
+        refused.push(key);
         return;
       }
       const side = publicKeys.has(key) ? 'public' : 'private';

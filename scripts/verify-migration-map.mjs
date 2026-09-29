@@ -37,7 +37,9 @@ const REAL_TABS = [
 const mapped = mappedTabs();
 check('every tab in the sheet is accounted for', REAL_TABS.filter((tab) => !mapped.includes(tab)), []);
 check('and nothing is mapped that is not a tab', mapped.filter((tab) => !REAL_TABS.includes(tab)), []);
-check('id_migration is the one skip', skippedTabs(), ['id_migration']);
+// Both are skipped on purpose: id_migration is history, and system_log's rows are development noise whose structure
+// the rules already define (the owner's call - the log starts clean).
+check('the two skips are the ones decided on', skippedTabs(), ['system_log', 'id_migration']);
 
 // --- secrets -----------------------------------------------------------------------------------------------------
 
@@ -130,18 +132,34 @@ checkIs(
 
 const settingsRows = [
   { key: 'station_name', value: 'Bolivia VFD' },
-  { key: 'fcm_private_key', value: 'BEGIN PRIVATE KEY' },
+  { key: 'fcm_service_account_private_key', value: 'BEGIN PRIVATE KEY' },
   { key: 'some_officer_setting', value: 'x' },
+  { key: 'looks_like_a_secret', value: 'oops' },
+  { key: 'an_api_key', value: 'sk-live' },
 ];
 const settingsPlan = planForTab({ tab: 'system_settings', spec: TAB_MAP.system_settings, rows: settingsRows });
 check('the public side takes the named public keys', settingsPlan.collections['settings/public'][0], {
   station_name: 'Bolivia VFD',
 });
-check('the private side takes the rest', settingsPlan.collections['settings/private'][0], { some_officer_setting: 'x' });
+check('the private side takes the rest', settingsPlan.collections['settings/private'][0], {
+  some_officer_setting: 'x',
+});
 checkIs(
-  'and the credential is refused rather than split anywhere',
-  !JSON.stringify(settingsPlan.collections).includes('BEGIN PRIVATE KEY') &&
-    settingsPlan.problems.some((p) => p.includes('fcm_private_key'))
+  'the FCM credential is not copied',
+  !JSON.stringify(settingsPlan.collections).includes('BEGIN PRIVATE KEY')
+);
+// The fcm_ namespace is build-time config, checked BEFORE the credential rule - so the FCM key is a note rather than
+// a problem that has to be forced past on every run. It is also the ordering that keeps the key out of Firestore.
+checkIs(
+  'and is a note, not a problem to force past',
+  settingsPlan.notes.some((note) => note.includes('fcm_service_account_private_key')) &&
+    settingsPlan.problems.every((problem) => !problem.includes('fcm_'))
+);
+checkIs(
+  'anything else that looks like a credential still is',
+  settingsPlan.problems.some((problem) => problem.includes('looks_like_a_secret')) &&
+    settingsPlan.problems.some((problem) => problem.includes('an_api_key')) &&
+    settingsPlan.problems.every((problem) => !problem.includes('fcm_'))
 );
 
 // --- the whole-sheet pass ----------------------------------------------------------------------------------------

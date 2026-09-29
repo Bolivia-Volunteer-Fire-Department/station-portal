@@ -111,7 +111,9 @@ The settings split is now explicit rather than guessed. Reading the real key nam
 read by the browser** - the loading messages, the theme, the time format, the idle timeout, and the clock location the
 fence is checked against - so they are named as public, and **private is the default** for anything added later. The
 four `fcm_*` keys are not copied at all: they are the web config the browser used to be handed at runtime, and after
-the move it comes from the build. `fcm_service_account_private_key` is refused outright.
+the move it comes from the build. `fcm_service_account_private_key` is the app's FCM credential and it stays where
+Apps Script reads it; checking the `fcm_` namespace BEFORE the credential rule is what keeps that a *note* rather
+than a problem somebody has to force past on every run, while an undeclared credential-looking key is still refused.
 
 The plan now separates the two kinds of line, because the first run put 107 of them under one heading for four
 findings, which is how a report stops being read to the end. **Notes** are what the plan *decided*: a junk column
