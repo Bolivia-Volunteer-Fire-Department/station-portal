@@ -152,9 +152,9 @@ const NOT_YET_ROUTED = [
   // opening one document, the officer's unfiltered view, a verifier's view of a member's records) and the seven writes
   // (signing, the checklist batch, the two verifications, removing a signature, the folder rename, the drag).
   //
-  // Training signatures, and the administrator's removal of one.
-  'SIGN_TRAINING',
-  'ADMIN_REMOVE_TRAINING_SIGNATURE',
+  // Training signatures: DONE, and deleted from this list. The batch from the session, the lock that means its
+  // signatures as well as its fields, and the removal behind its own permission.
+  //
   // The administrator's timeclock edits, deleting a user, and the runner's leaderboard.
   'ADMIN_SAVE_TIMECLOCK_ENTRY',
   'ADMIN_DELETE_TIMECLOCK_ENTRY',

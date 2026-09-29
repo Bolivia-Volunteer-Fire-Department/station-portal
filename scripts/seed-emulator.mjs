@@ -259,6 +259,9 @@ export const seed = async () => {
 
   // --- the training and certification reference data, plus one member's own records ---
   await put('trainings/tr1', { title: 'SCBA Fit Test' });
+  // A training that has been entered into an external system: LOCKED, and the lock has to mean its signatures as well as
+  // its fields, or it is only half a lock.
+  await put('trainings/tr2', { title: 'Hazmat Awareness', is_entered_into_external: true });
   await put('training_signatures/ts1', { training_id: 'tr1', user_id: 'u2', signed_at: '2026-02-01 09:00:00' });
   await put('certification_setup/c1', {
     name: 'EMT',

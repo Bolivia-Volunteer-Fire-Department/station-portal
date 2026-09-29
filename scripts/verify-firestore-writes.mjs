@@ -462,6 +462,35 @@ const main = async () => {
   const draggedDocument = (await getDoc(doc(firestore(), 'documents', 'doc6'))).data();
   check('writing only the position', [draggedDocument.sort_order, draggedDocument.title], [3, 'New Policy Acknowledgement']);
 
+  // --- training signatures: the same add-only shape, and a lock that means its signatures too ------------------------
+  await signIn('jane');
+  const signedTraining = await routeWrite('SIGN_TRAINING', { payload: { training_ids: ['tr1', 'a-training-that-is-gone'] } });
+  check('a member signs the trainings they name, and is told about the ones that are not there', [signedTraining.signed, signedTraining.skipped], [1, 1]);
+  const signedRow = signedTraining.signatures.find((row) => row.training_id === 'tr1');
+  checkIs('with the date stamped, because an undated signature cannot be listed in order', typeof (signedRow || {}).signed_at === 'string', JSON.stringify(signedRow));
+
+  const trainingAgain = await routeWrite('SIGN_TRAINING', { payload: { training_ids: ['tr1'] } });
+  check('signing the same training twice is nothing to do rather than an error', [trainingAgain.signed, trainingAgain.skipped], [0, 0]);
+
+  // A training entered into an external system accepts no new signatures: the lock has to mean its signatures as well as
+  // its fields, or somebody attends a course that is already on the record.
+  const lockedTraining = await routeWrite('SIGN_TRAINING', { payload: { training_ids: ['tr2'] } });
+  checkIs('a locked training refuses a new signature', lockedTraining.success === false, JSON.stringify(lockedTraining).slice(0, 160));
+
+  // A member cannot withdraw their OWN acknowledgment. This is the rules refusing rather than the writer, which is the
+  // point: the sheet refused it in a handler, and a rule that allows a crafted request to do what a handler refuses is
+  // not the rule the handler describes.
+  await signIn('bo');
+  const boSignature = (await rowsOf(query(collection(firestore(), 'training_signatures'), where('user_id', '==', 'u2'))))[0];
+  const withdrawn = await routeWrite('ADMIN_REMOVE_TRAINING_SIGNATURE', { signature_id: boSignature.id });
+  checkIs('a member cannot withdraw their own signature', withdrawn.success === false, JSON.stringify(withdrawn).slice(0, 140));
+
+  // The administrator can, and that is the only path that ever removes one.
+  await signIn('jane');
+  const removedTraining = await routeWrite('ADMIN_REMOVE_TRAINING_SIGNATURE', { signature_id: 'ts1' });
+  checkIs('an officer removes one', removedTraining.success === true, JSON.stringify(removedTraining).slice(0, 140));
+  check('and the row is gone', (await getDoc(doc(firestore(), 'training_signatures', 'ts1'))).exists(), false);
+
   // --- the member's own settings ------------------------------------------------------------------------------------
   //
   // A MERGE, and three things about it are asserted because each is a way to be wrong quietly: an absent preference must

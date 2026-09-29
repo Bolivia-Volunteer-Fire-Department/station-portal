@@ -569,6 +569,81 @@ export const reorderDocuments = async ({ order }) => {
   return { moved };
 };
 
+// The app's TRUE parsing, kept local rather than imported.
+//
+// It looks like something to share, and there IS a helper for it (utils/rankEligibility) - but that module's own imports
+// are extension-less, which Vite resolves and plain Node does not, and this file is loaded by Node harnesses as well as
+// by the app. One three-line function is cheaper than a dependency that breaks a test runner, and it matches what the
+// audit check in this file already does inline.
+const isTrue = (value) => {
+  if (value === true) return true;
+  if (value === false) return false;
+  const text = String(value === undefined || value === null ? '' : value).trim().toUpperCase();
+  return text === 'TRUE' || text === 'YES' || text === '1';
+};
+
+// Signing trainings, in bulk, because the module collects a set of ticked trainings and saves once.
+//
+// ADD-ONLY, like every other signature: a request carrying removals is REFUSED rather than ignored, so a caller that
+// expected an un-sign is told it did not happen instead of being quietly lied to. Removal is the administrator's action,
+// which the rules now enforce as well as this points at.
+//
+// TWO THINGS ARE COUNTED RATHER THAN SIGNED, and they are counted differently on purpose: an id that names no training
+// is a SKIP the caller is told about (a stale page must not be able to create a signature pointing at nothing), while a
+// training already signed is simply nothing to do - signing twice is a repeated click, not an error, and the sheet must
+// not gain a second row for the same member and training.
+export const signTrainings = async ({ userId, trainingIds }) => {
+  const wanted = [...new Set((Array.isArray(trainingIds) ? trainingIds : []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!wanted.length) return { success: false, message: 'No trainings were named.' };
+
+  const trainings = await rowsOf(collection(firestore(), 'trainings'));
+  const byId = new Map(trainings.map((training) => [training.id, training]));
+  const closed = wanted.filter((id) => {
+    const training = byId.get(id);
+    return training && isTrue(training.is_entered_into_external);
+  });
+  // A training that has been entered into an external system is LOCKED, and the lock has to mean its signatures as well
+  // as its fields - otherwise it is only half a lock, and somebody attends a course that is already on the record.
+  if (closed.length) {
+    return {
+      success: false,
+      message: `Training ${closed.join(', ')} has been entered into an external system and is locked, so it cannot be changed.`,
+    };
+  }
+
+  const mine = await rowsFor('training_signatures', 'user_id', userId);
+  const signed = new Set(mine.map((row) => String(row.training_id || '').trim()));
+
+  const at = stationTimestamp();
+  const batch = writeBatch(firestore());
+  let added = 0;
+  let skipped = 0;
+
+  wanted.forEach((trainingId) => {
+    if (!byId.has(trainingId)) {
+      skipped += 1;
+      return;
+    }
+    if (signed.has(trainingId)) return;
+    // `signed_at` is stamped here rather than left to the reader: a signature without a date cannot be ordered, and the
+    // training report lists them in the order they were given.
+    batch.set(doc(collection(firestore(), 'training_signatures')), { training_id: trainingId, user_id: userId, signed_at: at });
+    added += 1;
+  });
+
+  if (added) await batch.commit();
+  return { success: true, signed: added, skipped, signatures: await rowsFor('training_signatures', 'user_id', userId) };
+};
+
+// The only way a training signature is ever removed, behind its own permission rather than can_edit_trainings: removing
+// somebody else's acknowledgment is exactly the thing that has to be deliberate.
+export const removeTrainingSignature = async ({ id }) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('A signature id is required.');
+  await deleteDoc(doc(firestore(), 'training_signatures', wanted));
+  return { removed: 1 };
+};
+
 export const deleteDocument = async ({ collection, id }) => {
   const target = String(id || '');
   if (await clientWritesAreAudited()) {

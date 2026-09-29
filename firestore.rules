@@ -326,8 +326,13 @@ service cloud.firestore {
       allow read: if signedIn()
         && (resource.data.user_id == uid() || permission('can_administer_trainings'));
       allow create: if signedIn() && request.resource.data.user_id == uid() && permission('can_sign_trainings');
-      allow update, delete: if signedIn()
-        && (resource.data.user_id == uid() || permission('can_administer_trainings'));
+      // OFFICER-ONLY, and this is narrower than it used to be. The member's own row was deletable by the member, which
+      // is the opposite of what the sheet's handler did: it REFUSED a removal outright ("signatures cannot be removed,
+      // ask an administrator to correct a signature"), because a signature is an acknowledgment of attendance rather
+      // than a preference. A rule that allows a crafted request to do what the handler refuses is not the rule the
+      // handler describes - so the withdrawal is an administrator's action at the level the data is protected, not only
+      // at the level the button is drawn.
+      allow update, delete: if signedIn() && permission('can_administer_trainings');
     }
 
     // The catalog everyone reads, and one member's own records: the same shape as the clock and the availability

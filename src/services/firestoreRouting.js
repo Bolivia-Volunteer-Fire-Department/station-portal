@@ -225,6 +225,13 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // Training signatures: the same add-only shape as everything else, and the removal behind its own permission.
+  trainingSignatures: {
+    requires: ['memberPayload'],
+    writes: ['SIGN_TRAINING', 'ADMIN_REMOVE_TRAINING_SIGNATURE'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -525,6 +532,18 @@ const DISPATCH = {
   ADMIN_REORDER_DOCUMENTS: async (body) => {
     const { reorderDocuments } = await writes();
     return ok(await reorderDocuments({ order: body.order }));
+  },
+
+  // Training: a batch of signatures from the session, and the administrator's single removal.
+  SIGN_TRAINING: async (body, uid) => {
+    const { signTrainings } = await writes();
+    const payload = body.payload || {};
+    return ok(await signTrainings({ userId: uid, trainingIds: payload.training_ids }));
+  },
+
+  ADMIN_REMOVE_TRAINING_SIGNATURE: async (body) => {
+    const { removeTrainingSignature } = await writes();
+    return ok(await removeTrainingSignature({ id: body.signature_id || body.id }));
   },
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {
