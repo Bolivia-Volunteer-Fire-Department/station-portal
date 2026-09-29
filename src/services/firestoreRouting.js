@@ -179,7 +179,12 @@ export const ROUTED_FEATURES = {
   documents: {
     requires: ['memberPayload'],
     writes: [],
-    reads: ['GET_DOCUMENT_SIGNATURES'],
+    reads: [
+      'GET_DOCUMENTS',
+      'GET_DOCUMENT',
+      'ADMIN_GET_DOCUMENT',
+      'GET_DOCUMENT_SIGNATURES',
+    ],
     switchReads: [],
   },
 

@@ -219,9 +219,31 @@ const main = async () => {
   check('a member reads their own devices', devices.devices.map((row) => row.id), ['dev-own']);
   check('and no owner is claimed when the browser passed no token', devices.device_owner, null);
 
-  // The Documents tab's per-document read: the checklist items and the signatures taken on it. It is the read that
-  // failed in the field - "GET_DOCUMENT_SIGNATURES was not routed" - because the collections and the rules existed and
-  // only the reader was missing, which nothing noticed while the sheet was still answering.
+  // The member's library: the AUDIENCE and the two flags, because a document can be aimed at exactly the right people
+  // and still not be available yet. Four fixtures, one per rule.
+  await signIn('bo');
+  const library = await routeRead('GET_DOCUMENTS');
+  check('a member sees the documents aimed at them', library.documents.map((entry) => entry.id), ['doc1']);
+  checkIs('and their own signatures come with it, so one read answers signed and outstanding', library.signatures.length >= 1, String(library.signatures.length));
+
+  const opened = await routeRead('GET_DOCUMENT', { id: 'doc1' });
+  check('and one document opens with its body', opened.document.title, 'Annual SOG Acknowledgement');
+
+  // UNAVAILABLE, not forbidden: a document aimed at another rank answers as though it were not there, which is why a
+  // crafted request learns nothing about what exists above the caller's rank.
+  const above = await routeRead('GET_DOCUMENT', { id: 'doc2' });
+  check('a document above their rank reads as unavailable, not as forbidden', [above.success, above.message], [false, 'That document is not available.']);
+  check('and one that is not live yet answers the same way', (await routeRead('GET_DOCUMENT', { id: 'doc3' })).success, false);
+  check('as does an unpublished one', (await routeRead('GET_DOCUMENT', { id: 'doc4' })).success, false);
+
+  // An officer is not filtered: managing documents is the job, and the editor needs the WHOLE row.
+  await signIn('jane');
+  const officerView = await routeRead('ADMIN_GET_DOCUMENT', { id: 'doc2' });
+  check('an officer opens any document, audience or not', officerView.success, true);
+  check('with the whole row rather than a projection', officerView.document.audience_keys, ['rank:k1']);
+
+  // A document's checklist items and the signatures taken on it: the read that failed in the field, because the
+  // collections and the rules existed and only the reader was missing - which nothing noticed while the sheet answered.
   await signIn('jane');
   const documentSignatures = await routeRead('GET_DOCUMENT_SIGNATURES', { id: 'doc1' });
   check('a document’s checklist items come back in order', documentSignatures.items.map((item) => item.id), ['it1', 'it2']);

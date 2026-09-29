@@ -316,7 +316,33 @@ export const seed = async () => {
     title: 'Annual SOG Acknowledgement',
     audience_keys: ['*'],
     content_revision: 2,
-    is_active: true,
+    is_published: true,
+  });
+  // The other three exist to test the visibility rules the member's library applies, one each:
+  //
+  //   doc2 is aimed at a rank bo does not hold, so it must read as UNAVAILABLE rather than as forbidden - the sheet's
+  //        rule, and the reason a crafted request learns nothing about what exists above somebody's rank.
+  //   doc3 is aimed at everyone but is not live yet, so an audience alone is not enough.
+  //   doc4 is live and aimed at everyone but unpublished, which is the same answer for a different reason: it is not a
+  //        document yet.
+  await put('documents/doc2', {
+    title: 'Officer Only Policy',
+    audience_keys: ['rank:k1'],
+    content_revision: 1,
+    is_published: true,
+  });
+  await put('documents/doc3', {
+    title: 'Next Year Handbook',
+    audience_keys: ['*'],
+    content_revision: 1,
+    is_published: true,
+    date_from: '2027-01-01',
+  });
+  await put('documents/doc4', {
+    title: 'Unpublished Draft',
+    audience_keys: ['*'],
+    content_revision: 1,
+    is_published: false,
   });
   await put('document_checklist_items/it1', {
     document_id: 'doc1',

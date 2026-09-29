@@ -39,6 +39,60 @@ const keysFor = async (uid) => {
 // with no identity may see and a refusal is an answer rather than a failure.
 const quietly = (read) => read().catch(() => null);
 
+// The station's date, in the same 'YYYY-MM-DD' shape the app stores date keys in. A document's date window is compared
+// against this rather than against UTC, so a document that expires "today" expires on the station's today.
+const stationDateKey = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const at = (type) => parts.find((part) => part.type === type).value;
+  return `${at('year')}-${at('month')}-${at('day')}`;
+};
+
+// Whether a document is on the list at all: published, and inside its own date window. Both are separate from the
+// AUDIENCE, which is materialized on the document and answered by `audienceRows` - a document can be aimed at exactly
+// the right people and still not be available yet, which is the difference between a library and a list of intentions.
+const documentIsLive = (document, today) => {
+  const row = document || {};
+  if (row.is_published !== true && String(row.is_published || '').trim().toUpperCase() !== 'TRUE') return false;
+  const from = String(row.date_from || '').trim();
+  const to = String(row.date_to || '').trim();
+  if (from && today < from) return false;
+  if (to && today > to) return false;
+  return true;
+};
+
+// One document, if THIS viewer may see it. Null covers both "no such document" and "not for you", deliberately: what a
+// member may not see is answered as though it were not there, so a crafted request learns nothing about what exists
+// above their rank. That is the sheet's rule and it is worth keeping.
+//
+// The RULES refuse an out-of-audience document before this function sees it, so the read has to be caught rather than
+// checked: a permission-denied and a missing document are the same answer to the caller, which is exactly the point.
+// The audience comparison below is therefore belt-and-braces - it keeps the intent legible and it is what would still
+// be right if the rules ever loosened - and not the thing doing the work.
+const visibleDocumentFor = async (uid, id) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) return null;
+
+  let document = null;
+  try {
+    const snapshot = await getDoc(doc(firestore(), 'documents', wanted));
+    if (snapshot.exists()) document = { id: snapshot.id, ...snapshot.data() };
+  } catch {
+    return null;
+  }
+  if (!document) return null;
+
+  const mine = await keysFor(uid);
+  const audience = Array.isArray(document.audience_keys) ? document.audience_keys : [];
+  if (!audience.some((key) => mine.includes(String(key)))) return null;
+  if (!documentIsLive(document, stationDateKey())) return null;
+  return document;
+};
+
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
   GET_ROSTER: () => rosterRows().then((roster) => ({ roster })),
@@ -87,6 +141,37 @@ export const READERS = {
   ADMIN_GET_ANNOUNCEMENTS: () => rowsOf(collection(firestore(), 'announcements')).then((announcements) => ({ announcements })),
   ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
   ADMIN_GET_DOCUMENTS: () => rowsOf(collection(firestore(), 'documents')).then((documents) => ({ documents })),
+
+  // The member's own library: the documents they may see, and their own signatures so the screen can show what is
+  // outstanding without asking once per document. Deliberately WITHOUT the document bodies - those are fetched one at a
+  // time by GET_DOCUMENT, which is what keeps opening the module cheap however large the library gets.
+  GET_DOCUMENTS: async (uid) => {
+    const [visible, signatures] = await Promise.all([
+      audienceRows('documents', await keysFor(uid)),
+      rowsFor('document_signatures', 'user_id', uid),
+    ]);
+    const today = stationDateKey();
+    return { documents: visible.filter((document) => documentIsLive(document, today)), signatures };
+  },
+
+  // One document's body, for a viewer who may see it. A refusal is a REPLY rather than a thrown error, because the
+  // screens show `result.message` and the message is the useful part.
+  GET_DOCUMENT: async (uid, body) => {
+    const document = await visibleDocumentFor(uid, body && body.id);
+    if (!document) return { success: false, message: 'That document is not available.' };
+    return { success: true, document };
+  },
+
+  // The officer's view of the same document: no visibility question, because managing documents is the job - and the
+  // WHOLE row, because the editor round-trips every field it shows and a projection would quietly blank the ones it
+  // did not return.
+  ADMIN_GET_DOCUMENT: async (uid, body) => {
+    const wanted = String((body && body.id) || '').trim();
+    if (!wanted) return { success: false, message: 'Which document?' };
+    const snapshot = await getDoc(doc(firestore(), 'documents', wanted));
+    if (!snapshot.exists()) return { success: false, message: 'That document is not available.' };
+    return { success: true, document: { id: snapshot.id, ...snapshot.data() } };
+  },
 
   // A document's checklist items and the signatures taken on it: the one read the Documents tab makes per document.
   //

@@ -225,7 +225,21 @@ export async function enablePushNotifications(webConfig, vapidKey) {
 // The FCM SDK's deleteToken() is deliberately not called. Unlike getToken() it takes no
 // serviceWorkerRegistration option, so it insists on finding a firebase-messaging-sw.js at the site
 // root - a file this app does not ship (public/sw.js is registered instead). It therefore throws
-// "unsupported MIME type" before making any server call, which is pure noise.
+// before making any server call, which is pure noise.
+//
+// THE CONSOLE LINE THIS PRODUCES, named here so that a search for it lands on the explanation:
+//
+//     The script has an unsupported MIME type ('text/html').
+//
+// It is the dev server (or the SPA fallback on Pages) answering the missing file with index.html, and the browser
+// refusing to run HTML as a script. Both of this app's getToken() calls pass a serviceWorkerRegistration, so the
+// registration that matters works - the SDK's INTERNAL lookup is what fails, on a token rotation (which is why it shows
+// up after a device is disabled and enabled again and nowhere else). Notifications deliver regardless.
+//
+// Silencing it outright would mean renaming public/sw.js to the conventional firebase-messaging-sw.js and registering
+// that instead. Same scope, so it would REPLACE the current registration rather than fight it, and the push
+// subscription lives on the registration rather than the script - so it is a small, survivable change. It is not made
+// here because the only symptom is this line, and the thing it would put at risk is the path that just started working.
 //
 // Re-enabling still produces a fresh token without any cleanup here: the SDK caches tokens in
 // IndexedDB and isTokenValid() compares the stored push endpoint with the current one, so a new

@@ -150,9 +150,9 @@ const NOT_YET_ROUTED = [
   //
   // Documents and checklists, the area a user found first: signing, the signature report, the verifier's view of
   // somebody else's records, removing a signature, and the folder/order housekeeping.
-  'GET_DOCUMENTS',
-  'GET_DOCUMENT',
-  'ADMIN_GET_DOCUMENT',
+  // The three READS are done - the library, opening one document, and the officer's unfiltered view - so what remains
+  // here is the writes: signing a document, signing and verifying a checklist item, and the administrator's removal and
+  // housekeeping.
   'SIGN_DOCUMENT',
   'GET_MEMBER_DOCUMENT_RECORDS',
   'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
