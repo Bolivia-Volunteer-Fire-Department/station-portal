@@ -6,6 +6,17 @@ const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+
+// What an event MEANS: recipients, preferences and copy. Pure and separate so it can be asserted without FCM.
+const {
+  text,
+  notificationEnabled,
+  offerEventFromStatus,
+  offerRecipients,
+  offerCopy,
+  announcementRecipients,
+} = require('./pushAudience');
 
 // WHAT BELONGS IN A FUNCTION, and why:
 //
@@ -553,6 +564,187 @@ exports.registerPushDevice = onCall(async (request) => {
   }
 
   return { success: true, owner_name: '' };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// Push delivery: who hears about what, and when.
+// -------------------------------------------------------------------------------------------------------------
+//
+// WHY A TRIGGER RATHER THAN A CALL FROM THE WRITE PATH. The sheet sent these from the same server call that made the
+// change, which meant every route into an offer or an announcement had to remember to send. A Firestore trigger fires
+// for whoever wrote the document - a member's offer, the board save, a script, the console - so nobody has to remember
+// and a new write path cannot forget.
+//
+// What an event MEANS is in pushAudience.js: pure, and asserted by scripts/verify-push-audience.mjs without sending
+// anything, because FCM cannot be exercised in the emulator. This part does the reading and the sending.
+
+// One push, to one set of members, respecting each of their switches.
+//
+// The shape is the sheet's: the member's own preference, else the station default, else on; every device they have; dead
+// tokens dropped rather than retried forever; and ONE audit row naming the event and the counts rather than one row per
+// device.
+//
+// It never throws. A push that cannot be sent is a line in the console; a trigger that throws is RETRIED by the
+// platform, which for a notification means a member's phone buzzing twice for one shift.
+const deliverPush = async ({ action, actor, recipients, preference, title, body, data }) => {
+  const unique = [...new Set((recipients || []).map(text).filter(Boolean))];
+  if (!unique.length) return { recipients: 0, delivered: 0 };
+
+  const station = await db.doc('settings/public').get();
+  const stationDefault = (station.data() || {})[preference];
+
+  const settings = await Promise.all(unique.map((id) => db.doc(`user_settings/${id}`).get()));
+  const allowed = [];
+  settings.forEach((snapshot, index) => {
+    const row = snapshot.data() || {};
+    // An administrator's switch outranks the member's own, and it is checked here as well as at the door: a device
+    // registered before the switch was set would otherwise keep receiving.
+    if (row.is_push_disabled === true) return;
+    if (!notificationEnabled(row[preference], stationDefault)) return;
+    allowed.push(unique[index]);
+  });
+  if (!allowed.length) return { recipients: unique.length, delivered: 0 };
+
+  // `in` takes up to thirty values, so the recipient list is chunked rather than assumed small.
+  const devices = [];
+  for (let index = 0; index < allowed.length; index += 30) {
+    const rows = await db.collection('push_devices').where('user_id', 'in', allowed.slice(index, index + 30)).get();
+    rows.forEach((row) => {
+      const token = text((row.data() || {}).token);
+      if (token) devices.push({ token, ref: row.ref });
+    });
+  }
+  if (!devices.length) return { recipients: unique.length, delivered: 0 };
+
+  // Every value in an FCM data block has to be a STRING, and the service worker reads these to tag a notification per
+  // shift - so a repeat update to one shift collapses into one notification instead of stacking up.
+  const payload = {};
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') payload[key] = String(value);
+  });
+
+  const answer = await getMessaging().sendEachForMulticast({
+    tokens: devices.map((device) => device.token),
+    notification: { title, body },
+    data: payload,
+  });
+
+  // FCM says when a registration is gone. Anything else - a bad key, a quota, a network - says nothing about the token,
+  // so the row stays and the next attempt can succeed.
+  const stale = [];
+  answer.responses.forEach((result, index) => {
+    const code = String((result.error && result.error.code) || '');
+    if (!result.success && /not-registered|invalid-argument|invalid-registration/.test(code)) {
+      stale.push(devices[index].ref);
+    }
+  });
+  await Promise.all(stale.map((ref) => ref.delete()));
+
+  await audit(actor, action, JSON.stringify({
+    ...payload,
+    recipients: unique.length,
+    // Both numbers, which is the sheet's lesson: "delivered 0 for 3 recipients" and "delivered 0 for 0 recipients" are a
+    // broken device, a switched-off member and an empty audience respectively, and one number cannot tell them apart.
+    delivered: answer.successCount,
+    skipped: unique.length - allowed.length,
+    stale_removed: stale.length,
+  }));
+
+  return { recipients: unique.length, delivered: answer.successCount };
+};
+
+// The two reads every offer push needs: the roles (who can approve) and the users (who holds them).
+const offerAudience = async () => {
+  const [roles, users] = await Promise.all([db.collection('roles').get(), db.collection('users').get()]);
+  const rows = (snapshot) => snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  return { roles: rows(roles), users: rows(users) };
+};
+
+// A new offer: the approvers hear about it, because they are the ones with something to do.
+exports.onShiftOfferSubmitted = onDocumentCreated('schedule_offers/{offerId}', async (event) => {
+  try {
+    const offer = (event.data && event.data.data()) || {};
+    const { roles, users } = await offerAudience();
+    const copy = offerCopy('SUBMITTED', { dateFrom: offer.date_from, dateTo: offer.date_to });
+    await deliverPush({
+      action: 'SHIFT_OFFER_SUBMITTED',
+      actor: text(offer.user_id),
+      recipients: offerRecipients({ event: 'SUBMITTED', offer, roles, users }),
+      preference: copy.preference,
+      title: copy.title,
+      body: copy.body,
+      data: {
+        event: 'SHIFT_OFFER_SUBMITTED',
+        offer_id: event.params.offerId,
+        schedule_id: offer.schedule_id,
+        date_from: offer.date_from,
+        date_to: offer.date_to || offer.date_from,
+      },
+    });
+  } catch (error) {
+    console.error(`[push] the new-offer notification failed: ${(error && error.message) || error}`);
+  }
+});
+
+// A decided offer: the member hears the outcome, and only when the STATUS actually moves. An offer saved twice while
+// still pending - or any other field edited after it was decided - tells nobody anything.
+exports.onShiftOfferDecided = onDocumentUpdated('schedule_offers/{offerId}', async (event) => {
+  try {
+    const before = (event.data && event.data.before && event.data.before.data()) || {};
+    const after = (event.data && event.data.after && event.data.after.data()) || {};
+    if (text(before.status) === text(after.status)) return;
+
+    const decided = offerEventFromStatus(after.status);
+    if (!decided) return;
+
+    const copy = offerCopy(decided, { dateFrom: after.date_from, dateTo: after.date_to });
+    await deliverPush({
+      action: `SHIFT_OFFER_${decided}`,
+      actor: text(after.user_id),
+      recipients: offerRecipients({ event: decided, offer: after }),
+      preference: copy.preference,
+      title: copy.title,
+      body: copy.body,
+      data: {
+        event: `SHIFT_OFFER_${decided}`,
+        offer_id: event.params.offerId,
+        schedule_id: after.schedule_id,
+        date_from: after.date_from,
+        date_to: after.date_to || after.date_from,
+      },
+    });
+  } catch (error) {
+    console.error(`[push] the decision notification failed: ${(error && error.message) || error}`);
+  }
+});
+
+// An announcement: whoever the audience names, by the same keys the rules check with hasAny - so an audience cannot mean
+// one thing to the rules and another thing to the push.
+exports.onAnnouncementCreated = onDocumentCreated('announcements/{announcementId}', async (event) => {
+  try {
+    const announcement = (event.data && event.data.data()) || {};
+    const users = await db.collection('users').get();
+    const accounts = users.docs.map((entry) => ({
+      userId: entry.id,
+      roleId: (entry.data() || {}).role_id,
+      rankId: (entry.data() || {}).rank_id,
+    }));
+
+    const message = text(announcement.message);
+    await deliverPush({
+      action: 'ANNOUNCEMENT_PUSHED',
+      actor: text(announcement.author_user_id || announcement.user_id),
+      recipients: announcementRecipients({ audienceKeys: announcement.audience_keys, accounts }),
+      preference: 'notify_announcements',
+      title: text(announcement.title) || 'Announcement',
+      // Trimmed: a notification body is a glance, and the announcement itself is in the app. The service worker falls
+      // back to a sentence of its own when this is empty.
+      body: message.length > 160 ? `${message.slice(0, 157)}...` : message,
+      data: { event: 'ANNOUNCEMENT', announcement_id: event.params.announcementId },
+    });
+  } catch (error) {
+    console.error(`[push] the announcement notification failed: ${(error && error.message) || error}`);
+  }
 });
 
 // -------------------------------------------------------------------------------------------------------------
