@@ -34,6 +34,10 @@ const keysFor = async (uid) => {
   return audienceKeysFor({ userId: uid, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
 };
 
+// A read that is allowed to come back empty. Used only by the pre-login payload, where the rules decide what a caller
+// with no identity may see and a refusal is an answer rather than a failure.
+const quietly = (read) => read().catch(() => null);
+
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
   GET_ROSTER: () => rosterRows().then((roster) => ({ roster })),
@@ -56,11 +60,26 @@ export const READERS = {
   ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
   ADMIN_GET_DOCUMENTS: () => rowsOf(collection(firestore(), 'documents')).then((documents) => ({ documents })),
 
+// The pre-login payload: what the loading screen needs before anybody has signed in.
+//
+// It reads what it can and OMITS what it cannot, rather than failing: the rules let anybody read `settings/public`,
+// and deliberately refuse roles, ranks and shifts to a caller with no identity - they are station data, not public
+// data. So those three are best-effort, and the sign-in payload fills them in a moment later. That asymmetry is the
+// point: this action is the ONE read the app makes before it knows who is asking.
   GET_INITIAL_DATA: async () => {
-    const [settings, roles] = await Promise.all([
+    const [settings, roles, ranks, shifts, announcements] = await Promise.all([
       getDoc(doc(firestore(), 'settings', 'public')),
-      rowsOf(collection(firestore(), 'roles')),
+      quietly(() => rowsOf(collection(firestore(), 'roles'))),
+      quietly(() => rowsOf(collection(firestore(), 'ranks'))),
+      quietly(() => rowsOf(collection(firestore(), 'shifts'))),
+      quietly(() => audienceRows('announcements', ['*'])),
     ]);
-    return { systemSettings: settingRows(settings), roles };
+    return {
+      systemSettings: settingRows(settings),
+      ...(roles ? { roles } : {}),
+      ...(ranks ? { ranks } : {}),
+      ...(shifts ? { shifts } : {}),
+      ...(announcements ? { announcements } : {}),
+    };
   },
 };

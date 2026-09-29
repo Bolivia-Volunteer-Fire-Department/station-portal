@@ -147,8 +147,13 @@ export const ROUTED_FEATURES = {
       'GET_CERTIFICATIONS',
       'MY_ANNOUNCEMENTS',
       'GET_EVENTS',
+      // The ONE read nobody has signed in for yet. It is here rather than in its own feature because it answers from
+      // the same data - and because a feature is a unit of the move, not of the menu.
+      'GET_INITIAL_DATA',
     ],
-    switchReads: ['MY_PUSH_DEVICES', 'GET_INITIAL_DATA'],
+    // `MY_PUSH_DEVICES` is the last of the member reads left, and it needs a callable: the card asks whose device this
+    // browser is, and a member may only read their OWN row, so another member's token reads as nothing at all.
+    switchReads: ['MY_PUSH_DEVICES'],
   },
   // The two read payloads, named so `requires` can point at them. They write nothing themselves: this is where the
   // bootstrap actions become Firestore-backed, and it is the hop that unlocks every feature above.
@@ -227,7 +232,8 @@ export const routeRead = async (action, body = {}) => {
   }
 
   const { firebaseAuth } = await import('./firebase.js');
-  const uid = firebaseAuth().currentUser.uid;
+  // May be empty for the pre-login read, which is answered before there is a user at all.
+  const uid = firebaseAuth().currentUser?.uid || '';
   try {
     // The two payloads have their own dispatchers, because each is a whole shape to assemble. Everything else that
     // is routed as a read answers from firestoreReads.js, one slice at a time - which is how ten refresh reads are
@@ -268,6 +274,10 @@ export const failureFor = (error) => {
 
 // Whether this action should go to Firestore, and if not, why not. Exported so the harness can assert each
 // condition on its own rather than only the aggregate.
+// The reads that are answered BEFORE anybody has signed in. There is exactly one, and it is the loading screen's:
+// it draws the station's name and its own messages, which is why `settings/public` is readable by anybody at all.
+const PRE_AUTH_READS = ['GET_INITIAL_DATA'];
+
 export const routingBlocker = async (action) => {
   const feature = ROUTED_WRITES[action] || ROUTED_READS[action];
   if (!feature) return 'not-a-routed-action';
@@ -276,6 +286,10 @@ export const routingBlocker = async (action) => {
 
   const missing = ROUTED_FEATURES[feature].requires.filter((name) => !featureIsOn(name));
   if (missing.length) return `prerequisite-off:${missing.join(',')}`;
+
+  // A caller with no Firebase user has no uid to write as and no rule to satisfy - EXCEPT for the pre-login read,
+  // whose rules say what a stranger may see and whose reader omits whatever they may not.
+  if (PRE_AUTH_READS.includes(action)) return null;
 
   // Imported here rather than at the top, so the auth SDK is not pulled into every build: api.js imports this
   // module, and every screen imports api.js.

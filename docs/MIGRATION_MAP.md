@@ -165,6 +165,18 @@ own rows" and wants deciding rather than doing.
 **Neither blocks the station.** A member's Auth account already holds the migration's temporary password, so the
 passwords in `secrets/temp-passwords.txt` can be handed out today, and the login already prefers Firebase.
 
+**One thing the move has silently changed, and it needs deciding.** The audit log. On the sheet, the server wrote an
+audit row for what an officer did, because the server was the one doing it. Now the straightforward admin saves -
+roles, ranks, shifts, assignments, templates, certification setup, checklist items, announcements, documents, events,
+settings - go straight to Firestore from the browser, and **Firestore has no audit log**. The rows are correct and the
+rules police who may write them, but nobody can say afterwards who changed a role. The callable-backed work (creating
+a member, resetting a password, suspending somebody, saving the board) still audits, because a function does it.
+
+The options are to accept it (the rules are the record of who may, not who did), to move those saves behind a generic
+callable that audits before writing, or to have the audit written by the same client write - which the rules forbid,
+and for a good reason: an audit row a browser can forge is not an audit row. It is written here because it is a real
+change in what the station can answer for, and it is not the kind of thing to discover during an enquiry.
+
 ## What the migration does, in order
 
 1. **Read** every tab (read-only, service account, no writes at all).

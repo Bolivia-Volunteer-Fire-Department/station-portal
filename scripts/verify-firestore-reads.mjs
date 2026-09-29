@@ -204,6 +204,16 @@ const main = async () => {
   checkIs('and the documents collection, which had no rules at all until now', Array.isArray(allDocuments.documents), 'no documents');
   await signOut(firebaseAuth());
 
+  // The pre-login read, with NOBODY signed in - which is the whole point of it and the only read in the app that
+  // works that way. The asymmetry asserted here is the design: the station's own settings are readable by anybody,
+  // and roles are NOT, because they are station data rather than public data. Omitting them is the correct answer,
+  // not a failure, and the sign-in payload fills them in a moment later.
+  await signOut(firebaseAuth());
+  const preLogin = await routeRead('GET_INITIAL_DATA');
+  checkIs('the loading screen reads without anybody signed in', preLogin !== null, 'nothing was routed');
+  check('and gets the station settings it draws', [preLogin.success, Array.isArray(preLogin.systemSettings)], [true, true]);
+  checkIs('while roles are omitted, as the rules intend', preLogin.roles === undefined, JSON.stringify(preLogin.roles));
+
   // The kill switch, which has to work whatever else is true.
   process.env.VITE_FIRESTORE_FEATURES = 'off';
   check('with the switch off the router answers null', await routeRead('GET_BOOTSTRAP'), null);
