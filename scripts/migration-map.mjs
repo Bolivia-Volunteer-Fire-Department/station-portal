@@ -14,6 +14,42 @@ export const SECRET_KEY = /private_key|secret|password|passwd|token|api_key|apik
 
 export const isSecretKey = (key) => SECRET_KEY.test(String(key || ''));
 
+// A spreadsheet cell is a string; Firestore has real types, and the rules care.
+//
+// THIS IS THE BUG THAT MADE THE FIRST ROUTED READ FAIL. firestore.rules asks `role.is_admin == true` and
+// `role.get('can_edit_users', false) == true`. The migration wrote every value as a trimmed string, so "TRUE" was
+// compared to a boolean, read as false, and every officer permission granted by a role came out as not granted -
+// which surfaced as permission-denied on the member payload, from a browser where the data and the rules were both
+// correct. A boolean-looking COLUMN NAME plus a boolean-looking VALUE is the signal; anything else keeps its string.
+const BOOLEAN_COLUMN = /^(is_|can_|has_|should_|exclude_|requires_)/;
+// Numbers the app compares or does arithmetic with: row_version drives conflict detection, rank_order drives "this
+// rank and above", and the rest are counts and day offsets.
+const NUMERIC_COLUMNS = new Set([
+  'row_version',
+  'sort_order',
+  'rank_order',
+  'rank_order_required',
+  'warn_days_before',
+  'recurring_amount',
+  'date_of_month',
+  'duration',
+  'calc_hours',
+]);
+
+export const typedValue = (header, value) => {
+  const text = String(value ?? '').trim();
+  if (BOOLEAN_COLUMN.test(header)) {
+    // Anything that is not a recognisable yes is a no, which is what a blank cell meant in the sheet.
+    if (/^(true|yes|on|1)$/i.test(text)) return true;
+    return false;
+  }
+  if (NUMERIC_COLUMNS.has(header)) {
+    const number = Number(text);
+    return text !== '' && Number.isFinite(number) ? number : text;
+  }
+  return text;
+};
+
 // --- derived fields -----------------------------------------------------------------------------------------------
 
 // The audience array a document has to carry, because the member payload queries `array-contains-any` against the

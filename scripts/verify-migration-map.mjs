@@ -9,7 +9,7 @@
  *
  * Run with: npm run verify:migration-map
  */
-import { TAB_MAP, audienceKeysFrom, isOpenFrom, isSecretKey, mappedTabs, skippedTabs, slotKeyFrom } from './migration-map.mjs';
+import { TAB_MAP, audienceKeysFrom, isOpenFrom, isSecretKey, mappedTabs, skippedTabs, slotKeyFrom, typedValue } from './migration-map.mjs';
 import { planForTab, planForTabs } from './migrate-plan.mjs';
 
 let failures = 0;
@@ -95,7 +95,9 @@ check('the public half keeps the roster fields', usersPlan.collections.users[0],
   id: 'u1', name: 'J Doe', role_id: 'officer', rank_id: 'r2',
 });
 check('the private half keeps the username and the status', usersPlan.collections.users_private[0], {
-  username: 'jdoe', status: 'active', is_change_password_on_login: 'TRUE',
+  // A real boolean, not "TRUE": the rules compare `role.is_admin == true`, and the string cost every officer
+  // permission in the database. See typedValue in migration-map.mjs.
+  username: 'jdoe', status: 'active', is_change_password_on_login: true,
 });
 checkIs(
   'and the password is nowhere at all',
@@ -235,6 +237,25 @@ checkIs(
 // The distinction the first run taught: a decision is not a problem. The plan reports both, separately, because 107
 // lines for four findings is a report nobody reads to the end.
 checkIs('nothing decided is also a problem', !logPlan.notes.some((n) => logPlan.problems.includes(n)));
+
+// --- the typing, which is what made the first routed read fail ---------------------------------------------------
+
+// The spreadsheet stores TRUE and FALSE as strings; firestore.rules compares booleans. Every officer permission in
+// the database was read as not granted because of this, and it surfaced as permission-denied on the member payload -
+// a symptom with nothing to do with the cause.
+check('a boolean column becomes a real boolean', typedValue('is_admin', 'TRUE'), true);
+check('and the other spelling of it', typedValue('can_edit_users', 'true'), true);
+check('FALSE becomes false, not the string', typedValue('is_admin', 'FALSE'), false);
+check('and a blank cell is false, which is what it meant', typedValue('is_renewable', ''), false);
+check('a number the app compares becomes a number', typedValue('rank_order', '3'), 3);
+check('and conflict detection gets one too', typedValue('row_version', '12'), 12);
+check('while a date stays the string the readers expect', typedValue('date_from', '2026-03-04'), '2026-03-04');
+check('and so does free text', typedValue('description', 'Engine'), 'Engine');
+const roleRows = [{ id: 'officer', description: 'Officer', is_admin: 'TRUE', can_edit_users: 'TRUE', can_view_my_schedule: 'FALSE' }];
+const rolePlan = planForTab({ tab: 'roles', spec: TAB_MAP.roles, rows: roleRows });
+check('and a role document carries booleans, which is what the rules read', rolePlan.collections.roles[0], {
+  id: 'officer', description: 'Officer', is_admin: true, can_edit_users: true, can_view_my_schedule: false,
+});
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

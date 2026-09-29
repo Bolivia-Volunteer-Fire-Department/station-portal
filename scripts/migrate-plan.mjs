@@ -10,7 +10,7 @@
 //
 // Run with: npm run migration:plan
 import { accessTokenFor, resolveServiceAccount, resolveSpreadsheetId } from './migrate-recon.mjs';
-import { TAB_MAP, audienceKeysFrom, isSecretKey, skippedTabs } from './migration-map.mjs';
+import { TAB_MAP, audienceKeysFrom, isSecretKey, skippedTabs, typedValue } from './migration-map.mjs';
 import { pathToFileURL } from 'node:url';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -89,7 +89,8 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
         return;
       }
       const side = publicKeys.has(key) ? 'public' : 'private';
-      sides[side][key] = String(row[spec.pair.value] ?? '');
+      // Typed by KEY: `is_dark_mode` is a boolean the client reads, and the string "FALSE" is truthy.
+      sides[side][key] = typedValue(key, row[spec.pair.value]);
       landed[side].push(key);
     });
     push('settings/public', sides.public);
@@ -191,10 +192,10 @@ export const planForTab = ({ tab, spec, rows, ranks = [], knownIds = {} }) => {
       // report is not enough if the document still carries it.
       if (!declared.has(header) && isSecretKey(header)) return;
       if (spec.rename && spec.rename[header]) {
-        document[spec.rename[header]] = value;
+        document[spec.rename[header]] = typedValue(spec.rename[header], value);
         return;
       }
-      document[header] = value;
+      document[header] = typedValue(header, value);
     });
     Object.entries(spec.derive || {}).forEach(([field, derive]) => {
       document[field] = derive(row);
