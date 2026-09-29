@@ -101,6 +101,14 @@ export const ROUTED_FEATURES = {
       'ADMIN_SAVE_ANNOUNCEMENT',
       'ADMIN_SAVE_DOCUMENT',
       'ADMIN_SAVE_EVENT',
+      'ADMIN_SAVE_ASSIGNMENT',
+      'ADMIN_SAVE_SCHEDULE_TEMPLATE',
+      'ADMIN_SAVE_CERTIFICATION',
+      'SAVE_TRAINING',
+      'ADMIN_DELETE_ASSIGNMENT',
+      'ADMIN_DELETE_SCHEDULE_TEMPLATE',
+      'ADMIN_DELETE_CERTIFICATION',
+      'ADMIN_BULK_SAVE_TRAINING',
       'ADMIN_DELETE_ROLE',
       'ADMIN_DELETE_RANK',
       'ADMIN_DELETE_SHIFT',
@@ -359,6 +367,13 @@ const DISPATCH = {
     });
     return ok({ id });
   },
+
+  // The bulk training save is its own dispatcher rather than a row in the table above, because it is a BATCH: rows
+  // and removals in one commit.
+  ADMIN_BULK_SAVE_TRAINING: async (body) => {
+    const { saveTrainingRows } = await writes();
+    return ok(await saveTrainingRows({ rows: body.trainings || [], deleteIds: body.deleteIds || [] }));
+  },
 };
 
 // The officer tabs whose save is one document, and the collection each one writes. Declared here rather than in
@@ -369,6 +384,16 @@ const DOCUMENT_SAVES = {
   ADMIN_SAVE_SHIFT: 'shifts',
   ADMIN_SAVE_CERTIFICATION_SETUP: 'certification_setup',
   ADMIN_SAVE_CHECKLIST_ITEM: 'document_checklist_items',
+  // Assignments and schedule templates are plain documents, which is worth stating because it was not obvious: their
+  // model has a private half holding an officer's `admin_note`, but NO form in the app collects one - the sheet had no
+  // column for it either, which is why the migration wrote them empty. So the public document is the whole save, and
+  // the private halves keep the empty note the migration left. A note field would change this.
+  ADMIN_SAVE_ASSIGNMENT: 'assignments',
+  ADMIN_SAVE_SCHEDULE_TEMPLATE: 'schedule_templates',
+  // A certification RECORD is a plain document. The badge index beside it is not - it is materialized from every
+  // member's records - and it is the one piece of this tab still to come.
+  ADMIN_SAVE_CERTIFICATION: 'certifications',
+  SAVE_TRAINING: 'trainings',
 };
 
 const DOCUMENT_DELETES = {
@@ -382,6 +407,9 @@ const DOCUMENT_DELETES = {
   ADMIN_DELETE_ANNOUNCEMENT: 'announcements',
   ADMIN_DELETE_DOCUMENT: 'documents',
   ADMIN_DELETE_EVENT: 'events',
+  ADMIN_DELETE_ASSIGNMENT: 'assignments',
+  ADMIN_DELETE_SCHEDULE_TEMPLATE: 'schedule_templates',
+  ADMIN_DELETE_CERTIFICATION: 'certifications',
 };
 
 // The three collections a member sees by AUDIENCE, whose saves carry a materialized `audience_keys` list computed as

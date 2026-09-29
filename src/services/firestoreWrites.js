@@ -217,3 +217,26 @@ export const deleteDocument = async ({ collection, id }) => {
   await deleteDoc(doc(firestore(), collection, String(id || '')));
   return { id: String(id || '') };
 };
+
+// The bulk training save: rows upserted (a blank id creates one) and rows removed, in ONE commit - the same shape as
+// the availability batch and for the same reason. A half-applied bulk save is a training record that exists for some
+// of the people who attended it, which is worse than one that failed outright.
+export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
+  const db = firestore();
+  const batch = writeBatch(db);
+
+  rows.forEach((row) => {
+    const { action, token, row_version, id, ...fields } = row;
+    void action;
+    void token;
+    void row_version;
+    const target = String(id || '').trim() || doc(collection(db, 'trainings')).id;
+    // The id is written as a FIELD as well as used as the key, because the migration put it there and the app reads
+    // it off every row it lists.
+    batch.set(doc(db, 'trainings', target), { ...fields, id: target }, { merge: true });
+  });
+  deleteIds.forEach((id) => batch.delete(doc(db, 'trainings', String(id))));
+
+  await batch.commit();
+  return { saved: rows.length, deleted: deleteIds.length };
+};
