@@ -382,7 +382,6 @@ const DOCUMENT_SAVES = {
   ADMIN_SAVE_ROLE: 'roles',
   ADMIN_SAVE_RANK: 'ranks',
   ADMIN_SAVE_SHIFT: 'shifts',
-  ADMIN_SAVE_CERTIFICATION_SETUP: 'certification_setup',
   ADMIN_SAVE_CHECKLIST_ITEM: 'document_checklist_items',
   // Assignments and schedule templates are plain documents, which is worth stating because it was not obvious: their
   // model has a private half holding an officer's `admin_note`, but NO form in the app collects one - the sheet had no
@@ -390,10 +389,17 @@ const DOCUMENT_SAVES = {
   // the private halves keep the empty note the migration left. A note field would change this.
   ADMIN_SAVE_ASSIGNMENT: 'assignments',
   ADMIN_SAVE_SCHEDULE_TEMPLATE: 'schedule_templates',
-  // A certification RECORD is a plain document. The badge index beside it is not - it is materialized from every
-  // member's records - and it is the one piece of this tab still to come.
-  ADMIN_SAVE_CERTIFICATION: 'certifications',
   SAVE_TRAINING: 'trainings',
+};
+
+// Saves whose field is only HALF the story, because they change what a badge index should say - so each of them
+// rebuilds it afterwards. A certification record is what the index is derived from; a certification TYPE carries the
+// icon and the show-next-to-name flag that decide whether a badge exists at all. Neither belongs in the plain table
+// above, because saving the document alone would leave the roster showing yesterday's claim.
+const BADGE_REFRESHING_SAVES = {
+  ADMIN_SAVE_CERTIFICATION: { collection: 'certifications', kind: 'save' },
+  ADMIN_DELETE_CERTIFICATION: { collection: 'certifications', kind: 'delete' },
+  ADMIN_SAVE_CERTIFICATION_SETUP: { collection: 'certification_setup', kind: 'save' },
 };
 
 const DOCUMENT_DELETES = {
@@ -409,7 +415,6 @@ const DOCUMENT_DELETES = {
   ADMIN_DELETE_EVENT: 'events',
   ADMIN_DELETE_ASSIGNMENT: 'assignments',
   ADMIN_DELETE_SCHEDULE_TEMPLATE: 'schedule_templates',
-  ADMIN_DELETE_CERTIFICATION: 'certifications',
 };
 
 // The three collections a member sees by AUDIENCE, whose saves carry a materialized `audience_keys` list computed as
@@ -442,6 +447,17 @@ Object.entries(AUDIENCE_SAVES).forEach(([action, { collection, rankAndAbove }]) 
   DISPATCH[action] = async (body, uid) => {
     const { saveAudienceDocument } = await writes();
     return ok(await saveAudienceDocument({ collection, id: body.id, body, rankAndAbove, authorId: uid }));
+  };
+});
+
+// Save the document, then rebuild the badge index - in that order, because the index is derived from what was just
+// written. The reply carries how many members have badges now, which is the visible proof it ran.
+Object.entries(BADGE_REFRESHING_SAVES).forEach(([action, { collection, kind }]) => {
+  DISPATCH[action] = async (body) => {
+    const { saveDocument, deleteDocument, refreshCertificationBadges } = await writes();
+    if (kind === 'delete') await deleteDocument({ collection, id: body.id });
+    else await saveDocument({ collection, id: body.id, body });
+    return ok({ id: String(body.id || ''), badges: await refreshCertificationBadges() });
   };
 });
 

@@ -21,6 +21,7 @@ import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import {
   approveOffer,
   audienceKeysForWrite,
+  badgeForRecord,
   clockIn,
   clockOut,
   makeOffer,
@@ -271,6 +272,26 @@ const main = async () => {
     }
   })();
   checkIs('and a rank that does not exist is refused rather than hiding the row', ghostRank.includes('does not exist'), ghostRank);
+
+  // --- the badge index: the one piece of the certifications tab that makes a CLAIM about a member ---
+  //
+  // "This member is a paramedic" is worth being wrong about only in one direction, so the two cases that must earn
+  // nothing - not started yet, and lapsed - are asserted as carefully as the one that must.
+  console.log('\n--- the badge index ---');
+  const badgeType = { id: 'emtb', name: 'EMT-Basic', icon: 'ambulance', show_next_to_name: true };
+  const today = '2026-09-28';
+  check('a current certification earns its badge', badgeForRecord({ effective_date: '2024-01-01', end_date: '2027-01-01' }, badgeType, today), {
+    id: 'emtb', name: 'EMT-Basic', icon: 'ambulance',
+  });
+  checkIs('one with no end date never lapses', badgeForRecord({ effective_date: '2024-01-01', end_date: '' }, badgeType, today) !== null);
+  check('one that has not started yet earns nothing', badgeForRecord({ effective_date: '2027-01-01', end_date: '' }, badgeType, today), null);
+  check('and one that has lapsed earns nothing either', badgeForRecord({ effective_date: '2020-01-01', end_date: '2025-01-01' }, badgeType, today), null);
+  check(
+    'a type that does not ask to be shown earns nothing, however current',
+    badgeForRecord({ effective_date: '2024-01-01' }, { ...badgeType, show_next_to_name: false }, today),
+    null
+  );
+  check('and neither does one with no icon to draw', badgeForRecord({ effective_date: '2024-01-01' }, { ...badgeType, icon: '' }, today), null);
 
   checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };

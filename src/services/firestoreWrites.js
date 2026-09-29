@@ -240,3 +240,56 @@ export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
   await batch.commit();
   return { saved: rows.length, deleted: deleteIds.length };
 };
+
+// The badge index: member id -> the [{ id, name, icon }] of the types that asked to be shown beside a name, and only
+// for records that are CURRENT. This mirrors certificationBadgeIndex in Code.gs, including the part that matters
+// most: a paramedic badge on somebody whose licence lapsed is worse than no badge, because it is the app making a
+// claim the station cannot back.
+//
+// It refreshes EVERY member rather than the one just edited, which is the honest trade. The inputs are the records,
+// the types and today, so editing a TYPE changes other people's badges, and a record quietly ageing past its end date
+// changes its own. At station scale that is a few dozen small writes per save, and it is the only way the roster
+// cannot end up showing a stale claim it cannot back.
+// Whether ONE record earns a badge today, extracted because it is the only part of the index with a claim in it -
+// "this member is a paramedic" - and therefore the only part worth testing on its own. A type that does not ask to be
+// shown, or has no icon, earns nothing however current the record is.
+export const badgeForRecord = (record = {}, type = {}, today = '') => {
+  if (!type || type.show_next_to_name !== true || !type.icon) return null;
+  const from = String(record.effective_date || '');
+  const to = String(record.end_date || '');
+  if (from && from > today) return null; // not started yet
+  if (to && to < today) return null; // lapsed - the badge would be a claim the station cannot back
+  return { id: type.id, name: type.name, icon: type.icon };
+};
+
+export const refreshCertificationBadges = async () => {
+  const db = firestore();
+  const today = stationTimestamp().slice(0, 10);
+  const [records, types] = await Promise.all([rowsOf(collection(db, 'certifications')), rowsOf(collection(db, 'certification_setup'))]);
+  const typeById = Object.fromEntries(types.map((type) => [String(type.id), type]));
+
+  const index = {};
+  records.forEach((record) => {
+    const owner = String(record.user_id || '');
+    const badge = owner ? badgeForRecord(record, typeById[String(record.certification_id || '')], today) : null;
+    if (!badge) return;
+    index[owner] = index[owner] || [];
+    // One badge per type, however many periods a member has of it.
+    if (index[owner].some((existing) => existing.id === badge.id)) return;
+    index[owner].push(badge);
+  });
+
+  // A member whose last badge lapsed loses the document, rather than keeping an empty one: the roster draws whatever
+  // this returns, and an empty list and a missing document have to mean the same thing.
+  const existing = await rowsOf(collection(db, 'certification_badges'));
+  const batch = writeBatch(db);
+  Object.entries(index).forEach(([userId, badges]) => {
+    batch.set(doc(db, 'certification_badges', userId), { user_id: userId, badges }, { merge: true });
+  });
+  existing
+    .filter((row) => !index[String(row.id)])
+    .forEach((row) => batch.delete(doc(db, 'certification_badges', String(row.id))));
+  await batch.commit();
+
+  return { members: Object.keys(index).length, cleared: existing.filter((row) => !index[String(row.id)]).length };
+};
