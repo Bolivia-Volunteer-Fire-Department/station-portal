@@ -82,15 +82,29 @@ Two things it needs:
 1. **Identity Platform.** Blocking functions require the project to be upgraded, which is a single click in the
    console (Authentication → the upgrade prompt) and free at this scale. Deploying the function without the upgrade
    simply leaves it unused.
-2. **A deploy** - `npm run deploy:functions`.
+2. **A deploy** - `npm run deploy:functions`. **Do it after the upgrade as well as before:** the trigger is
+   registered with Identity Platform when the function deploys, so deploying again is what guarantees the two know
+   about each other. `firebase functions:list` should show eight functions, `beforeUserCreated` among them.
 
 It is worth knowing that blocking functions **fail closed**: if the function cannot run, account creation fails
 rather than quietly falling through. That is the correct way round for a security control, and it is why its logic is
 three lines long - the more it does, the more ways it has to stop an officer adding a member.
 
-**To check it worked**, open the deployed site, and in the browser console call
-`firebase.auth().createUserWithEmailAndPassword('someone@example.com', 'password123')`. It should fail, and no
-account should appear under Authentication → Users.
+**To check it worked**, ask the Auth REST API for an account, which is exactly what the client SDK does underneath -
+and the only route that works today, because the app itself still has no Firebase in it (see step 2):
+
+```bash
+# The API key is public by design; this never leaves your shell.
+KEY=$(grep VITE_FIREBASE_API_KEY .env | cut -d= -f2)
+curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"someone@example.com","password":"password123","returnSecureToken":true}'
+```
+
+**Blocked looks like an error object with no `idToken`** - typically `400` with a message naming the blocking
+function. If you get an `idToken` back, the block is not active: check that the function deployed (it is called
+`beforeUserCreated`) and that the Identity Platform upgrade went through. Either way, confirm no account appeared
+under Authentication → Users.
 The emulators cannot check this for us - the Auth emulator does not run blocking triggers - so this one stays a
 manual step after each deploy of `functions/`.
 
