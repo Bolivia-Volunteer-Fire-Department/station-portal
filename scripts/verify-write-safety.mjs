@@ -899,7 +899,18 @@ checkIs(
   'the check runs before the row is written',
   /stored !== String\(supplied\)\.trim\(\)\) throw rowVersionConflict_/.test(codeSource)
 );
-checkIs('the client sends the version on a user save', /row_version: rowVersionField\(userData\)/.test(apiSource));
+// The user save used to carry `row_version`: the sheet's conflict check, which REFUSED a form filled in before another
+// officer's change rather than silently overwriting it. Firestore does not work that way, and the decision is recorded
+// where the envelope is unpacked - see firestoreWrites.js, which discards `row_version` deliberately and says the app's
+// rule is that the last writer wins.
+//
+// So this asserts what is TRUE rather than what was, and it says the loss out loud: a stale save that quietly wins is
+// worth knowing about, and if the station ever wants the refusal back, a version field compared inside a transaction is
+// the equivalent - the mechanism exists, it is simply not what every save in this app does today.
+checkIs(
+  'the client no longer sends a row version, because Firestore saves are last-writer-wins by decision',
+  /row_version: rowVersionField\(userData\)/.test(apiSource) === false
+);
 checkIs('and on the other single-record saves', (apiSource.match(/row_version: rowVersionField\(/g) || []).length, 8);
 checkIs(
   'the forms carry it from the row they were opened on',
