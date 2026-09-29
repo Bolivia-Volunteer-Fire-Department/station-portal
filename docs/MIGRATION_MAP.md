@@ -133,3 +133,14 @@ over 1 MiB, a tab with no mapping at all.
 The Auth accounts are a separate step in the same tool: every member in `users` needs an account before anything else
 can move, the sheet holds only a hashed password, so each arrives with a temporary password and the officer-driven
 change-on-first-login flow already in `functions/index.js` does the rest.
+
+**And the account's uid is the sheet's id.** That is not a detail, it is the thing that decides whether any of this
+works: every document about a member is keyed by their id - `users`, `users_private`, `user_settings`, and every
+`user_id` in every other collection - and `firestore.rules` compares that key to `request.auth.uid`. If Firebase were
+left to mint its own uid, the migration would file 33 members' rows under ids nothing could authenticate as, and each
+of them would sign in to an empty station. The Admin SDK accepts a chosen uid, so the two line up by construction and
+no reference anywhere has to be rewritten.
+
+An account created by hand in the console is the one case that does not: it has a uid of Firebase's choosing and the
+right address, so the migration cannot fix it and must not ignore it. The writer reports every such account by name,
+with both ids, and exits non-zero - because the failure it prevents is a member who can sign in and see nothing.

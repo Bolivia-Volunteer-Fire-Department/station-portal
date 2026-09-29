@@ -180,13 +180,17 @@ export const TAB_MAP = {
   },
   certification_setup: { collections: ['certification_setup'], key: 'id' },
   system_log: {
+    // The log's DATA is not migrated: it is development noise rather than the station's history, and the owner said so.
+    // The STRUCTURE stays - firestore.rules already matches /system_log/{entryId} and the functions write audit rows
+    // through the Admin SDK - and Firestore creates a collection with its first document, so nothing needs creating
+    // here. What the writer must still know is the id rule below, for the first real audit write to look like the
+    // rest of this file.
+    skip: 'its existing rows are development noise; the rules and the audit writers already define the collection',
     collections: ['system_log'],
     key: 'id',
     // The id column here is a row counter, not an id: 35 of the 688 rows share one with another row, so using it as
-    // a document id would overwrite rows. Firestore mints one per row instead.
+    // a document id would overwrite rows. The writer mints one per row instead.
     mintIds: true,
-    // History, not references: these rows name users by username from before ids were rewritten (`id_migration`),
-    // and an audit trail that forgets where it came from is worse than one with a stale name in it.
     softForeignKeys: { user_id: 'users' },
   },
   id_migration: { skip: 'history: it records a one-off rewrite of every id' },
