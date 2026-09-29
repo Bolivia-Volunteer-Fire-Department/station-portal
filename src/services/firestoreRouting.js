@@ -79,13 +79,31 @@ export const ROUTED_FEATURES = {
   },
   // The two read payloads, named so `requires` can point at them. They write nothing themselves: this is where the
   // bootstrap actions become Firestore-backed, and it is the hop that unlocks every feature above.
-  memberPayload: { requires: [], writes: [], switchReads: ['GET_BOOTSTRAP'] },
-  adminPayload: { requires: ['memberPayload'], writes: [], switchReads: ['ADMIN_GET_BOOTSTRAP'] },
+  //
+  // `reads` is what the router DISPATCHES today; `switchReads` is the fuller list of reads that have to move with the
+  // feature before it can be switched on - a read named there and not here is a step still to take, which is the
+  // difference between a plan and a claim.
+  memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
+  adminPayload: {
+    requires: ['memberPayload'],
+    // GET_ADMIN_BOOTSTRAP arrives above: the admin payload reads thirty-odd collections and its own harness comes
+    // first. Naming it here without a dispatcher would be a route that throws.
+    writes: [],
+    reads: [],
+    switchReads: ['ADMIN_GET_BOOTSTRAP'],
+  },
 };
 
-// Every action any feature writes, mapped to the feature that owns it. Built from the table so the two cannot drift.
+// Every action any feature writes or reads, mapped to the feature that owns it. Built from the table so the two
+// cannot drift - the counts in the harness are taken from these, and a duplicate would collapse in the object.
 export const ROUTED_WRITES = Object.fromEntries(
-  Object.entries(ROUTED_FEATURES).flatMap(([feature, spec]) => spec.writes.map((action) => [action, feature]))
+  Object.entries(ROUTED_FEATURES).flatMap(([feature, spec]) =>
+    (spec.writes || []).map((action) => [action, feature])
+  )
+);
+
+export const ROUTED_READS = Object.fromEntries(
+  Object.entries(ROUTED_FEATURES).flatMap(([feature, spec]) => (spec.reads || []).map((action) => [action, feature]))
 );
 
 // The reply shape `api.js` callers already read: `result.success`, and on failure `result.code` and
@@ -105,6 +123,28 @@ const FAILURE_MESSAGES = {
   'already-clocked-out': 'That shift is already closed.',
 };
 
+// The one entry point api.js uses for a read. null means "not routed", which is the signal to fetch it the way the
+// code always did. A read that FAILS answers null too, deliberately: the sheet still has the same data, so falling
+// back is both safe and better than an error - and unlike a write there is nothing to duplicate by trying.
+export const routeRead = async (action) => {
+  const blocker = await routingBlocker(action);
+  if (blocker) {
+    if (blocker !== 'feature-off' && blocker !== 'not-a-routed-action') {
+      console.info(`[firestore] ${action} is still read from the sheet (${blocker}).`);
+    }
+    return null;
+  }
+
+  const { firebaseAuth } = await import('./firebase.js');
+  const uid = firebaseAuth().currentUser.uid;
+  try {
+    return await READ_DISPATCH[action](uid);
+  } catch (error) {
+    console.info(`[firestore] ${action} could not be read from Firestore (${(error && error.code) || error.message}); using the sheet.`);
+    return null;
+  }
+};
+
 export const failureFor = (error) => {
   const name = String((error && error.message) || '');
   const code = String((error && error.code) || '');
@@ -121,7 +161,7 @@ export const failureFor = (error) => {
 // Whether this action should go to Firestore, and if not, why not. Exported so the harness can assert each
 // condition on its own rather than only the aggregate.
 export const routingBlocker = async (action) => {
-  const feature = ROUTED_WRITES[action];
+  const feature = ROUTED_WRITES[action] || ROUTED_READS[action];
   if (!feature) return 'not-a-routed-action';
   if (!featureIsOn(feature)) return 'feature-off';
   if (!firebaseConfigured()) return 'firebase-unconfigured';
@@ -141,6 +181,15 @@ export const routingBlocker = async (action) => {
 //
 // `firestoreWrites` is imported lazily: with the switch off, none of the Firebase SDK is ever fetched.
 const writes = () => import('./firestoreWrites.js');
+
+// The read dispatchers. GET_BOOTSTRAP is the member's whole sign-in payload, and it needs nothing but the uid: the
+// reader resolves the member's own role and rank from their document, because a claim can be an hour stale.
+const READ_DISPATCH = {
+  GET_BOOTSTRAP: async (uid) => {
+    const { fetchMemberPayload } = await import('./firestorePayload.js');
+    return fetchMemberPayload({ userId: uid });
+  },
+};
 
 const DISPATCH = {
   // CLOCK OUT needs the open entry's id, which the sheet backend found for itself. The Firestore side reads the

@@ -4,7 +4,7 @@ import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 import { createReadCoalescer, isReadAction, readKey } from '../utils/readCoalescing';
-import { routeWrite } from './firestoreRouting.js';
+import { routeRead, routeWrite } from './firestoreRouting.js';
 
 // The row version a save was based on, when the caller has one.
 //
@@ -169,8 +169,13 @@ export const fetchInitialData = async () =>
 // before it read a cell, and the calls at the end of that queue were the ones that ran out of the 60-second
 // patience this module enforces - which showed up as a calendar with no shifts on it and a clock that had gone
 // back to 12-hour. See memberBootstrapPayload in Code.gs.
-export const fetchBootstrap = async (token) =>
-  appScriptFetch({ action: 'GET_BOOTSTRAP', token }, { retryOnNetworkError: true });
+export const fetchBootstrap = async (token) => {
+  const request = { action: 'GET_BOOTSTRAP', token };
+  // The whole member sign-in in ONE request, as before - from Firestore when that payload is switched on, and from
+  // the sheet otherwise. A read that fails falls back the same way (see routeRead), because the sheet still has the
+  // data and there is nothing to duplicate by asking twice.
+  return (await routeRead('GET_BOOTSTRAP')) || appScriptFetch(request, { retryOnNetworkError: true });
+};
 
 // Everything an administration sign-in - and every admin save's background reload - needs, in ONE request. The
 // admin-scoped fields are present only for a role that may have them: a section the caller cannot have is omitted

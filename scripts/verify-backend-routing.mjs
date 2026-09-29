@@ -53,9 +53,8 @@ const actionIsWired = (action, source) =>
     : source.includes(`action: '${action}'`) && source.includes(`routeWrite('${action}'`);
 // --- the table, before any environment is set: this is the default build ----------------------------------------
 process.env.VITE_FIRESTORE_FEATURES = '';
-const { ROUTED_FEATURES, ROUTED_WRITES, routingBlocker, routeWrite, failureFor, ok } = await import(
-  '../src/services/firestoreRouting.js'
-);
+const { ROUTED_FEATURES, ROUTED_READS, ROUTED_WRITES, routingBlocker, routeRead, routeWrite, failureFor, ok } =
+  await import('../src/services/firestoreRouting.js');
 
 const features = Object.keys(ROUTED_FEATURES);
 checkIs(
@@ -99,6 +98,11 @@ check('no feature is its own prerequisite', reachesItself, []);
 for (const [action, feature] of Object.entries(ROUTED_WRITES)) {
   checkIs(`${action} (${feature}) is wired through routeWrite in api.js`, actionIsWired(action, apiSource));
 }
+// Reads dispatch through routeRead instead, and the same question applies: a feature that claims a read it cannot
+// route is a plan, not a fact.
+for (const [action] of Object.entries(ROUTED_READS)) {
+  checkIs(`${action} is wired through routeRead in api.js`, apiSource.includes(`routeRead('${action}'`));
+}
 for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
   for (const read of spec.switchReads) {
     checkIs(`${feature}: ${read} is a real api.js action`, apiSource.includes(`action: '${read}'`));
@@ -112,6 +116,8 @@ checkIs('the wiring check bites (mutation)', mutated !== apiSource && !actionIsW
 
 // --- the gates, in the order they are consulted ------------------------------------------------------------------
 check('an action no feature writes is not routed at all', await routingBlocker('PING'), 'not-a-routed-action');
+check('a read is switched off by default too', await routingBlocker('GET_BOOTSTRAP'), 'feature-off');
+check('and answers null, so it is read from the sheet exactly as before', await routeRead('GET_BOOTSTRAP'), null);
 check('switched off by default', await routingBlocker('SET_MY_AVAILABILITY'), 'feature-off');
 check('and routeWrite answers null, so the caller keeps doing what it did', await routeWrite('SET_MY_AVAILABILITY'), null);
 
@@ -142,7 +148,10 @@ const childScript = `
   process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,clock';
   const clockIn = await second.routingBlocker('CLOCK_IN');
   const clockOut = await second.routingBlocker('CLOCK_OUT');
-  console.log(JSON.stringify({ withoutPrerequisite, withoutUser, sent, clockIn, clockOut }));
+  // The member payload is the first READ to have a dispatcher, so it is the first thing the fourth condition holds
+  // back: switched on, configured, prerequisites met - and still the sheet, because nobody is signed in to Firebase.
+  const bootstrap = await second.routingBlocker('GET_BOOTSTRAP');
+  console.log(JSON.stringify({ withoutPrerequisite, withoutUser, sent, clockIn, clockOut, bootstrap }));
 `;
 const childOut = execFileSync(process.execPath, ['--input-type=module', '-e', childScript], { encoding: 'utf8' });
 const child = JSON.parse(childOut.trim().split('\n').pop());
@@ -160,6 +169,7 @@ check('the clock answers the same way, both directions', [child.clockIn, child.c
   'not-signed-in-to-firebase',
   'not-signed-in-to-firebase',
 ]);
+check('and so does the first routed read', child.bootstrap, 'not-signed-in-to-firebase');
 
 // --- the reply shape the screens already read ---------------------------------------------------------------------
 check('a success reply carries success', ok({ added: 1 }).success, true);

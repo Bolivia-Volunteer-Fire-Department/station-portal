@@ -36,7 +36,20 @@ const settingRows = (snapshot) => Object.entries(snapshot.data() || {}).map(([ke
 
 export const fetchMemberPayload = async (account) => {
   const db = firestore();
-  const keys = audienceKeysFor(account);
+
+  // Where the caller's own keys come from MATTERS. The role and rank are read from the member's own document, not
+  // from the Auth claims: a claim can be up to an hour stale after an officer changes somebody's role or rank, and
+  // these two decide which announcements and events are visible - so a stale one quietly shows the wrong station.
+  // The document is what the officer's save writes, which makes this one read the freshest answer available.
+  const supplied = account.roleId && account.rankId;
+  const roster = supplied
+    ? { role_id: account.roleId, rank_id: account.rankId }
+    : (await getDoc(doc(db, 'users', account.userId))).data() || {};
+  const keys = audienceKeysFor({
+    userId: account.userId,
+    roleId: String(roster.role_id || ''),
+    rankId: String(roster.rank_id || ''),
+  });
 
   // Reference data and the crew's shifts: everything a member may read for the whole station.
   const [roles, ranks, shifts, users, assignments, templates, schedule] = await Promise.all([
