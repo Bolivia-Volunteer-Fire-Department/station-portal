@@ -141,9 +141,16 @@ audience-bearing collections, and extend `scripts/verify-rules.mjs` to assert bo
 only what they may, and that an officer's whole-collection read is allowed. The readers behind them are a few lines
 each once that is true.
 
-The two member-facing exceptions are unchanged and named in the routing table: `MY_PUSH_DEVICES` (it also answers
-which device this browser is, which this side cannot work out yet) and `GET_INITIAL_DATA` (it runs before anyone
-signs in, so a route needing a Firebase user could never fire).
+Only ONE member-facing exception is left in the routing table, and it is the one that has to be there: `GET_INITIAL_DATA`
+runs before anyone signs in, so a route needing a Firebase user could never fire, and the router carries a single
+pre-auth exception for it.
+
+`MY_PUSH_DEVICES` was the other, and it is MOVED - the last member read to leave the sheet. It needed more than a
+reader because it answers two questions at once. "Which devices are mine" is a member's own rows and always was
+readable from Firestore. "Whose alerts arrive on THIS browser" is not a query Firestore will prove: a member may read
+their own `push_devices` rows and nobody else's, so another member's token reads as nothing at all and a shared
+computer looks like the signed-in member's own. The `pushDeviceOwner` callable answers it server-side, exactly as the
+sheet did, and returns only whose device it is and on which device - nothing else about the row.
 
 ## Two things the login work found, and what each needs
 
