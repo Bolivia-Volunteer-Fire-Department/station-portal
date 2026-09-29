@@ -28,6 +28,13 @@ import { firebaseConfigured } from './firebase.js';
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 const setting = (key) => env[key] ?? (typeof process !== 'undefined' ? process.env[key] : undefined);
 
+// Which features are switched on. Firebase being configured is what makes a build a Firestore build, so an
+// environment variable is the wrong place to require consent from - the OVERRIDE is what the variable is for:
+//
+//   unset            every feature whose prerequisites are met. A configured build routes; an unconfigured one
+//                    cannot, so this is the default the dev loop wants and the deployed site inherits.
+//   a list of names  only those (so `memberPayload` is a legitimate way to hold part of the move back).
+//   `off` or `none`  nothing, which is the kill switch.
 const enabledFeatures = () =>
   String(setting('VITE_FIRESTORE_FEATURES') || '')
     .split(',')
@@ -35,8 +42,9 @@ const enabledFeatures = () =>
     .filter(Boolean);
 
 const featureIsOn = (name) => {
-  const wanted = enabledFeatures();
-  return wanted.includes('*') || wanted.includes(name);
+  const named = enabledFeatures();
+  if (named.includes('off') || named.includes('none')) return false;
+  return named.length === 0 || named.includes('*') || named.includes(name);
 };
 
 // The features, their prerequisites, and the actions each one dispatches.
@@ -184,10 +192,14 @@ const writes = () => import('./firestoreWrites.js');
 
 // The read dispatchers. GET_BOOTSTRAP is the member's whole sign-in payload, and it needs nothing but the uid: the
 // reader resolves the member's own role and rank from their document, because a claim can be an hour stale.
+//
+// IT ANSWERS IN THE REPLY SHAPE, not the bare payload, and that is not cosmetic: api.js callers decide whether a
+// bootstrap loaded by reading `data.success`. A payload without it was dropped as a failed refresh - which is what
+// happened the first time this route was tried, and looked exactly like the read never moving to Firestore at all.
 const READ_DISPATCH = {
   GET_BOOTSTRAP: async (uid) => {
     const { fetchMemberPayload } = await import('./firestorePayload.js');
-    return fetchMemberPayload({ userId: uid });
+    return ok(await fetchMemberPayload({ userId: uid }));
   },
 };
 

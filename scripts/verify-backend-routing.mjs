@@ -52,7 +52,11 @@ const actionIsWired = (action, source) =>
     ? source.includes(DYNAMIC_WIRING[action]) && source.includes(`'${action}'`)
     : source.includes(`action: '${action}'`) && source.includes(`routeWrite('${action}'`);
 // --- the table, before any environment is set: this is the default build ----------------------------------------
-process.env.VITE_FIRESTORE_FEATURES = '';
+//
+// The default is ON, not off: a build with no Firebase config cannot route anything anyway (that is the gate
+// below), and one WITH a config is a build that has decided to move. The variable is an override - a list to hold
+// part of the move back, or `off` for the kill switch.
+delete process.env.VITE_FIRESTORE_FEATURES;
 const { ROUTED_FEATURES, ROUTED_READS, ROUTED_WRITES, routingBlocker, routeRead, routeWrite, failureFor, ok } =
   await import('../src/services/firestoreRouting.js');
 
@@ -116,10 +120,20 @@ checkIs('the wiring check bites (mutation)', mutated !== apiSource && !actionIsW
 
 // --- the gates, in the order they are consulted ------------------------------------------------------------------
 check('an action no feature writes is not routed at all', await routingBlocker('PING'), 'not-a-routed-action');
-check('a read is switched off by default too', await routingBlocker('GET_BOOTSTRAP'), 'feature-off');
-check('and answers null, so it is read from the sheet exactly as before', await routeRead('GET_BOOTSTRAP'), null);
-check('switched off by default', await routingBlocker('SET_MY_AVAILABILITY'), 'feature-off');
-check('and routeWrite answers null, so the caller keeps doing what it did', await routeWrite('SET_MY_AVAILABILITY'), null);
+
+// The kill switch first, because it is the one override that must work whatever else is true.
+process.env.VITE_FIRESTORE_FEATURES = 'off';
+check('`off` switches everything off', await routingBlocker('SET_MY_AVAILABILITY'), 'feature-off');
+check('including reads', await routingBlocker('GET_BOOTSTRAP'), 'feature-off');
+check('and routeRead answers null, so it is read from the sheet exactly as before', await routeRead('GET_BOOTSTRAP'), null);
+
+// Then the default: no config, no variable - and an unconfigured build cannot route, which is what keeps a build
+// without the VITE_FIREBASE_* values behaving exactly as it did before any of the move existed.
+delete process.env.VITE_FIRESTORE_FEATURES;
+check('an unconfigured build routes nothing, whatever the features', await routingBlocker('SET_MY_AVAILABILITY'), 'firebase-unconfigured');
+check('and no read either', await routingBlocker('GET_BOOTSTRAP'), 'firebase-unconfigured');
+check('so a write is not routed', await routeWrite('SET_MY_AVAILABILITY'), null);
+check('nor a read', await routeRead('GET_BOOTSTRAP'), null);
 
 // Configured and switched on, but the prerequisite is not: the guard against moving a write without its read.
 //

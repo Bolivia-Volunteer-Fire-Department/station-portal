@@ -134,6 +134,34 @@ const main = async () => {
 
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
   console.log('\n--- the harness itself ---');
+  // --- and the ROUTED path, which is what the app actually calls -------------------------------------------------
+  //
+  // The reader above is called directly; this calls what api.js calls, through the router, with the gates open -
+  // which is the only way to catch the difference between "the payload is right" and "the app receives it". That
+  // difference is not hypothetical: the first version of this route returned the bare payload, the caller reads
+  // `data.success` to decide whether a bootstrap loaded, and the whole read was dropped as a failed refresh. It
+  // looked exactly like the read never moving to Firestore at all.
+  console.log('\n--- through the router ---');
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload';
+  const { routeRead } = await import('../src/services/firestoreRouting.js');
+
+  await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
+  const routed = await routeRead('GET_BOOTSTRAP');
+  checkIs('the router answers at all, with a Firebase user signed in', routed !== null, 'nothing was routed');
+  check('and in the shape the caller decides on', routed.success, true);
+  checkIs(
+    'carrying the payload the screens read',
+    Array.isArray(routed.schedule) && Array.isArray(routed.roster),
+    JSON.stringify(Object.keys(routed || {}).slice(0, 8))
+  );
+  checkIs('and the member availability rows with it', Array.isArray(routed.availability), 'no availability');
+  await signOut(firebaseAuth());
+
+  // The kill switch, which has to work whatever else is true.
+  process.env.VITE_FIRESTORE_FEATURES = 'off';
+  check('with the switch off the router answers null', await routeRead('GET_BOOTSTRAP'), null);
+  delete process.env.VITE_FIRESTORE_FEATURES;
+
   checkIs('every case ran', cases >= 34, `only ${cases} cases: a section has stopped running`);
 };
 
