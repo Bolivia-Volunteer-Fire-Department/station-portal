@@ -85,6 +85,31 @@ export const ROUTED_FEATURES = {
     writes: ['ADMIN_BULK_SAVE_SCHEDULE'],
     switchReads: ['GET_SCHEDULE', 'ADMIN_GET_BOOTSTRAP'],
   },
+  // The officer tabs whose save is ONE DOCUMENT, with the collection each writes.
+  //
+  // The audience-bearing collections are deliberately absent from the SAVES: announcements, events and documents each
+  // carry a materialized `audience_keys` list that has to be computed when they are written, and a save that left it
+  // out would produce a row nobody can see. Their DELETES are here, because removing a row cannot hide anything.
+  adminSaves: {
+    requires: ['adminPayload'],
+    writes: [
+      'ADMIN_SAVE_ROLE',
+      'ADMIN_SAVE_RANK',
+      'ADMIN_SAVE_SHIFT',
+      'ADMIN_SAVE_CERTIFICATION_SETUP',
+      'ADMIN_SAVE_CHECKLIST_ITEM',
+      'ADMIN_DELETE_ROLE',
+      'ADMIN_DELETE_RANK',
+      'ADMIN_DELETE_SHIFT',
+      'ADMIN_DELETE_CERTIFICATION_SETUP',
+      'ADMIN_DELETE_CHECKLIST_ITEM',
+      'ADMIN_DELETE_ANNOUNCEMENT',
+      'ADMIN_DELETE_DOCUMENT',
+      'ADMIN_DELETE_EVENT',
+    ],
+    reads: [],
+    switchReads: [],
+  },
   // The small reads the app makes AFTER the sign-in payload: who is on duty, the clock history, the roster, the
   // schedule, the member's own availability and offers, training, certifications, announcements and events. They
   // answer from the same data the payload does, which is why they depend on it and why their shapes are its shapes.
@@ -332,6 +357,46 @@ const DISPATCH = {
     return ok({ id });
   },
 };
+
+// The officer tabs whose save is one document, and the collection each one writes. Declared here rather than in
+// firestoreWrites.js because it is routing: which action goes where, next to the list of actions that are routed.
+const DOCUMENT_SAVES = {
+  ADMIN_SAVE_ROLE: 'roles',
+  ADMIN_SAVE_RANK: 'ranks',
+  ADMIN_SAVE_SHIFT: 'shifts',
+  ADMIN_SAVE_CERTIFICATION_SETUP: 'certification_setup',
+  ADMIN_SAVE_CHECKLIST_ITEM: 'document_checklist_items',
+};
+
+const DOCUMENT_DELETES = {
+  ADMIN_DELETE_ROLE: 'roles',
+  ADMIN_DELETE_RANK: 'ranks',
+  ADMIN_DELETE_SHIFT: 'shifts',
+  ADMIN_DELETE_CERTIFICATION_SETUP: 'certification_setup',
+  ADMIN_DELETE_CHECKLIST_ITEM: 'document_checklist_items',
+  // A delete needs no audience - removing a row cannot hide anything from anybody - so these three are safe here
+  // where their SAVES are not.
+  ADMIN_DELETE_ANNOUNCEMENT: 'announcements',
+  ADMIN_DELETE_DOCUMENT: 'documents',
+  ADMIN_DELETE_EVENT: 'events',
+};
+
+// The document saves and deletes share one implementation, so they share one loop rather than a hand-written entry
+// each - which also keeps the table and the dispatchers in step by construction. An action named in a feature with
+// nothing here would be a route that throws, and the harness asserts the table in both directions.
+Object.entries(DOCUMENT_SAVES).forEach(([action, collection]) => {
+  DISPATCH[action] = async (body) => {
+    const { saveDocument } = await writes();
+    return ok(await saveDocument({ collection, id: body.id, body }));
+  };
+});
+
+Object.entries(DOCUMENT_DELETES).forEach(([action, collection]) => {
+  DISPATCH[action] = async (body) => {
+    const { deleteDocument } = await writes();
+    return ok(await deleteDocument({ collection, id: body.id }));
+  };
+});
 
 // The one entry point api.js uses. null means "not routed", which is the signal to do what the code always did.
 // Anything else is the reply, failures included - a routed write that failed is never retried on the other backend.

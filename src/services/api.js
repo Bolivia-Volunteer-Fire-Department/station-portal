@@ -162,22 +162,24 @@ async function appScriptRequest(body, { retryOnNetworkError = false } = {}) {
 const readsInFlight = createReadCoalescer();
 
 function appScriptFetch(body, options) {
-  if (!isReadAction(body?.action)) return appScriptRequest(body, options);
+  const action = body?.action ?? '';
 
-  // EVERY READ PASSES THROUGH HERE, which is why the Firestore offer is made at this one place rather than at each
-  // call site: it moves the whole refresh wave with a single hook. Writes are not offered - their functions call
-  // routeWrite first and only reach this on a fallback, so offering again here would be a second decision about the
-  // same request.
-  //
-  // `routeRead` answers null for anything unrouted, which is most actions, and it decides that from the table before
-  // touching the network - so the hook costs a lookup for reads that have not moved.
-  return routeRead(body.action, body).then((routed) => {
-    if (routed) return routed;
-    const key = readKey(body);
-    const joined = readsInFlight.join(key);
-    if (joined) return joined;
-    return readsInFlight.hold(key, appScriptRequest(body, options));
-  });
+  // READS: Firestore first, the sheet otherwise. Every read in the app passes through here, which is why the offer is
+  // made at this one place rather than at each call site - it moved the whole refresh wave with a single hook.
+  if (isReadAction(action)) {
+    return routeRead(action, body).then((routed) => {
+      if (routed) return routed;
+      const key = readKey(body);
+      const joined = readsInFlight.join(key);
+      if (joined) return joined;
+      return readsInFlight.hold(key, appScriptRequest(body, options));
+    });
+  }
+
+  // WRITES: the same offer, and it is safe here because a write with a dedicated routeWrite call NEVER reaches this
+  // function on success - so there is no second decision about the same request, and only the actions with no
+  // dedicated caller arrive this way (the admin tabs' simple saves).
+  return routeWrite(action, body).then((routed) => (routed ? routed : appScriptRequest(body, options)));
 }
 
 export const fetchInitialData = async () =>

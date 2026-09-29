@@ -136,3 +136,29 @@ export const saveScheduleBoard = async ({ entries = [], deleteIds = [] }) => {
   const result = await httpsCallable(firebaseFunctions(), 'saveScheduleBoard')({ entries, deleteIds });
   return result.data;
 };
+
+// A save that is ONE DOCUMENT, which is what most of the admin tabs are. The action's own fields become the document:
+// the sheet's columns were already the document's field names, so there is nothing to translate, and `action` /
+// `token` / `row_version` are the envelope and the sheet's conflict check rather than data. Firestore has no
+// equivalent of row_version - a set replaces what the last writer wrote, and the app's rule is that the last writer
+// wins.
+const withoutEnvelope = (body = {}) => {
+  const { action, token, row_version, ...fields } = body;
+  void action;
+  void token;
+  void row_version;
+  return fields;
+};
+
+export const saveDocument = async ({ collection, id, body, extra = {} }) => {
+  // An empty id means CREATE, exactly as it did on the sheet - and Firestore mints the id the sheet's generated
+  // column used to. It has to be this way round: the caller awaits the reply and puts the new id in its table.
+  const target = String(id || '').trim() || doc(collection(firestore(), collection)).id;
+  await setDoc(doc(firestore(), collection, target), { ...withoutEnvelope(body), ...extra }, { merge: true });
+  return { id: target };
+};
+
+export const deleteDocument = async ({ collection, id }) => {
+  await deleteDoc(doc(firestore(), collection, String(id || '')));
+  return { id: String(id || '') };
+};

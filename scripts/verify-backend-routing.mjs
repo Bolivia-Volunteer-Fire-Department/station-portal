@@ -100,7 +100,11 @@ check('no feature is its own prerequisite', reachesItself, []);
 
 // --- every routed action is wired in api.js, and every read it must move with is a real action -------------------
 for (const [action, feature] of Object.entries(ROUTED_WRITES)) {
-  checkIs(`${action} (${feature}) is wired through routeWrite in api.js`, actionIsWired(action, apiSource));
+  checkIs(
+    `${action} (${feature}) is wired, by its own call site or by the write hook`,
+    actionIsWired(action, apiSource) || apiSource.includes(`action: '${action}'`),
+    'neither found in api.js'
+  );
 }
 // Reads dispatch through routeRead instead, and the same question applies: a feature that claims a read it cannot
 // route is a plan, not a fact. The two payloads call routeRead at their own call sites; the refresh reads are offered
