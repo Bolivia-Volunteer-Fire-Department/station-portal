@@ -180,7 +180,14 @@ const main = async () => {
   await signOut(auth);
   await signIn('jane');
   const log = await getDocs(collection(db, 'system_log'));
-  const rows = log.docs.map((entry) => entry.data()).filter((row) => row.action !== 'SEED');
+  // The log holds whatever the station has written, so this filters to the actions this harness is ABOUT rather than
+  // asserting an exact set for the whole collection: the seed contributes rows of its own, and a real station's log
+  // will hold clock-ins, sign-ins and everything else alongside these. (SEED was the only one here until the log's
+  // fixtures were added, which is what an assertion written against a whole collection looks like when it meets a
+  // second writer.)
+  const rows = log.docs
+    .map((entry) => entry.data())
+    .filter((row) => /^(ADMIN_|COMPLETE_)/.test(row.action || ''));
   check(
     'every account action left a row',
     rows.map((row) => row.action).sort(),
@@ -235,10 +242,19 @@ const main = async () => {
     typeof login.user.is_change_password_on_login === 'boolean',
     String(login.user.is_change_password_on_login)
   );
-  checkIs('and no session token of its own - the Firebase user is the session', login.token === '', login.token);
+  // A REAL session token, and not the empty string the Firebase user would suggest: app state treats a token as the
+  // identity of the session it is holding (applyToken in App.jsx guards the admin refresh wave with it and passes it to
+  // every screen), so it has to be something. It is the Firebase ID token - Firestore is authenticated by the session
+  // itself, not by this string.
+  checkIs(
+    'and a real session token for the app to hold',
+    typeof login.token === 'string' && login.token.length > 0,
+    login.token ? 'a token' : 'empty'
+  );
 
-  // A password Firebase does not accept must THROW, because that is what makes loginUser fall back to the sheet for
-  // every member whose Auth account still holds the migration's temporary password.
+  // A password Firebase does not accept must THROW. This used to be stated the other way round: the throw was what
+  // made loginUser fall back to the sheet for every member whose Auth account still held the migration's temporary
+  // password. There is no sheet now, so the refusal IS the member's answer and nothing downstream softens it.
   const refusedLogin = await signInAsMember('jane', 'not-the-password').then(
     () => 'accepted',
     (error) => String(error.code || '')

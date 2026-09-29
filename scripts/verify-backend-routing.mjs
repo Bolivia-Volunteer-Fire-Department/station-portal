@@ -119,7 +119,13 @@ for (const [action] of Object.entries(ROUTED_READS)) {
 }
 for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
   for (const read of spec.switchReads) {
-    checkIs(`${feature}: ${read} is a real api.js action`, apiSource.includes(`action: '${read}'`));
+    // Either shape counts as naming it in api.js: the action envelope the call sites carry, or a routeRead call at the
+    // call site that owns it. The two payloads are read that second way - fetchBootstrap and adminFetchBootstrap call
+    // routeRead directly, because they are one read of a whole shape rather than an action offered to the hook.
+    checkIs(
+      `${feature}: ${read} is a real api.js action`,
+      apiSource.includes(`action: '${read}'`) || apiSource.includes(`routeRead('${read}'`)
+    );
   }
 }
 

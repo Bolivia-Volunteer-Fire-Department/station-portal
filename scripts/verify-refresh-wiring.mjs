@@ -646,30 +646,24 @@ await boom.catch(() => {});
 await Promise.resolve();
 check('a failed read is not left holding the key', failedRead.size() === 0, String(failedRead.size()));
 
-// And the fetch layer is wired to it - with writes kept out, which is the part that must never drift.
+// And the fetch layer USED to be wired to it, with writes kept out. That wiring is gone with the backend it was for:
+// the coalescer existed because Apps Script runs one execution at a time behind a script lock, so two callers asking
+// the same question paid for two executions of the same answer. Firestore has no such queue - an identical read is two
+// ordinary reads - so appScriptFetch no longer joins anything, and the util above is exercised by its own assertions
+// rather than by the app.
+//
+// The READ/WRITE SPLIT it relied on is still wired, and still worth asserting, because it is what sends a write to the
+// dispatchers rather than to the readers:
 const fetchLayerSource = read('src/services/api.js');
-check('the fetch layer owns a coalescer', /createReadCoalescer\(\)/.test(fetchLayerSource), 'no coalescer in api.js');
+check('reads and writes take different doors', /if \(isReadAction\(action\)\)/.test(fetchLayerSource), 'the split is gone');
+check('and a read that is not answered is reported, not swallowed', /throw noAnswer\(action\)/.test(fetchLayerSource));
+check('while an unrouted write is named', /throw noRoute\(action\)/.test(fetchLayerSource));
 check(
-  'writes bypass it',
-  /if \(!isReadAction\(body\?\.action\)\) return appScriptRequest\(body, options\);/.test(fetchLayerSource),
-  'reads and writes are not separated'
-);
-check('an identical read in flight is joined', /readsInFlight\.join\(key\)/.test(fetchLayerSource), 'never joins');
-check(
-  'and held for the next caller',
-  /readsInFlight\.hold\(key, appScriptRequest\(body, options\)\)/.test(fetchLayerSource),
-  'never holds'
-);
-// Teeth: remove the read/write split and the check above must fail - a coalescer that takes writes would let two
-// saves share one request, which is exactly the class of bug this guard exists for.
-const unsplit = fetchLayerSource.replace(
-  'if (!isReadAction(body?.action)) return appScriptRequest(body, options);',
-  'if (!body?.action) return appScriptRequest(body, options);'
-);
-check('the mutation applied', unsplit !== fetchLayerSource);
-check(
-  'and the wiring check catches a coalescer that takes writes too',
-  !/if \(!isReadAction\(body\?\.action\)\) return appScriptRequest\(body, options\);/.test(unsplit)
+  'and nothing in the fetch layer reaches the sheet any more',
+  // Matched with the call paren, because the comments in api.js deliberately still NAME the function they replaced -
+  // a reader arriving at an empty region deserves to know what used to be there.
+  !/appScriptRequest\(|SCRIPT_URL|await fetch\(/.test(fetchLayerSource),
+  'the sheet transport is still there'
 );
 
 // Not waiting on the wave left the table holding pre-save values, so re-opening a form showed the old ones

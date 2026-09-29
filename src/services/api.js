@@ -1,9 +1,8 @@
-import { SCRIPT_URL } from '../config';
 import { NOTIFICATION_TYPES } from '../utils/notificationPrefs';
 import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
-import { createReadCoalescer, isReadAction, readKey } from '../utils/readCoalescing';
+import { isReadAction } from '../utils/readCoalescing';
 import { routeRead, routeWrite } from './firestoreRouting.js';
 import {
   changeOwnPassword,
@@ -40,146 +39,64 @@ export const notificationPrefFields = (settings) => {
   return fields;
 };
 
-// How long any single backend call may take before it is abandoned.
+// THE TIMEOUT, THE BUSY RETRY AND THE ABORT DETECTION USED TO LIVE HERE, and they went with the backend that needed
+// them. All three existed because of how Apps Script behaves: it serialises requests behind a script lock, so a refresh
+// wave could queue for tens of seconds and needed a 60-second backstop; it refuses a write it could not serialise with
+// BUSY and a `retry_after`; and an abandoned fetch reports "signal is aborted without reason", which needed naming.
 //
-// Generous on purpose: Apps Script serializes requests behind a script lock, so a refresh wave can
-// legitimately queue for tens of seconds under load. This is a backstop against a request that
-// never returns at all, not a performance budget - without it, one stalled call leaves a caller
-// awaiting forever, which the UI shows as a spinner that never stops.
-const APP_SCRIPT_TIMEOUT_MS = 60000;
+// None of that applies to Firestore. A request that does not come back rejects on its own with a real error, and
+// Firestore's writers already answer a conflict with the message the admin tabs display - so the retry loop, the
+// abort-naming and the wait ceiling have no work to do and are gone rather than kept as decoration.
 
-// How a timeout is described. The browser's own message for an aborted fetch is "signal is aborted without
-// reason", which reads as a mystery in the console - and during a background refresh that is exactly where a
-// reader will meet it.
-const timeoutMessage = () =>
-  `Apps Script did not answer within ${Math.round(APP_SCRIPT_TIMEOUT_MS / 1000)}s.`;
-const isTimeoutAbort = (err) =>
-  !!err && (err.name === 'AbortError' || /aborted/i.test(String(err.message || '')));
-
-// How long a refused write waits before its single retry, in ms, and its ceiling.
+// THE APPS SCRIPT BACKEND USED TO BE CALLED FROM HERE, and this is where it was.
 //
-// The server refuses a write it could not serialize (code BUSY) and asks for a short wait; this caps how long
-// that wait can be so a hostile or mistaken `retry_after` cannot stall a save behind a long sleep.
-const BUSY_RETRY_DEFAULT_MS = 1000;
-const BUSY_RETRY_CAP_MS = 6000;
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// A refused write is the ONE case where retrying a mutation is safe: the server answers BUSY only when it has
-// written nothing at all (no cell, no log row, no session), and says so in the reply. That is categorically
-// different from a network error, where the write may have landed and the answer been lost - which is why
-// mutations never retry on those, and why this path is only ever entered on an explicit BUSY code.
+// `appScriptRequest` POSTed the action envelope to the deployed script: a bounded timeout because the platform
+// serialises requests behind a script lock, a first-request 302 warm-up, a UNAUTHORIZED path that opened the
+// reauthentication prompt, and BUSY/CONFLICT retries. Every one of those shapes belonged to that platform, and none of
+// them is needed now: Firestore is asked directly and answers with Firestore's own errors, which the routed writers
+// map to the same `result.message` the screens already show.
 //
-// Reads cannot receive BUSY (they take no lock), so this is effectively a write-only path.
-const busyRetryWaitMs = (data) => {
-  const seconds = Number(data && data.retry_after);
-  if (!Number.isFinite(seconds) || seconds <= 0) return BUSY_RETRY_DEFAULT_MS;
-  return Math.min(BUSY_RETRY_CAP_MS, Math.round(seconds * 1000));
+// What went with it, deliberately, is the FALLBACK. A read Firestore refused used to be re-asked of the sheet, which
+// kept a screen working while hiding a migration step that was not working - the module's own comment called that out
+// as the thing that "hides it". Now a routed read that fails throws and the screen says so, which is the honest answer
+// once there is nothing left to fall back TO.
+
+// THE ONE GATE EVERY DATA CALL PASSES THROUGH, and its name is now historical: the bodies are still shaped as the
+// action envelopes they were when a sheet answered them, because the action NAMES are what the routing tables are
+// keyed by and every call site still names one. The name is kept rather than renamed across a hundred call sites in
+// the same change that removes the backend - see docs/MIGRATION_MAP.md.
+//
+// An action with no route THROWS rather than being swallowed or asked of somewhere else: there is no second backend
+// now, and a screen that quietly receives nothing is the failure this module exists to prevent.
+const noRoute = (action) => {
+  const error = new Error(`No Firestore route for '${action}'.`);
+  error.code = 'UNROUTED_ACTION';
+  return error;
 };
 
-// Executes a POST against the Google Apps Script backend, transparently
-// handling the platform's first-request redirect quirk.
-//
-// The first fetch to a freshly deployed /exec URL is answered with a 302
-// redirect; browsers follow it as a GET, which drops the POST body. Without a
-// doGet on the backend that redirected response carries no CORS headers, which
-// surfaces in the console as:
-//
-//   Access ... blocked by CORS policy: No 'Access-Control-Allow-Origin' header
-//   net::ERR_FAILED 200 (OK)
-//
-// Fix: the backend's doGet returns {"redirected": true} via ContentService
-// (which Apps Script serves with Access-Control-Allow-Origin). When we see that
-// marker the original action never ran - so we re-send it once to the now
-// warmed URL. Read-only calls additionally retry once on a raw network/CORS
-// failure, so the app still boots even before the backend is redeployed with
-// doGet. Mutations never retry on network errors (only on the safe redirect
-// marker, and on an explicit BUSY refusal), so a write can never be applied twice.
-async function appScriptRequest(body, { retryOnNetworkError = false } = {}) {
-  // Every request is bounded. Apps Script serializes requests behind a script lock in doPost, so a
-  // long queue was previously able to leave a caller waiting indefinitely - and because callers
-  // await these before clearing a spinner, an unbounded wait looked like a hung screen. A timeout
-  // turns that into a normal, retryable error.
-  const postOnce = () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), APP_SCRIPT_TIMEOUT_MS);
-    return fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-      .then((r) => r.json())
-      .finally(() => clearTimeout(timer));
-  };
+const noAnswer = (action) => {
+  const error = new Error(`Firestore did not answer ${action}. The console says which read failed.`);
+  error.code = 'READ_FAILED';
+  return error;
+};
 
-  let data;
-  try {
-    data = await postOnce();
-  } catch (err) {
-    // A timed-out request arrives as `AbortError: signal is aborted without reason`, which says nothing about
-    // what happened or how long it waited. Named here, because this error surfaces in the console during a
-    // background refresh and a reader should be able to tell a timeout from a network failure.
-    const failure = isTimeoutAbort(err) ? new Error(timeoutMessage()) : err;
-    if (!retryOnNetworkError) throw failure;
-    return postOnce();
-  }
-
-  if (data && data.redirected) data = await postOnce();
-
-  // A refused session is worth naming, loudly.
-  //
-  // "Session expired. Please sign in again." cannot be told apart from a request that was refused for some other
-  // reason, and working it out from the outside is guesswork: the action that was refused and the token it was
-  // sent with are what make it answerable from a bug report. Logged here because this is the one place every
-  // request passes through, so no caller has to remember to do it.
-  if (data && data.code === 'UNAUTHORIZED') {
-    data.requestAction = body.action;
-    const sent = String(body.token || body.payload?.token || '');
-    console.warn(`[reauth] ${body.action} was refused (token …${sent.slice(-6) || 'none'})`);
-  }
-
-  // One retry, and only for a refusal: the other writer needs the moment `retry_after` asks for, and a second
-  // refusal is reported to the caller rather than retried again.
-  if (data && data.code === 'BUSY') {
-    await sleep(busyRetryWaitMs(data));
-    data = await postOnce();
-  }
-
-  // A write refused because the record moved on since the form was filled in. Reported as a normal failure
-  // whose MESSAGE is the server's explanation ("...your change was NOT saved. Reload it and apply your change
-  // again.") - every admin tab already surfaces `result.message`, so this needs no special case in the UI.
-  // `current` rides along for a caller that wants to show or reload the newer row.
-  return data;
-}
-
-// One read, one execution.
-//
-// The post-sign-in waves overlap (the member wave and the admin wave both fetch the schedule, the roster, on-duty,
-// training, announcements and events), and the backend runs one execution at a time - so the duplicate copies of
-// each read were pure queue. An identical read that is already in flight is shared instead of sent: see
-// utils/readCoalescing for why that is safe, and why writes never join anything.
-const readsInFlight = createReadCoalescer();
-
-function appScriptFetch(body, options) {
+function appScriptFetch(body) {
   const action = body?.action ?? '';
 
-  // READS: Firestore first, the sheet otherwise. Every read in the app passes through here, which is why the offer is
-  // made at this one place rather than at each call site - it moved the whole refresh wave with a single hook.
+  // Reads answer from firestoreReads.js, one slice at a time.
   if (isReadAction(action)) {
     return routeRead(action, body).then((routed) => {
       if (routed) return routed;
-      const key = readKey(body);
-      const joined = readsInFlight.join(key);
-      if (joined) return joined;
-      return readsInFlight.hold(key, appScriptRequest(body, options));
+      throw noAnswer(action);
     });
   }
 
-  // WRITES: the same offer, and it is safe here because a write with a dedicated routeWrite call NEVER reaches this
-  // function on success - so there is no second decision about the same request, and only the actions with no
-  // dedicated caller arrive this way (the admin tabs' simple saves).
-  return routeWrite(action, body).then((routed) => (routed ? routed : appScriptRequest(body, options)));
+  // Writes go to their own dispatcher: the admin tabs' simple saves reach here through the one hook, and everything
+  // with a dedicated routeWrite call never does.
+  return routeWrite(action, body).then((routed) => {
+    if (routed) return routed;
+    throw noRoute(action);
+  });
 }
 
 export const fetchInitialData = async () =>
@@ -192,47 +109,47 @@ export const fetchInitialData = async () =>
 // before it read a cell, and the calls at the end of that queue were the ones that ran out of the 60-second
 // patience this module enforces - which showed up as a calendar with no shifts on it and a clock that had gone
 // back to 12-hour. See memberBootstrapPayload in Code.gs.
-export const fetchBootstrap = async (token) => {
-  const request = { action: 'GET_BOOTSTRAP', token };
-  // The whole member sign-in in ONE request, as before - from Firestore when that payload is switched on, and from
-  // the sheet otherwise. A read that fails falls back the same way (see routeRead), because the sheet still has the
-  // data and there is nothing to duplicate by asking twice.
-  return (await routeRead('GET_BOOTSTRAP')) || appScriptFetch(request, { retryOnNetworkError: true });
+export const fetchBootstrap = async () => {
+  // The whole member sign-in in ONE read: schedule, availability, roster, offers, training, announcements, events,
+  // clock history and who is on duty.
+  //
+  // No fallback and no silent null. This payload is the app's first screen after sign-in, so a failure has to reach the
+  // loading state as an error rather than being rendered as an empty station - which is exactly what a fallback to a
+  // backend that no longer exists would produce. routeRead logs which read failed, by name, before this throws.
+  const payload = await routeRead('GET_BOOTSTRAP');
+  if (!payload) throw noAnswer('GET_BOOTSTRAP');
+  return payload;
 };
 
 // Everything an administration sign-in - and every admin save's background reload - needs, in ONE request. The
 // admin-scoped fields are present only for a role that may have them: a section the caller cannot have is omitted
 // rather than refusing the whole response. See adminBootstrapPayload in Code.gs.
-export const adminFetchBootstrap = async (token) => {
-  const request = { action: 'ADMIN_GET_BOOTSTRAP', token };
-  // The officer's whole sign-in in ONE request, from Firestore once that payload is switched on and from the sheet
-  // otherwise - the same arrangement as the member bootstrap, and the same fallback.
-  return (await routeRead('ADMIN_GET_BOOTSTRAP')) || appScriptFetch(request, { retryOnNetworkError: true });
+export const adminFetchBootstrap = async () => {
+  // The officer's whole sign-in in ONE read, the same arrangement as the member bootstrap and the same refusal to
+  // answer with a silent null.
+  const payload = await routeRead('ADMIN_GET_BOOTSTRAP');
+  if (!payload) throw noAnswer('ADMIN_GET_BOOTSTRAP');
+  return payload;
 };
 
 export const loginUser = async (username, password) => {
-  // FIREBASE FIRST, and the sheet as the fallback rather than the other way round.
+  // FIREBASE, AND ONLY FIREBASE.
   //
-  // The order matters because the two hold different passwords while the move is in flight: a member's Auth account
-  // carries the migration's temporary password until they are given it, so their Firebase sign-in fails and the sheet
-  // - which still has their old one - has to be allowed to answer. When it does answer, nothing changes for them.
+  // The sheet used to answer when Auth refused, because a member's Auth account carried the migration's temporary
+  // password while their old password was still in the sheet - so a refusal had to be allowed to fall through. There
+  // is no sheet to ask now, and the case for the fallback went with the thing that made it temporary: a wrong password
+  // is a wrong password.
   //
-  // When Firebase DOES accept, the Apps Script session is still fetched, quietly, because the calls that have not
-  // moved yet need a token. Its failure is not the login's failure: those calls would fail, and the console says so.
-  if (firebaseConfigured()) {
-    try {
-      const viaFirebase = await signInAsMember(username, password);
-      const sheetSession = await appScriptFetch({ action: 'LOGIN', username, password }).catch((error) => {
-        console.info(`[firebase] signed in, but the Apps Script session could not be opened (${error?.message || error}) - calls that have not moved will fail.`);
-        return null;
-      });
-      return { ...viaFirebase, token: sheetSession?.token || '' };
-    } catch (error) {
-      // A wrong password, a disabled account, a missing Auth user: the sheet decides, exactly as it always did.
-      console.info(`[login] Firebase did not accept this sign-in (${error?.code || error?.message}); asking the sheet.`);
-    }
+  // The token this returns is the FIREBASE ID token, from signInAsMember. It is not what Firestore is authenticated
+  // with - that is the Firebase session itself - but the app uses a token as the identity of the session it is holding
+  // (see applyToken in App.jsx), so it has to be a real one rather than an empty string.
+  if (!firebaseConfigured()) {
+    const error = new Error('This build has no Firebase configuration, so nobody can sign in.');
+    error.code = 'NO_FIREBASE_CONFIG';
+    throw error;
   }
-  return appScriptFetch({ action: 'LOGIN', username, password });
+
+  return signInAsMember(username, password);
 };
 
 export const fetchTimeclockLogs = async (token) =>
@@ -240,11 +157,6 @@ export const fetchTimeclockLogs = async (token) =>
 
 export const fetchOnDutyUsers = async (token) =>
   appScriptFetch({ action: 'GET_ON_DUTY', token }, { retryOnNetworkError: true });
-
-// Refreshes the server-side session window without fetching anything. Used by the idle-timeout
-// warning's "Stay signed in", so the button extends the real session rather than only a local timer.
-export const pingSession = async (token) =>
-  appScriptFetch({ action: 'PING', token }, { retryOnNetworkError: false });
 
 export const fetchUserSchedule = async (token) =>
   appScriptFetch({ action: 'GET_SCHEDULE', token }, { retryOnNetworkError: true });
@@ -306,11 +218,6 @@ export const fetchMyPushDevices = async (token, deviceToken) =>
 // The member's own records, the catalog they are named and iconed from, and whichever are expiring. The
 // bootstrap carries all three at sign-in; this is for a re-read without signing in again.
 export const fetchCertifications = async (token) => appScriptFetch({ action: 'GET_CERTIFICATIONS', token });
-
-// Every record, for the administration table. The catalog comes from the bootstrap (or the call above), so it
-// is not repeated here.
-export const adminFetchCertifications = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_CERTIFICATIONS', token }, { retryOnNetworkError: true });
 
 // The catalog: what the station tracks, how each one is shown, and what should happen when it runs out.
 export const adminSaveCertificationSetup = async (certification, token) =>
@@ -393,9 +300,6 @@ export const updateUserPassword = async (userId, newPassword, token) => {
   });
 };
 // --- Admin: Users ---
-
-export const adminFetchUsers = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_USERS', token }, { retryOnNetworkError: true });
 
 // The officer's user editor, translated. The sheet's ONE save is four operations in this model, and two of them are
 // callables that already exist: creating a member (which also makes the Auth account), setting the account status,
@@ -540,9 +444,6 @@ export const adminSaveShift = async (shiftData, token) =>
 export const adminDeleteShift = async (shiftId, token) =>
   appScriptFetch({ action: 'ADMIN_DELETE_SHIFT', token, id: shiftId });
 // --- Admin: Schedule Templates ---
-
-export const adminFetchScheduleTemplates = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_SCHEDULE_TEMPLATES', token }, { retryOnNetworkError: true });
 
 export const adminSaveScheduleTemplate = async (templateData, token) =>
   appScriptFetch({

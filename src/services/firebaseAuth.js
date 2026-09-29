@@ -97,9 +97,12 @@ export const signInAsMember = async (username, password) => {
       status: secret.status || 'active',
       is_change_password_on_login: secret.is_change_password_on_login === true,
     },
-    // Not a session: the Firebase user IS the session. The caller replaces this with the Apps Script token when one
-    // can still be had (see loginUser), because the calls that have not moved yet need it.
-    token: '',
+    // The session token the app holds, and it has to be a real one: `applyToken` in App.jsx treats an empty string as
+    // no session (it guards the admin refresh wave, and it is passed to every screen as the `token` prop). It used to
+    // be the Apps Script session token, fetched after this sign-in so that the calls which had not moved yet could
+    // authenticate; nothing needs that now, so it is the Firebase ID token - which is what a session token means here
+    // (Firestore is authenticated by the session itself, not by this string).
+    token: await getIdTokenResult(firebaseAuth().currentUser).then((result) => result.token),
   };
 };
 

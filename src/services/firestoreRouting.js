@@ -165,16 +165,15 @@ export const ROUTED_FEATURES = {
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
   // is why the rules had to grow an officer branch before any of this could work.
   //
-  // What is left is named rather than hidden: the other three actions (users, certifications, templates) have no
-  // caller anywhere in the app - they are api.js exports nothing invokes. They stay on the sheet until either a caller
-  // appears or they are deleted. The system log USED to be named here too, because it is paged and sorted server-side
-  // and that reader was a design step rather than a line; it is moved, and the design decision is written up in
-  // functions/index.js above `readSystemLog`.
+  // NOTHING IS LEFT ON THE SHEET. The three actions that used to be named here - ADMIN_GET_USERS,
+  // ADMIN_GET_CERTIFICATIONS, ADMIN_GET_SCHEDULE_TEMPLATES - had no caller anywhere in the app, so they have been
+  // deleted from api.js rather than left as a promise: the routing table's job is to say what is routed, and a
+  // `switchReads` entry that names a function nobody calls is a note, not a route. See docs/MIGRATION_MAP.md.
   adminReads: {
     requires: ['adminPayload'],
     writes: [],
     reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS', 'ADMIN_GET_SYSTEM_LOG'],
-    switchReads: ['ADMIN_GET_USERS', 'ADMIN_GET_CERTIFICATIONS', 'ADMIN_GET_SCHEDULE_TEMPLATES'],
+    switchReads: [],
   },
 
   adminPayload: {

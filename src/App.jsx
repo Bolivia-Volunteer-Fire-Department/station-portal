@@ -28,7 +28,6 @@ import {
   saveUserSettings,
   updateUserPassword,
   loginUser,
-  pingSession,
   registerPushDevice,
   unregisterPushDevice,
   fetchMyPushDevices
@@ -985,14 +984,13 @@ const getLoadingMessage = () => {
     };
   }, [currentUser, activeTab, sessionConfig, endSession, applyIdleWarning]);
 
-  // "Stay signed in". The click already counts as activity, but the server window has to be pushed
-  // out too - otherwise the button would only dismiss the warning while the session lapsed anyway.
+  // "Stay signed in". On Apps Script this also had to push the SERVER session window out, or the button would have
+  // dismissed the warning while the session quietly lapsed anyway - that is what pingSession was for, and it went with
+  // the sheet. There is nothing to push now: the SDK keeps the Firebase session refreshed on its own, so all this has
+  // to do is reset the local timer, which is the only clock the idle warning reads.
   const handleStaySignedIn = () => {
     lastActivityRef.current = Date.now();
     applyIdleWarning(null);
-    // Deliberately not awaited: the warning disappears at once, and a failure here is not worth
-    // reporting when the next action will simply ask for the password again.
-    void pingSession(authToken);
   };
 
   // Verifies credentials from the reauthentication modal and keeps the user in

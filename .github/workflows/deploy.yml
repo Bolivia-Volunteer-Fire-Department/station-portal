@@ -27,15 +27,25 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Verify Apps Script URL secret
+      # The station is ON Firebase now, and the sheet is no longer a backend: a build without this config is a build
+      # where nobody can sign in. So this refuses to publish one - the check the Apps Script URL used to have, moved to
+      # the thing that is actually required.
+      - name: Verify the Firebase web config is set
         env:
-          APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
+          API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
         run: |
-          if [ -z "$APPS_SCRIPT_URL" ]; then
-            echo "::error::The VITE_APPS_SCRIPT_URL repository secret is not set. Add it under Settings > Secrets and variables > Actions."
-            exit 1
-          fi
-          echo "VITE_APPS_SCRIPT_URL secret is set."
+          for pair in "VITE_FIREBASE_API_KEY:$API_KEY" "VITE_FIREBASE_AUTH_DOMAIN:$AUTH_DOMAIN" "VITE_FIREBASE_PROJECT_ID:$PROJECT_ID" "VITE_FIREBASE_APP_ID:$APP_ID"; do
+            name="${pair%%:*}"
+            value="${pair#*:}"
+            if [ -z "$value" ]; then
+              echo "::error::$name is not set. Add it under Settings > Secrets and variables > Actions."
+              exit 1
+            fi
+          done
+          echo "The Firebase web config is set."
 
       - name: Install dependencies
         run: npm ci
@@ -53,15 +63,15 @@ jobs:
         run: npm run lint
 
       - name: Build
-        # The Firebase values are the web app's PUBLIC config, passed through as repository secrets because a CI
-        # build has no .env (it is gitignored). They are deliberately NOT required: an unset secret arrives as an
-        # empty string, src/services/firebase.js reports itself unconfigured, and the app stays entirely on Apps
-        # Script - which is exactly what should happen until the login switches over.
+        # The Firebase values are the web app's PUBLIC config, passed through as repository secrets because a CI build
+        # has no .env (it is gitignored). There is no VITE_APPS_SCRIPT_URL any more: the sheet is not a backend and
+        # nothing reads the value, and the check above is what makes a missing config a failed build rather than a
+        # published app that nobody can sign in to.
         env:
-          VITE_APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          # Which features read and write Firestore instead of the sheet. Unset - the safe default - routes nothing,
-          # so a build without this secret behaves exactly as it did before any of the move existed.
+          # Which routes are on. Unset means every route whose prerequisites are met, which is the normal state;
+          # `off`/`none` is a kill switch, and it is only a kill switch - there is no second backend to fall back to
+          # now, so switching a route off means the screens that use it fail. See src/services/firestoreRouting.js.
           VITE_FIRESTORE_FEATURES: ${{ secrets.VITE_FIRESTORE_FEATURES }}
           VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}

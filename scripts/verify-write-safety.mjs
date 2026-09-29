@@ -142,7 +142,10 @@ checkIs(
 );
 check('and the API client parses', (() => {
   try {
-    new Function(apiSource.replace(/^import .*$/gm, '').replace(/^export /gm, ''));
+    // Multi-line named imports end on a later line, so the strip has to run to the terminating semicolon rather than
+    // to the end of the `import` line. Without that, the import LIST is left dangling and this reports a syntax error
+    // in a file that is perfectly valid - which is how this check sat broken over a valid api.js.
+    new Function(apiSource.replace(/^import [\s\S]*?;$/gm, '').replace(/^export /gm, ''));
     return '';
   } catch (err) {
     return String(err.message);
@@ -176,6 +179,11 @@ const constSource = (name, source = codeSource) => {
 //
 // The lazy regex above cannot do this one: it stops at the first `;\n`, which for an arrow function is a
 // `return` inside the body - so the extracted source would be a truncated function that throws when run.
+//
+// It has no caller at the moment: the one declaration it was written for, the client's `busyRetryWaitMs`, went with
+// the sheet's BUSY refusal. Kept rather than deleted because the extraction it does is the non-obvious half of this
+// file's machinery - the next brace-balanced declaration lifted out of Code.gs will need it, and re-deriving it from
+// scratch is how a harness ends up quietly checking a truncated function.
 const constBodySource = (name, source) => {
   const at = source.indexOf(`const ${name} = `);
   if (at === -1) throw new Error(`no ${name}`);
@@ -933,26 +941,13 @@ checkIs(
   'a batch could write before being validated'
 );
 
-const clientHelpers = new Function(`
-  ${constSource('BUSY_RETRY_DEFAULT_MS', apiSource)}
-  ${constSource('BUSY_RETRY_CAP_MS', apiSource)}
-  ${constBodySource('busyRetryWaitMs', apiSource)}
-  return { busyRetryWaitMs, BUSY_RETRY_DEFAULT_MS, BUSY_RETRY_CAP_MS };
-`)();
-check('a refusal with a wait uses it', clientHelpers.busyRetryWaitMs({ retry_after: 3 }), 3000);
-check('a nonsensical wait falls back to the default', clientHelpers.busyRetryWaitMs({}), clientHelpers.BUSY_RETRY_DEFAULT_MS);
-check('a zero wait falls back too', clientHelpers.busyRetryWaitMs({ retry_after: 0 }), clientHelpers.BUSY_RETRY_DEFAULT_MS);
-check('a negative one as well', clientHelpers.busyRetryWaitMs({ retry_after: -5 }), clientHelpers.BUSY_RETRY_DEFAULT_MS);
-check('a hostile wait is capped', clientHelpers.busyRetryWaitMs({ retry_after: 3600 }), clientHelpers.BUSY_RETRY_CAP_MS);
-
-checkIs('the client retries a refusal once', /if \(data && data\.code === 'BUSY'\)/.test(apiSource));
-checkIs('and only on the explicit code, never on a thrown error', /catch \(err\)[\s\S]{0,400}if \(!retryOnNetworkError\) throw failure;/.test(apiSource));
-checkIs(
-  'a mutation still never retries a network failure',
-  /Mutations never retry on network errors/.test(apiSource),
-  'the comment that documents the rule is gone'
-);
-checkIs('the refusal is not swallowed', !/code === 'BUSY'[\s\S]{0,200}return \{\s*success: true/.test(apiSource));
+// The client's BUSY retry used to be asserted here: the wait it chose, the ceiling on a hostile `retry_after`, the
+// single retry, and the rule that a mutation never retries a NETWORK failure. All of it went with the sheet, because
+// the sheet was the thing that could answer BUSY - it refused a write it could not serialise and asked the caller to
+// come back. Firestore has no such refusal: a conflict is reported as a normal failure with the message the admin tabs
+// already display (see firestoreWrites.js and the conflict cases in verify-firestore-writes.mjs), and there is no
+// second attempt to get wrong. The sheet's OWN write safety - the lock, the batch validation, the "no cell, no log row,
+// no session" refusal - is still asserted below, because Code.gs is still the record of how it behaved.
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
