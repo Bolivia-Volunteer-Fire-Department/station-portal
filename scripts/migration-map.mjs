@@ -5,6 +5,8 @@
 // subtle, the comment names the behaviour being reproduced, because reproducing the wrong half of it silently changes
 // who can see what.
 
+import { PUBLIC_SETTING_KEYS } from '../src/utils/systemSettings.js';
+
 // A header the sheet carries that must never reach Firestore. `timeclock` really does have Column 1..Column 14.
 const JUNK_HEADER = /^Column \d+$/;
 
@@ -147,26 +149,7 @@ export const TAB_MAP = {
     // is only possible if the member's browser can read the boundary it is checking against.
     collections: ['settings/public', 'settings/private'],
     pair: { key: 'key', value: 'value' },
-    publicKeys: [
-      'station_name',
-      'department_name',
-      'loading_message0',
-      'loading_message1',
-      'loading_message2',
-      'loading_message3',
-      'loading_message4',
-      'loading_message5',
-      'loading_message6',
-      'loading_message7',
-      'loading_message8',
-      'loading_message9',
-      'required_clock_latitude',
-      'required_clock_longitude',
-      'gps_margin_of_error',
-      'session_timeout',
-      'is_dark_mode',
-      'time_format',
-    ],
+    publicKeys: PUBLIC_SETTING_KEYS,
   },
   shifts: { collections: ['shifts'], key: 'id' },
   apparatus: { collections: ['apparatus'], key: 'id' },

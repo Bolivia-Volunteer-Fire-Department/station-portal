@@ -12,6 +12,8 @@ import { collection, deleteDoc, doc, getDocs, query, runTransaction, setDoc, whe
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
 import { rowsOf } from './firestorePayload.js';
+import { settingSide } from '../utils/systemSettings.js';
+import { deleteField } from 'firebase/firestore';
 
 // The timestamp format the app reads everywhere: 'YYYY-MM-DD HH:MM:SS' in station time. Apps Script had
 // getEasternTimestamp(); this is the same shape and the same timezone, which keeps a clock entry written by one
@@ -292,4 +294,33 @@ export const refreshCertificationBadges = async () => {
   await batch.commit();
 
   return { members: Object.keys(index).length, cleared: existing.filter((row) => !index[String(row.id)]).length };
+};
+
+// Settings are one document per SIDE - `settings/public` and `settings/private` - rather than one per key, because a
+// document is the unit of permission and a key's side has to be a fact rather than a judgement made at each call.
+// settingSide decides it, in one place the migration reads too, so a key cannot land on a different side depending on
+// who wrote it.
+export const saveSystemSettings = async ({ settings = [] } = {}) => {
+  const bySide = { public: {}, private: {} };
+  settings.forEach(({ key, value }) => {
+    const name = String(key || '').trim();
+    if (!name) return;
+    bySide[settingSide(name)][name] = value === undefined || value === null ? '' : String(value);
+  });
+
+  await Promise.all(
+    Object.entries(bySide).map(([side, fields]) =>
+      Object.keys(fields).length
+        ? setDoc(doc(firestore(), 'settings', side), fields, { merge: true })
+        : Promise.resolve()
+    )
+  );
+  return { saved: settings.length };
+};
+
+// Removing a setting removes the FIELD, not a document: the side's document holds every key on that side.
+export const deleteSystemSetting = async (key) => {
+  const name = String(key || '').trim();
+  if (name) await setDoc(doc(firestore(), 'settings', settingSide(name)), { [name]: deleteField() }, { merge: true });
+  return { key: name };
 };

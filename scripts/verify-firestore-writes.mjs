@@ -18,6 +18,7 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { firebaseAuth, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
+import { settingSide } from '../src/utils/systemSettings.js';
 import {
   approveOffer,
   audienceKeysForWrite,
@@ -292,6 +293,14 @@ const main = async () => {
     null
   );
   check('and neither does one with no icon to draw', badgeForRecord({ effective_date: '2024-01-01' }, { ...badgeType, icon: '' }, today), null);
+
+  // --- the side a setting belongs on, decided in one place for the app AND the migration ---
+  console.log('\n--- which side a setting belongs on ---');
+  check('a setting the browser draws is public', settingSide('loading_message3'), 'public');
+  check('and so is the fence the browser checks', settingSide('required_clock_latitude'), 'public');
+  check('a setting nobody outside the office needs is private', settingSide('some_officer_thing'), 'private');
+  check('and a setting added later starts private, which is the safe way round', settingSide('a_key_nobody_named_yet'), 'private');
+  check('whitespace does not change the answer', settingSide('  station_name  '), 'public');
 
   checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };

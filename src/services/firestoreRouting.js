@@ -109,6 +109,9 @@ export const ROUTED_FEATURES = {
       'ADMIN_DELETE_SCHEDULE_TEMPLATE',
       'ADMIN_DELETE_CERTIFICATION',
       'ADMIN_BULK_SAVE_TRAINING',
+      'ADMIN_SAVE_SYSTEM_SETTING',
+      'ADMIN_SAVE_SYSTEM_SETTINGS',
+      'ADMIN_DELETE_SYSTEM_SETTING',
       'ADMIN_DELETE_ROLE',
       'ADMIN_DELETE_RANK',
       'ADMIN_DELETE_SHIFT',
@@ -373,6 +376,27 @@ const DISPATCH = {
   ADMIN_BULK_SAVE_TRAINING: async (body) => {
     const { saveTrainingRows } = await writes();
     return ok(await saveTrainingRows({ rows: body.trainings || [], deleteIds: body.deleteIds || [] }));
+  },
+
+  // System settings: one document per SIDE, so a save and a delete both go through the same rule about which side a
+  // key belongs to - the rule the migration reads too, in src/utils/systemSettings.js.
+  ADMIN_SAVE_SYSTEM_SETTING: async (body) => {
+    const { saveSystemSettings } = await writes();
+    return ok(await saveSystemSettings({ settings: [{ key: body.key, value: body.value }] }));
+  },
+
+  // The Loading Messages card saves all ten at once, all-or-nothing. It sends a list; an object works too.
+  ADMIN_SAVE_SYSTEM_SETTINGS: async (body) => {
+    const { saveSystemSettings } = await writes();
+    const pairs = Array.isArray(body.settings)
+      ? body.settings
+      : Object.entries(body.settings || {}).map(([key, value]) => ({ key, value }));
+    return ok(await saveSystemSettings({ settings: pairs }));
+  },
+
+  ADMIN_DELETE_SYSTEM_SETTING: async (body) => {
+    const { deleteSystemSetting } = await writes();
+    return ok(await deleteSystemSetting(body.key));
   },
 };
 

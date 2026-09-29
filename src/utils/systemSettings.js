@@ -55,3 +55,27 @@ export const loadingMessageSavePlan = (messages) =>
     value: String(message.value ?? ''),
     label: message.label,
   }));
+
+// Which system settings are PUBLIC, in one place, because three things have to agree about it: the migration that
+// filled `settings/public` and `settings/private`, that migration's plan (which prints which side each key lands on),
+// and the app's own settings saves.
+//
+// PUBLIC IS BY NAMING AND PRIVATE IS THE DEFAULT, so a setting added later is officer-readable until somebody decides
+// it belongs to everyone - the safe way round for a document any signed-in member may read. Every key below is public
+// because the BROWSER reads it: the loading messages, the theme and the time format are drawn on screen, and the clock
+// location has to be readable or the fence cannot be checked at all (see clockLocation.js).
+export const PUBLIC_SETTING_KEYS = [
+  'station_name',
+  'department_name',
+  ...LOADING_MESSAGE_KEYS,
+  'required_clock_latitude',
+  'required_clock_longitude',
+  'gps_margin_of_error',
+  'session_timeout',
+  'is_dark_mode',
+  'time_format',
+];
+
+// Which document a setting belongs in: 'public' or 'private'.
+export const settingSide = (key) =>
+  PUBLIC_SETTING_KEYS.includes(String(key || '').trim()) ? 'public' : 'private';
