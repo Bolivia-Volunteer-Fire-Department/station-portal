@@ -85,7 +85,13 @@ export const TAB_MAP = {
   },
   roles: { collections: ['roles'], key: 'id' },
   ranks: { collections: ['ranks'], key: 'id' },
-  push_devices: { collections: ['push_devices'], key: 'id' },
+  push_devices: {
+    collections: ['push_devices'],
+    // The device token IS this collection's data - a member's browser registered it. Declared so the
+    // credential-looking refusal below does not mistake the collection's whole point for a leak.
+    keeps: ['token'],
+    key: 'id',
+  },
   user_settings: {
     collections: ['user_settings'],
     drop: ['fcm_token'], // the rules keep device tokens out of this document; push_devices has them
@@ -161,7 +167,16 @@ export const TAB_MAP = {
     foreignKeys: { user_id: 'users', certification_id: 'certification_setup' },
   },
   certification_setup: { collections: ['certification_setup'], key: 'id' },
-  system_log: { collections: ['system_log'], key: 'id', foreignKeys: { user_id: 'users' } },
+  system_log: {
+    collections: ['system_log'],
+    key: 'id',
+    // The id column here is a row counter, not an id: 35 of the 688 rows share one with another row, so using it as
+    // a document id would overwrite rows. Firestore mints one per row instead.
+    mintIds: true,
+    // History, not references: these rows name users by username from before ids were rewritten (`id_migration`),
+    // and an audit trail that forgets where it came from is worse than one with a stale name in it.
+    softForeignKeys: { user_id: 'users' },
+  },
   id_migration: { skip: 'history: it records a one-off rewrite of every id' },
 };
 

@@ -158,5 +158,45 @@ checkIs('the totals count documents per collection', Object.keys(whole.totals).l
 const noId = planForTabs({ tabs: [{ title: 'roles', values: [['id'], ['']] }] });
 checkIs('and a row with no id is skipped rather than written', noId.problems.some((p) => p.includes('no id')));
 
+// --- what the first real run of the plan taught the tooling ------------------------------------------------------
+
+// A declared column is not a leak: both of these were refused as credentials before the declaration mattered, and
+// both are the data of their own collection.
+check('the password-change flag is not refused', usersPlan.problems.filter((p) => p.includes('REFUSED')).length, 0);
+const devicePlan = planForTab({
+  tab: 'push_devices',
+  spec: TAB_MAP.push_devices,
+  rows: [{ id: 'd1', user_id: 'u1', token: 'fcm-abc', device_label: 'phone' }],
+});
+check('a device token travels, since it is the whole point of the collection', devicePlan.collections.push_devices[0], {
+  id: 'd1', user_id: 'u1', token: 'fcm-abc', device_label: 'phone',
+});
+check('and is not refused', devicePlan.problems.filter((p) => p.includes('REFUSED')).length, 0);
+
+// An undeclared column that looks like a credential still is refused, and never reaches a document.
+const leaky = planForTab({
+  tab: 'roles',
+  spec: TAB_MAP.roles,
+  rows: [{ id: 'r1', description: 'Officer', api_key: 'sk-live-123' }],
+});
+checkIs('an undeclared api key is refused', leaky.problems.some((p) => p.includes('REFUSED') && p.includes('api_key')));
+checkIs('and does not reach the document', !JSON.stringify(leaky.collections).includes('sk-live'));
+
+// system_log: a row-counter id, so the writer mints one per row instead of overwriting 35 of them.
+const logRows = [
+  { id: '2', timestamp: '2026-01-01 08:00:00', user_id: 'mwills', action: 'LOGIN', details: '' },
+  { id: '2', timestamp: '2026-01-02 08:00:00', user_id: 'crave', action: 'LOGIN', details: '' },
+];
+const logPlan = planForTab({
+  tab: 'system_log', spec: TAB_MAP.system_log, rows: logRows, knownIds: { users: new Set(['u1']) },
+});
+check('a duplicated row-counter id is not reported as a duplicate', logPlan.problems.filter((p) => p.includes('more than once')).length, 0);
+checkIs('the writer is told to mint ids', logPlan.problems.some((p) => p.includes('mints an id')));
+checkIs(
+  'and a stale username is history rather than a broken reference',
+  logPlan.problems.some((p) => p.includes('historical row(s)')) &&
+    logPlan.problems.filter((p) => p.includes('does not resolve')).length === 0
+);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

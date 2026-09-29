@@ -85,6 +85,32 @@ point of this move is that secrets stop travelling to browsers.
 - **`certification_badges` has rules but no tab.** It is a materialized index written by the certification writer, so
   the migration leaves it alone and the first certification save fills it.
 
+## What the first real run of the plan changed
+
+The plan found four things the design had not, and three of them were in the tooling rather than the data:
+
+1. **`system_log`'s id is a row counter, not an id.** 35 of the 688 rows share an id with another row, so using it as
+   a document id would have overwritten 35 audit rows in silence. The writer mints a Firestore id per row instead, and
+   the sheet's id is kept as a field.
+2. **12 audit rows name a user that no longer exists** (`mwills`, `crave`, `firefighter`, `Unknown` …) - usernames
+   from before the id rewrite `id_migration` records. An FK check that treated those as errors would have been wrong:
+   the log is history, so `system_log.user_id` is a **soft** reference, reported as a count and migrated as it stands.
+3. **Declared columns are not leaks.** The credential-looking refusal fired 35 times on
+   `is_change_password_on_login` and twice on `push_devices.token` - both the data of their own collection. A column
+   the map has spoken about is exempt; only an **undeclared** credential-looking column is refused, and it is refused
+   from the document as well as named in the report.
+4. **The `fcm_*` settings are not copied at all.** They are the web config the browser used to be handed at runtime;
+   after the move it comes from the build. `fcm_service_account_private_key` is refused for the same reason as before
+   and the rest are dropped as mechanism rather than data.
+
+And one thing the plan proved rather than assumed: **no announcement, event or document fills more than one audience
+column.** That was the case an `array-contains-any` query cannot express, so it would have needed a different design -
+it turned out not to exist.
+
+The settings split still needs a decision: 20 of the 21 keys landed in `settings/private`, because the public list was
+written from the reader's expectations rather than the sheet's key names. The plan now prints every key and the side
+it lands on, which is the input for fixing that list.
+
 ## What the migration does, in order
 
 1. **Read** every tab (read-only, service account, no writes at all).
