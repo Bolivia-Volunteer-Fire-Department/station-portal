@@ -462,6 +462,43 @@ exports.saveDocumentWithAudit = onCall(async (request) => {
 // Identity Platform's own guard on account creation. The app creates members with the Admin SDK from an officer's
 // callable, and the console creates them by hand; anything else - a browser trying to sign up to our domain - is
 // refused before it exists.
+// Which member's alerts arrive on the browser holding this token - the one question a member cannot answer for
+// themselves, and the reason this callable exists at all.
+//
+// A member may read their OWN push_devices rows and nobody else's, which is right, but it means a query "is this
+// browser's token registered to somebody else?" cannot be asked from the browser: Firestore would have to prove
+// ownership it has no way to prove, and it refuses. The sheet answered it server-side for the same reason.
+//
+// It is restricted to the two things the card draws - whose, and on which device - because a token is
+// credential-shaped and the row it points at is nobody else's business. The token travels from the browser that
+// already holds it, which is why asking is safe in the first place: a browser that does not hold it cannot ask.
+//
+// `null` is a real answer, not a failure: it means this browser's alerts are set up to go to nobody.
+exports.pushDeviceOwner = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+
+  const token = String((request.data || {}).token || '').trim();
+  if (!token) return { device_owner: null };
+
+  const found = await db.collection('push_devices').where('token', '==', token).limit(1).get();
+  if (found.empty) return { device_owner: null };
+
+  const row = found.docs[0].data() || {};
+  const ownerId = String(row.user_id || '').trim();
+  const owner = ownerId ? await db.doc(`users/${ownerId}`).get() : null;
+  const ownerData = (owner && owner.exists && owner.data()) || {};
+
+  return {
+    device_owner: {
+      user_id: ownerId,
+      // The same phrase the sheet used when the member has vanished or has no name: this is shown to somebody who is
+      // working out which account they are looking at, so it says something rather than being empty.
+      name: String(ownerData.name || ownerData.user_name || '').trim() || 'another member',
+      device_label: String(row.device_label || '').trim(),
+    },
+  };
+});
+
 exports.beforeUserCreated = beforeUserCreated((event) => {
   const fromBrowser = Boolean(event.ipAddress) || Boolean(event.userAgent);
   if (fromBrowser) {

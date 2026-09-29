@@ -14,9 +14,10 @@
  *     still cannot approve it.
  */
 import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
-import { firebaseAuth, firestore } from '../src/services/firebase.js';
+import { firebaseAuth, firebaseFunctions, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
 import {
@@ -302,6 +303,47 @@ const main = async () => {
   check('a setting nobody outside the office needs is private', settingSide('some_officer_thing'), 'private');
   check('and a setting added later starts private, which is the safe way round', settingSide('a_key_nobody_named_yet'), 'private');
   check('whitespace does not change the answer', settingSide('  station_name  '), 'public');
+
+  // Whose device is this browser? The one question a member cannot answer for themselves, and the reason a callable
+  // exists for it: a member may read their OWN push_devices rows and nobody else's - correctly - so another member's
+  // token reads as nothing at all against a rules-constrained query, and a shared computer would look like the
+  // signed-in member's own. The sheet's own comment says that is what this change exists to close, so the shared
+  // computer is the case asserted here: jane asks about a token registered to BO, and has to be told it is his.
+  const pushDeviceOwner = httpsCallable(firebaseFunctions(), 'pushDeviceOwner');
+
+  await signIn('jane');
+  await setDoc(doc(firestore(), 'push_devices', 'dev-jane'), {
+    user_id: 'u1',
+    token: 'token-of-jane',
+    device_label: 'Front desk',
+  });
+  await signIn('bo');
+  await setDoc(doc(firestore(), 'push_devices', 'dev-bo'), {
+    user_id: 'u2',
+    token: 'token-of-bo',
+    device_label: 'Firehouse iPad',
+  });
+
+  await signIn('jane');
+  const ownDevice = await pushDeviceOwner({ token: 'token-of-jane' });
+  check('a device this member registered is theirs', ownDevice.data.device_owner.user_id, 'u1');
+  check('and it is named the way the card shows it', ownDevice.data.device_owner.name, 'Jane Smith');
+
+  const someoneElses = await pushDeviceOwner({ token: 'token-of-bo' });
+  check('a device registered to ANOTHER member says so', someoneElses.data.device_owner.user_id, 'u2');
+  check('and names them, which is the whole point of asking', someoneElses.data.device_owner.name, 'Bo Jones');
+
+  const unregistered = await pushDeviceOwner({ token: 'a-token-nobody-registered' });
+  checkIs(
+    'a token nobody registered claims no owner rather than failing',
+    unregistered.data.device_owner === null,
+    String(unregistered.data.device_owner)
+  );
+
+  await signOut(firebaseAuth());
+  // The callable's own code, as the client sees it: the app's custom codes come through bare, and the SDK's own
+  // come through with the `functions/` prefix.
+  await refused('an unsigned caller cannot ask whose device a token is', 'functions/unauthenticated', () => pushDeviceOwner({ token: 'token-of-bo' }));
 
   // The audit toggle, asserted BOTH ways because the wrong default here is invisible: the save succeeds either way,
   // and only the audit row differs. Off unless an officer asks for it is the owner's decision, so 'off' is a case

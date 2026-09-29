@@ -12,7 +12,8 @@
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { fetchAdminPayload, fetchMemberPayload } from '../src/services/firestorePayload.js';
-import { firebaseAuth, firebaseConfigured } from '../src/services/firebase.js';
+import { doc, setDoc } from 'firebase/firestore';
+import { firebaseAuth, firebaseConfigured, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 
 let failures = 0;
@@ -203,6 +204,20 @@ const main = async () => {
   const allDocuments = await routeRead('ADMIN_GET_DOCUMENTS');
   checkIs('and the documents collection, which had no rules at all until now', Array.isArray(allDocuments.documents), 'no documents');
   await signOut(firebaseAuth());
+
+  // The last member read, and its two halves. The devices half is a member's own rows, which the rules allow because
+  // the query says whose they are. The other half - "whose device is this browser?" - is a callable and is asserted in
+  // the WRITES harness, which runs the functions emulator; here the read is asked WITHOUT a token, which is the shape
+  // the card uses on a browser that has no subscription - so the callable is deliberately never reached from here.
+  await signIn('bo');
+  await setDoc(doc(firestore(), 'push_devices', 'dev-own'), {
+    user_id: 'u2',
+    token: 'token-of-bo',
+    device_label: 'Firehouse iPad',
+  });
+  const devices = await routeRead('MY_PUSH_DEVICES');
+  check('a member reads their own devices', devices.devices.map((row) => row.id), ['dev-own']);
+  check('and no owner is claimed when the browser passed no token', devices.device_owner, null);
 
   // The pre-login read, with NOBODY signed in - which is the whole point of it and the only read in the app that
   // works that way. The asymmetry asserted here is the design: the station's own settings are readable by anybody,

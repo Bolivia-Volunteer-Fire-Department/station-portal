@@ -128,11 +128,11 @@ export const ROUTED_FEATURES = {
   // schedule, the member's own availability and offers, training, certifications, announcements and events. They
   // answer from the same data the payload does, which is why they depend on it and why their shapes are its shapes.
   //
-  // TWO READS ARE DELIBERATELY NOT HERE. `MY_PUSH_DEVICES` also answers "whose device is this browser", which this
-  // side cannot work out yet - routing it would show the member their devices and hide which one they are holding.
-  // And `GET_INITIAL_DATA` runs BEFORE anyone signs in (it draws the loading screen), so a route that needs a signed
-  // -in Firebase user could never fire; it stays on the sheet by arithmetic rather than by preference. Both are named
-  // in `switchReads` so the record says what is left rather than looking finished.
+  // TWO READS NEEDED SOMETHING THE OTHERS DID NOT, and both are here now. `GET_INITIAL_DATA` runs BEFORE anyone has
+  // signed in - it draws the loading screen - which is why the router has one pre-auth exception. And `MY_PUSH_DEVICES`
+  // also answers "whose device is this browser", which a member cannot work out for themselves: it reads its own rows
+  // and asks the `pushDeviceOwner` callable for the other half, because another member's token reads as nothing at all
+  // against a rules-constrained query and a shared computer would look like the signed-in member's own.
   memberReads: {
     requires: ['memberPayload'],
     writes: [],
@@ -150,10 +150,9 @@ export const ROUTED_FEATURES = {
       // The ONE read nobody has signed in for yet. It is here rather than in its own feature because it answers from
       // the same data - and because a feature is a unit of the move, not of the menu.
       'GET_INITIAL_DATA',
+      'MY_PUSH_DEVICES',
     ],
-    // `MY_PUSH_DEVICES` is the last of the member reads left, and it needs a callable: the card asks whose device this
-    // browser is, and a member may only read their OWN row, so another member's token reads as nothing at all.
-    switchReads: ['MY_PUSH_DEVICES'],
+    switchReads: [],
   },
   // The two read payloads, named so `requires` can point at them. They write nothing themselves: this is where the
   // bootstrap actions become Firestore-backed, and it is the hop that unlocks every feature above.

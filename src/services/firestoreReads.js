@@ -10,8 +10,9 @@
 // which is the failure this whole module exists to avoid. scripts/verify-firestore-reads.mjs signs in and asks
 // through these, so the shapes are checked rather than hoped for.
 import { collection, doc, getDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { audienceKeysFor, audienceRows, rowsFor, rowsOf, settingRows } from './firestorePayload.js';
-import { firestore } from './firebase.js';
+import { firebaseFunctions, firestore } from './firebase.js';
 
 // The roster as the schedule stores it: an id, a name and a rank. Read while the calendar labels other people's
 // shifts, so it is deliberately the narrow projection.
@@ -50,7 +51,21 @@ export const READERS = {
     rowsFor('certifications', 'user_id', uid).then((certifications) => ({ certifications })),
   MY_ANNOUNCEMENTS: async (uid) => ({ announcements: await audienceRows('announcements', await keysFor(uid)) }),
   GET_EVENTS: async (uid) => ({ events: await audienceRows('events', await keysFor(uid)) }),
-  MY_PUSH_DEVICES: (uid) => rowsFor('push_devices', 'user_id', uid).then((devices) => ({ devices })),
+  MY_PUSH_DEVICES: async (uid, body) => {
+    const devices = await rowsFor('push_devices', 'user_id', uid);
+
+    // The second half of this read, and the reason it needed a callable: "whose device is this browser?" is a
+    // question the browser cannot answer, because a member may read their own rows and nobody else's - so another
+    // member's token reads as nothing at all, and a shared computer would look like the signed-in member's own. The
+    // sheet answered it server-side for exactly the same reason, and so does `pushDeviceOwner`.
+    //
+    // The token is the one this browser's own service worker holds, passed in by the card that asks the question.
+    const deviceToken = String((body && body.device_token) || '').trim();
+    if (!deviceToken) return { devices, device_owner: null };
+
+    const answer = await httpsCallable(firebaseFunctions(), 'pushDeviceOwner')({ token: deviceToken });
+    return { devices, device_owner: (answer.data && answer.data.device_owner) || null };
+  },
 
   // The officer-only reads, in the same reply shape their callers already read: `result.announcements`,
   // `result.documents`, `result.events`. They return the WHOLE collection rather than an audience-filtered slice,
