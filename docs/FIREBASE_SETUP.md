@@ -134,6 +134,25 @@ happen.
   `engines` field in `functions/package.json` names the runtime the functions DEPLOY to, and it has to be an exact
   supported version, so it stays `22` even when the machine has a newer Node. Nothing needs changing; the warning
   appears because npm compares the two.
+- **`Functions successfully deployed but could not set up cleanup policy in locations us-central1, us-east1`** -
+  the deploy worked. This is about the container images behind the functions, which accumulate and cost a few cents
+  a month once they are old. The CLI tries to set a clean-up policy itself and failed to, usually for a permissions
+  or Artifact Registry API reason on the deploying account. Set it by hand, once per location it named:
+
+  ```bash
+  npx firebase functions:artifacts:setpolicy --location us-central1 --days 1 --force
+  npx firebase functions:artifacts:setpolicy --location us-east1  --days 1 --force
+  ```
+
+  `--days 1` is the CLI's own default: old images are deleted a day after a deploy supersedes them. If you would
+  rather keep the images and live with the bill, `--none` opts out and silences the suggestion for good. If the
+  manual command fails the same way, the console is the way round it - you are the Owner there, and it is the
+  Artifact Registry repository's cleanup policies, one repository per location. **None of this blocks anything else:**
+  go on to the Identity Platform upgrade and the self-sign-up check, and come back to it when convenient.
+
+  One thing not to do about it: `firebase deploy --force` silences this too, but `--force` on *deploy* also skips
+  the confirmation before deleting functions that are no longer in the source. That is not a trade worth making for
+  a container-image suggestion.
 - **`npm audit` reports moderate vulnerabilities** - they come in with `firebase-admin`'s dependency tree. `npm
   audit fix` at this level can move dependencies under a Functions runtime, so leave them and read the report if it
   matters.
