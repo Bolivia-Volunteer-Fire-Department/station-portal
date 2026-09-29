@@ -33,7 +33,24 @@ const config = {
 };
 
 // Whether there is anything to talk to. A build without the config is a build that has not moved yet.
-export const firebaseConfigured = () => Boolean(config.apiKey && config.projectId && config.appId);
+//
+// Said ONCE, at the first question, because "why is nothing routing to Firestore?" is otherwise answered only by
+// reading this file and src/services/firestoreRouting.js together. A build with no config reports itself and stays
+// entirely on Apps Script - and the most common reason for that is not a wrong value but a stale process: Vite reads
+// .env when the dev server STARTS, so a value added since is invisible until it restarts.
+let reported = false;
+export const firebaseConfigured = () => {
+  const configured = Boolean(config.apiKey && config.projectId && config.appId);
+  if (!reported) {
+    reported = true;
+    console.info(
+      configured
+        ? `[firebase] configured for ${config.projectId}${usingEmulator ? ' (emulators)' : ''}.`
+        : '[firebase] no Firebase config in this build, so everything stays on Apps Script. If .env has the values, restart the dev server: Vite reads it at startup only.'
+    );
+  }
+  return configured;
+};
 
 let app = null;
 
