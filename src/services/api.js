@@ -5,8 +5,15 @@ import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 import { createReadCoalescer, isReadAction, readKey } from '../utils/readCoalescing';
 import { routeRead, routeWrite } from './firestoreRouting.js';
-import { changeOwnPassword, signInAsMember } from './firebaseAuth.js';
-import { firebaseAuth, firebaseConfigured } from './firebase.js';
+import {
+  changeOwnPassword,
+  createMember,
+  resetMemberPassword,
+  setMemberStatus,
+  signInAsMember,
+} from './firebaseAuth.js';
+import { firebaseAuth, firebaseConfigured, firestore } from './firebase.js';
+import { doc, setDoc } from 'firebase/firestore';
 
 // The row version a save was based on, when the caller has one.
 //
@@ -387,8 +394,63 @@ export const updateUserPassword = async (userId, newPassword, token) => {
 export const adminFetchUsers = async (token) =>
   appScriptFetch({ action: 'ADMIN_GET_USERS', token }, { retryOnNetworkError: true });
 
-export const adminSaveUser = async (userData, token) =>
-  appScriptFetch({
+// The officer's user editor, translated. The sheet's ONE save is four operations in this model, and two of them are
+// callables that already exist: creating a member (which also makes the Auth account), setting the account status,
+// and resetting a password. The roster fields - name, rank, role - are the only three the rules let an officer write
+// to `users` directly, which is why they are a plain setDoc here.
+//
+// The TWO fields that have nowhere to go are reported rather than dropped: `exclude_from_scheduling` and
+// `is_change_password_on_login` live in users_private, which is writable by NOBODY, and no callable touches them yet.
+// A half-saved form that says it succeeded is the failure mode this whole migration has been arranged to avoid, so
+// this answers success:false with the reason - which is the one path the caller surfaces to the officer.
+//
+// A username change is the same story, for the same reason, and is reported the same way.
+export const adminSaveUser = async (userData, token) => {
+  if (firebaseConfigured() && firebaseAuth().currentUser) {
+    const notSaved = [];
+    try {
+      if (!userData.id) {
+        const created = await createMember({
+          username: userData.user_name,
+          password: userData.password || '',
+          name: userData.name,
+          rank_id: userData.rank_id,
+          role_id: userData.role_id,
+        });
+        return { success: true, id: created?.id || created?.userId || '' };
+      }
+
+      // The three fields the rules allow, in one write.
+      await setDoc(
+        doc(firestore(), 'users', String(userData.id)),
+        {
+          name: String(userData.name || ''),
+          rank_id: String(userData.rank_id || ''),
+          role_id: String(userData.role_id || ''),
+        },
+        { merge: true }
+      );
+
+      if (userData.status) await setMemberStatus({ userId: String(userData.id), status: String(userData.status) });
+      if (userData.password) {
+        await resetMemberPassword({ userId: String(userData.id), temporaryPassword: String(userData.password) });
+      }
+
+      if (['TRUE', 'FALSE'].includes(String(userData.exclude_from_scheduling || '')) ||
+          ['TRUE', 'FALSE'].includes(String(userData.is_change_password_on_login || ''))) {
+        notSaved.push('the scheduling and password-change flags');
+      }
+      if (userData.user_name) notSaved.push('a username change');
+
+      return notSaved.length
+        ? { success: false, id: String(userData.id), message: `Saved the name, rank, role, status and password. Not saved: ${notSaved.join(', ')} - that needs a callable that does not exist yet.` }
+        : { success: true, id: String(userData.id) };
+    } catch (error) {
+      return { success: false, id: String(userData.id || ''), message: error?.message || 'The member could not be saved.' };
+    }
+  }
+
+  return appScriptFetch({
     action: 'ADMIN_SAVE_USER',
     token,
     id: userData.id || '',
@@ -410,6 +472,7 @@ export const adminSaveUser = async (userData, token) =>
     exclude_from_scheduling: userData.exclude_from_scheduling,
     is_change_password_on_login: userData.is_change_password_on_login,
   });
+};
 
 export const adminDeleteUser = async (userId, token) =>
   appScriptFetch({ action: 'ADMIN_DELETE_USER', token, id: userId });
