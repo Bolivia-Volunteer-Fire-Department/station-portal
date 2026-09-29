@@ -153,10 +153,21 @@ const readsInFlight = createReadCoalescer();
 
 function appScriptFetch(body, options) {
   if (!isReadAction(body?.action)) return appScriptRequest(body, options);
-  const key = readKey(body);
-  const joined = readsInFlight.join(key);
-  if (joined) return joined;
-  return readsInFlight.hold(key, appScriptRequest(body, options));
+
+  // EVERY READ PASSES THROUGH HERE, which is why the Firestore offer is made at this one place rather than at each
+  // call site: it moves the whole refresh wave with a single hook. Writes are not offered - their functions call
+  // routeWrite first and only reach this on a fallback, so offering again here would be a second decision about the
+  // same request.
+  //
+  // `routeRead` answers null for anything unrouted, which is most actions, and it decides that from the table before
+  // touching the network - so the hook costs a lookup for reads that have not moved.
+  return routeRead(body.action).then((routed) => {
+    if (routed) return routed;
+    const key = readKey(body);
+    const joined = readsInFlight.join(key);
+    if (joined) return joined;
+    return readsInFlight.hold(key, appScriptRequest(body, options));
+  });
 }
 
 export const fetchInitialData = async () =>

@@ -14,9 +14,11 @@
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from './firebase.js';
 
-const rowsOf = async (target) => (await getDocs(target)).docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+// Shared with firestoreReads.js, which serves the refresh reads: one implementation of each query, so a read moved
+// to Firestore cannot answer differently depending on which action asked for it.
+export const rowsOf = async (target) => (await getDocs(target)).docs.map((entry) => ({ id: entry.id, ...entry.data() }));
 
-const rowsFor = (name, field, value) => rowsOf(query(collection(firestore(), name), where(field, '==', value)));
+export const rowsFor = (name, field, value) => rowsOf(query(collection(firestore(), name), where(field, '==', value)));
 
 // The four keys an audience query carries: everyone, this member, their role, their rank. The rules answer the same
 // list with hasAny - see firestore.rules - which is what makes the query provable rather than merely convenient.
@@ -27,12 +29,12 @@ export const audienceKeysFor = ({ userId, roleId, rankId }) => [
   `rank:${rankId}`,
 ];
 
-const audienceRows = (name, keys) =>
+export const audienceRows = (name, keys) =>
   rowsOf(query(collection(firestore(), name), where('audience_keys', 'array-contains-any', keys)));
 
 // A settings document turned back into the key/value rows the app reads today. The shape stays a list until the
 // settings screen itself is migrated: keeping it is what lets this module drop in behind api.js unchanged.
-const settingRows = (snapshot) => Object.entries(snapshot.data() || {}).map(([key, value]) => ({ key, value }));
+export const settingRows = (snapshot) => Object.entries(snapshot.data() || {}).map(([key, value]) => ({ key, value }));
 
 export const fetchMemberPayload = async (account) => {
   const db = firestore();

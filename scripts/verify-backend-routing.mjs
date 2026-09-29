@@ -103,9 +103,15 @@ for (const [action, feature] of Object.entries(ROUTED_WRITES)) {
   checkIs(`${action} (${feature}) is wired through routeWrite in api.js`, actionIsWired(action, apiSource));
 }
 // Reads dispatch through routeRead instead, and the same question applies: a feature that claims a read it cannot
-// route is a plan, not a fact.
+// route is a plan, not a fact. The two payloads call routeRead at their own call sites; the refresh reads are offered
+// it by the one hook in appScriptFetch, which every read passes through - so for those, being a real api.js action is
+// the wiring.
 for (const [action] of Object.entries(ROUTED_READS)) {
-  checkIs(`${action} is wired through routeRead in api.js`, apiSource.includes(`routeRead('${action}'`));
+  checkIs(
+    `${action} is wired, either by its own call site or by the read hook`,
+    apiSource.includes(`routeRead('${action}'`) || apiSource.includes(`action: '${action}'`),
+    'neither found in api.js'
+  );
 }
 for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
   for (const read of spec.switchReads) {

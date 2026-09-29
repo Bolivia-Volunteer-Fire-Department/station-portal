@@ -142,7 +142,7 @@ const main = async () => {
   // `data.success` to decide whether a bootstrap loaded, and the whole read was dropped as a failed refresh. It
   // looked exactly like the read never moving to Firestore at all.
   console.log('\n--- through the router ---');
-  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,adminPayload';
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,memberReads,adminPayload';
   const { routeRead } = await import('../src/services/firestoreRouting.js');
 
   await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
@@ -166,6 +166,29 @@ const main = async () => {
     Array.isArray(adminRouted.users) && Array.isArray(adminRouted.certificationRecords),
     JSON.stringify(Object.keys(adminRouted || {}).slice(0, 10))
   );
+
+  // The refresh reads, through the same route. Their shapes have to be the PAYLOAD's shapes - data.onDuty, data.logs,
+  // data.roster - because the app hands the payload and the refresh to the same setters, and a different key here is
+  // a screen that empties when the refresh lands.
+  const onDuty = await routeRead('GET_ON_DUTY');
+  check(
+    'the on-duty read routes, carrying the key the dashboard reads',
+    [onDuty.success, Array.isArray(onDuty.onDuty)],
+    [true, true]
+  );
+  const roster = await routeRead('GET_ROSTER');
+  checkIs(
+    'and the roster arrives as the narrow projection the calendar labels shifts with',
+    roster.roster.length > 0 && roster.roster.every((row) => row.id && 'name' in row && 'rank_id' in row),
+    JSON.stringify(roster.roster.slice(0, 2))
+  );
+  const training = await routeRead('GET_TRAINING');
+  checkIs('and training its list', Array.isArray(training.trainings), 'no trainings');
+  const logs = await routeRead('GET_TIMECLOCK_LOGS');
+  checkIs('and the clock history the member may read their own of', Array.isArray(logs.logs), 'no logs');
+
+  // A read that is NOT routed still answers null, so the hook in api.js leaves it alone.
+  check('a read with no route still answers null', await routeRead('GET_SYSTEM_SETTINGS'), null);
   await signOut(firebaseAuth());
 
   // The kill switch, which has to work whatever else is true.

@@ -85,6 +85,32 @@ export const ROUTED_FEATURES = {
     writes: ['ADMIN_BULK_SAVE_SCHEDULE'],
     switchReads: ['GET_SCHEDULE', 'ADMIN_GET_BOOTSTRAP'],
   },
+  // The small reads the app makes AFTER the sign-in payload: who is on duty, the clock history, the roster, the
+  // schedule, the member's own availability and offers, training, certifications, announcements and events. They
+  // answer from the same data the payload does, which is why they depend on it and why their shapes are its shapes.
+  //
+  // TWO READS ARE DELIBERATELY NOT HERE. `MY_PUSH_DEVICES` also answers "whose device is this browser", which this
+  // side cannot work out yet - routing it would show the member their devices and hide which one they are holding.
+  // And `GET_INITIAL_DATA` runs BEFORE anyone signs in (it draws the loading screen), so a route that needs a signed
+  // -in Firebase user could never fire; it stays on the sheet by arithmetic rather than by preference. Both are named
+  // in `switchReads` so the record says what is left rather than looking finished.
+  memberReads: {
+    requires: ['memberPayload'],
+    writes: [],
+    reads: [
+      'GET_ON_DUTY',
+      'GET_ROSTER',
+      'GET_TIMECLOCK_LOGS',
+      'GET_SCHEDULE',
+      'GET_AVAILABILITY',
+      'GET_SHIFT_OFFERS',
+      'GET_TRAINING',
+      'GET_CERTIFICATIONS',
+      'MY_ANNOUNCEMENTS',
+      'GET_EVENTS',
+    ],
+    switchReads: ['MY_PUSH_DEVICES', 'GET_INITIAL_DATA'],
+  },
   // The two read payloads, named so `requires` can point at them. They write nothing themselves: this is where the
   // bootstrap actions become Firestore-backed, and it is the hop that unlocks every feature above.
   //
@@ -146,7 +172,15 @@ export const routeRead = async (action) => {
   const { firebaseAuth } = await import('./firebase.js');
   const uid = firebaseAuth().currentUser.uid;
   try {
-    return await READ_DISPATCH[action](uid);
+    // The two payloads have their own dispatchers, because each is a whole shape to assemble. Everything else that
+    // is routed as a read answers from firestoreReads.js, one slice at a time - which is how ten refresh reads are
+    // moved by one entry in the table rather than ten wrappers in api.js.
+    if (READ_DISPATCH[action]) return await READ_DISPATCH[action](uid);
+    const { READERS } = await import('./firestoreReads.js');
+    if (READERS[action]) return ok(await READERS[action](uid));
+    // Named as routed with nothing to route it: a mistake in the table, and worth saying rather than failing quietly.
+    console.error(`[firestore] ${action} is routed but has no reader, so it is being read from the sheet.`);
+    return null;
   } catch (error) {
     // LOUD on purpose. A routed read that fails is a step of the migration not working, and the fallback that keeps
     // the app usable is exactly what hides it - a console.info nobody reads is how "still using Apps Script" becomes
