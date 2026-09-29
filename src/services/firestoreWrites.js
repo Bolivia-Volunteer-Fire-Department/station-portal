@@ -8,10 +8,13 @@
 //   - What the rules can check, they check - a member may only open a shift for themselves. What they cannot (that
 //     the coordinates are honest) was never checked by the sheet version either: it validated what the browser sent,
 //     and so does this.
-import { collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
-import { rowsOf } from './firestorePayload.js';
+import { rowsFor, rowsOf } from './firestorePayload.js';
+// The SAME visibility test the readers apply, imported rather than copied: this is what decides whether a document
+// exists as far as a member is concerned, and two implementations of that would drift.
+import { visibleDocumentFor } from './firestoreReads.js';
 import { settingSide } from '../utils/systemSettings.js';
 import { deleteField } from 'firebase/firestore';
 
@@ -326,6 +329,174 @@ export const saveMemberSettings = async ({ userId, fields }) => {
   if (!Object.keys(document).length) return { userId: target, changed: 0 };
   await setDoc(doc(firestore(), 'user_settings', target), document, { merge: true });
   return { userId: target, changed: Object.keys(document).length };
+};
+
+// Signing, and the three rules that make it safe to be add-only.
+//
+// A signature is an ACKNOWLEDGMENT, so there is no un-sign: an administrator removes one. A request carrying removals is
+// REFUSED rather than ignored, because a silent no-op looks like a working un-sign to a caller that expected one.
+//
+// BOTH identities come from the SESSION and never from the request: who signed, and who it was for. That is what makes
+// "a member cannot sign another member's checklist" a fact rather than a convention a crafted request can ignore - and
+// the rules check the same thing on the way in, so a client that skipped this function entirely still cannot.
+//
+// WHAT `content_revision` IS FOR: the document's revision AT THE MOMENT OF SIGNING. Comparing it with the document's
+// current one is how a signature that predates an edit is reported as stale - the same judgment GET_DOCUMENT_SIGNATURES
+// makes, which is why it is stamped here and not computed later.
+const signatureRow = ({ documentId, itemId, memberId, signerId, role, revision, at }) => ({
+  document_id: documentId,
+  checklist_item_id: itemId || '',
+  user_id: memberId,
+  signed_by_user_id: signerId,
+  signature_role: role,
+  signed_at: at,
+  content_revision: revision,
+});
+
+// The signatures this member owns, which is what the member-facing screens re-render from after a sign.
+const ownSignatureRows = (memberId) => rowsFor('document_signatures', 'user_id', memberId);
+
+export const signDocument = async ({ userId, documentId }) => {
+  const document = await visibleDocumentFor(userId, documentId);
+  if (!document) return { success: false, message: 'That document is not available.' };
+  if (String(document.doc_type || '').trim().toLowerCase() === 'checklist') {
+    // A checklist is signed ITEM BY ITEM, so signing the document would record an acknowledgment that means nothing
+    // and clear the "to sign" badge while every item was still outstanding.
+    return { success: false, message: 'A checklist is signed item by item. Tick and save the items instead.' };
+  }
+  if (document.is_sign_required !== true && String(document.is_sign_required || '').trim().toUpperCase() !== 'TRUE') {
+    return { success: false, message: 'That document does not need a signature.' };
+  }
+
+  const already = await rowsFor('document_signatures', 'user_id', userId);
+  const existing = already.find((row) => row.document_id === documentId && !String(row.checklist_item_id || '').trim());
+  if (existing) {
+    // Signing twice is a repeated click, not an error. The caller is told what is already on file rather than being
+    // given a failure it would show as one.
+    const signatures = await ownSignatureRows(userId);
+    return { success: true, signed: 0, already_signed: true, signature: existing, signatures };
+  }
+
+  const created = await addDoc(collection(firestore(), 'document_signatures'), signatureRow({
+    documentId,
+    memberId: userId,
+    signerId: userId,
+    role: 'member',
+    revision: parseInt(document.content_revision, 10) || 0,
+    at: stationTimestamp(),
+  }));
+
+  return {
+    success: true,
+    signed: 1,
+    id: created.id,
+    signature: { id: created.id, ...(await getDoc(created)).data() },
+    signatures: await ownSignatureRows(userId),
+  };
+};
+
+// A checklist is signed ITEM BY ITEM, and the batch is what the screen sends: ticking several boxes and saving once.
+//
+// Two things are deliberately NOT errors, and both are counted rather than failing the batch: an item that belongs to
+// another checklist (or to no checklist at all), because a stale page must not be able to create a signature pointing
+// at an item it does not own; and an item already signed, which is most likely an earlier press of the same button.
+//
+// The whole batch shares ONE timestamp, because it was one act - a member ticking five boxes did not sign five times.
+export const signChecklistItems = async ({ userId, documentId, itemIds }) => {
+  const document = await visibleDocumentFor(userId, documentId);
+  if (!document || String(document.doc_type || '').trim().toLowerCase() !== 'checklist') {
+    return { success: false, message: 'That checklist is not available to sign.' };
+  }
+
+  const wanted = [...new Set((Array.isArray(itemIds) ? itemIds : []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!wanted.length) return { success: false, message: 'No items were named.' };
+
+  const items = await rowsFor('document_checklist_items', 'document_id', documentId);
+  const owned = new Set(items.map((item) => item.id));
+  const mine = await ownSignatureRows(userId);
+  const signed = new Set(
+    mine
+      .filter((row) => row.document_id === documentId && String(row.checklist_item_id || '').trim())
+      .map((row) => row.checklist_item_id)
+  );
+
+  const at = stationTimestamp();
+  const revision = parseInt(document.content_revision, 10) || 0;
+  const batch = writeBatch(firestore());
+  let added = 0;
+  let skipped = 0;
+
+  wanted.forEach((itemId) => {
+    if (!owned.has(itemId) || signed.has(itemId)) {
+      skipped += 1;
+      return;
+    }
+    batch.set(
+      doc(collection(firestore(), 'document_signatures')),
+      signatureRow({ documentId, itemId, memberId: userId, signerId: userId, role: 'member', revision, at })
+    );
+    added += 1;
+  });
+
+  if (added) await batch.commit();
+  return { success: true, signed: added, skipped, signatures: await ownSignatureRows(userId) };
+};
+
+// A VERIFICATION IS A SEPARATE ROW, not an edit of the member's. The two are different people, and a row that says who
+// signed and who checked it is the whole point of the exercise - which is also why the rules let a verifier create a row
+// that is not their own, as long as it is theirs to attribute and says 'verifier'.
+//
+// `content_revision` is 0 on these deliberately: a verification is not a signature OF a revision. The member's row
+// carries the revision it was signed against, and this one only records that somebody else looked.
+export const verifyChecklistItem = async ({ verifierId, documentId, itemId, memberId }) => {
+  const member = String(memberId || '').trim();
+  const item = String(itemId || '').trim();
+  if (!member || !item || !documentId) return { success: false, message: 'Which item, for which member?' };
+  if (member === verifierId) return { success: false, message: 'A verification is somebody else looking at it.' };
+
+  const signatures = await rowsFor('document_signatures', 'document_id', documentId);
+  const theirs = signatures.filter((row) => row.user_id === member && row.checklist_item_id === item);
+  if (!theirs.some((row) => row.signature_role === 'member')) {
+    return { success: false, message: 'That member has not signed that item.' };
+  }
+  if (theirs.some((row) => row.signature_role === 'verifier')) {
+    // Verifying twice is a double click, not an error.
+    return { success: true, verified: 0, already_verified: true, signatures };
+  }
+
+  await addDoc(
+    collection(firestore(), 'document_signatures'),
+    signatureRow({ documentId, itemId: item, memberId: member, signerId: verifierId, role: 'verifier', revision: 0, at: stationTimestamp() })
+  );
+  return { success: true, verified: 1, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
+};
+
+// Everything that member has signed and nobody has verified, in ONE call: a verifier going down a list wants the list
+// finished, and doing it one at a time is how a checklist ends up half-verified with no way to tell which half.
+export const verifyChecklistRemaining = async ({ verifierId, documentId, memberId }) => {
+  const member = String(memberId || '').trim();
+  if (!member || !documentId) return { success: false, message: 'Which member?' };
+  if (member === verifierId) return { success: false, message: 'A verification is somebody else looking at it.' };
+
+  const signatures = await rowsFor('document_signatures', 'document_id', documentId);
+  const verified = new Set(
+    signatures.filter((row) => row.user_id === member && row.signature_role === 'verifier').map((row) => row.checklist_item_id)
+  );
+  const pending = signatures.filter(
+    (row) => row.user_id === member && row.signature_role === 'member' && !verified.has(row.checklist_item_id)
+  );
+  if (!pending.length) return { success: true, verified: 0, already_verified: true, signatures };
+
+  const at = stationTimestamp();
+  const batch = writeBatch(firestore());
+  pending.forEach((row) => {
+    batch.set(
+      doc(collection(firestore(), 'document_signatures')),
+      signatureRow({ documentId, itemId: row.checklist_item_id, memberId: member, signerId: verifierId, role: 'verifier', revision: 0, at })
+    );
+  });
+  await batch.commit();
+  return { success: true, verified: pending.length, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
 };
 
 export const deleteDocument = async ({ collection, id }) => {

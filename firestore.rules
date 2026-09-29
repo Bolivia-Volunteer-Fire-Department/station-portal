@@ -406,7 +406,27 @@ service cloud.firestore {
         && (resource.data.user_id == uid()
           || permission('can_verify_documents')
           || permission('can_manage_documents'));
-      allow create: if signedIn() && request.resource.data.user_id == uid();
+      // TWO SHAPES OF ROW ARE CREATED HERE, by two different people.
+      //
+      // A MEMBER's own signature: about them AND attributed to them, role 'member', and only with `can_view_documents` -
+      // signing a document you are not allowed to read is not a thing. The sheet checked that permission in its handler;
+      // here it is a rule, so a client that skips the handler entirely still cannot.
+      //
+      // A VERIFIER's row: about the member and attributed to the VERIFIER. It is the one row a client may create that is
+      // not about itself, so it names it role 'verifier' and it must carry the caller as the signer: a verifier can say
+      // "I checked this", never "somebody else checked it". There is no update path for either - a verification is a new
+      // row rather than an edit of the member's, which is what keeps the two signatures and the two people legible.
+      // `get(key, default)` rather than `data.key`, and that is not a style choice: reading a field that is NOT THERE
+      // makes the rule ERROR, and an error is indistinguishable from a denial in the log - which is how a malformed
+      // client write turns into an afternoon of "the rules say no". With a default, a missing field is simply `false`.
+      allow create: if signedIn()
+        && ((request.resource.data.get('user_id', '') == uid()
+              && request.resource.data.get('signed_by_user_id', '') == uid()
+              && request.resource.data.get('signature_role', '') == 'member'
+              && permission('can_view_documents'))
+            || (permission('can_verify_documents')
+              && request.resource.data.get('signed_by_user_id', '') == uid()
+              && request.resource.data.get('signature_role', '') == 'verifier'));
       allow update, delete: if permission('can_manage_documents');
     }
 

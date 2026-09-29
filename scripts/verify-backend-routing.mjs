@@ -148,19 +148,14 @@ const NOT_YET_ROUTED = [
   // The member's own settings and their password change: DONE. The settings save is a client write with a merge, and the
   // password goes to the `changeOwnPassword` callable with no second path.
   //
-  // Documents and checklists, the area a user found first: signing, the signature report, the verifier's view of
-  // somebody else's records, removing a signature, and the folder/order housekeeping.
-  // The three READS are done - the library, opening one document, and the officer's unfiltered view - so what remains
-  // here is the writes: signing a document, signing and verifying a checklist item, and the administrator's removal and
-  // housekeeping.
-  'SIGN_DOCUMENT',
+  // Documents and checklists, the area a user found first. DONE: the three reads (the library, opening one document, the
+  // officer's unfiltered view) and the four writes (signing a document, the checklist batch that counts what it skipped,
+  // and the two verifications that write their own row naming both people). What is left of this area is the
+  // administrator's half and the verifier's view of somebody else's records.
   'GET_MEMBER_DOCUMENT_RECORDS',
   'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
   'ADMIN_RENAME_DOCUMENT_FOLDER',
   'ADMIN_REORDER_DOCUMENTS',
-  'SIGN_CHECKLIST_ITEM',
-  'VERIFY_CHECKLIST_ITEM',
-  'VERIFY_CHECKLIST_REMAINING',
   // Training signatures, and the administrator's removal of one.
   'SIGN_TRAINING',
   'ADMIN_REMOVE_TRAINING_SIGNATURE',

@@ -223,7 +223,7 @@ const main = async () => {
   // and still not be available yet. Four fixtures, one per rule.
   await signIn('bo');
   const library = await routeRead('GET_DOCUMENTS');
-  check('a member sees the documents aimed at them', library.documents.map((entry) => entry.id), ['doc1']);
+  check('a member sees the documents aimed at them', library.documents.map((entry) => entry.id).sort(), ['doc1', 'doc5', 'doc6']);
   checkIs('and their own signatures come with it, so one read answers signed and outstanding', library.signatures.length >= 1, String(library.signatures.length));
 
   const opened = await routeRead('GET_DOCUMENT', { id: 'doc1' });

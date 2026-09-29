@@ -73,7 +73,10 @@ const documentIsLive = (document, today) => {
 // checked: a permission-denied and a missing document are the same answer to the caller, which is exactly the point.
 // The audience comparison below is therefore belt-and-braces - it keeps the intent legible and it is what would still
 // be right if the rules ever loosened - and not the thing doing the work.
-const visibleDocumentFor = async (uid, id) => {
+// EXPORTED for one caller: the writers, which must apply the SAME visibility test before letting somebody sign. Two
+// copies of it would drift, and this is the function that decides whether a document exists as far as a member is
+// concerned - the security-shaped half of the documents feature.
+export const visibleDocumentFor = async (uid, id) => {
   const wanted = String(id || '').trim();
   if (!wanted) return null;
 

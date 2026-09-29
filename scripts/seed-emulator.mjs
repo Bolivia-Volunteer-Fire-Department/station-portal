@@ -317,6 +317,43 @@ export const seed = async () => {
     audience_keys: ['*'],
     content_revision: 2,
     is_published: true,
+    // A plain document that wants a signature. `doc_type` is what SIGN_DOCUMENT reads to refuse a checklist, and
+    // `is_sign_required` is what it reads to refuse a document nobody has to sign - two different refusals, and the
+    // seed carries both shapes so neither goes untested.
+    doc_type: 'document',
+    is_sign_required: true,
+  });
+  // A plain document nobody has signed yet, so the ordinary sign has something to do: the other two carry signatures as
+  // fixtures for the staleness report, which is exactly the state that makes "signing again" a different assertion.
+  await put('documents/doc6', {
+    title: 'New Policy Acknowledgement',
+    audience_keys: ['*'],
+    content_revision: 1,
+    is_published: true,
+    doc_type: 'document',
+    is_sign_required: true,
+  });
+  // A CHECKLIST, which is signed item by item and cannot be signed as a whole. Its items are its own: an id from
+  // another document must not be signable against this one.
+  await put('documents/doc5', {
+    title: 'Weekly Apparatus Check',
+    audience_keys: ['*'],
+    content_revision: 1,
+    is_published: true,
+    doc_type: 'checklist',
+    is_sign_required: true,
+  });
+  await put('document_checklist_items/it3', {
+    document_id: 'doc5',
+    sort_order: 1,
+    section: 'Engine',
+    label: 'Fluids topped up',
+  });
+  await put('document_checklist_items/it4', {
+    document_id: 'doc5',
+    sort_order: 2,
+    section: 'Engine',
+    label: 'Lights tested',
   });
   // The other three exist to test the visibility rules the member's library applies, one each:
   //

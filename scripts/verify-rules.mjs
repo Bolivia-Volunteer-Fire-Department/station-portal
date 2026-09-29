@@ -207,15 +207,16 @@ const main = async () => {
   );
   checkIs('and is refused the one aimed at another role', theirs.includes('permission-denied'), theirs);
 
-  // Signatures: everyone gives their own, nobody gives somebody else's.
-  await setDoc(doc(db, 'document_signatures', 'sig-bo'), { id: 'sig-bo', user_id: 'u2' });
+  // Signatures: everyone gives their own, nobody gives somebody else's - and a row now has to say WHO GAVE IT
+  // (`signed_by_user_id`) as well as who it is about, because that is the pair a verification is built out of.
+  await setDoc(doc(db, 'document_signatures', 'sig-bo'), { id: 'sig-bo', user_id: 'u2', signed_by_user_id: 'u2', signature_role: 'member' });
   const ownSignature = await getDoc(doc(db, 'document_signatures', 'sig-bo')).then(
     (snapshot) => (snapshot.exists() ? 'read' : 'missing'),
     (error) => String(error.code || '')
   );
   checkIs('a member reads their own signature', ownSignature, 'read');
   await asUser('u1');
-  await setDoc(doc(db, 'document_signatures', 'sig-jane'), { id: 'sig-jane', user_id: 'u1' });
+  await setDoc(doc(db, 'document_signatures', 'sig-jane'), { id: 'sig-jane', user_id: 'u1', signed_by_user_id: 'u1', signature_role: 'member' });
   await asUser('u2');
   const someoneElses = await getDoc(doc(db, 'document_signatures', 'sig-jane')).then(
     () => 'read',
@@ -227,6 +228,18 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('and cannot sign as another member', forged.includes('permission-denied'), forged);
+  // The SECOND identity is checked too: a member cannot attribute a signature to somebody else, which is the hole a
+  // "user_id must be mine" check alone would leave open.
+  const misattributed = await setDoc(doc(db, 'document_signatures', 'sig-misattributed'), {
+    id: 'sig-misattributed',
+    user_id: 'u2',
+    signed_by_user_id: 'u1',
+    signature_role: 'member',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('nor attribute their own row to somebody else', misattributed.includes('permission-denied'), misattributed);
 
   // The Users-tab save now writes one more field on the roster document, so the rules have to allow it - and allow
   // nothing else with it. `exclude_from_scheduling` is a scheduling preference; the status is not.

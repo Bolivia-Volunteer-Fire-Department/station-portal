@@ -379,6 +379,57 @@ const main = async () => {
   );
   check('and no row is left behind by the refused batch', forJane.filter((row) => row.date_from === '2026-04-02').length, 0);
 
+  // --- signing and verifying: the everyday half of documents ---------------------------------------------------------
+  //
+  // Every identity comes from the SESSION here, so what these assert is mostly that the SUBJECT travels separately from
+  // the signer: a member signs their own, and a verification is a row ABOUT somebody else written by the verifier.
+  await signIn('bo');
+  const signedDocument = await routeWrite('SIGN_DOCUMENT', { id: 'doc6' });
+  checkIs('a member signs a document', signedDocument.signed === 1, JSON.stringify(signedDocument).slice(0, 140));
+  const signedAgain = await routeWrite('SIGN_DOCUMENT', { id: 'doc1' });
+  checkIs('and signing twice is a repeated click, not an error', signedAgain.success === true && signedAgain.already_signed === true, JSON.stringify(signedAgain).slice(0, 140));
+
+  // Two refusals, and they are different ones: a checklist is signed item by item, and a document nobody has to sign
+  // cannot be signed either.
+  const wholeChecklist = await routeWrite('SIGN_DOCUMENT', { id: 'doc5' });
+  checkIs('a checklist refuses a document-level signature', wholeChecklist.success === false, JSON.stringify(wholeChecklist).slice(0, 140));
+  const notRequired = await routeWrite('SIGN_DOCUMENT', { id: 'doc2' });
+  checkIs('and so does a document that does not ask for one', notRequired.success === false, JSON.stringify(notRequired).slice(0, 140));
+
+  const items = await routeWrite('SIGN_CHECKLIST_ITEM', { document_id: 'doc5', item_ids: ['it3', 'it4', 'it_from_elsewhere'] });
+  check('the checklist batch signs the items it owns and counts the rest', [items.signed, items.skipped], [2, 1]);
+  const itemsAgain = await routeWrite('SIGN_CHECKLIST_ITEM', { document_id: 'doc5', item_ids: ['it3'] });
+  check('an item already signed is skipped rather than refused', [itemsAgain.success, itemsAgain.signed, itemsAgain.skipped], [true, 0, 1]);
+
+  // A verification is a SEPARATE ROW about somebody else, written by the verifier - the only row a client may create
+  // that is not about itself, and the rules allow it only as 'verifier'.
+  await signIn('jane');
+  const verified = await routeWrite('VERIFY_CHECKLIST_ITEM', { document_id: 'doc5', item_id: 'it3', user_id: 'u2' });
+  check('a verifier marks a signed item', verified.verified, 1);
+  const checklistRows = await rowsOf(query(collection(firestore(), 'document_signatures'), where('document_id', '==', 'doc5')));
+  const verification = checklistRows.find((row) => row.signature_role === 'verifier');
+  check('and the row says who it is about and who checked it', [verification.user_id, verification.signed_by_user_id], ['u2', 'u1']);
+  check('which is a second row rather than an edit of the member own', checklistRows.filter((row) => row.checklist_item_id === 'it3').length, 2);
+
+  const verifiedAgain = await routeWrite('VERIFY_CHECKLIST_ITEM', { document_id: 'doc5', item_id: 'it3', user_id: 'u2' });
+  checkIs('verifying twice is a double click', verifiedAgain.success === true && verifiedAgain.already_verified === true, JSON.stringify(verifiedAgain).slice(0, 140));
+  const rest = await routeWrite('VERIFY_CHECKLIST_REMAINING', { document_id: 'doc5', user_id: 'u2' });
+  checkIs('and the rest of a member list goes in one call', rest.verified >= 1, JSON.stringify(rest).slice(0, 140));
+
+  // Jane signs an item of her own, so there is a valid pair for the two refusals below to be told apart by.
+  const janeSigned = await routeWrite('SIGN_CHECKLIST_ITEM', { document_id: 'doc5', item_ids: ['it4'] });
+  checkIs('a second member signs their own item', janeSigned.signed === 1, JSON.stringify(janeSigned).slice(0, 140));
+
+  // Nobody verifies their own - and this is the writer refusing, because the pair is otherwise perfectly valid.
+  const ownChecklist = await routeWrite('VERIFY_CHECKLIST_ITEM', { document_id: 'doc5', item_id: 'it4', user_id: 'u1' });
+  checkIs('nobody verifies their own checklist', ownChecklist.success === false, JSON.stringify(ownChecklist).slice(0, 140));
+
+  // And a member who may not verify cannot write the row AT ALL: the pair is valid, the writer allows the attempt, and
+  // the RULES refuse it - which is what makes it a property of the data rather than of a screen.
+  await signIn('bo');
+  const memberVerifies = await routeWrite('VERIFY_CHECKLIST_ITEM', { document_id: 'doc5', item_id: 'it4', user_id: 'u1' });
+  checkIs('and a member without the permission cannot write the row either', memberVerifies.success === false, JSON.stringify(memberVerifies).slice(0, 140));
+
   // --- the member's own settings ------------------------------------------------------------------------------------
   //
   // A MERGE, and three things about it are asserted because each is a way to be wrong quietly: an absent preference must

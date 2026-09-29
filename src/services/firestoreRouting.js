@@ -178,7 +178,12 @@ export const ROUTED_FEATURES = {
   // gap the two-direction check below the table now closes.
   documents: {
     requires: ['memberPayload'],
-    writes: [],
+    writes: [
+      'SIGN_DOCUMENT',
+      'SIGN_CHECKLIST_ITEM',
+      'VERIFY_CHECKLIST_ITEM',
+      'VERIFY_CHECKLIST_REMAINING',
+    ],
     reads: [
       'GET_DOCUMENTS',
       'GET_DOCUMENT',
@@ -468,6 +473,36 @@ const DISPATCH = {
     // The session's own row unless the form named another - which is how an officer edits a member through the same
     // call. A member sending somebody else's id is refused by the RULES rather than here, which is where that belongs.
     return ok(await saveMemberSettings({ userId: payload.id || uid, fields: payload }));
+  },
+
+  // Signing and verifying. EVERY IDENTITY COMES FROM THE SESSION, and the request only ever names the SUBJECT: `uid`
+  // is who signed, and `body.user_id` is the member a row is about - which is how "a member cannot sign as somebody
+  // else" and "a verifier cannot claim somebody else verified" are properties of the shape rather than of a check.
+  SIGN_DOCUMENT: async (body, uid) => {
+    const { signDocument } = await writes();
+    return ok(await signDocument({ userId: uid, documentId: body.id }));
+  },
+
+  SIGN_CHECKLIST_ITEM: async (body, uid) => {
+    const { signChecklistItems } = await writes();
+    return ok(await signChecklistItems({ userId: uid, documentId: body.document_id, itemIds: body.item_ids }));
+  },
+
+  VERIFY_CHECKLIST_ITEM: async (body, uid) => {
+    const { verifyChecklistItem } = await writes();
+    return ok(
+      await verifyChecklistItem({
+        verifierId: uid,
+        documentId: body.document_id,
+        itemId: body.item_id,
+        memberId: body.user_id,
+      })
+    );
+  },
+
+  VERIFY_CHECKLIST_REMAINING: async (body, uid) => {
+    const { verifyChecklistRemaining } = await writes();
+    return ok(await verifyChecklistRemaining({ verifierId: uid, documentId: body.document_id, memberId: body.user_id }));
   },
 
   ADMIN_BULK_SAVE_SCHEDULE: async (body) => {
