@@ -72,7 +72,7 @@ export const shiftItemDetails = (assignment, { timeFormat = '12', crewMember = f
       ? offerState === 'pending'
         ? 'Awaiting approval'
         : offerState === 'declined'
-          ? 'Declined — you can offer again'
+          ? 'Declined — ask an officer to put you on it'
           : 'Open'
       : 'Scheduled',
   });

@@ -77,6 +77,9 @@ export const ADMIN_PERMISSIONS = [
   {
     key: 'can_edit_member_availability',
     tab: 'availability',
+    // The windows a member chooses from are the same responsibility as the claims made against them, so ONE permission
+    // governs both tabs rather than two boxes an administrator has to remember to tick together.
+    moreTabs: ['availability-windows'],
     label: 'Manage member availability',
     description: 'View and edit the weekly availability of any member.',
   },
@@ -290,7 +293,12 @@ export const roleAllowsTab = (role, tabId) => {
   // A permissionless tab still needs Administration access to be reachable.
   if (ADMIN_PERMISSIONLESS_TABS.indexOf(tabId) !== -1) return roleHasAdministration(role);
 
-  const direct = ADMIN_PERMISSIONS.find((permission) => permission.tab === tabId);
+  // A tab is found by the permission that OWNS it, or by one that merely includes it: `moreTabs` is how a permission
+  // reaches a second screen of the same responsibility (member availability and the windows it offers), which is the
+  // mirror of the tab two permissions open, below.
+  const direct = ADMIN_PERMISSIONS.find(
+    (permission) => permission.tab === tabId || (permission.moreTabs || []).includes(tabId)
+  );
 
   // An unrecognized tab id is refused even for an administrator: a typo should fail
   // closed rather than silently pass for admins and fail for everyone else.
@@ -330,8 +338,8 @@ export const roleHasAdministration = (role) => {
 // Permission-driven tabs come first so a role's default tab is always one it was actually
 // granted; the permissionless ones (Help) trail behind and can never become the landing tab.
 export const allowedAdminTabs = (role) => [
-  ...ADMIN_PERMISSIONS.filter((permission) => roleAllowsTab(role, permission.tab)).map(
-    (permission) => permission.tab
+  ...ADMIN_PERMISSIONS.flatMap((permission) =>
+    roleAllowsTab(role, permission.tab) ? [permission.tab, ...(permission.moreTabs || [])] : []
   ),
   ...ADMIN_PERMISSIONLESS_TABS.filter((tab) => roleAllowsTab(role, tab)),
 ];

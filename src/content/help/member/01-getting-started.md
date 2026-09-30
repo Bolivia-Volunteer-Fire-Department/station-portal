@@ -15,7 +15,7 @@ Welcome to the **Station Portal**. This guide is for members: what each module i
 | **User Settings** | Your preferences, notifications, password and access |
 
 > [!NOTE]
-> **Administration** also appears in the sidebar if your role has any administrator permissions. Information about that module can read at *Administration → System → Help*.
+> **Administration** also appears in the sidebar if your role has any administrator permissions. Information about that module can be read at *Administration → System → Help*.
 
 ## Signing in
 
@@ -40,16 +40,21 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
-**Version 1.10**
-* Migrated from Google Sheets to Firebase Firestore for all kinds of reasons.
+**Version 1.1x**
+* Moved the app onto a modern database (Firebase, in place of the Google Sheet it used to run on). Nothing for you to do — it should simply feel quicker, and it lets the app do things a spreadsheet could not.
+* **Sign-in is much faster.** The app now asks for everything it needs in one request instead of two dozen small ones.
+* **Things that used to need a refresh now update by themselves.** The *who is on duty* card, plus announcements and events, appear as soon as they change — nobody has to reload a page to see you clock in.
+* **Reads keep working with no signal.** If you lose your bars, the schedule, your history and these guides still open. Clocking in and out is the exception: that needs a connection, because the app has to record the *real* time it happened rather than the time your phone thinks it is. While you are offline, the clock buttons are switched off and say why.
+* Two people editing at the same moment can no longer overwrite each other, and every entry gets its own unique number so a slow save cannot collide with a fast one.
+* Internal codes are no longer shown anywhere in the app — you see names, not identifiers.
 
-**Version 1.06**
+**Version 1.06x**
 * Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...
 * Added Checklists - used for creating and viewing things like new hire orientation packet lists.
 * Added Links - used for external URLs.
 * Added a "Turn Off" button for administrators in the Notifications configuration tab.
 * Added some animations and transitions to the app overall to help this feel fast, as opposed to abrupt.
-* Modified some PWA settings that make the app feel more like a native app instead of just another web app, like taking over the full screen, preventing pinch-to-zoom, etc.
+* Adjusted the app settings so that, once it is installed on a phone or tablet, it feels like an app rather than a web page, and a stray two-finger touch cannot resize the screen by accident.
 * Added Certifications, where things like an EMT certification can be tracked. Optionally allowed the representing icon be displayed next to user names (to assist with scheduling).
 * Added more icons.
 * Changed icon dropdown to icon pickers, allowing users to administrators to visually select an icon instead of guessing based on name.
@@ -73,25 +78,25 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Adjusted some wording on the Events configuration page.
 * Update the modal sounds to be shorter and better matching to the visual animation.
 * Removed the presence of UUIDs from the front end.
-* Batched the member network request wave into one action and the admin network request wave into another, taking ~12 executions down to 3–4. Should be a major performance increase.
+* Sign-in used to make about a dozen separate requests to the server, one after another. It now makes one, which was the single biggest speed improvement the app has had.
 
 **Version 1.04x**
 * Fixed an issue with app state where loading messages couldn’t be edited (Administration > System Settings)
-* Hardened protections in Code.gs to reduce potential issues where writes conflict with each other.
-* Switched sequential enumerated ids to uuids, also to reduce write conflicts.
+* Two people saving at the same moment can no longer overwrite each other.
+* Each new entry gets its own unique number, so two saves at once cannot collide.
 * Fixed bizarre issue where users are asked to verify their username and password after logging in.
 * Added a version number to the login screen.
 * Added administrative ability to force a user to change their password the next time they log in.
 
 **Version 1.03**
-* Fixed System Log timestamp sorting in the Google Apps Scripts.
+* Fixed the order of entries in the System Log.
 * Introduced "bar labels", which are how page titles will stick to the header on mobile so users know where they are after they scroll on the page.
 * Removed an extra and unnecessary heading from User Settings.
 * Added informational modals to the My Schedule module that appear when you tap on a calendar item, or list item.
 * Swapped out the icon for the Content dropdown in the Administration module.
 
 **Version 1.02**
-* Fixed HTTP REFERRER blocks for push notifications
+* Fixed notifications not arriving on some devices.
 * Fixed sticky header (again lol)
 
 **Version 1.01**
@@ -107,6 +112,6 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added filtering to several tabs and modules where it would be most useful.
 * Added printing to schedules
 * Added toasts for loading
-* Improved loading speeds by removing some requests from script locks.
+* Made several screens load faster.
 * Added **Announcements**
 * Added **Events**

@@ -20,18 +20,18 @@ Press **New certification type** at the right of the table to add one, or **Edit
 
 ## "Blank means do not warn" is not the same as zero
 
-The warning is what a member sees when they sign in, and it is the reason to fill this in for the licences that matter — a paramedic card, an EVOC, a medical certification.
+The warning is what a member sees when they sign in, and it is the reason to fill this in for the licenses that matter — a paramedic card, an EVOC, a medical certification.
 
 > [!NOTE]
 > A certification with a blank window is still tracked, still dated, and still shows its status on the records page. The blank says "we do not need to nag anybody about this one", which is a different decision from "this one cannot expire".
 
-An expired certification is mentioned too, until it is renewed — the alternative is a licence that lapses and is never spoken of again.
+An expired certification is mentioned too, until it is renewed — the alternative is a license that lapses and is never spoken of again.
 
 ## Not renewable means no end date
 
 Leaving **This certification can be renewed** unticked is for a one-off achievement: a course you completed once, an award, a certificate with no renewal cycle.
 
-The end date is then disabled on the Certifications tab, and the server clears it, so a date cannot be attached to something that does not expire — even by editing the sheet.
+The end date is then disabled on the Certifications tab, and the server clears it, so a date cannot be attached to something that does not expire — even if the record is edited by hand.
 
 ## Icons, including numbers
 

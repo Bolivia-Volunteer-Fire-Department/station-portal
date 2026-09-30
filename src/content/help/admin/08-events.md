@@ -44,7 +44,7 @@ Some worked examples:
 > The repeat start is the **anchor, not the first occurrence**. A Tuesday repeat anchored on a Thursday first appears on the **following Tuesday** — anchor Thu Sep 24, tick Tuesday, and it lands on Tue Sep 29. That is why the form shows **First appears:** once you pick a frequency, and why the list shows a **Next:** line. Trust those two lines over the repeat start date.
 
 > [!NOTE]
-> The sheet stores the repeat's anchor date in the **Starts** and **Ends** columns, because those columns have to hold some date — only the times are used. Reading the sheet directly, do not mistake that date for the day the event runs.
+> A repeating event stores an anchor date alongside the times it runs at. Only the times decide when it lands, so do not read the anchor as the day the event runs.
 
 ## Rank targeting means "and above"
 

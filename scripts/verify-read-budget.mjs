@@ -71,6 +71,33 @@ checkIs(
   'it takes what the caller already read instead',
   /stationRows \|\| \(await readStationRows\(db, scheduleWindow\)\)/.test(memberBody)
 );
+// THE CLOCK HISTORY IS NOT READ HERE AT ALL, which is the whole point of moving it to its own screen: it is the one
+// per-member table with no ceiling, and it was only here so the dashboard could answer "am I clocked in".
+checkIs('the member payload does not read the clock history', !/rowsFor\('timeclock'/.test(memberBody));
+// THE ACTIVE ANNOUNCEMENT BOUND IS ON BOTH HALVES OF THE PATH, and this is the invariant that keeps the saving real: the
+// payload's READ and the live LISTENER. A read bounded to "in force" beside a listener watching the whole collection would
+// pay for all of it a moment after sign-in - the snapshot REPLACES what the read put in state - so either half alone is a
+// narrowing that costs complexity and saves nothing. Asserted here, together, because that failure looks like success.
+checkIs('the payload reads announcements through the active bound', /activeAudienceRows\('announcements'/.test(memberBody));
+// ...and the bound only works because the SAVE PATH materializes the column it filters on: a query over a field nothing
+// writes matches nothing, silently.
+const writesSource = readFileSync('src/services/firestoreWrites.js', 'utf8');
+checkIs('which the save path writes, from the app\u2019s own date parser', /extra\.live_until = parseSheetDateKey/.test(writesSource));
+checkIs(
+  'for announcements specifically',
+  /liveUntilFrom: 'end_date'/.test(readFileSync('src/services/firestoreRouting.js', 'utf8'))
+);
+// NO READ ACTION DEFINED TWICE. A duplicate key in an object literal does not fail - the LAST one wins - so a reader added
+// above an existing one is silently not the reader that runs. That is exactly how a windowed clock-history reader gets
+// written, reviewed and then quietly bypassed, with the window still "passing" a check that only asks for rows.
+const readerKeys = [...readFileSync('src/services/firestoreReads.js', 'utf8').matchAll(/^  ([A-Z][A-Z0-9_]*):/gm)].map(
+  (match) => match[1]
+);
+check(
+  'no read action is defined twice in the reader table',
+  [...new Set(readerKeys.filter((key, index) => readerKeys.indexOf(key) !== index))],
+  []
+);
 // The window is the whole point of that parameter: `schedule` is the only collection here that grows without limit, so it
 // is the only one read as a range - and a future edit that quietly turns it back into a whole-collection read would
 // otherwise be invisible until somebody's bill arrived.
@@ -94,6 +121,19 @@ checkIs(
 
 // ...and the same invariant across the refresh readers, which is where most of those four live.
 const readsSource = readFileSync('src/services/firestoreReads.js', 'utf8');
+// The reader the history moved TO, and that it now serves a range: this is the check that would catch the window being
+// dropped in a later edit, which would quietly restore the read the payload stopped making.
+checkIs('the clock-history reader serves a range', /where\('time_in', '>=', from/.test(readsSource));
+// THE PRE-LOGIN READ IS ONE DOCUMENT, and this is the guard on the only read the app makes with no session: every extra
+// collection it asks for is a request the rules refuse to a caller with no identity. The login screen's announcements used
+// to be one of them, and the whole placement is gone rather than fixed (utils/announcements#ANNOUNCEMENT_LOCATIONS).
+//
+// It is the LAST entry in the reader table, so its body ends at the table's own closing brace - and the "did we find it"
+// check comes first, because the check after it is a negative one and a negative check against an empty string passes.
+const preLoginBody = (readsSource.match(/GET_INITIAL_DATA:[\s\S]*?\n\};/) || [''])[0];
+checkIs('the pre-login read was located in the reader table', preLoginBody.length > 0);
+checkIs('the pre-login read asks for the public settings', /'settings', 'public'/.test(preLoginBody));
+checkIs('and for no collection at all', !/rowsOf\(|rowsFor\(|audienceRows\(|rowsInRange\(/.test(preLoginBody));
 check(
   'the users collection is read in exactly one place in the whole app',
   [...`${source}\n${readsSource}`.matchAll(/rowsOf\(collection\((?:db|firestore\(\)), 'users'\)/g)].length,
@@ -129,6 +169,29 @@ check('no collection is read twice in one sign-in', [...new Set(duplicates)], []
 // services/liveReads.js; what is pinned here is what makes the difference between a listener that saves reads and one that
 // costs them.
 const liveSource = readFileSync('src/services/liveReads.js', 'utf8');
+// THE ANNOUNCEMENT BOUND IS ON THE LISTENER TOO, and it has to be asserted beside the read that shares its column: a
+// payload bounded to "in force" beside a listener watching the whole collection pays for everything a moment after
+// sign-in, because the snapshot REPLACES what the read put in state. Either half alone is a narrowing that costs
+// complexity and saves nothing - which is why the two are checked together, four lines apart in this harness.
+checkIs('the announcements listener carries the same active bound as the read', /where\('live_until', '>=', toDateKey/.test(liveSource));
+
+// SHIFT OFFERS ARE NARROWED TO THE STATUSES A CALENDAR USES, on both sides - and that narrowing is only safe because the
+// save path always writes the column it filters on. This is the difference from the announcements' dates, where a blank end
+// date is meaningful and a materialized column was needed; an offer with no `status` would not be actionable in the UI
+// either, so filtering on it cannot hide something a member needed. The write is asserted beside the read because the read
+// depends on it. (Placed here, with the other source-text invariants, rather than beside the payload checks above: that
+// block runs BEFORE `readsSource` is declared, and a const read above its own declaration is a crash, not a failure.)
+const payloadSource = readFileSync('src/services/firestorePayload.js', 'utf8');
+checkIs(
+  'the member offers read is bounded to the calendar statuses',
+  /OFFER_STATUSES_ON_A_CALENDAR = \['pending', 'declined'\]/.test(payloadSource) &&
+    /where\('status', 'in', OFFER_STATUSES_ON_A_CALENDAR\)/.test(payloadSource)
+);
+checkIs('the officer offers read is bounded to the pending ones', /pendingOffers\(firestore\(\)\)/.test(readsSource));
+checkIs(
+  'and every offer the app creates carries the status that filter needs',
+  /setDoc\(created, \{[\s\S]{0,400}status: 'pending'/.test(writesSource)
+);
 const liveCollections = [...liveSource.matchAll(/collection\(db, '([a-z_]+)'\)/g)].map((match) => match[1]);
 check('the live collections are the small and audience ones', [...new Set(liveCollections)].sort(), [
   'announcements',
@@ -214,8 +277,12 @@ console.log('\n--- what a load reads whole ---');
 console.log(`  shared wave (both payloads): ${[...new Set(wholeCollectionReads(stationBody))].join(', ')}`);
 console.log(`  member payload alone:        ${[...new Set(wholeCollectionReads(memberBody))].join(', ')}`);
 console.log(`  admin payload alone:         ${[...new Set(wholeCollectionReads(adminBody))].join(', ')}`);
-console.log('  filtered to the caller (per matching row, not per collection): availability, timeclock, schedule_offers,');
-console.log('  training_signatures, certifications, user_settings, settings/public, users/{uid}');
+console.log('  filtered to the caller (per matching row, not per collection): availability, schedule_offers (pending + declined');
+console.log('  only - an approved offer filled its shift, so no pill is drawn from it), training_signatures, certifications,');
+console.log('  user_settings, settings/public, users/{uid}');
+console.log('  read when its own screen opens (NOT at sign-in): the clock history, over a range - it is the one per-member');
+console.log('  table with no ceiling (a five-year member has thousands of entries), and the dashboard question it used to');
+console.log('  answer at sign-in ("am I clocked in") is answered by the on-duty row, which the clock transaction writes.');
 console.log('\n  cost = the documents those collections hold. `schedule` is the one that grows without limit - it holds every');
 console.log('  shift the station has ever scheduled - so it is the read worth watching, and it is WINDOWED to three months');
 console.log('  (utils/scheduleWindow). `users` is next: four readers want it, and they share ONE in-flight read (readUsersOnce),');

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Save, Loader2, Pencil, Trash2, Plus, AlertCircle, Megaphone, Send, RefreshCw,
-  UserRound,
+  UserRound, History,
 } from 'lucide-react';
 import { adminDeleteAnnouncement, adminFetchAnnouncements, adminSaveAnnouncement } from '../../services/api';
 import RankIcon from '../RankIcon';
@@ -32,7 +32,6 @@ const EMPTY_FORM = {
   message: '',
   effective_date: '',
   end_date: '',
-  is_visible_on_login: false,
   is_visible_on_dashboard: false,
   is_visible_on_sidebar: false,
   role_id: '',
@@ -52,6 +51,13 @@ const dateLabel = (key) => {
   const [year, month, day] = key.split('-').map(Number);
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${months[month - 1]} ${day}, ${year}`;
+};
+
+// A Date N months back - the floor of the list's window. Local, because it is about this list's paging rather than about
+// dates in general.
+const monthsAgo = (months) => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
 };
 
 export default function AdminAnnouncementsTab({
@@ -76,22 +82,36 @@ export default function AdminAnnouncementsTab({
   //
   // Fetched on mount rather than from the shared refresh wave - this tab is mounted only while it is
   // open, so the request happens when an administrator actually looks at it.
+  //
+  // AND IT IS A WINDOW, because this is the read that grows: a station accumulates notices for years, and managing them
+  // means looking at the recent ones. The window is a FLOOR, not a range - the reader unions the recent rows with every
+  // row still in force, so a notice with no end date cannot fall out of sight however old it is - and pressing "Show
+  // older" moves the floor back a year at a time, growing the list rather than replacing it.
+  const [windowMonths, setWindowMonths] = useState(12);
+  // A string, rebuilt each render but equal to the last one for the whole day - so it is a stable dependency below, and the
+  // list refetches when "Show older" moves it rather than on every keystroke of a form.
+  const windowFrom = toDateKey(monthsAgo(windowMonths));
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
-  const loadRows = useCallback(async () => {
-    const result = await adminFetchAnnouncements(token);
-    if (!result?.success) throw new Error(result?.message || 'Failed to load announcements.');
-    return Array.isArray(result.announcements) ? result.announcements : [];
-  }, [token]);
+  const loadRows = useCallback(
+    // The window is a REQUIRED argument rather than a default: a default would read render-scoped state inside the callback,
+    // which is what the React Compiler refuses to memoize. The effect below re-runs on the floor instead.
+    async (from) => {
+      const result = await adminFetchAnnouncements(token, { from });
+      if (!result?.success) throw new Error(result?.message || 'Failed to load announcements.');
+      return Array.isArray(result.announcements) ? result.announcements : [];
+    },
+    [token]
+  );
 
   useEffect(() => {
     let canceled = false;
     setLoading(true);
     setLoadError(null);
 
-    loadRows()
+    loadRows(windowFrom)
       .then((list) => {
         if (!canceled) setRows(list);
       })
@@ -105,19 +125,30 @@ export default function AdminAnnouncementsTab({
     return () => {
       canceled = true;
     };
-  }, [loadRows]);
+    // The window floor is here rather than inside the callback: a new floor is a new read, and that is exactly what the
+    // effect is for. "Show older" only moves the floor.
+  }, [loadRows, windowFrom]);
 
   // Re-reads the list after a write. The shared onDataChanged covers the member-facing lists, which are
   // audience-filtered, so it cannot refresh this one.
   const reload = async () => {
     try {
-      setRows(await loadRows());
+      setRows(await loadRows(windowFrom));
       setLoadError(null);
     } catch (err) {
       // The write already succeeded - report only that the list could not be re-read.
       setLoadError(err.message || 'Saved, but the list could not be reloaded.');
     }
   };
+
+  // Moves the window floor back a year. The effect above re-runs on its own - `loadRows` changes with the floor - so there
+  // is no second fetch here, and the list grows rather than being replaced.
+  const showOlder = () => setWindowMonths((months) => months + 12);
+
+  // ANNOUNCEMENTS SAVED BEFORE THE `live_until` COLUMN EXISTED, said out loud rather than left to a console warning. The
+  // member-facing reads bound by that column, so a row without one is fetched by neither the payload nor the live listener:
+  // visible here, invisible to the crew. Opening and saving it from this form stamps it.
+  const unstamped = rows.filter((row) => !String(row.live_until || '').trim());
 
   const isEditing = !!formData.id;
   // Collapsed by default to save screen space, matching the Training form. Clicking Edit on a row
@@ -145,7 +176,8 @@ export default function AdminAnnouncementsTab({
       message: String(announcement.message ?? ''),
       effective_date: window.from,
       end_date: window.to,
-      is_visible_on_login: announcementFlag(announcement.is_visible_on_login),
+      // `is_visible_on_login` is NOT read here any more, so editing an old announcement drops the legacy column rather than
+      // carrying a flag that no screen consults. See utils/announcements#ANNOUNCEMENT_LOCATIONS for why it went.
       is_visible_on_dashboard: announcementFlag(announcement.is_visible_on_dashboard),
       is_visible_on_sidebar: announcementFlag(announcement.is_visible_on_sidebar),
       role_id: String(announcement.role_id ?? '').trim(),
@@ -447,12 +479,37 @@ export default function AdminAnnouncementsTab({
         </ViewportModal>
       )}
 
+      {/* Said before the list, because these rows are the ones with a problem rather than a curiosity: they are managed
+          here and read by nobody. Saving one from this form stamps the marker the member-facing reads filter on. */}
+      {unstamped.length > 0 && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <strong>
+            {unstamped.length} announcement{unstamped.length === 1 ? '' : 's'}
+          </strong>{' '}
+          here {unstamped.length === 1 ? 'was' : 'were'} saved before announcements carried an end-date marker, so they are
+          not showing to the crew. Open and save each one to stamp it:{' '}
+          {unstamped.map((row) => row.title || 'untitled').join(', ')}.
+        </div>
+      )}
+
       {/* Existing announcements, newest first. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             Announcements ({rows.length})
+            {/* What the list holds, so a short list reads as a window rather than as data that went missing. */}
+            <span className="ml-2 font-normal text-xs text-slate-500 dark:text-slate-400">
+              from {windowFrom}, plus everything still in force
+            </span>
           </h3>
+          <button
+            type="button"
+            onClick={showOlder}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <History className="h-4 w-4" />
+            Show older
+          </button>
           <button
             type="button"
             onClick={() => {

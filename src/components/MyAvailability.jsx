@@ -3,21 +3,22 @@ import { Info } from 'lucide-react';
 import { setMyAvailability } from '../services/api';
 import AvailabilityCalendar from './AvailabilityCalendar';
 
-// "My Availability" - the member marks the shifts they could work.
+// "My Availability" - the member marks the availability windows they could work.
 //
-// Modeled on My Schedule: it preloads every shift template occurrence the member's rank
-// qualifies for and lets them mark each one, rather than asking them to describe their week
-// as time windows. There is deliberately no "show everyone" toggle here - this screen is
-// about the member's own availability, and seeing the crew's would not help answer it.
+// It shows the station's weekly patterns for the month (utils/availability.js) and lets the member mark each day they
+// fall on. There is deliberately no "show everyone" toggle here - this screen is about the member's own availability,
+// and seeing the crew's would not help answer it.
 //
-// The calendar owns the draft and saves it in one request; this just performs the save and
-// refreshes the sheet, so the success path leaves the calendar reading fresh server state.
+// The calendar owns the draft and saves it in one request; this performs the save and refreshes the claims, so the
+// success path leaves the calendar reading fresh server state.
 export default function MyAvailability({
   token,
   currentUser,
   availability = [],
-  scheduleTemplates = [],
-  assignments = [],
+  windows = [],
+  loadedFrom = '',
+  loadedTo = '',
+  onLoadMonth,
   ranks = [],
   timeFormat = '12',
   events = [],
@@ -43,7 +44,7 @@ export default function MyAvailability({
         <div className="flex items-start gap-2">
           <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Tick every shift you could work, then press <span className="font-medium">Save</span>.
+            Tick every window you could work, then press <span className="font-medium">Save</span>.
             This is what administrators check when they build the schedule — marking yourself
             available does not commit you to the shift, and you can change it at any time.
           </p>
@@ -53,11 +54,13 @@ export default function MyAvailability({
       <AvailabilityCalendar
         member={currentUser}
         availability={availability}
-        scheduleTemplates={scheduleTemplates}
-        assignments={assignments}
+        windows={windows}
+        loadedFrom={loadedFrom}
+        loadedTo={loadedTo}
+        onLoadMonth={onLoadMonth}
         ranks={ranks}
         timeFormat={timeFormat}
-        // Non-shift entries, so the member sees training and meetings alongside the shifts they can mark.
+        // Non-shift entries, so the member sees training and meetings alongside the windows they can mark.
         events={events}
         eventAudience={eventAudience}
         onSave={save}

@@ -256,7 +256,7 @@ checkIs('the phases advance on the animation, not a timer', /onAnimationEnd/.tes
 });
 checkIs(
   'and so does the administrator roster',
-  /useMonthSlide\(viewDate, setViewDate\)/.test(readFileSync('src/components/admin/AdminAvailabilityRoster.jsx', 'utf8'))
+  /useMonthSlide\(viewDate, setViewDate\)/.test(readFileSync('src/components/AvailabilityCalendar.jsx', 'utf8'))
 );
 // Reduced motion gets the month, not the wait: the phases are skipped rather than run invisibly.
 checkIs('a member who asked for less movement skips to the month', /if \(reduced\.current\) \{[\s\S]{0,80}setViewDate\(next\)/.test(motion));

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import ClockHistoryTable from './clock/ClockHistoryTable';
-import { Clock, CheckCircle2, ArrowUpDown, FilterX } from 'lucide-react';
+import { Clock, CheckCircle2, ArrowUpDown, FilterX, History } from 'lucide-react';
 import {
   CLOCK_LOG_SORT_OPTIONS,
   CLOCK_LOG_STATUS_OPTIONS,
@@ -16,8 +16,9 @@ const SELECT_CLASS =
 
 const LABEL_CLASS = 'block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 mb-1.5';
 
-export default function MyClockHistory({ currentUser, logs = [], timeFormat, shifts = [] }) {
+export default function MyClockHistory({ currentUser, logs = [], timeFormat, shifts = [], loadedFrom = '', onLoadOlder }) {
   const [filters, setFilters] = useState(emptyClockLogFilters);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   // This member's entries, then their filters and chosen order applied. Both the table and the summary
   // cards below read from this one list, so a total can never disagree with what is on screen.
@@ -98,17 +99,40 @@ export default function MyClockHistory({ currentUser, logs = [], timeFormat, shi
           <span>
             Showing {totals.count} of {mineCount} {mineCount === 1 ? 'entry' : 'entries'}
             {isFiltered ? ' (filtered)' : ''}
+            {/* THE PAGE DOES NOT HOLD YOUR WHOLE HISTORY, and it says so: it opens on the last twelve months and can be asked
+                for older ones. Without this line, "Showing 8 of 8" reads as a lifetime total, which it is not. */}
+            {loadedFrom ? ` · entries back to ${loadedFrom}` : ''}
           </span>
-          {isFiltered && (
-            <button
-              type="button"
-              onClick={() => setFilters(emptyClockLogFilters())}
-              className="inline-flex items-center gap-1.5 font-semibold text-red-600 dark:text-red-400 hover:underline"
-            >
-              <FilterX className="w-3.5 h-3.5" />
-              Clear filters
-            </button>
-          )}
+          <span className="flex items-center gap-3">
+            {onLoadOlder && (
+              <button
+                type="button"
+                disabled={loadingOlder}
+                onClick={async () => {
+                  setLoadingOlder(true);
+                  try {
+                    await onLoadOlder();
+                  } finally {
+                    setLoadingOlder(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 font-semibold text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+              >
+                <History className="w-3.5 h-3.5" />
+                {loadingOlder ? 'Loading…' : 'Load older entries'}
+              </button>
+            )}
+            {isFiltered && (
+              <button
+                type="button"
+                onClick={() => setFilters(emptyClockLogFilters())}
+                className="inline-flex items-center gap-1.5 font-semibold text-red-600 dark:text-red-400 hover:underline"
+              >
+                <FilterX className="w-3.5 h-3.5" />
+                Clear filters
+              </button>
+            )}
+          </span>
         </div>
       </div>
 

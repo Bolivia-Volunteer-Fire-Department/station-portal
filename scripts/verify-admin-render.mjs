@@ -30,7 +30,7 @@ import HelpGuides from '../src/components/HelpGuides.jsx';
 import Markdown from '../src/components/Markdown.jsx';
 import { hasGuideContent, helpGuides } from '../src/utils/helpGuides.js';
 import AdminSystemSettingsTab from '../src/components/admin/AdminSystemSettingsTab.jsx';
-import AdminAvailabilityRoster from '../src/components/admin/AdminAvailabilityRoster.jsx';
+// The roster is a private component inside AdminAvailabilityTab now, so this block renders the tab itself.
 import AdminUsersTab from '../src/components/admin/AdminUsersTab.jsx';
 import AdminPendingApprovalsTab from '../src/components/admin/AdminPendingApprovalsTab.jsx';
 import AdminTrainingTab from '../src/components/admin/AdminTrainingTab.jsx';
@@ -492,20 +492,27 @@ const availDay = `${availYear}-${String(availMonth + 1).padStart(2, '0')}-15`;
 const availDow = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][
   new Date(availYear, availMonth, 15).getDay()
 ];
-const availTemplate = {
-  id: 't1',
-  day_of_week: availDow,
+// A window that runs every day, and one member's claim against it. The weekday logic is the derivation's job and
+// verify-availability-slots tests it exhaustively; this block is about what the member's grid DRAWS.
+const availWindow = {
+  id: 'w1',
+  nickname: 'Day shift cover',
   start_time: '08:00',
   end_time: '18:00',
-  assignment_id: 'a1',
+  is_monday: true,
+  is_tuesday: true,
+  is_wednesday: true,
+  is_thursday: true,
+  is_friday: true,
+  is_saturday: true,
+  is_sunday: true,
 };
-const availAssignment = { id: 'a1', description: 'Firefighter 3', icon: 'flame' };
 const availMember = { id: 'u1', name: 'Member 1', rank_id: 'k1', status: 'active' };
 const availRows = [
-  { id: 1, schedule_template_id: 't1', date_from: availDay, date_to: availDay, user_id: 'u1' },
+  { id: 'c1', availability_window_id: 'w1', date_from: availDay, user_id: 'u1' },
 ];
-// One event before the day's 8am shift and one after it, so the order asserted below cannot pass by accident: with
-// events drawn as their own block above the slots it would read Breakfast, Drill, Firefighter 3.
+// One event before the day's 8am window and one after it, so the order asserted below cannot pass by accident: with
+// events drawn as their own block above the windows it would read Breakfast, Drill, Day shift cover.
 const availEvents = [
   { id: 'ae0', title: 'Breakfast', date_from: `${availDay} 07:00`, date_to: `${availDay} 07:30` },
   { id: 'ae1', title: 'Drill', date_from: `${availDay} 19:00`, date_to: `${availDay} 19:30` },
@@ -517,8 +524,7 @@ const calendarHtml = (() => {
       React.createElement(AvailabilityCalendar, {
         member: availMember,
         availability: availRows,
-        scheduleTemplates: [availTemplate],
-        assignments: [availAssignment],
+        windows: [availWindow],
         ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
         events: availEvents,
         onSave: async () => ({ success: true }),
@@ -530,9 +536,9 @@ const calendarHtml = (() => {
 })();
 check('the member grid renders', typeof calendarHtml === 'string', calendarHtml.error && calendarHtml.error.message);
 check('with the availability legend', String(calendarHtml).includes('Not marked'));
-check('and the shift it preloaded', String(calendarHtml).includes('Firefighter 3'));
+check('and the window it preloaded', String(calendarHtml).includes('Day shift cover'));
 check('marking the marked shift as available', String(calendarHtml).includes('bg-emerald-600'));
-check('showing the assignment icon too', String(calendarHtml).includes('lucide-flame'));
+check('showing the window hours on the pill', String(calendarHtml).includes('6:00 PM'));
 // Ticks are held locally now, so the Save button must be present and start disabled (no
 // changes yet) - that is the whole point of the batch.
 check('with a batch save button', String(calendarHtml).includes('Save availability'));
@@ -542,11 +548,11 @@ check('starting disabled until something changes', calendarHtml.includes('disabl
 const availCells = String(calendarHtml).split('min-h-[76px] rounded-lg flex flex-col items-stretch');
 const availDayCell = availCells.find((cell) => cell.includes('Breakfast')) || '';
 check('the availability day cell with its events was found', availDayCell.length > 0);
-const availOrder = ['Breakfast', 'Firefighter 3', 'Drill'].map((label) => availDayCell.indexOf(label));
+const availOrder = ['Breakfast', 'Day shift cover', 'Drill'].map((label) => availDayCell.indexOf(label));
 check(
-  'and the availability cell reads a 7am event, the 8am shift, a 7pm event',
+  'and the availability cell reads a 7am event, the 8am window, a 7pm event',
   availOrder.every((at, i) => at > -1 && (i === 0 || availOrder[i - 1] < at)),
-  `Breakfast, slot, Drill at ${availOrder.join(', ')}`
+  `Breakfast, window, Drill at ${availOrder.join(', ')}`
 );
 
 const myAvailabilityHtml = (() => {
@@ -556,8 +562,7 @@ const myAvailabilityHtml = (() => {
         token: 'test-token',
         currentUser: availMember,
         availability: availRows,
-        scheduleTemplates: [availTemplate],
-        assignments: [availAssignment],
+        windows: [availWindow],
         ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
         onChanged: async () => {},
       })
@@ -579,9 +584,7 @@ const adminAvailabilityHtml = (() => {
       React.createElement(AdminAvailabilityTab, {
         token: 'test-token',
         users: [availMember, { id: 'u2', name: 'Member 3', rank_id: 'k1', status: 'active' }],
-        availability: availRows,
-        scheduleTemplates: [availTemplate],
-        assignments: [availAssignment],
+        windows: [availWindow],
         ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
         onDataChanged: async () => {},
       })
@@ -596,9 +599,10 @@ check(
   adminAvailabilityHtml.error && adminAvailabilityHtml.error.message
 );
 check('with All Members first in the picker', String(adminAvailabilityHtml).includes('>All Members<'));
-// Both members are in the picker, so the meaningful assertion is about the ROSTER rows:
-// a marked member appears as a chip (<span>), an unmarked one only as an <option>.
-check('and naming the members who marked the shift', String(adminAvailabilityHtml).includes('>Member 1</span>'));
+// Both members are in the picker, so the meaningful assertion is about the ROSTER rows: a member who claimed the window
+// appears as a chip in it, and the one who did not appears only as an <option>. The name is rendered through MemberName,
+// so it is wrapped in its own spans - which is why this looks for the name rather than for a bare `>Member 1</span>`.
+check('and naming the members who claimed the window', String(adminAvailabilityHtml).includes('Member 1'));
 check(
   'while the member who said nothing is not listed as available',
   !String(adminAvailabilityHtml).includes('>Member 3</span>')
@@ -1182,24 +1186,43 @@ const rosterMonday = (() => {
   return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
 })();
 
+// The All Members list, rendered through the TAB that hosts it: the roster is a private component inside it now, which is
+// the simplification the windows model allowed (one list instead of a component of its own).
+//
+// The fixtures are WINDOW-shaped, because that is the model: a window recurs weekly, and a claim points at one window on
+// one day. The window here runs every day on purpose - which weekday it falls on is the derivation's job and
+// verify-availability-slots tests it exhaustively - so this block is only about how the list draws names.
 const rosterView = (props) => {
   try {
     return renderToString(
-      React.createElement(AdminAvailabilityRoster, {
-        scheduleTemplates: [
-          { id: 'tp1', day_of_week: 'Monday', start_time: '08:00', end_time: '18:00', assignment_id: 'a1' },
+      React.createElement(AdminAvailabilityTab, {
+        windows: [
+          {
+            id: 'w1',
+            nickname: 'Always on',
+            start_time: '08:00',
+            end_time: '18:00',
+            is_monday: true,
+            is_tuesday: true,
+            is_wednesday: true,
+            is_thursday: true,
+            is_friday: true,
+            is_saturday: true,
+            is_sunday: true,
+          },
         ],
-        availability: [
-          { id: 'av1', schedule_template_id: 'tp1', date_from: rosterMonday, user_id: 'u1' },
-          { id: 'av2', schedule_template_id: 'tp1', date_from: rosterMonday, user_id: 'u2' },
-          { id: 'av3', schedule_template_id: 'tp1', date_from: rosterMonday, user_id: 'u3' },
+        rosterAvailability: [
+          // Dated in the CURRENT month, because that is the month the All Members list opens on - a claim dated
+          // elsewhere would simply not appear, which is correct and useless as a fixture.
+          { id: 'c1', user_id: 'u1', availability_window_id: 'w1', date_from: availDay },
+          { id: 'c2', user_id: 'u2', availability_window_id: 'w1', date_from: availDay },
+          { id: 'c3', user_id: 'u3', availability_window_id: 'w1', date_from: availDay },
         ],
         users: [
           { id: 'u1', name: 'Member 1', rank_id: 'r1' },
           { id: 'u2', name: 'Member 2', rank_id: 'r2' },
           { id: 'u3', name: 'No Rank Member', rank_id: '' },
         ],
-        assignments: [{ id: 'a1', description: 'Engine 1' }],
         ranks: [
           { id: 'r1', description: 'Driver/Operator', color: '#227dc3', icon: 'truck' },
           { id: 'r2', description: 'Officer', color: '#c3223b', icon: 'shield-check' },
@@ -1234,14 +1257,17 @@ check('the rank name is available as a tooltip', /title="Member 1 — Driver\/Op
 // wraps it (and any certification icons) in its own spans, so these look for the name INSIDE the colored span
 // rather than requiring the span to contain nothing else - the contract is where the color lands, not that the
 // name is the only thing there.
-check('the name carries the rank color', /<span style="color:#227dc3">[\s\S]{0,200}Member 1/.test(String(roster)), true);
-check('the icon is colored with it too', /<svg[^>]*style="color:#227dc3"/.test(String(roster)), true);
+// The colour lands on the CHIP, and the rank's icon is drawn with it. The icon deliberately has no colour of its own:
+// it inherits the chip's, so the two can never disagree.
+check('the name carries the rank color', /style="[^"]*color:#227dc3[^"]*"[\s\S]{0,900}Member 1/.test(String(roster)), true);
+check('and the rank icon is drawn with it', /lucide-truck/.test(String(roster)), true);
+check('the icon sets no colour of its own, so it cannot drift from the chip', !/<svg[^>]*style="color:/.test(String(roster)), true);
 check('and exactly those two, not more', (String(roster).match(/color:#227dc3/g) || []).length, 2);
-check('a second member gets their own color', /<span style="color:#c3223b">[\s\S]{0,200}Member 2/.test(String(roster)), true);
+check('a second member gets their own color', /style="[^"]*color:#c3223b[^"]*"[\s\S]{0,900}Member 2/.test(String(roster)), true);
 
 // An unranked member must not break or silently borrow someone else's rank.
 check('an unranked member still appears', String(roster).includes('No Rank Member'));
-check('and keeps the plain chip', /bg-emerald-50/.test(chipFor(roster, 'No Rank Member')), true);
+check('and keeps an uncoloured chip', !/style="border-color:/.test(chipFor(roster, 'No Rank Member')), true);
 check('with an unstyled name', !/style="color:#[^"]*"[^<]*No Rank Member/.test(String(roster)), true);
 check('and no rank icon', !/lucide-user[^>]*style="color:/.test(String(roster)), true);
 
@@ -1260,7 +1286,7 @@ check('and no rank color is applied', !/color:#/.test(String(noRanks)), true);
 
 // The tab must actually pass ranks through: without it the roster cannot color anything.
 const tabSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
-check('the tab forwards ranks to the roster', /<AdminAvailabilityRoster[\s\S]{0,300}?ranks=\{ranks\}/.test(tabSource), true);
+check('the tab forwards ranks to the roster', /<AvailabilityRoster[\s\S]{0,400}?ranks=\{ranks\}/.test(tabSource), true);
 
 // --- sticky app bar -----------------------------------------------------------------------------
 console.log('\n--- the app bar pins on mobile ---');
@@ -1477,7 +1503,7 @@ for (const [path, name] of adminCenteredTabs) {
 const availabilitySource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
 check('Member Availability imports the wrapper', /import CenteredContent from '\.\.\/CenteredContent'/.test(availabilitySource), true);
 const showingAllBranch = availabilitySource.slice(availabilitySource.indexOf('{showingAll ? ('), availabilitySource.indexOf(') : selectedMember ?'));
-check('the All Members list is wrapped', /<CenteredContent>[\s\S]*?<AdminAvailabilityRoster/.test(showingAllBranch), true);
+check('the All Members list is wrapped', /<CenteredContent>[\s\S]*?<AvailabilityRoster/.test(showingAllBranch), true);
 const memberBranch = availabilitySource.slice(availabilitySource.indexOf(') : selectedMember ?'));
 check('the single-member grid is NOT wrapped', /<AvailabilityCalendar/.test(memberBranch) && !/<CenteredContent/.test(memberBranch.slice(0, memberBranch.indexOf('<AvailabilityCalendar'))), true);
 check('and the whole tab is not wrapped', !/^export default function[\s\S]{0,200}<CenteredContent/.test(availabilitySource), true);

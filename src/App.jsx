@@ -26,6 +26,7 @@ import {
   fetchOnDutyUsers,
   fetchMyShiftOffers,
   fetchAvailability,
+  adminFetchAvailability,
   submitClockAction,
   saveUserSettings,
   updateUserPassword,
@@ -79,6 +80,8 @@ import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
 import { mergeSavedUser } from './utils/userRow';
 import { mergeSavedRow, mergeRowsById } from './utils/savedRow';
+// Date keys, for the windows this screen asks for (the clock history, and the schedule before it).
+import { toDateKey } from './utils/scheduleDate';
 // The trustworthy-clock rule, for the clock card: it must not offer a button it cannot honour, and it must say why.
 import { OFFLINE_CLOCK_MESSAGE, isOffline } from './utils/connectivity';
 import { createWaveReporter, nextWaveId } from './utils/activity';
@@ -134,6 +137,14 @@ export default function App() {
   // out again: without it a screen cannot tell "this month is empty" from "I have not asked for this month".
   const [scheduleWindow, setScheduleWindow] = useState({ from: '', to: '' });
   const [availability, setAvailability] = useState([]);
+  // The availability windows (station reference data, in the sign-in payload) and the scope the claims were read over -
+  // the grid needs to know what it holds before it can trust "nothing is marked" for a month.
+  const [availabilityWindows, setAvailabilityWindows] = useState([]);
+  const [availabilityScope, setAvailabilityScope] = useState({ from: '', to: '' });
+  // EVERY member's claims, for the officer screens: loaded lazily for a range, and the read that replaced an officer's
+  // own rows being handed to a roster of the crew.
+  const [rosterAvailability, setRosterAvailability] = useState([]);
+  const [rosterScope, setRosterScope] = useState({ from: '', to: '' });
   // Training: the activities, and the signatures this member may see (their own, unless the
   // role can administer trainings - the server decides which).
   const [trainings, setTrainings] = useState([]);
@@ -150,7 +161,6 @@ export default function App() {
   // Non-shift calendar entries. Fetched once per sign-in and after an administrator changes something,
   // rather than on every page view: they change rarely and every calendar reads the same list.
   const [events, setEvents] = useState([]);
-  const [loginAnnouncements, setLoginAnnouncements] = useState([]);
   const [scheduleTemplates, setScheduleTemplates] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [systemSettings, setSystemSettings] = useState([]);
@@ -498,14 +508,14 @@ const getLoadingMessage = () => {
     return () => navigator.serviceWorker.removeEventListener('message', handlePushMessage);
   }, [currentUser]);
 
+  // AM I CLOCKED IN, from the ON-DUTY list rather than from my clock history. Those are the same fact — the clock transaction
+  // writes the entry and the on-duty row together, so a member's row exists exactly while one of their entries is open — and
+  // the list is already here, read once and kept live. Asking the history instead meant reading every entry a member has ever
+  // made, at every sign-in, to answer a yes/no question.
   useEffect(() => {
-    if (currentUser && logs) {
-      const activeShift = logs.find(
-        (log) => String(log.user_id) === String(currentUser.id) && !log.time_out
-      );
-      setIsClockedIn(!!activeShift);
-    }
-  }, [currentUser, logs]);
+    if (!currentUser) return;
+    setIsClockedIn(onDutyUsers.some((row) => String(row.id ?? row.user_id) === String(currentUser.id)));
+  }, [currentUser, onDutyUsers]);
 
   const loadAppData = async () => {
     try {
@@ -612,16 +622,14 @@ const getLoadingMessage = () => {
           {
             name: 'the initial payload',
             run: async () => {
+              // THE ONLY READ THE APP MAKES WITHOUT A SESSION, and it reads one document: the public settings the login and
+              // loading screens draw. Three more reads used to be asked for here - roles, ranks and the shift definitions -
+              // and the rules refuse them to a stranger, so they were round trips that could not succeed. The fourth was
+              // the login-screen announcements, which are gone rather than fixed: see utils/announcements.
               const initial = await fetchInitialData();
               if (!initial) return REFRESH_FAILED;
-              // No session yet, so only the public half can be applied: roles, ranks, the shift definitions, the
-              // system settings and the login-screen announcements.
               if (initial.userSettings) setUserSettings(initial.userSettings);
-              if (initial.roles) setRoles(initial.roles);
-              if (initial.ranks) setRanks(initial.ranks);
-              if (initial.shifts) setShifts(initial.shifts);
               if (initial.systemSettings) setSystemSettings(initial.systemSettings);
-              if (Array.isArray(initial.announcements)) setLoginAnnouncements(initial.announcements);
               return REFRESH_OK;
             }
           }
@@ -782,13 +790,19 @@ const getLoadingMessage = () => {
     // The window those rows came in, which every screen that draws a month depends on. Load-bearing, not bookkeeping.
     if (data.schedule_window) setScheduleWindow(data.schedule_window);
     if (data.availability) setAvailability(data.availability);
+    // The windows, and the scope the claims came back over: the grid compares the month it is showing against this
+    // before it draws or saves anything.
+    if (data.availabilityWindows) setAvailabilityWindows(data.availabilityWindows);
+    if (data.availability_window) setAvailabilityScope(data.availability_window);
     if (data.roster) setRoster(data.roster);
     if (data.offers) setOffers(data.offers);
     if (data.trainings) setTrainings(data.trainings);
     if (data.signatures) setTrainingSignatures(data.signatures);
     if (data.announcements) setAnnouncements(data.announcements);
     if (data.events) setEvents(normalizeEventList(data.events));
-    if (data.logs) setLogs(data.logs);
+    // `logs` is deliberately NOT read here any more. It is the one per-member table that grows without limit, and it was read
+    // at every sign-in only so the dashboard could answer "am I clocked in" - which the on-duty row answers for free. The
+    // Clock History screen reads its own, over a range, when it is opened.
     if (data.onDuty) setOnDutyUsers(data.onDuty);
     if (!isAdmin && data.assignments) setAssignments(data.assignments);
     if (!isAdmin && data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
@@ -824,9 +838,6 @@ const getLoadingMessage = () => {
     if (data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
     if (data.assignments) setAssignments(data.assignments);
     if (data.scheduleOffers) setAdminOffers(data.scheduleOffers);
-    // The login screen's announcements, kept in their own state: they are shown before sign-in and are not
-    // cleared on sign-out, so they are not the member's dashboard list.
-    if (data.loginAnnouncements) setLoginAnnouncements(data.loginAnnouncements);
   };
 
   // The signed-in member's own shift offers (pending/approved/declined) - what
@@ -846,14 +857,62 @@ const getLoadingMessage = () => {
     }
   };
 
+  // WHAT RANGE OF THE MEMBER'S CLOCK HISTORY IS LOADED, and null until the History screen asks for it. It is not read at
+  // sign-in: it is the one per-member table that grows without limit (a five-year member has thousands of entries), and the
+  // dashboard's only question about it — "am I clocked in" — is answered by the on-duty row.
+  const [logsScope, setLogsScope] = useState(null);
+
+  // Loading a range GROWS what is held rather than replacing it: the screen can ask for an older year without losing the one
+  // it has, and a range that arrives late cannot drop rows an earlier one brought. Same arrangement as the schedule window.
+  const loadLogs = async (from, to) => {
+    const data = await fetchTimeclockLogs(authToken, { from, to });
+    if (!data || data.code === 'UNAUTHORIZED') {
+      sessionExpired(authToken);
+      return [];
+    }
+    const rows = data && Array.isArray(data.logs) ? data.logs : [];
+    if (rows.length) setLogs((prev) => mergeRowsById(prev, rows));
+    setLogsScope((prev) => ({
+      from: prev && prev.from && prev.from < from ? prev.from : from,
+      to: prev && prev.to && prev.to > to ? prev.to : to,
+    }));
+    return rows;
+  };
+
+  // The window the screen opens with, and the one its "older entries" button asks for: twelve months at a time.
+  const monthsBack = (months) => {
+    const now = new Date();
+    return toDateKey(new Date(now.getFullYear(), now.getMonth() - months, now.getDate()));
+  };
+
+  // ONCE PER SESSION PER WINDOW, which is what makes this different from re-fetching a module on every visit: the guard is
+  // the scope itself, so moving between tabs costs nothing after the first look.
+  //
+  // The admin Clock Management tab is included because it is drawn from this same list. Worth saying plainly: that list is
+  // the SIGNED-IN member's own entries, for an officer as much as for a member, because the payload it used to come from was
+  // always per-member - so the tab shows an officer their own clock entries, not the station's. That is a gap of its own (an
+  // admin-wide clock read does not exist yet), and it is deliberately left exactly as it was here: this pass must not turn
+  // "the officer's own entries" into "nothing at all".
+  useEffect(() => {
+    const wantsTheHistory = activeTab === 'clock-history' || (activeTab === 'admin' && adminSubTab === 'clock');
+    if (!wantsTheHistory || !authToken || logsScope) return;
+    void loadLogs(monthsBack(12), toDateKey(new Date())).catch((error) => {
+      console.error('[logs] could not load the clock history', error);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, adminSubTab, authToken, logsScope]);
+
   const refreshLogs = async (token) => {
+    // Only when the history is loaded. A clock action needs the ON-DUTY list refreshed (refreshOnDuty does that); fetching a
+    // member's entire clock history to show a card that does not use it is exactly the read this pass removed.
+    if (!logsScope) return REFRESH_OK;
     try {
-      const data = await fetchTimeclockLogs(token);
+      const data = await fetchTimeclockLogs(token, { from: logsScope.from, to: logsScope.to });
       if (data && data.code === 'UNAUTHORIZED') {
         sessionExpired(token);
         return REFRESH_EXPIRED;
       }
-      if (data && data.logs) setLogs(data.logs);
+      if (data && data.logs) setLogs((prev) => mergeRowsById(prev, data.logs));
       return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update logs', err);
@@ -893,17 +952,86 @@ const getLoadingMessage = () => {
     }
   };
 
-  const refreshAvailability = async (token = authToken) => {
+  // The member's own claims, over a range. It REPLACES what the range covers and keeps what is outside it: a plain
+  // merge would keep a row the server no longer has (an un-marked day), and a plain replace would drop months nobody
+  // asked for. Naming no range replaces everything, which is what the refresh wave does.
+  const refreshAvailability = async (token = authToken, range = null) => {
     try {
-      const data = await fetchAvailability(token);
+      const scope = range || {};
+      const data = await fetchAvailability(token, scope);
       if (data && data.code === 'UNAUTHORIZED') {
         sessionExpired(token);
         return;
       }
-      if (data && data.availability) setAvailability(data.availability);
+      if (data && data.availability) {
+        const rows = Array.isArray(data.availability) ? data.availability : [];
+        const from = String(scope.from || '');
+        const to = String(scope.to || '');
+        setAvailability((prev) =>
+          from && to
+            ? [
+                ...(prev || []).filter((row) => {
+                  const day = String(row?.date_from || '').slice(0, 10);
+                  return day < from || day > to;
+                }),
+                ...rows,
+              ]
+            : rows
+        );
+      }
+      if (data && data.availability_window) setAvailabilityScope(data.availability_window);
       return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update availability', err);
+      return REFRESH_FAILED;
+    }
+  };
+
+  // THE OFFICER'S ROSTER DATA, loaded when one of the screens that reads it is open - the Member Availability tab and
+  // the windows tab beside it - and scoped to the months around today, which is what those screens show. It is not in
+  // the payload: a member's session would be paying for the whole crew's claims.
+  //
+  // Before this existed those screens were handed the OFFICER'S OWN claims, which is why the roster listed them against
+  // the crew and the board warned about availability it could not actually see.
+  useEffect(() => {
+    const wantsRoster =
+      activeTab === 'admin' && (adminSubTab === 'availability' || adminSubTab === 'availability-windows');
+    if (!wantsRoster || !authToken || rosterScope.from) return;
+    const from = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 3, 1));
+    const to = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 4, 0));
+    void loadRosterAvailability(from, to).catch((error) => {
+      console.error('[availability] could not load the crew availability', error);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, adminSubTab, authToken, rosterScope.from]);
+
+  // Loading another month for a screen that navigated outside the scope it holds.
+  const loadRosterMonth = async (year, month) => {
+    const from = toDateKey(new Date(year, month, 1));
+    const to = toDateKey(new Date(year, month + 1, 0));
+    return loadRosterAvailability(from, to);
+  };
+  const loadAvailabilityMonth = async (year, month) => {
+    const from = toDateKey(new Date(year, month, 1));
+    const to = toDateKey(new Date(year, month + 1, 0));
+    return refreshAvailability(authToken, { from, to });
+  };
+
+  // EVERY member's claims for a range, for the officer screens. Loaded when one of those screens is open, so a member's
+  // session never pays for it.
+  const loadRosterAvailability = async (from, to) => {
+    try {
+      const data = await adminFetchAvailability(authToken, { from, to });
+      if (data && data.code === 'UNAUTHORIZED') {
+        sessionExpired(authToken);
+        return REFRESH_EXPIRED;
+      }
+      if (data && data.availability) setRosterAvailability(data.availability);
+      setRosterScope({ from: String(from || ''), to: String(to || '') });
+      if (data && data.availability_window) setRosterScope(data.availability_window);
+      return REFRESH_OK;
+    } catch (err) {
+      console.error('Failed to load the crew availability', err);
       return REFRESH_FAILED;
     }
   };
@@ -1466,7 +1594,7 @@ const getLoadingMessage = () => {
       )}
 
       {!currentUser ? (
-        <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} announcements={loginAnnouncements} />
+        <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} />
       ) : (
         <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
           {/* The strip the iOS status bar sits on.
@@ -1632,7 +1760,19 @@ const getLoadingMessage = () => {
             )}
 
             {activeTab === 'clock-history' && canUseTimeclock && (
-              <MyClockHistory currentUser={currentUser} logs={logs} timeFormat={activeTimeFormat} shifts={shifts} />
+              <MyClockHistory
+                currentUser={currentUser}
+                logs={logs}
+                timeFormat={activeTimeFormat}
+                shifts={shifts}
+                // WHAT IS LOADED, so the screen can say so and offer to go further back. The page opens on the last twelve
+                // months rather than on a member's whole history - see the note on `logsScope` above.
+                loadedFrom={logsScope ? logsScope.from : ''}
+                onLoadOlder={() => {
+                  if (!logsScope || !logsScope.from) return undefined;
+                  return loadLogs(monthsBack(24), logsScope.from);
+                }}
+              />
             )}
 
             {activeTab === 'schedule' && canViewSchedule && (
@@ -1670,10 +1810,12 @@ const getLoadingMessage = () => {
                 token={authToken}
                 currentUser={currentUser}
                 availability={availability}
-                // Same reference data My Schedule uses, so the slots this screen
-                // preloads are exactly the shifts the calendar would let them offer for.
-                scheduleTemplates={scheduleTemplates}
-                assignments={assignments}
+                // The windows are the options list, and the scope is what the claims cover - so the grid knows when to
+                // ask for a month rather than draw it as unmarked.
+                windows={availabilityWindows}
+                loadedFrom={availabilityScope.from}
+                loadedTo={availabilityScope.to}
+                onLoadMonth={loadAvailabilityMonth}
                 ranks={ranks}
                 timeFormat={activeTimeFormat}
                 // Non-shift entries, so the month reads the same here as on My Schedule.
@@ -1749,6 +1891,12 @@ const getLoadingMessage = () => {
                 scheduleTemplates={scheduleTemplates}
                 assignments={assignments}
                 availability={availability}
+                // The Member Availability tab reads the WINDOWS and the CREW'S claims, not this member's own rows: that
+                // is what the station-wide read changed, and it is why the roster and the board used to be wrong.
+                availabilityWindows={availabilityWindows}
+                rosterAvailability={rosterAvailability}
+                rosterScope={rosterScope}
+                onRosterMonth={loadRosterMonth}
                 systemSettings={systemSettings}
                 logs={logs}
                 timeFormat={activeTimeFormat}

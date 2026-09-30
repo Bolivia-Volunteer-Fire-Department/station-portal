@@ -16,6 +16,10 @@ import { rowsFor, rowsOf } from './firestorePayload.js';
 // exists as far as a member is concerned, and two implementations of that would drift.
 import { visibleDocumentFor } from './firestoreReads.js';
 import { settingSide } from '../utils/systemSettings.js';
+// The app's own date parser, shared rather than re-implemented: what the save path materializes below and what the screen
+// compares against must be the same reading of the same column, or an announcement can be live on screen and expired in
+// the query that feeds it.
+import { parseSheetDateKey } from '../utils/scheduleDate.js';
 // The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
 // device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
 import { isOffline } from '../utils/connectivity.js';
@@ -107,6 +111,13 @@ export const clockOut = async ({ userId, entryId }) => {
 // AVAILABILITY: one batch per save, which is how the app already sends it - the slots marked and unmarked in one
 // commit. The sheet version held the script lock for this; a batch is atomic without one, and the rules see to it
 // that every row written belongs to the member writing it.
+// ONE ROW PER WINDOW PER DAY: "this member could work this window on this date". The window carries the hours and the
+// days it runs on, so a claim carries only the day the member means - there is no date RANGE here, which is what the
+// old schedule-template shape had.
+//
+// `removes` are row IDS. They used to arrive as whole slot objects and be deleted as `String(rowId)`, which is
+// "[object Object]" - so un-marking a day never actually removed anything and the screen said it had saved. Ids are
+// the honest currency for a delete, and the screens keep the id beside the mark.
 export const saveAvailability = async ({ userId, adds = [], removes = [] }) => {
   const db = firestore();
   const batch = writeBatch(db);
@@ -114,20 +125,41 @@ export const saveAvailability = async ({ userId, adds = [], removes = [] }) => {
   adds.forEach((slot) => {
     batch.set(doc(collection(db, 'availability')), {
       user_id: userId,
+      availability_window_id: String(slot.availability_window_id || ''),
+      // AND THE OLD SHAPE WHILE THE SCREENS MOVE ACROSS: a save from the schedule-template calendar still lands as it
+      // did, so nothing is half-migrated in production. One of these two fields is always empty; this line goes when
+      // the last screen does.
       schedule_template_id: String(slot.schedule_template_id || ''),
       date_from: String(slot.date_from || ''),
-      date_to: String(slot.date_to || slot.date_from || ''),
     });
   });
-  removes.forEach((rowId) => batch.delete(doc(db, 'availability', String(rowId))));
+  // An id, or a row that carries one: a delete takes IDs, and the screens hold rows. Both are accepted deliberately -
+  // the writer is called directly by tests and by the officer's path, and forcing one shape on both callers would be a
+  // convention nobody remembers.
+  const removeId = (row) => String((row && typeof row === 'object' ? row.id : row) || '').trim();
+  removes.forEach((row) => {
+    const id = removeId(row);
+    if (id) batch.delete(doc(db, 'availability', id));
+  });
 
   await batch.commit();
-  return { added: adds.length, removed: removes.length };
+  return { added: adds.length, removed: removes.filter((row) => removeId(row)).length };
 };
 
 // OFFERS: a member raises one, withdraws their own, and an officer approves one - and the approval is the write that
 // fills the shift, in a transaction, so the offer's status and the schedule row cannot end up disagreeing.
+//
+// A DECLINE IS FINAL FOR THE MEMBER, and this is where that is enforced. The calendar hides the offer button on a declined
+// shift, but a screen that was already open when the officer said no would still be holding a live button - so the refusal
+// belongs on the write, not only on the screen. Their own offers are what gets read: the rules allow that (they are the
+// caller's own rows) and it costs one small query, with no index beyond `user_id`.
 export const makeOffer = async ({ userId, scheduleId, dateFrom, assignmentId, slotKey }) => {
+  const key = String(slotKey || '');
+  const mine = await rowsFor('schedule_offers', 'user_id', userId);
+  if (mine.some((row) => String(row.slot_key ?? '') === key && row.status === 'declined')) {
+    throw new Error('Your offer for this shift was declined, so you cannot offer for it again. Ask an officer to put you on it.');
+  }
+
   const created = doc(collection(firestore(), 'schedule_offers'));
   await setDoc(created, {
     user_id: userId,
@@ -149,6 +181,17 @@ export const withdrawOffer = async (offerId) => {
 // the browser version of this was the second one.
 export const approveOffer = async ({ offerId }) => {
   const result = await httpsCallable(firebaseFunctions(), 'approveOffer')({ offerId: String(offerId) });
+  return result.data;
+};
+
+// Declining is the other half of resolving an offer, and it is a function for the same reason: an officer's decision is
+// not a member's write, and the notification the member gets watches the STATUS change (onShiftOfferDecided), so
+// whatever sets that status has to be something the rules trust.
+//
+// It writes nothing else. Declining deliberately leaves the shift open - "no" to one member is not a decision about the
+// shift - and the member cannot offer for it again afterwards (ScheduleCalendar#offerStateFor, makeOffer).
+export const declineOffer = async ({ offerId }) => {
+  const result = await httpsCallable(firebaseFunctions(), 'declineOffer')({ offerId: String(offerId) });
   return result.data;
 };
 
@@ -226,10 +269,30 @@ export const audienceKeysForWrite = ({ roleId, rankId, userId, ranks = [], rankA
     .map((candidate) => `rank:${candidate.id}`);
 };
 
+// THE OPEN END OF A LIVE WINDOW, for the materialized `live_until` below. A date key far enough out that no station will
+// reach it, in the same `YYYY-MM-DD` shape as every other key in the app - so "still live" stays a string comparison.
+export const LIVE_UNTIL_OPEN = '9999-12-31';
+
 // A save for the three collections a member sees by audience. It reads the ranks, computes the list, and writes it
 // with the document - and it stamps the author on CREATE only, which is what the sheet's server did rather than
 // letting an edit rewrite who wrote it.
-export const saveAudienceDocument = async ({ collection: name, id, body, rankAndAbove = false, authorId = '' }) => {
+//
+// `liveUntilFrom` names the body field holding the row's END date, and it is the second thing materialized here, for the
+// same reason as the first. Deciding "is this in force today" takes TWO columns, either of which may be blank - and a
+// blank end date means INDEFINITELY (utils/announcements#announcementDateWindow), which is the normal state for an
+// announcement nobody has scheduled an end for. A Firestore range filter excludes documents where the field is absent,
+// and a query may filter on only ONE range field, so neither `effective_date` nor `end_date` can be asked for directly:
+// `end_date >= today` would silently drop every announcement that has no end date, which is the one failure that must
+// not be quiet. So the row carries what the query needs, computed on the way in - the same trick `audience_keys` plays
+// for the audience, for the same reason.
+export const saveAudienceDocument = async ({
+  collection: name,
+  id,
+  body,
+  rankAndAbove = false,
+  authorId = '',
+  liveUntilFrom = '',
+}) => {
   const ranks = await rowsOf(collection(firestore(), 'ranks'));
   const audience_keys = audienceKeysForWrite({
     roleId: body.role_id,
@@ -239,6 +302,7 @@ export const saveAudienceDocument = async ({ collection: name, id, body, rankAnd
     rankAndAbove,
   });
   const extra = { audience_keys };
+  if (liveUntilFrom) extra.live_until = parseSheetDateKey(body?.[liveUntilFrom]) || LIVE_UNTIL_OPEN;
   if (authorId && !String(id || '').trim()) extra.author_user_id = authorId;
   return saveDocument({ collection: name, id, body, extra });
 };

@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
 import AdminScheduleTemplatesTab from './AdminScheduleTemplatesTab';
 import AdminAssignmentsTab from './AdminAssignmentsTab';
 import AdminAvailabilityTab from './AdminAvailabilityTab';
+import AdminAvailabilityWindowsTab from './AdminAvailabilityWindowsTab';
 import AdminScheduleManagementTab from './AdminScheduleManagementTab';
 import AdminSystemSettingsTab from './AdminSystemSettingsTab';
 import AdminClockManagementTab from './AdminClockManagementTab';
@@ -60,6 +61,9 @@ export const ADMIN_NAV_CATEGORIES = [
       // Member Availability sits here rather than under Timeclock: it answers "who can work
       // which shift", the same question as the rest of this group.
       { id: 'availability', label: 'Member Availability', icon: Clock },
+      // The windows members choose from, in the same group and under the same permission: the patterns are the options
+      // list, and Member Availability is where the claims against them are read and corrected.
+      { id: 'availability-windows', label: 'Availability Windows', icon: Repeat },
       { id: 'approvals', label: 'Pending Approvals', icon: AlertCircle },
     ],
   },
@@ -116,6 +120,12 @@ export default function AdminPanel({
   scheduleTemplates,
   assignments,
   availability,
+  // Reference data and the crew's claims for the availability screens: the windows every member chooses from, the
+  // claims themselves (loaded per range, not in the payload), and the scope they were read over.
+  availabilityWindows = [],
+  rosterAvailability = [],
+  rosterScope = { from: '', to: '' },
+  onRosterMonth,
   systemSettings,
   logs,
   timeFormat,
@@ -391,9 +401,13 @@ export default function AdminPanel({
         <AdminAvailabilityTab
           token={token}
           users={users}
-          availability={availability}
-          scheduleTemplates={scheduleTemplates}
-          assignments={assignments}
+          // The windows, the CREW'S claims and the scope they were read over. `availability` (this officer's own rows)
+          // is deliberately NOT passed here any more: it was what made the roster list the wrong people.
+          windows={availabilityWindows}
+          rosterAvailability={rosterAvailability}
+          loadedFrom={rosterScope?.from || ''}
+          loadedTo={rosterScope?.to || ''}
+          onLoadMonth={onRosterMonth}
           ranks={ranks}
           timeFormat={timeFormat}
           events={events}
@@ -447,6 +461,12 @@ export default function AdminPanel({
       {/* Guides for administrators, from src/content/help/admin/*.md. No permission gates
           this tab beyond being able to open Administration at all. */}
       {activeSubTab === 'help' && <HelpGuides scope="admin" />}
+
+      {/* Availability windows: the weekly patterns members choose from. Gated by the same permission as the tab that
+          reads the claims against them - utils/permissions carries the pair. */}
+      {activeSubTab === 'availability-windows' && (
+        <AdminAvailabilityWindowsTab token={token} onDataChanged={onDataChanged} />
+      )}
 
       {/* Announcements: gated on can_make_announcements by the nav, and enforced again by the
           backend actions behind it. */}

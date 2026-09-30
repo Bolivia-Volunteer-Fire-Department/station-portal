@@ -11,7 +11,7 @@ This card controls push notifications to your devices. There are up to four swit
 | **My shift request declined** | An offer **you** made was declined |
 | **Announcements** | The department has posted an announcement. *Shown to everyone* |
 
-**Announcements are different from the other three.** Turning that switch off stops the *push* and nothing else — announcements still appear in the app, on the dashboard, in the sidebar and on the login screen. The switch is about being interrupted while you are away from the app, not about being told; there is no way to opt out of seeing an announcement.
+**Announcements are different from the other three.** Turning that switch off stops the *push* and nothing else — announcements still appear in the app, on the dashboard and in the sidebar. The switch is about being interrupted while you are away from the app, not about being told; there is no way to opt out of seeing an announcement.
 
 **Turning on this device.** The card shows whether **this** device is on, and press **Enable** to subscribe it. Your browser may ask for permission to show notifications — allow it, or nothing can be delivered. The card reports the browser's permission state, so if it says *blocked* you have previously declined and must re-allow it in your browser's site settings rather than in here.
 
@@ -27,10 +27,10 @@ This card controls push notifications to your devices. There are up to four swit
 
 On an iPhone or iPad the app must be **added to the Home Screen** and opened from that icon before notifications can be enabled at all — a plain Safari tab cannot receive them.
 
-**Installed, it behaves like an app.** Opened from a Home Screen icon, the portal runs without browser chrome and fills the screen, keeps its content clear of the notch and the home indicator, and takes away the gestures that give a web page away: no pinch-zoom, no double-tap zoom, and no selection menu when you press and hold a button. On an Android device it opens **full-screen**, with the status and navigation bars hidden until you swipe for them. On an iPhone the app draws its own navy band behind the clock, so the clock sits *inside* the app rather than in a grey strip above it — in both light and dark themes, because the clock is drawn in white there.
+**Installed, it behaves like an app.** Opened from a Home Screen icon, the portal runs without browser chrome and fills the screen, keeps its content clear of the notch and the home indicator, and takes away the gestures that give a web page away: no pinch-zoom, no double-tap zoom, and no selection menu when you press and hold a button. On an Android device it opens **full-screen**, with the status and navigation bars hidden until you swipe for them. On an iPhone the app draws its own navy band behind the clock, so the clock sits *inside* the app rather than in a gray strip above it — in both light and dark themes, because the clock is drawn in white there.
 
 > [!NOTE]
-> The iPhone status-bar setting is fixed when the app is **added to the Home Screen**, so an icon added before this change keeps the old grey band. Remove the icon and add it again to pick up the new look — nothing else about the app is affected.
+> The iPhone status-bar setting is fixed when the app is **added to the Home Screen**, so an icon added before this change keeps the old gray band. Remove the icon and add it again to pick up the new look — nothing else about the app is affected.
 
 In an ordinary browser tab **pinch-zoom still works**, which is deliberate — a member who needs larger text is never stuck with text they cannot enlarge.
 

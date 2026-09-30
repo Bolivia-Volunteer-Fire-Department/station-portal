@@ -49,7 +49,7 @@ Each sound has a slider for how loud the app plays it. The row shows the level i
 
 - **Move a slider** and the level applies straight away, everywhere the app plays that sound, not just on this page. The sample plays when you let the handle go, so each position can be heard as you try it.
 - **reset** appears on a row once it has been moved, and puts that one sound back. **reset all levels** puts everything back at once.
-- The levels are **temporary**. Nothing is saved to the sheet, and every one of them returns to the app's own mix when the session ends — whether you sign out or it times out. That is deliberate: a level is something to try, and the next person to sign in on this machine should not inherit somebody's experiment.
+- The levels are **temporary**. Nothing is saved, and every one of them returns to the app's own mix when the session ends — whether you sign out or it times out. That is deliberate: a level is something to try, and the next person to sign in on this machine should not inherit somebody's experiment.
 
 > [!NOTE]
 > These sliders are for finding the right level, not for setting it. If a level should change for everyone, the number has to be changed in the app's code — so note the percentage you landed on and tell Matt.

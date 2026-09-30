@@ -291,8 +291,13 @@ export default function ScheduleCalendar({
   }
   const offersFor = (a) => offersBySlot.get(a.key) || [];
 
-  // '' (open) | 'pending' (waiting on an admin) | 'declined' (turned down - the
-  // member may offer again, which records a fresh pending offer).
+  // '' (open) | 'pending' (waiting on an admin) | 'declined' (turned down, and CLOSED to this member).
+  //
+  // A DECLINE IS FINAL IN THE APP. It used to be a nudge - the member could offer again and a fresh pending row appeared -
+  // which turned one decision into a loop: an officer says no, the offer comes back, somebody says no again. Now the pill
+  // still reads "Declined" so the member knows where they stand, and the way in is a conversation rather than a button: an
+  // officer can put them on the shift by hand. makeOffer refuses the write too, so a screen that was already open when the
+  // decline landed cannot slip a second offer through.
   const offerStateFor = (a) => {
     const slotOffers = offersFor(a);
     if (slotOffers.some((o) => o.status === 'pending')) return 'pending';
@@ -305,11 +310,11 @@ export default function ScheduleCalendar({
   const eventFor = (segment) =>
     normalizedEvents.find((event) => String(event.id) === String(segment?.eventId)) || null;
 
-  // Opens the confirmation modal (only open/declined pills are clickable, and only
-  // for a role that may offer at all).
+  // Opens the confirmation modal: ONLY a shift this member has no offer on. A pending one is waiting on an answer, and a
+  // declined one is closed to them outright (see offerStateFor).
   const openOfferModal = (a) => {
     if (!canMakeOffers) return;
-    if (offerStateFor(a) === 'pending') return;
+    if (offerStateFor(a) !== '') return;
     setOfferTarget(a);
   };
 
@@ -375,7 +380,7 @@ export default function ScheduleCalendar({
     const base = describe(a);
     if (!canMakeOffers) return `${base} — your role cannot offer to fill shifts`;
     if (state === 'pending') return `${base} — awaiting admin approval`;
-    if (state === 'declined') return `${base} — your offer was declined, click to offer again`;
+    if (state === 'declined') return `${base} — your offer was declined, so this shift is closed to you. Ask an officer to put you on it.`;
     return `${base} — click to offer to fill this shift`;
   };
 
@@ -513,7 +518,7 @@ export default function ScheduleCalendar({
             {declinedThisMonth.length > 0 && (
               <span className="flex items-center gap-2">
                 <span className="inline-block w-3 h-3 rounded-sm border border-dashed border-rose-400 shrink-0" />
-                Offer declined — you can offer again
+                Offer declined — ask an officer if you still want it
               </span>
             )}
           </div>
@@ -603,7 +608,8 @@ export default function ScheduleCalendar({
                     // Filled pills are solid (member name, or the assignment in
                     // the personal view). Open shifts are dashed and colored by
                     // assignment; once the member offers they turn amber while
-                    // pending, or rose when declined (and offerable again).
+                    // pending, or rose when declined - which closes the shift to
+                    // them, so the pill is not a button any more.
                     const line1 = a.isOpen
                       ? offerState === 'pending'
                         ? 'Pending'
@@ -659,7 +665,7 @@ export default function ScheduleCalendar({
                       <button
                         key={a.key}
                         type="button"
-                        disabled={offerState === 'pending' || !canMakeOffers}
+                        disabled={offerState !== '' || !canMakeOffers}
                         onClick={() => openOfferModal(a)}
                         title={offerTitleFor(a, offerState)}
                         className={`${baseClass} text-left transition ${
@@ -668,7 +674,7 @@ export default function ScheduleCalendar({
                             : offerState === 'pending'
                               ? 'border border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 cursor-default'
                               : offerState === 'declined'
-                                ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-pointer hover:ring-1 hover:ring-rose-400/70'
+                                ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-default'
                                 : 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-pointer hover:ring-1 hover:ring-slate-400/70'
                         }`}
                         // Open pills carry the assignment color; pending/declined

@@ -180,8 +180,10 @@ export const loginUser = async (username, password) => {
   return signInAsMember(username, password);
 };
 
-export const fetchTimeclockLogs = async (token) =>
-  dispatchRequest({ action: 'GET_TIMECLOCK_LOGS', token });
+// The member's own clock history, over an optional window. The History screen asks for a range (and can ask for an older
+// one), because this table grows without limit - see the note on the reader in firestoreReads.js.
+export const fetchTimeclockLogs = async (token, { from = '', to = '' } = {}) =>
+  dispatchRequest({ action: 'GET_TIMECLOCK_LOGS', token, from, to });
 
 export const fetchOnDutyUsers = async (token) =>
   dispatchRequest({ action: 'GET_ON_DUTY', token });
@@ -550,8 +552,11 @@ export const adminRemoveTrainingSignature = async (signatureId, token) =>
 export const fetchMyAnnouncements = async (token) =>
   dispatchRequest({ action: 'MY_ANNOUNCEMENTS', token });
 
-export const adminFetchAnnouncements = async (token) =>
-  dispatchRequest({ action: 'ADMIN_GET_ANNOUNCEMENTS', token });
+// The window is the administrator's own: an older window GROWS what the list holds, and the reader answers with the recent
+// rows unioned with everything still in force (see ADMIN_GET_ANNOUNCEMENTS), so a notice with no end date never falls out
+// of view however old it is.
+export const adminFetchAnnouncements = async (token, { from = '' } = {}) =>
+  dispatchRequest({ action: 'ADMIN_GET_ANNOUNCEMENTS', token, from });
 
 export const adminSaveAnnouncement = async (announcementData, token) =>
   dispatchRequest({
@@ -565,7 +570,8 @@ export const adminSaveAnnouncement = async (announcementData, token) =>
     message: announcementData.message || '',
     effective_date: announcementData.effective_date || '',
     end_date: announcementData.end_date || '',
-    is_visible_on_login: Boolean(announcementData.is_visible_on_login),
+    // No `is_visible_on_login`: the location is gone (utils/announcements#ANNOUNCEMENT_LOCATIONS), so sending it would keep a
+    // column alive that nothing reads. A save therefore clears it on an older row, which is the intent.
     is_visible_on_dashboard: Boolean(announcementData.is_visible_on_dashboard),
     is_visible_on_sidebar: Boolean(announcementData.is_visible_on_sidebar),
     role_id: announcementData.role_id || '',
@@ -827,25 +833,70 @@ export const adminFetchScheduleOffers = async (token) =>
 export const adminFetchSystemLog = async (params = {}, token) =>
   dispatchRequest(systemLogRequest(params, token));
 
-// Admin: approve (fills the shift) or decline a single offer. Other pending
-// offers for the same shift are closed out on approval.
+// Admin: approve (fills the shift) or decline a single offer, both through the same route - and both of them through a
+// callable, because writing a schedule row or a status is an officer's decision rather than a client write.
+//
+// The decision travels in the button's own vocabulary ('APPROVE' / 'DECLINE'), which is what Code.gs expected and what
+// the router now accepts in either case. Other pending offers for the same shift are NOT closed out here; approving
+// fills the shift, which is what stops them showing, and they stay in the pending list until an officer declines them.
 export const adminResolveShiftOffer = async (offerId, decision, token) => {
   const request = { action: 'ADMIN_RESOLVE_SHIFT_OFFER', token, id: offerId, decision };
-  // Only an approval is implemented on the Firestore side; a decline answers null and is sent as it always was.
   return (await routeWrite('ADMIN_RESOLVE_SHIFT_OFFER', request)) || dispatchRequest(request);
 };
 
+// --- Availability windows ---
+//
+// Officer-maintained reference data for the Member Availability module: the recurring weekly patterns members choose
+// from (utils/availability.js). Saved and deleted like any other plain document - the routing table names the
+// collection, so there is nothing to compute on the way in and no private half to write.
+
+export const adminFetchAvailabilityWindows = async (token) =>
+  dispatchRequest({ action: 'ADMIN_GET_AVAILABILITY_WINDOWS', token });
+
+export const adminSaveAvailabilityWindow = async (windowData, token) =>
+  dispatchRequest({
+    action: 'ADMIN_SAVE_AVAILABILITY_WINDOW',
+    token,
+    id: windowData.id || '',
+    row_version: rowVersionField(windowData),
+    nickname: windowData.nickname || '',
+    start_time: windowData.start_time || '',
+    end_time: windowData.end_time || '',
+    is_monday: Boolean(windowData.is_monday),
+    is_tuesday: Boolean(windowData.is_tuesday),
+    is_wednesday: Boolean(windowData.is_wednesday),
+    is_thursday: Boolean(windowData.is_thursday),
+    is_friday: Boolean(windowData.is_friday),
+    is_saturday: Boolean(windowData.is_saturday),
+    is_sunday: Boolean(windowData.is_sunday),
+    effective_date: windowData.effective_date || '',
+    end_date: windowData.end_date || '',
+  });
+
+export const adminDeleteAvailabilityWindow = async (windowId, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_AVAILABILITY_WINDOW', token, id: windowId });
+
 // --- Availability ---
 
-export const fetchAvailability = async (token) =>
-  dispatchRequest({ action: 'GET_AVAILABILITY', token });
+export const fetchAvailability = async (token, { from = '', to = '' } = {}) =>
+  dispatchRequest({ action: 'GET_AVAILABILITY', token, from, to });
+
+// Every member's claims for a month, for the two officer screens that ask "who can cover this?" - the All Members
+// roster and the board's availability warning. Bounded by the month, and the read that replaced the officer being
+// handed their own rows.
+export const adminFetchAvailability = async (token, { from = '', to = '' } = {}) =>
+  dispatchRequest({ action: 'ADMIN_GET_AVAILABILITY', token, from, to });
 
 // One availability slot in the shape the backend expects. `date_to` defaults to the start
 // date: a template occurrence is a single day.
-const availabilitySlotFields = (slot) => ({
-  schedule_template_id: slot?.templateId || '',
-  date_from: slot?.dateKey || '',
-  date_to: slot?.dateToKey || slot?.dateKey || '',
+// One availability claim in the shape the backend writes: the window it is for, and the single day it means.
+const availabilitySlotFields = (claim) => ({
+  availability_window_id: claim?.windowId || '',
+  // ...AND THE TEMPLATE SHAPE WHILE THE SCREENS MOVE ACROSS. A save from the schedule-template calendar still lands as
+  // it did, so the migration never has a moment where a save goes nowhere; one of the two is always empty, and this
+  // line goes with the last screen.
+  schedule_template_id: claim?.templateId || '',
+  date_from: claim?.dateKey || '',
 });
 
 // Applies every availability change the caller accumulated, in ONE request.
@@ -858,7 +909,9 @@ export const setMyAvailability = async ({ adds = [], removes = [] } = {}, token)
     action: 'SET_MY_AVAILABILITY',
     token,
     adds: adds.map(availabilitySlotFields),
-    removes: removes.map(availabilitySlotFields),
+    // A removal is a row, and the only field that matters is which row: the write deletes by id, so sending the slot
+    // shape here (as it used to) produced a delete of "[object Object]" that never happened.
+    removes: removes.map((row) => ({ id: String((row && row.id) || '') })),
   };
   return (await routeWrite('SET_MY_AVAILABILITY', request)) || dispatchRequest(request);
 };
@@ -870,7 +923,7 @@ export const adminSetAvailability = async (userId, { adds = [], removes = [] } =
     token,
     user_id: userId,
     adds: adds.map(availabilitySlotFields),
-    removes: removes.map(availabilitySlotFields),
+    removes: removes.map((row) => ({ id: String((row && row.id) || '') })),
   });
 
 // --- Admin: System Settings ---

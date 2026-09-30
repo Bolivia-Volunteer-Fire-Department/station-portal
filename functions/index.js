@@ -426,6 +426,36 @@ exports.approveOffer = onCall(async (request) => {
   return result;
 });
 
+// Declining an offer is the light half of resolving one: it stamps the status and writes NOTHING else. The shift stays
+// open, because "no" to one member is not a decision about the shift - and the member cannot offer for it again
+// afterwards, which is enforced on their own write (makeOffer) rather than here.
+//
+// A transaction, for the same reason approveOffer is one: two officers looking at the same offer must not both decide
+// it. The second one finds a status that is no longer pending and is refused.
+//
+// THE STATUS CHANGE IS THE NOTIFICATION. onShiftOfferDecided watches this document and sends the DECLINED push, so
+// nothing here has to remember to tell anybody.
+exports.declineOffer = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_approve_shifts', 'decline a shift offer');
+
+  const offerId = String((request.data || {}).offerId || '');
+  const result = await db.runTransaction(async (transaction) => {
+    const offerRef = db.doc(`schedule_offers/${offerId}`);
+    const offer = await transaction.get(offerRef);
+    if (!offer.exists) throw new HttpsError('not-found', 'That offer no longer exists.');
+    const data = offer.data();
+    if (String(data.status) !== 'pending') throw new HttpsError('failed-precondition', 'already-resolved');
+
+    transaction.update(offerRef, { status: 'declined', declined_by: caller.uid });
+    return { scheduleId: String(data.schedule_id || '') };
+  });
+
+  await audit(caller.uid, 'ADMIN_DECLINE_OFFER', `Declined an offer for shift ${result.scheduleId}`);
+  return result;
+});
+
 // Suspending somebody has to disable the Auth account too, or the suspension is only as good as the app's own
 // checks - and whatever reads the database next would not check.
 exports.setMemberStatus = onCall(async (request) => {

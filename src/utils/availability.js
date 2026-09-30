@@ -201,3 +201,136 @@ export const availabilityRosterForMonth = ({
 
   return days;
 };
+
+// ---------------------------------------------------------------------------------------------------------------
+// AVAILABILITY WINDOWS: the model this module is moving to.
+//
+// A window is a station-wide, recurring weekly pattern with a nickname:
+//
+//   availability_windows/{id}: (id, nickname, start_time, end_time, is_sunday..is_saturday, effective_date, end_date)
+//
+// A member's claim points at one window and one day - the same day-by-day choice the module has always made. What
+// changes is where the OPTIONS come from. They used to be the member's rank-eligible schedule templates, so drawing a
+// month's grid needed templates, assignments AND ranks; windows are station-wide and rank-blind on purpose, so the
+// options come from one small collection an officer maintains, and a member sees every window that falls on the day.
+//
+// THE WEEKDAY FLAG IS THE DAY THE WINDOW STARTS. `is_tuesday` with 18:00-08:00 describes a Tuesday night: the shift
+// begins on Tuesday and runs into Wednesday morning, so its pill belongs to Tuesday - and the flags are the only thing
+// that decides which days a window appears on.
+//
+// EFFECTIVE AND END DATES ARE THE CONFIGURATION'S LIFE, NOT AN OCCURRENCE. A department that changes its shift
+// structure ends the old windows on the last day they applied - keeping them, because claims reference them and the
+// history should still read - and adds new ones with an effective date. Both ends are inclusive; a blank end means
+// "still current", and blank dates mean the window was never scheduled to start or stop.
+//
+// The member module and the administration roster are being moved onto this. Until that lands, the template-based
+// derivations above stay in place and in use - both sets are tested in scripts/verify-availability-slots.mjs.
+
+// A window's own date fields, through the same parser the screens use, so a window cannot be live in one place and
+// expired in another.
+const windowDay = (value) => parseSheetDateKey(value);
+
+// The window a claim points at, and the day it is for - the two halves of a claim's identity.
+const windowIdOf = (row) => String(row?.availability_window_id ?? '').trim();
+
+const rowDayOf = (row) => parseSheetDateKey(row?.date_from);
+
+const flagOn = (value) => value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';
+
+const weekdayOf = (dateKey) => DAY_ORDER[new Date(`${dateKey}T12:00:00`).getDay()];
+
+// Whether a window's configuration is in force on a date: effective <= day <= end, either end optional.
+export const windowIsLiveOn = (window, dateKey) => {
+  const day = String(dateKey ?? '').trim();
+  if (!day) return false;
+  const from = windowDay(window?.effective_date);
+  const to = windowDay(window?.end_date);
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+};
+
+// Whether a window falls on a date: in force, and flagged for that date's weekday. This IS the pill rule - a Tuesday
+// night shows on Tuesdays, and the Wednesday morning it ends on is not its day.
+export const windowCoversDate = (window, dateKey) => {
+  const day = windowDay(dateKey);
+  if (!day) return false;
+  if (!windowIsLiveOn(window, day)) return false;
+  return flagOn(window?.[`is_${weekdayOf(day)}`]);
+};
+
+// The windows that fall on one date, in start-time order: what a day's cell lists.
+export const windowsOnDate = (windows, dateKey) =>
+  (Array.isArray(windows) ? windows : [])
+    .filter((window) => windowCoversDate(window, dateKey))
+    .sort((a, b) => {
+      const aMin = timeToMinutes(a?.start_time);
+      const bMin = timeToMinutes(b?.start_time);
+      const aKey = aMin === null ? Number.MAX_SAFE_INTEGER : aMin;
+      const bKey = bMin === null ? Number.MAX_SAFE_INTEGER : bMin;
+      if (aKey !== bKey) return aKey - bKey;
+      return String(a?.nickname ?? '').localeCompare(String(b?.nickname ?? ''));
+    });
+
+// One member's claims, as the set of `window|day` keys the grid diffs against.
+export const claimedKeysFor = (availability, userId) =>
+  new Set(
+    availabilityRowsFor(availability, userId)
+      .map((row) => availabilityKey(windowIdOf(row), rowDayOf(row)))
+      .filter((key) => key !== '|')
+  );
+
+// Whether one member has claimed one window on one date.
+export const isAvailableForWindow = (availability, userId, windowId, dateKey) => {
+  const key = availabilityKey(windowId, dateKey);
+  return key !== '|' && claimedKeysFor(availability, userId).has(key);
+};
+
+// The members who claimed one window on one date, in name order. A row pointing at a member missing from `users` still
+// appears, labeled by id: silently dropping someone the data says is available would be worse than showing an id.
+export const availableMembersForWindow = (availability, windowId, dateKey, users = []) => {
+  const wanted = availabilityKey(windowId, dateKey);
+  if (wanted === '|') return [];
+  const seen = new Set();
+  const members = [];
+  for (const row of Array.isArray(availability) ? availability : []) {
+    if (availabilityKey(windowIdOf(row), rowDayOf(row)) !== wanted) continue;
+    const userId = String(row?.user_id ?? '').trim();
+    if (!userId || seen.has(userId)) continue;
+    seen.add(userId);
+    const user = (Array.isArray(users) ? users : []).find((u) => String(u?.id ?? '').trim() === userId);
+    members.push({
+      id: userId,
+      name: String(user?.name ?? '').trim() || unnamedLabel('member'),
+      rank_id: String(user?.rank_id ?? '').trim(),
+    });
+  }
+  return members.sort((a, b) => a.name.localeCompare(b.name));
+};
+
+// Every day of a month with at least one window, and - when `availability` is given - who claimed each one. ONE
+// derivation for the member's grid and the administration's roster, so the two cannot disagree about which windows
+// fall on a day.
+export const windowDaysForMonth = ({ year, month, windows = [], availability = [], users = [] } = {}) => {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const days = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateKey = toDateKey(new Date(year, month, day));
+    const found = windowsOnDate(windows, dateKey);
+    if (!found.length) continue;
+    days.push({
+      dateKey,
+      windows: found.map((window) => ({
+        ...window,
+        id: String(window?.id ?? '').trim(),
+        key: availabilityKey(window?.id, dateKey),
+        claimed: availableMembersForWindow(availability, window?.id, dateKey, users),
+      })),
+    });
+  }
+  return days;
+};
+
+// The member module and the administration roster are being moved onto this. Until that lands, the template-based
+// derivations above stay in place and in use - both sets are tested in scripts/verify-availability-slots.mjs.
+

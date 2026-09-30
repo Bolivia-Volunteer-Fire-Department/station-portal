@@ -79,6 +79,14 @@
         { "fieldPath": "date_from", "order": "ASCENDING" },
         { "fieldPath": "date_to", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "announcements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "audience_keys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "live_until", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

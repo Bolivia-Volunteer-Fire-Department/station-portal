@@ -28,7 +28,7 @@ The **Filter & sort** bar above the report drives both the list and the totals b
 
 The **Signed by this member** tile is deliberately hidden for **All Members**, where a signature count for one person is not a meaningful question; the two totals that always apply — how many trainings and how many hours — are shown instead.
 
-An empty result reads *No trainings match these filters* rather than looking like an empty sheet.
+An empty result reads *No trainings match these filters* rather than looking like an empty list.
 
 ## Adding and editing trainings
 
@@ -42,7 +42,7 @@ Press **Add training** at the right of the report toolbar, and the editor opens 
 | **Duration (hours)** | A decimal, such as `2` or `1.5` |
 | **Location**, **Instructors** | Free text |
 | **Narrative** | What was covered; shown under the signature list |
-| **Classification** | Company Training, Hazmat, EMS, fire prevention, multi-company, training facility, officer training, driver training, and **entered into an external system**. These are the sheet's `is_company_training`, `is_hazmat`, `is_ems` and so on columns, one per classification, so a training can carry several |
+| **Classification** | Company Training, Hazmat, EMS, fire prevention, multi-company, training facility, officer training, driver training, and **entered into an external system**. These are separate checks, one for each classification, so a single training can carry several |
 
 **Edit is available here for a training that has been signed.** That is the point of the rule: the Training module closes a training as soon as anybody signs it, and changes from then on are made here, deliberately.
 
@@ -53,7 +53,7 @@ Ticking **Entered into an external system** is permanent. It should be set once 
 - **locks the training itself** — no field can be changed again, by anyone,
 - **locks its signatures** — none can be removed, added or altered,
 - **prevents deletion**, and
-- cannot be unticked in the app. **Only the training sheet can clear it.**
+- cannot be unticked in the app. **Only the external system, or somebody editing the record outside the app, can clear it.**
 
 The app asks you to confirm before it sets the marker, and says all of the above at the time. A locked training shows a padlock in the **Ext.** column, and its Edit, Delete and signature-remove controls are all disabled — including for you.
 
@@ -88,7 +88,7 @@ Two prints, both from the toolbar and the rows of the report:
 
 **Print list** prints the report as it stands on screen. The columns are the report's own — date, training (with its time and categories), location, instructors, how many signed, and whether it is filed externally — and under each training is the list of who signed, sorted by name. Nothing the list does not show is added: **the narrative is not on it**, which is the point of it being a list.
 
-The sheet also says **which filters produced it**, because a filtered list is a subset of the record and a printout that does not say so is misleading — e.g. *Category: Hazmat · Location: Station 1 · Sorted by Date (newest first)* — along with the total trainings and training hours, so it agrees with the tiles. It is headed with the station's name and patch, the date it was printed, and who printed it.
+The printout also says **which filters produced it**, because a filtered list is a subset of the record and a printout that does not say so is misleading — e.g. *Category: Hazmat · Location: Station 1 · Sorted by Date (newest first)* — along with the total trainings and training hours, so it agrees with the tiles. It is headed with the station's name and patch, the date it was printed, and who printed it.
 
 **Print** on a row is that training's own record, and it is deliberately the opposite: everything the record holds, including the narrative as written and the categories by their full names. **A training entered into an external system can still be printed** — that is the record most likely to be wanted on paper, and printing changes nothing.
 

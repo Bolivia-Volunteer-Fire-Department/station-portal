@@ -189,6 +189,15 @@ service cloud.firestore {
       allow write: if permission('can_edit_schedule');
     }
 
+    // The station's availability windows: a short, officer-maintained list of recurring weekly patterns that members
+    // choose from (utils/availability.js). Everybody reads it - a member's own module draws its options from it - and
+    // only somebody who maintains member availability may change it. Rank plays no part here, deliberately: a window is
+    // an hour of the station's week, not a slot somebody has to qualify for.
+    match /availability_windows/{windowId} {
+      allow read: if signedIn();
+      allow write: if permission('can_edit_member_availability');
+    }
+
     match /apparatus/{apparatusId} {
       allow read: if signedIn();
       allow write: if permission('can_edit_schedule');

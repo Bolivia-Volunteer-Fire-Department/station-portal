@@ -253,7 +253,14 @@ checkIs('the full assignment rows, not the member projection', 'admin_note' in (
 checkIs('so the member projection really is narrower', !('admin_note' in (member.assignments[0] || {})));
 checkIs('and the same for the templates', 'admin_note' in (admin.scheduleTemplates[0] || {}) && !('admin_note' in (member.scheduleTemplates[0] || {})));
 checkIs('the offers table', Array.isArray(admin.scheduleOffers));
-checkIs('and the login-screen announcements', Array.isArray(admin.loginAnnouncements));
+// ...and NO login-screen announcements. That placement is gone (utils/announcements#ANNOUNCEMENT_LOCATIONS), so the field
+// went with it rather than lingering as an empty array that nothing renders - which is what makes this a check and not a
+// formality: a payload field no screen reads is still a read somebody will eventually try to fill.
+checkIs(
+  'and no login-screen announcements at all',
+  admin.loginAnnouncements === undefined,
+  JSON.stringify(admin.loginAnnouncements)
+);
 
 console.log('\n--- a narrower role loses a section, not the response ---');
 // The claim that makes the batch safe for a role that may only have some of it: an omitted section must not take
@@ -294,9 +301,12 @@ checkIs(
   /String\(log\.user_id\) === String\(currentUser\.id\)/.test(clockHistory)
 );
 const appSource = readFileSync('src/App.jsx', 'utf8');
+// The clock card asks the ON-DUTY row instead of scanning the history, which is stronger than "it only reads the viewer's
+// own rows": there is no clock entry in that lookup at all now. That is what let the history leave the sign-in payload - the
+// payload used to carry every entry the member had ever made, because this lookup needed one of them.
 checkIs(
-  'and so does the "am I clocked in" lookup that arms the clock card',
-  /String\(log\.user_id\) === String\(currentUser\.id\) && !log\.time_out/.test(appSource)
+  'and the "am I clocked in" lookup that arms the clock card reads the on-duty row, not the history',
+  /onDutyUsers\.some\(/.test(appSource) && !/const activeShift = logs\.find/.test(appSource)
 );
 const availabilityScreen = readFileSync('src/components/MyAvailability.jsx', 'utf8');
 checkIs('My Availability is built for that member', /member=\{currentUser\}/.test(availabilityScreen));

@@ -34,7 +34,7 @@ Click a document and it opens beside the list. Long documents scroll inside thei
 The line under the title says which folder it is in and when it was last changed, so you can tell a procedure that was updated last week from one that has not been touched in three years.
 
 > [!NOTE]
-> Documents live in the station's spreadsheet rather than in the app itself, so **this screen needs a connection**. That is the one difference from the Help guides, which are part of the app and work offline.
+> Documents live on the station's server rather than inside the app, so opening one needs a connection the first time. The list itself, and anything you have already opened, stays readable if your signal drops — which is the one difference from these Help guides, which are part of the app and always available.
 
 ## Signing
 

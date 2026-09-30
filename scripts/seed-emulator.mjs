@@ -247,6 +247,54 @@ export const seed = async () => {
   await put('availability/av1', { user_id: 'u1', schedule_template_id: 't1', date_from: '2026-03-06', date_to: '2026-03-06' });
   await put('availability/av2', { user_id: 'u2', schedule_template_id: 't1', date_from: '2026-03-07', date_to: '2026-03-07' });
 
+  // --- availability windows, and claims made against them ---
+  // The model the Member Availability module is moving to (utils/availability.js): a station-wide list of recurring
+  // weekly patterns, and one claim per member per window per day. The template-based rows above stay until that
+  // switchover lands, which is why both shapes are seeded.
+  //
+  // The four windows are the four cases the derivation has to get right: a night window that crosses midnight and
+  // belongs to its START day, an ordinary day window, a RETIRED configuration (ended, kept so old claims still read),
+  // and one that has not taken effect yet. `2026-09-02` is a Wednesday and `2026-09-01` a Tuesday, which is what the
+  // pill assertions in verify-availability-slots.mjs lean on.
+  await put('availability_windows/aw1', {
+    nickname: 'Tuesday night',
+    start_time: '18:00',
+    end_time: '08:00',
+    is_tuesday: true,
+    effective_date: '2026-01-01',
+    end_date: '',
+  });
+  await put('availability_windows/aw2', {
+    nickname: 'Saturday day',
+    start_time: '08:00',
+    end_time: '18:00',
+    is_saturday: true,
+    effective_date: '2026-01-01',
+    end_date: '',
+  });
+  await put('availability_windows/aw3', {
+    nickname: 'Old weekday pattern',
+    start_time: '06:00',
+    end_time: '14:00',
+    is_monday: true,
+    is_tuesday: true,
+    effective_date: '2024-01-01',
+    end_date: '2024-12-31',
+  });
+  await put('availability_windows/aw4', {
+    nickname: 'Next year pattern',
+    start_time: '08:00',
+    end_time: '18:00',
+    is_wednesday: true,
+    effective_date: '2027-01-01',
+    end_date: '',
+  });
+  // Two members on the same window and day, which is what the roster view is for, and one claim against a retired
+  // window - kept, because that is the whole point of retiring rather than deleting.
+  await put('availability/avw1', { user_id: 'u2', availability_window_id: 'aw1', date_from: '2026-09-01' });
+  await put('availability/avw2', { user_id: 'u1', availability_window_id: 'aw1', date_from: '2026-09-01' });
+  await put('availability/avw3', { user_id: 'u2', availability_window_id: 'aw3', date_from: '2024-06-03' });
+
   // --- u1 on duty: the open clock entry, and the on_duty document the same transaction writes ---
   await put('timeclock/c1', { user_id: 'u1', time_in: '2026-03-02 07:55', time_out: '', is_manual: false });
   await put('timeclock/c2', { user_id: 'u2', time_in: '2026-03-01 08:00', time_out: '2026-03-01 17:00', is_manual: false });
@@ -280,20 +328,47 @@ export const seed = async () => {
   await put('announcements/an1', {
     title: 'Everyone sees this',
     audience_keys: ['*'],
-    is_visible_on_login: true,
+    // The login screen is no longer a place an announcement can appear (utils/announcements#ANNOUNCEMENT_LOCATIONS), so this
+    // one is placed where a member actually reads it.
+    is_visible_on_dashboard: true,
     created_at: '2026-02-01 08:00:00',
+    // `live_until` is what the SAVE PATH materializes (firestoreWrites#saveAudienceDocument): the row's end date, or the
+    // far-future sentinel when it has none. The read bounds by it (`>= today`) because neither date column can be queried
+    // directly - a blank `end_date` means "indefinitely", and a range filter drops documents where the field is absent.
+    live_until: '9999-12-31',
   });
   await put('announcements/an2', {
     title: 'Officers only',
     audience_keys: ['role:r1'],
-    is_visible_on_login: false,
     created_at: '2026-02-02 08:00:00',
+    live_until: '9999-12-31',
   });
   await put('announcements/an3', {
     title: 'For Bo',
     audience_keys: ['user:u2'],
-    is_visible_on_login: false,
     created_at: '2026-02-03 08:00:00',
+    live_until: '9999-12-31',
+  });
+  // THE ONE THAT PROVES THE BOUND IS A BOUND. It is aimed at everyone and would have been read by every sign-in before the
+  // active filter existed; it ended in February, so nothing should see it any more. Without a fixture like this the
+  // narrowing is an assertion rather than a test - the three rows above all stay visible either way.
+  await put('announcements/an4', {
+    title: 'Expired notice',
+    audience_keys: ['*'],
+    // A LEGACY ROW, deliberately left as one: `is_visible_on_login` was a real column, rows in the wild still carry it, and
+    // nothing consults it any more. It is here so "a leftover flag does no harm" is a fixture rather than a hope.
+    is_visible_on_login: true,
+    effective_date: '2025-11-01',
+    end_date: '2026-02-28',
+    live_until: '2026-02-28',
+  });
+  // AND THE ONE THAT PROVES THE PAYLOAD IS NOT ASKED TO DO THE CLIENT'S JOB. This is dated in the future: `live_until` is
+  // open, so the read brings it, and `announcementIsLiveOn` is what keeps it off the screen until its date arrives.
+  await put('announcements/an5', {
+    title: 'Starts next year',
+    audience_keys: ['*'],
+    effective_date: '2027-01-01',
+    live_until: '9999-12-31',
   });
   await put('events/ev1', { title: 'Everyone', date_from: '2026-03-10', date_to: '2026-03-10', audience_keys: ['*'] });
   await put('events/ev2', {
@@ -420,6 +495,29 @@ export const seed = async () => {
     assignment_id: 'a1',
     status: 'pending',
     slot_key: '2026-03-09|a1',
+  });
+  // THE ONE THAT PROVES THE FILTER IS A FILTER, and the one that proves it is not too tight. `of2` was approved, which fills
+  // its shift: the slot is no longer open, so there is no pill for a calendar to colour and the row is not read any more -
+  // it is the history the read stopped carrying. `of3` was DECLINED, and that one must still arrive, because a declined
+  // shift is CLOSED to that member and the pill has to say so: without the row the slot would simply look open again and
+  // they would try to re-offer a shift the officer has already turned them down for (makeOffer refuses that write, but the
+  // screen should never have invited it). Approving one and declining another is the whole test: a filter that dropped both
+  // would look identical on the pending pill alone.
+  await put('schedule_offers/of2', {
+    user_id: 'u2',
+    schedule_id: 's1',
+    date_from: '2026-03-02',
+    assignment_id: 'a1',
+    status: 'approved',
+    slot_key: '2026-03-02|a1',
+  });
+  await put('schedule_offers/of3', {
+    user_id: 'u2',
+    schedule_id: 's2',
+    date_from: '2026-03-16',
+    assignment_id: 'a2',
+    status: 'declined',
+    slot_key: '2026-03-16|a2',
   });
 
   // --- the badge index, materialized: what the app draws beside a member's name ---

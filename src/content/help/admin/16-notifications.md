@@ -11,11 +11,11 @@
 > [!CAUTION]
 > Do not change the settings in the FCM card without first consulting Matt!
 
-This card holds the credentials that let the station's server send notifications at all. Until it is filled in correctly, no notification can be delivered however the other cards are set.
+This card holds what the station's browser needs in order to subscribe. The **sending** half is not here at all: notifications are sent by the deployment's own service account, which nothing on this screen configures and no browser ever holds.
 
-- **Project ID**, **Client email** and **Private key** come from a Firebase service account, and the web configuration keys come from the Firebase web app registration. The repository's `docs/FCM_SETUP.md` walks through creating them, and is worth reading in full before starting — the private key in particular is easy to paste incorrectly.
-- **The private key is write-only.** Once stored it is never sent back to a browser, not even to an administrator: the card reports only whether a key is present. Leaving the field **blank on save means "keep the existing key"**, not "clear it", so you can change another field without re-pasting it.
-- **Test** is per member, and lives in the **Device Status** table below — see that section. A test that fails is reported with the actual reason: an authorization problem on the server is not the same as a message FCM refused, and the message says which you have. If the report mentions an external-request permission, the Apps Script project needs re-authorizing; the setup guide in `docs/FCM_SETUP.md` covers that.
+- **Web config** is the Firebase web app configuration and **VAPID public key** is the Web Push certificate key. Both come from the Firebase console — *Project settings → Your apps* for the config, *Cloud Messaging → Web configuration* for the key — and both are **public by design**: they identify the station's app to Google rather than authorising anything. The same values are built into the app when it is deployed, so this card is how a station changes them **without** a rebuild. A value set here takes precedence over the one in the build.
+- **There is nothing to paste and no key to store.** Earlier versions of this card took a service-account email and private key so that the old Google Sheet backend could send pushes. That credential is gone, along with the fields: the app's own functions send notifications as themselves, and a private key pasted into a settings document — which is where it used to end up — is a credential sitting somewhere no browser should ever see.
+- **Test** is per member, and lives in the **Device Status** table below — see that section. A test that fails is reported with the actual reason: an authorization problem on the server is not the same as a message FCM refused, and the message says which you have. A server-side refusal is fixed in the Google Cloud project rather than on this screen, because the credential is the deployment's own service account.
 
 ## Station Defaults
 

@@ -9,6 +9,7 @@ Each shift is drawn as a colored pill. The color comes from the **assignment**, 
 | **Solid** | Someone is assigned to that shift — you, or a colleague if you have turned on the crew view |
 | **Dashed** | The shift is **Open**: nobody is assigned to it yet |
 | **Amber** | You have offered to fill it and an administrator has not decided yet |
+| **Rose (dashed)** | An administrator **declined** your offer. That shift is closed to you — see below |
 
 A pill shows the assignment plus either the shift's **nickname** (such as "Day Shift") or its times. Click one and a popup opens with everything the pill has no room for — see **Reading the details of an item** below.
 
@@ -48,7 +49,11 @@ Use the arrows either side of the month name, or the **Today** button to jump ba
 2. Click it and confirm in the dialog.
 3. The pill turns amber. Your offer is now waiting in **Pending Approvals**.
 
-An administrator approves or declines it. If it is approved, the shift becomes yours and appears as a solid pill. If it is declined, the pill goes back to dashed and you may offer again — there is nothing to withdraw, and offering twice on the same shift is treated as one offer rather than a duplicate.
+An administrator approves or declines it. If it is approved, the shift becomes yours and appears as a solid pill.
+
+**If it is declined, that is final for the app.** The pill turns rose and reads *Declined*, and you cannot offer for that shift again — the button is gone, and the app refuses the offer even if you still had the page open from before. That is deliberate: it stops the same offer going backwards and forwards, and it keeps a decision a decision. **It does not mean you can never work that shift.** If your circumstances changed, or you think the shift was turned down by mistake, speak to an officer — they can put you on it directly, and a shift filled that way works exactly like one you were approved for.
+
+While an offer is still waiting you cannot offer a second time on the same shift; that is treated as the same offer rather than a duplicate. There is nothing to withdraw — an officer's decision is what closes an offer out.
 
 You can only offer on shifts your rank qualifies for.
 

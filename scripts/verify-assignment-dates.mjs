@@ -198,9 +198,10 @@ check('and the end date', /end_date: assignmentData\.end_date/.test(apiSource), 
 const panelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
 check('the panel passes templates to the assignments tab', /<AdminAssignmentsTab[\s\S]{0,400}scheduleTemplates=\{scheduleTemplates\}/.test(panelSource), true);
 
-const rosterSource = readFileSync('src/components/admin/AdminAvailabilityRoster.jsx', 'utf8');
-check('the availability roster passes assignments down', /availabilityRosterForMonth\(\{[\s\S]{0,200}assignments,/.test(rosterSource), true);
-check('and the generator accepts them', /availabilityRosterForMonth = \(\{[\s\S]{0,400}assignments = \[\]/.test(readFileSync('src/utils/availability.js', 'utf8')), true);
+// The availability screens no longer gate anything on assignment dates: they draw the station's availability WINDOWS,
+// which carry their own effective/end dates and no assignment at all (utils/availability.js). The assignment gate
+// above still governs the schedule board, which is where an assignment's dates matter.
+check('the availability roster generator takes no assignments', /windowDaysForMonth/.test(readFileSync('src/utils/availability.js', 'utf8')), true);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

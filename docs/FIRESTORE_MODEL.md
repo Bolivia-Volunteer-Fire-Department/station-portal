@@ -523,12 +523,54 @@ path is proven by the emulator harness while the live app keeps working untouche
 `memberBootstrapPayload` returns in `Code.gs` — same field names, same projections, same narrowing — because that is
 what lets `api.js` swap its internals without a component changing.
 
+**One field is deliberately absent: `logs`.** The clock history is the one per-member table with no ceiling — a
+five-year member has thousands of entries — and the payload carried it only so that the DASHBOARD could answer "am I
+clocked in", which the on-duty row answers for free: the clock transaction writes the entry and that row together, so a
+member's on-duty row exists exactly while one of their entries is open. The history is read now by the screen that shows
+it, over a range (`GET_TIMECLOCK_LOGS`), so the Firestore payload and the sheet payload no longer match field for field
+on that one name — deliberately, and asserted in `scripts/verify-firestore-reads.mjs`.
+
 | piece | what it is |
 |---|---|
 | `src/services/firestorePayload.js` | two parallel waves of reads, then the projections: the roster is three columns, on-duty is joined to names, the settings document goes back to key/value rows |
 | `firestore.rules` | the rest of the payload's collections: announcements, events, trainings, signatures, certifications, the catalogue, and offers (read-only until Phase 3 writes them) |
 | `scripts/seed-emulator.mjs` | announcements for everyone / a role / one member, two events, a signature, a certification, an offer |
-| `scripts/verify-firestore-reads.mjs` | 26 cases: the payload's shape and projections, and the audience filtering that used to happen in a server function |
+| `scripts/verify-firestore-reads.mjs` | the payload's shape and projections, the audience filtering that used to happen in a server function, and the windows the growing collections are read over |
+
+**Announcements are read as "what is in force", and that needed a second materialized column.** The audience rule already
+narrowed a member's announcements to the ones aimed at them; the *date* rule could not be asked as a query at all, because
+`effective_date` and `end_date` may each be blank (blank start means "in force", blank end means "indefinitely"), a range
+filter excludes documents where the field is absent, and a query may filter on one range field only. So a save stamps
+`live_until` — the end date, or a far-future sentinel — beside `audience_keys`, and every member-facing read bounds by it:
+the sign-in payload, `MY_ANNOUNCEMENTS`, and the live listener that would otherwise put the whole collection back a moment
+after sign-in. The composite index is in `firestore.indexes.json`. Rows saved before the column existed cannot be matched by
+that bound, so the reader falls back to the unfiltered query and says so loudly, and the Announcements tab lists them for an
+officer to stamp by saving.
+
+**Availability windows are new reference data with no equivalent in the sheet.** A member's availability used to be
+keyed to schedule templates — a row per claimed template occurrence, and a month's grid needed templates, assignments
+*and* ranks to work out what somebody was allowed to claim. The `availability_windows` collection replaces that with a
+short, officer-maintained list of recurring weekly patterns (`nickname`, `start_time`, `end_time`, seven day flags,
+`effective_date`, `end_date`), and a claim points at a window and a day. The weekday flags are the day a window STARTS,
+so an 18:00–08:00 Tuesday window belongs to Tuesday and its pill is drawn there; the two dates are the life of the
+CONFIGURATION rather than of an occurrence, which is what lets a station retire old patterns and keep the history that
+references them. Rank plays no part: a window is an hour of the station's week. The member module and the administration
+roster both read the windows and a month of claims now — the template-based derivations are gone, and with them the
+per-member reading of templates, assignments and ranks that used to be needed to draw one month of checkboxes.
+
+The login-screen placement these reads used to serve has been **removed** rather than fixed: it could only show
+announcements aimed at everybody, and it was the only reason the app read a collection before it had a session.
+`GET_INITIAL_DATA` is now one document — `settings/public` — and anything that must be read before signing in is code in
+`LoginScreen` rather than a row in a form.
+
+**Shift offers are read over the two statuses a calendar draws from.** A member's offers used to be read in full at every
+sign-in — every offer they had ever raised, kept long after it resolved, which is the shape of a request log rather than of
+something a screen draws. The My Schedule pills need `pending` (waiting on an officer) and `declined` (the member may offer
+again, which is why the pill says so instead of reverting to open); an `approved` offer is not needed at all, because
+approving *fills* the shift, so the slot is closed and there is no pill to colour. The officer's board reads `pending` only,
+which is what its slot flags are built from. Unlike the announcements' dates this needed no materialized column: every offer
+the app creates is written with a `status` (`firestoreWrites#makeOffer`), so a filter on it cannot hide something that was
+actionable — and `scripts/verify-read-budget.mjs` asserts that write, because the read depends on it.
 
 **The audience shape changed, and this is why.** The sheet version stores `role_id`, `rank_id` and `user_id` as
 three columns and ORs them in a function; "this rank or above" compares rank orders. None of that can be turned into

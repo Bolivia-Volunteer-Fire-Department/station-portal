@@ -151,18 +151,24 @@ const main = async () => {
     ],
   });
   const mine = await rowsOf(query(collection(db, 'availability'), where('user_id', '==', 'u2')));
-  // Three rows, not two: the seed already gave u2 one for 2026-03-07, which is the point of the assertion below.
+  // Five rows, not two: the seed already gave u2 one template-keyed row for 2026-03-07, and - because the module is
+  // moving onto availability windows - two window-keyed claims as well. Both shapes live in the same collection while
+  // that switchover lands, and this assertion is about the WRITES, so it lists everything the member holds.
   check('both slots were written alongside the one the seed left', mine.map((row) => row.date_from).sort(), [
+    '2024-06-03',
     '2026-03-07',
     '2026-03-20',
     '2026-03-21',
+    '2026-09-01',
   ]);
   const removal = mine.find((row) => row.date_from === '2026-03-20');
   await saveAvailability({ userId: 'u2', removes: [removal.id] });
   const afterRemoval = await rowsOf(query(collection(db, 'availability'), where('user_id', '==', 'u2')));
   check('and one was removed in the same batch', afterRemoval.map((row) => row.date_from).sort(), [
+    '2024-06-03',
     '2026-03-07',
     '2026-03-21',
+    '2026-09-01',
   ]);
   await refused(
     'an availability row cannot be written for somebody else',
@@ -213,6 +219,71 @@ const main = async () => {
   });
   await withdrawOffer(secondOffer);
   check('a member may withdraw their own offer', (await getDoc(doc(db, 'schedule_offers', secondOffer))).exists(), false);
+
+  // BOTH DECISIONS THROUGH THE ROUTE, which is how the admin tab resolves an offer, and which used to resolve NOTHING:
+  // the decision travels in the button's vocabulary ('APPROVE' / 'DECLINE') and the router compared it against the
+  // lowercase 'approved', so every call fell through as "not routed" and landed on Apps Script - gone. An officer could
+  // not approve or decline anything. These two calls are the proof it works, and they are here rather than beside the
+  // direct approveOffer above because the VOCABULARY is the thing that broke.
+  await signOut(auth);
+  await signIn('bo');
+  const routedOffer = await makeOffer({
+    userId: 'u2',
+    scheduleId: 's2',
+    dateFrom: '2026-03-16',
+    assignmentId: 'a2',
+    slotKey: 'slot-2026-03-16|a2',
+  });
+  const declinedOffer = await makeOffer({
+    userId: 'u2',
+    scheduleId: 's2',
+    dateFrom: '2026-03-23',
+    assignmentId: 'a2',
+    slotKey: 'slot-2026-03-23|a2',
+  });
+  await signOut(auth);
+  await signIn('jane');
+
+  const approved = await routeWrite('ADMIN_RESOLVE_SHIFT_OFFER', { id: routedOffer, decision: 'APPROVE' });
+  check('an APPROVE through the route reports success', approved && approved.success, true);
+  check('and stamps the offer approved', (await getDoc(doc(db, 'schedule_offers', routedOffer))).data().status, 'approved');
+
+  const rowBefore = (await getDoc(doc(db, 'schedule', 's2'))).data();
+  const declined = await routeWrite('ADMIN_RESOLVE_SHIFT_OFFER', { id: declinedOffer, decision: 'DECLINE' });
+  check('a DECLINE through the route reports success', declined && declined.success, true);
+  check('and stamps the offer declined', (await getDoc(doc(db, 'schedule_offers', declinedOffer))).data().status, 'declined');
+  check('recording which officer decided it', (await getDoc(doc(db, 'schedule_offers', declinedOffer))).data().declined_by, 'u1');
+  // A decline is a decision about ONE MEMBER, not about the shift: nothing else may move.
+  const rowAfter = (await getDoc(doc(db, 'schedule', 's2'))).data();
+  check('and leaves the shift exactly as it was', [rowAfter.user_id, rowAfter.is_open], [rowBefore.user_id, rowBefore.is_open]);
+
+  // ...and the member cannot ask again for the shift they were turned down for. This is the guard in makeOffer, and it is
+  // the only thing standing between a member with a declined row and a second offer: their calendar hides the button, but a
+  // page opened before the decline would still be holding one.
+  await signOut(auth);
+  await signIn('bo');
+  let refusal = '';
+  try {
+    await makeOffer({
+      userId: 'u2',
+      scheduleId: 's2',
+      dateFrom: '2026-03-23',
+      assignmentId: 'a2',
+      slotKey: 'slot-2026-03-23|a2',
+    });
+  } catch (error) {
+    refusal = error.message;
+  }
+  checkIs('a declined member cannot offer for that shift again', /declined/.test(refusal), refusal || 'the offer went through');
+  // ...and the rule closes ONE shift, not the member's ability to offer at all: another slot is still theirs to take.
+  const elsewhere = await makeOffer({
+    userId: 'u2',
+    scheduleId: 's2',
+    dateFrom: '2026-03-30',
+    assignmentId: 'a2',
+    slotKey: 'slot-2026-03-30|a2',
+  });
+  check('while a different shift is still open to them', typeof elsewhere, 'string');
 
   // --- the board: the officer's bulk save, its conflict check, and the audit trail ---
   // Back to the officer: the section above ends signed in as the member, and the board is an officer's tool.

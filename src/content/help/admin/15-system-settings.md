@@ -54,7 +54,7 @@ Signs a member out of a shared terminal when nobody is using it. The card's badg
 Two details worth knowing before you set this:
 
 - **The server expires the session as well, not just the browser.** A session that has been idle for longer than the setting stops working on the server too, so the timeout holds even if someone keeps the page open — the browser half is the courtesy, the server half is the rule.
-- **Saving applies to members who are signed in right now**, not just the next sign-in: the setting is pushed out to open sessions, keeping whatever idle time they have already spent. So shortening it while somebody has been idle for longer than the new value ends their session immediately. Editing the cell directly in the spreadsheet instead reaches only the next sign-in.
+- **Saving reaches members who are signed in right now**, not just the next sign-in: the app keeps an eye on this setting, so an open session picks up a change within moments and keeps whatever idle time it has already spent. Shortening the time-out while somebody has been idle for longer than the new value therefore ends that session straight away rather than at the next sign-in.
 
 > [!WARNING]
 > **A value that cannot be read switches this OFF rather than on.** A cell holding `30 minutes` or `1,000` is reported as unusable and the timeout is not applied. This is deliberate: a typo that expired every session instantly would lock the whole department out of a shared terminal, and the card tells you when it is happening.
@@ -89,10 +89,10 @@ Worth knowing if a member reports "the app has gone quiet": a member who has nev
 
 The rotating messages shown on the loading screen while the app fetches data. Ten of them, and you can edit any or all. Short works best — they are read in passing during a wait of a few seconds.
 
-All ten fields are always there, whether or not a message has been set, so the first one can be added from this screen rather than by inserting a row in the sheet. Saving writes all ten: clearing a field removes that message, and an empty field stays empty.
+All ten fields are always there, whether or not a message has been set, so the first one can be added from this screen rather than by adding a row by hand. Saving writes all ten: clearing a field removes that message, and an empty field stays empty.
 
 ## Custom Settings
 
-Any other `key`/`value` pairs on the `system_settings` sheet, listed here so you can see and edit them without opening the spreadsheet. The three clock-location keys and everything in the cards above are managed by their own cards and are deliberately not duplicated here.
+Any other settings the station has stored, listed here so you can see and edit them without going anywhere else. The three clock-location keys and everything in the cards above are managed by their own cards and are deliberately not duplicated here.
 
 Credential-looking keys — anything named like a password, secret or private key — are excluded from what the app sends to browsers, so they will not appear in this list at all. Those are configuration for the server, not settings for the app.

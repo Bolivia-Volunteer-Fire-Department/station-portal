@@ -40,7 +40,7 @@ const check = (label, actual, expected) => {
   );
 };
 
-const ALL_TABS = ADMIN_PERMISSIONS.map((permission) => permission.tab);
+const ALL_TABS = ADMIN_PERMISSIONS.flatMap((permission) => [permission.tab, ...(permission.moreTabs || [])]);
 // The permission-driven tabs plus the permissionless ones (Help), which trail behind and are
 // granted to anyone with Administration access.
 const ALL_TABS_WITH_PERMISSIONLESS = [...ALL_TABS, ...ADMIN_PERMISSIONLESS_TABS];
@@ -83,6 +83,14 @@ check('users is not', roleAllowsTab(approver, 'users'), false);
 check('the schedule board is not', roleAllowsTab(approver, 'schedule'), false);
 check('but Administration DOES open', roleHasAdministration(approver), true);
 check('with only that tab listed', allowedAdminTabs(approver), ['approvals', ...ADMIN_PERMISSIONLESS_TABS]);
+// ONE PERMISSION CAN OPEN MORE THAN ONE TAB, and the availability pair is the first that does: the windows are the
+// options list for member availability, so an officer who maintains one maintains the other. Asserted here rather than
+// left to the catalog, so a later edit cannot quietly separate them and leave an officer with a tab they cannot reach.
+check(
+  'managing member availability opens the windows tab too',
+  allowedAdminTabs({ can_edit_member_availability: true }),
+  ['availability', 'availability-windows', ...ADMIN_PERMISSIONLESS_TABS]
+);
 
 console.log('\n--- a role with nothing granted ---');
 const nothing = { is_admin: false };

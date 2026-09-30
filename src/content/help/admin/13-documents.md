@@ -3,7 +3,7 @@ The station's own documents: procedures, policies and checklists, written and or
 > [!IMPORTANT]
 > Access to this area requires the **Manage documents** role permission, which itself requires **View documents**. A role with **Verify checklists** also opens this tab, but sees only the verification view at the bottom of it — never the editor.
 
-Unlike the Help guides — which are files in the app's repository, written by whoever maintains it — these are written **from this screen**, by your own administrators, and stored in the station's spreadsheet. Adding one needs no code change and no new deployment.
+Unlike the Help guides — which are files in the app's repository, written by whoever maintains it — these are written **from this screen**, by your own administrators, and stored on the station's server. Adding one needs no code change and no new deployment.
 
 ## Writing a document
 
@@ -48,7 +48,7 @@ A date ending **today** still counts as in force: both ends are inclusive, so an
 
 **Retiring is the alternative to deleting.** A document past its end date leaves every member's list and stops asking for signatures, but the row, its checklist items and every signature on it are kept exactly as they were. That is the point: *the 2023 SOG is superseded, and here is who signed it* is a record you can only keep if the document is still there.
 
-The document list marks what state each one is in — **· draft**, **· scheduled** (not started yet) and **· retired** — because those are exactly the documents whose behaviour is not obvious from the row. Retired documents are only visible here; a member never sees one, and cannot sign one even from a page they opened before it retired.
+The document list marks what state each one is in — **· draft**, **· scheduled** (not started yet) and **· retired** — because those are exactly the documents whose behavior is not obvious from the row. Retired documents are only visible here; a member never sees one, and cannot sign one even from a page they opened before it retired.
 
 ## The toolbar
 
@@ -61,7 +61,7 @@ Write mode is a rich editor: the document appears as it will be read, and format
 | ¶ Normal text | Takes a heading, list, quote or callout back to ordinary text |
 | H1 / H2 / H3 | Makes it a heading, in the three sizes the guides use |
 | Bulleted / Numbered list | Turns the line into a list, or the other kind of list |
-| Quote | A quote block — the grey bar with a line down the side |
+| Quote | A quote block — the gray bar with a line down the side |
 | Callout (the ▾ menu) | A colored box: Note, Tip, Important, Warning or Caution |
 | Code block | A fenced block of literal text |
 | Table | Inserts a 3-column table with a header row; type into the cells |
@@ -115,10 +115,10 @@ Position is set by **dragging**, not by typing numbers:
 - **Drag a folder heading** to move the whole folder, and every document in it, in front of another folder.
 - **Unfiled is pinned last** and cannot be dragged: it is where documents with no folder are shown, not a shelf you chose.
 
-Both are saved the moment you drop, and the list is redrawn from what the sheet holds — so a row somebody else moved while you were dragging appears where it actually is. A drag that ends where it started writes nothing at all.
+Both are saved the moment you drop, and the list is redrawn from what was saved — so a row somebody else moved while you were dragging appears where it actually is. A drag that ends where it started writes nothing at all.
 
 > [!NOTE]
-> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button greyed out. If your crew writes documents on an iPad, that is the way to set a position.
+> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button grayed out. If your crew writes documents on an iPad, that is the way to set a position.
 
 A drag **never changes a document's folder**: the folder is a field on the document, and dragging is about position. Drop a document onto a row from another folder and the app says so instead of moving it silently — change the **Folder** field for that.
 
@@ -151,7 +151,7 @@ Selecting a document shows a **Signatures** panel below its fields, in the same 
 
 The panel is **paged**, ten rows at a time, and the pager only appears when there is more than one page. A checklist fills up quickly — every member times every item is a row — and this is what keeps the panel from pushing the document's own fields off the screen.
 
-On a checklist, **each item appears once per member**. A signature and a verification are two separate records in the sheet, and this panel used to draw them as two lines, so every verified item looked as though it had been done twice with "Verified by…" underneath. The item and the person are now the row, with the verification shown on it. The two remain separately removable, which is why the buttons name which one they remove.
+On a checklist, **each item appears once per member**. A signature and a verification are two separate records, and this panel used to draw them as two lines, so every verified item looked as though it had been done twice with "Verified by…" underneath. The item and the person are now the row, with the verification shown on it. The two remain separately removable, which is why the buttons name which one they remove.
 
 > [!WARNING]
 > Editing a document does not require anyone to sign again — it marks the signatures they already gave as older than the current text. Whether that matters is a judgment for you, which is why it is reported rather than enforced.

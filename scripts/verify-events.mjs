@@ -1019,8 +1019,8 @@ check('it has an events switch', /noun="events"/.test(availabilitySource), true)
 // merges events and slots in time order (utils/dayOrder), so the event branch is the part of that merge before the
 // slot branch - anchored on both ends, and the anchors are asserted, because a slice whose end marker has moved
 // silently becomes the rest of the file and then asserts whatever it happens to find there.
-const mergeStart = availabilitySource.indexOf('mergeDayItems(daySlots,');
-const slotBranch = availabilitySource.indexOf('const slot = value;');
+const mergeStart = availabilitySource.indexOf('mergeDayItems(dayItems,');
+const slotBranch = availabilitySource.indexOf('const item = value;');
 check('the availability merge was found', mergeStart > -1 && slotBranch > mergeStart, true);
 const availabilityEventBranch = availabilitySource.slice(mergeStart, slotBranch);
 // The shared pill is handed no handler here, so it stays the <div> it is by default - no tap, no button.
@@ -1129,53 +1129,11 @@ check('and shows the event', renderedAvailability.includes('Conference'), true);
 check('and the events switch', plain(renderedAvailability).includes('Hide events'), true);
 
 
-console.log('\n--- rendered: the All Members list shows them per day ---');
-// The roster is a list of who is available per shift, not a calendar, so events go on the DATE heading: an
-// event belongs to the day, and repeating it down every shift would bury the names the view exists to show.
-const rosterSource = readFileSync('src/components/admin/AdminAvailabilityRoster.jsx', 'utf8');
-check('the roster takes events', /events = \[\]/.test(rosterSource), true);
-check('and normalizes them', /normalizeEventList\(events\)/.test(rosterSource), true);
-check('it does not audience-filter', /eventSegmentsByDay\([\s\S]{0,200}\{ ranks \}/.test(rosterSource) && !/eventAudience/.test(rosterSource), true);
-check('the calendar tab forwards events to it', /<AdminAvailabilityRoster[\s\S]{0,600}events=\{events\}/.test(
-  readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8')
-), true);
-
-const { default: AdminAvailabilityRoster } = await import('../src/components/admin/AdminAvailabilityRoster.jsx');
-// The list only has date groups where a shift template runs, so the fixture needs one that falls in the
-// current month - otherwise the day (and its event line) would not exist to render.
-const rosterWeekday = [
-  'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
-][new Date(now.getFullYear(), now.getMonth(), 2).getDay()];
-
-const renderedRoster = renderToString(
-  React.createElement(AdminAvailabilityRoster, {
-    scheduleTemplates: [
-      { id: 'T1', day_of_week: rosterWeekday, start_time: '08:00', end_time: '18:00', assignment_id: '9' },
-    ],
-    assignments: [{ id: '9', description: 'Firefighter 3' }],
-    ranks: [{ id: '10', description: 'Firefighter', rank_order: '1' }],
-    users: [],
-    availability: [],
-    // RAW rows again, as the sheet would supply them.
-    events: [
-      { id: '3', title: 'Conference', is_all_day: 'TRUE', date_from: monthDay(2), date_to: monthDay(2) },
-    ],
-    timeFormat: '12',
-  })
-);
-
-// React's SSR inserts comment markers between static text and an interpolated value, so "1 event this month"
-// is really "1<!-- --> event<!-- --> this month" in the HTML. Strip tags and markers before matching text.
-const plainHtml = (html) => String(html).replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, ' ');
-
-const rosterText = plainHtml(renderedRoster);
-check('the roster renders', renderedRoster.length > 500, true);
-check('it shows the shift', rosterText.includes('Firefighter 3'), true);
-check('and the day\'s event', rosterText.includes('Conference'), true);
-check('and counts the month\'s events', rosterText.includes('1 event this month'), true);
-// An event must stay visually distinct from a shift: a colored DOT rather than a shift pill. The default gray
-// proves the dot rendered with the event's resolved color.
-check('the event shows as a colored dot', renderedRoster.includes('background-color:#64748b'), true);
+console.log('\n--- the All Members list draws windows, not events ---');
+// THE ROSTER NO LONGER SHOWS EVENTS, and that is the windows model rather than an oversight: the list answers "who can
+// cover this window?" from two things - the station's windows and a month of claims - where it used to be built from the
+// month's shift templates and each day's events. Events still appear on every CALENDAR (asserted immediately above, on
+// the member's own grid), which is where they earn their place: they explain why fewer people are available.
 
 console.log('\n--- a repeating event is described by its TIMES, not a phantom date ---');
 // This pins a real confusion. The administration list printed date_from's date beside the recurrence, so an

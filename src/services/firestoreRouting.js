@@ -76,9 +76,18 @@ export const ROUTED_FEATURES = {
   // A member's own availability, and the officer's edit of somebody else's - one batch write each, through the SAME
   // writer, because the rules already distinguish the two: `can_edit_member_availability` lets an officer write another
   // member's rows, and the writer builds exactly the rows either path needs.
+  //
+  // The WINDOWS those claims are made against are edited here too: they are officer-maintained reference data for this
+  // module, saved and deleted like any other plain document (`availability_windows`, below).
   availability: {
     requires: ['memberPayload'],
-    writes: ['SET_MY_AVAILABILITY', 'ADMIN_SET_AVAILABILITY'],
+    writes: [
+      'SET_MY_AVAILABILITY',
+      'ADMIN_SET_AVAILABILITY',
+      'ADMIN_SAVE_AVAILABILITY_WINDOW',
+      'ADMIN_DELETE_AVAILABILITY_WINDOW',
+    ],
+    reads: ['ADMIN_GET_AVAILABILITY_WINDOWS', 'ADMIN_GET_AVAILABILITY'],
     switchReads: ['GET_AVAILABILITY'],
   },
   // Offers: raised, withdrawn, approved. The approval fills the shift, so it is the callable.
@@ -132,9 +141,13 @@ export const ROUTED_FEATURES = {
     reads: [],
     switchReads: [],
   },
-  // The small reads the app makes AFTER the sign-in payload: who is on duty, the clock history, the roster, the
-  // schedule, the member's own availability and offers, training, certifications, announcements and events. They
-  // answer from the same data the payload does, which is why they depend on it and why their shapes are its shapes.
+  // The reads the app makes AFTER the sign-in payload: who is on duty, the roster, the schedule, the member's own
+  // availability and offers, training, certifications, announcements and events. They answer from the same data the
+  // payload does, which is why they depend on it and why their shapes are its shapes.
+  //
+  // ONE OF THEM IS A SCREEN'S OWN LOAD RATHER THAN A REFRESH: the clock history. It is the one per-member table with no
+  // ceiling (a five-year member has thousands of entries), it is NOT in the payload any more, and its screen asks for a
+  // RANGE - which is also why it is the one reader here whose answer can be deliberately empty. See GET_TIMECLOCK_LOGS.
   //
   // TWO READS NEEDED SOMETHING THE OTHERS DID NOT, and both are here now. `GET_INITIAL_DATA` runs BEFORE anyone has
   // signed in - it draws the loading screen - which is why the router has one pre-auth exception. And `MY_PUSH_DEVICES`
@@ -615,11 +628,26 @@ const DISPATCH = {
   },
 
   ADMIN_RESOLVE_SHIFT_OFFER: async (body) => {
-    // Approval fills the shift and is the callable. A DECLINE is not implemented on the Firestore side, so it
-    // stays on Apps Script rather than being half-routed: null here means the caller sends it as it always did.
-    if (String(body.decision || '') !== 'approved') return null;
-    const { approveOffer } = await writes();
-    return ok(await approveOffer({ offerId: body.id }));
+    // BOTH DECISIONS ARE ROUTED, and the vocabulary is worth spelling out because getting it wrong is how this route
+    // spent its whole life doing nothing. The client sends the SHEET'S words - 'APPROVE' or 'DECLINE', built from the
+    // button the officer pressed (api.js) and uppercased by Code.gs - while this entry compared against the lowercase
+    // 'approved'. So neither decision matched, every resolution fell through as "not routed", and the fallback it was
+    // meant to reach was Apps Script, which no longer exists: an officer could not approve or decline anything, and the
+    // failure looked like a transport error rather than a wiring mistake. Both spellings are accepted now.
+    const decision = String(body.decision || '').trim().toLowerCase();
+    if (decision === 'approve' || decision === 'approved') {
+      const { approveOffer } = await writes();
+      return ok(await approveOffer({ offerId: body.id }));
+    }
+    if (decision === 'decline' || decision === 'declined') {
+      const { declineOffer } = await writes();
+      return ok(await declineOffer({ offerId: body.id }));
+    }
+    // Anything else is refused out loud rather than guessed at: a null here means "ask the sheet", and there is no sheet.
+    console.error(
+      `[firestore] ADMIN_RESOLVE_SHIFT_OFFER was given "${body.decision}", which is neither an APPROVE nor a DECLINE.`
+    );
+    return null;
   },
 
   SUBMIT_SHIFT_OFFER: async (body, uid) => {
@@ -681,6 +709,7 @@ const DOCUMENT_SAVES = {
   ADMIN_SAVE_ROLE: 'roles',
   ADMIN_SAVE_RANK: 'ranks',
   ADMIN_SAVE_SHIFT: 'shifts',
+  ADMIN_SAVE_AVAILABILITY_WINDOW: 'availability_windows',
   ADMIN_SAVE_CHECKLIST_ITEM: 'document_checklist_items',
   // Assignments and schedule templates are plain documents, which is worth stating because it was not obvious: their
   // model has a private half holding an officer's `admin_note`, but NO form in the app collects one - the sheet had no
@@ -705,6 +734,7 @@ const DOCUMENT_DELETES = {
   ADMIN_DELETE_ROLE: 'roles',
   ADMIN_DELETE_RANK: 'ranks',
   ADMIN_DELETE_SHIFT: 'shifts',
+  ADMIN_DELETE_AVAILABILITY_WINDOW: 'availability_windows',
   ADMIN_DELETE_CERTIFICATION_SETUP: 'certification_setup',
   ADMIN_DELETE_CHECKLIST_ITEM: 'document_checklist_items',
   // A delete needs no audience - removing a row cannot hide anything from anybody - so these three are safe here
@@ -719,8 +749,14 @@ const DOCUMENT_DELETES = {
 // The three collections a member sees by AUDIENCE, whose saves carry a materialized `audience_keys` list computed as
 // they are written - which is why they are not in the plain table above. Events are the one that expands to "this
 // rank and above"; announcements and documents target the rank exactly.
+//
+// `liveUntilFrom` is the second materialized field, and only announcements have it: a row's END date, written as a
+// `live_until` key so the read can ask for "what is in force" with one range filter. See firestoreWrites#saveAudienceDocument
+// for why the column itself cannot be queried. Events are dated too, but a recurring event anchors on the date of its
+// FIRST occurrence, so a range over `date_from` would drop a weekly meeting that started two years ago - which is why
+// they are not on this list.
 const AUDIENCE_SAVES = {
-  ADMIN_SAVE_ANNOUNCEMENT: { collection: 'announcements', rankAndAbove: false },
+  ADMIN_SAVE_ANNOUNCEMENT: { collection: 'announcements', rankAndAbove: false, liveUntilFrom: 'end_date' },
   ADMIN_SAVE_DOCUMENT: { collection: 'documents', rankAndAbove: false },
   ADMIN_SAVE_EVENT: { collection: 'events', rankAndAbove: true },
 };
@@ -742,10 +778,12 @@ Object.entries(DOCUMENT_DELETES).forEach(([action, collection]) => {
   };
 });
 
-Object.entries(AUDIENCE_SAVES).forEach(([action, { collection, rankAndAbove }]) => {
+Object.entries(AUDIENCE_SAVES).forEach(([action, { collection, rankAndAbove, liveUntilFrom }]) => {
   DISPATCH[action] = async (body, uid) => {
     const { saveAudienceDocument } = await writes();
-    return ok(await saveAudienceDocument({ collection, id: body.id, body, rankAndAbove, authorId: uid }));
+    return ok(
+      await saveAudienceDocument({ collection, id: body.id, body, rankAndAbove, authorId: uid, liveUntilFrom })
+    );
   };
 });
 

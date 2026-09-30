@@ -72,7 +72,6 @@ const CACHES = [
   ['who is on duty', /setOnDutyUsers\(/],
   ['training and its signatures', /setTrainings\([\s\S]*setTrainingSignatures\(/],
   ['announcements', /setAnnouncements\(/],
-  ['the login-screen announcements', /setLoginAnnouncements\(/],
   ['events', /setEvents\(/],
 ];
 for (const [cache, pattern] of CACHES) {

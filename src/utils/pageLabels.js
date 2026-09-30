@@ -36,6 +36,7 @@ export const ADMIN_BAR_LABELS = {
   schedule: 'Schedule Mgt',
   events: 'Events',
   availability: 'Availability',
+  'availability-windows': 'Avail Windows',
   approvals: 'Approvals',
   clock: 'Clock Mgt',
   announcements: 'Announcements',

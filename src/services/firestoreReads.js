@@ -11,8 +11,12 @@
 // through these, so the shapes are checked rather than hoped for.
 import { collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { audienceKeysFor, audienceRows, readUsersOnce, rowsFor, rowsInRange, rowsOf, settingRows } from './firestorePayload.js';
+import { activeAudienceRows, audienceKeysFor, audienceRows, availabilityForMember, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
+// A window's date key, and the id-merge that makes two bounded queries answer as one list. Both are the app's own helpers
+// rather than service-local copies: the admin list merges the same way a screen does when it loads an older window.
+import { toDateKey } from '../utils/scheduleDate.js';
+import { mergeRowsById } from '../utils/savedRow.js';
 
 // The roster the calendar used to ask for separately (`GET_ROSTER`, now retired) is a projection of `users` that the sign-in
 // payload already carries - see the note where the route used to be listed, in firestoreRouting.js. Nothing in the app asks
@@ -43,10 +47,6 @@ const keysFor = async (uid) => {
   const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
   return audienceKeysFor({ userId: uid, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
 };
-
-// A read that is allowed to come back empty. Used only by the pre-login payload, where the rules decide what a caller
-// with no identity may see and a refusal is an answer rather than a failure.
-const quietly = (read) => read().catch(() => null);
 
 // The station's date, in the same 'YYYY-MM-DD' shape the app stores date keys in. A document's date window is compared
 // against this rather than against UTC, so a document that expires "today" expires on the station's today.
@@ -246,7 +246,32 @@ const RUNNER_LEADERBOARD_LIMIT = 25;
 
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
-  GET_TIMECLOCK_LOGS: (uid) => rowsFor('timeclock', 'user_id', uid).then((logs) => ({ logs })),
+  // The member's own clock history, optionally WINDOWED — and windowed is how the APP asks for it, because this is the one
+  // per-member table that grows without limit: a five-year member has thousands of entries, and reading all of them at every
+  // sign-in was the largest single read in the app.
+  //
+  // It was read at sign-in so that the DASHBOARD could answer "am I clocked in" — and `on_duty` answers that for free, since
+  // the clock transaction writes both: a member's on-duty row exists exactly while one of their entries is open. So the
+  // dashboard asks the on-duty list (which is live), and the history is read when the History screen is opened.
+  //
+  // The `timeclock (user_id, time_in)` index this needs already existed. A caller that names no window still gets the whole
+  // history, which is what the harnesses ask for.
+  GET_TIMECLOCK_LOGS: async (uid, body) => {
+    const from = String((body && body.from) || '').trim();
+    const to = String((body && body.to) || '').trim();
+    if (!from && !to) return { logs: await rowsFor('timeclock', 'user_id', uid) };
+
+    const logs = await rowsOf(
+      query(
+        collection(firestore(), 'timeclock'),
+        where('user_id', '==', uid),
+        where('time_in', '>=', from || '0000-01-01'),
+        where('time_in', '<=', to || '9999-12-31')
+      )
+    );
+    // The window comes back with the rows, so a caller can tell what it holds - the same arrangement GET_SCHEDULE uses.
+    return { logs, logs_window: { from, to } };
+  },
   // The station's schedule, optionally WINDOWED - and a window is what the app always asks for, because `schedule` is the
   // one collection that grows without limit. A caller that names no window is asking for every shift the station has ever
   // scheduled: that is what the harnesses do, and what a screen that has not been scoped yet would do. Slow rather than
@@ -261,12 +286,43 @@ export const READERS = {
     // The window comes back with the rows, so a caller can tell what it holds rather than assuming it holds everything.
     return { schedule, schedule_window: { from, to } };
   },
-  GET_AVAILABILITY: (uid) => rowsFor('availability', 'user_id', uid).then((availability) => ({ availability })),
-  GET_SHIFT_OFFERS: (uid) => rowsFor('schedule_offers', 'user_id', uid).then((offers) => ({ offers })),
+  // The member's own claims, over a window - the same shape GET_TIMECLOCK_LOGS uses, and for the same reason: a claim
+  // is one row per window per day, so "all of them" is a growing set the screen does not need. A caller that names no
+  // window still gets everything, which is what the harnesses ask for.
+  GET_AVAILABILITY: async (uid, body) => {
+    const from = String((body && body.from) || '').trim();
+    const to = String((body && body.to) || '').trim();
+    if (!from && !to) return { availability: await rowsFor('availability', 'user_id', uid) };
+    return {
+      availability: await availabilityForMember(uid, { from, to }),
+      availability_window: { from, to },
+    };
+  },
+  // EVERY member's claims for a month, for the two officer screens: the All Members roster and the board's "you are
+  // scheduling somebody who did not mark it" warning. The rules allow it (`can_edit_member_availability`), it is
+  // bounded by the month being looked at, and it is the read that did not exist before - which is why those screens
+  // used to be handed the officer's OWN rows.
+  ADMIN_GET_AVAILABILITY: async (uid, body) => {
+    const from = String((body && body.from) || '').trim();
+    const to = String((body && body.to) || '').trim();
+    if (!from && !to) {
+      return { availability: await rowsOf(collection(firestore(), 'availability')) };
+    }
+    return {
+      availability: await rowsInRange('availability', 'date_from', from, to),
+      availability_window: { from, to },
+    };
+  },
+  // The member's own offers, over the two statuses a calendar draws from. See OFFER_STATUSES_ON_A_CALENDAR.
+  GET_SHIFT_OFFERS: (uid) => offersForMember(uid).then((offers) => ({ offers })),
   GET_TRAINING: () => rowsOf(collection(firestore(), 'trainings')).then((trainings) => ({ trainings })),
   GET_CERTIFICATIONS: (uid) =>
     rowsFor('certifications', 'user_id', uid).then((certifications) => ({ certifications })),
-  MY_ANNOUNCEMENTS: async (uid) => ({ announcements: await audienceRows('announcements', await keysFor(uid)) }),
+  // The member's own announcements, narrowed to the ones in force - the same read the sign-in payload makes, so a refresh
+  // cannot put back what the payload left out (an expired notice).
+  MY_ANNOUNCEMENTS: async (uid) => ({
+    announcements: await activeAudienceRows('announcements', await keysFor(uid), { liveUntilField: 'live_until' }),
+  }),
   GET_EVENTS: async (uid) => ({ events: await audienceRows('events', await keysFor(uid)) }),
   MY_PUSH_DEVICES: async (uid, body) => {
     const [devices, settings] = await Promise.all([
@@ -301,7 +357,29 @@ export const READERS = {
   // `result.documents`, `result.events`. They return the WHOLE collection rather than an audience-filtered slice,
   // which is what makes them officer reads and why the rules carry an officer branch first - a whole-collection read
   // against an audience rule is a query Firestore refuses to prove.
-  ADMIN_GET_ANNOUNCEMENTS: () => rowsOf(collection(firestore(), 'announcements')).then((announcements) => ({ announcements })),
+  // The availability windows, whole. A short officer-maintained list (see utils/availability.js): the recurring weekly
+  // patterns a member's own module draws its options from. Small enough to read whole, and it is why the Member
+  // Availability tab needs no per-member reference data at all - one list, loaded once, instead of templates,
+  // assignments and ranks being assembled per member to work out what somebody was allowed to claim.
+  ADMIN_GET_AVAILABILITY_WINDOWS: async () => ({
+    availabilityWindows: await rowsOf(collection(firestore(), 'availability_windows')),
+  }),
+
+  ADMIN_GET_ANNOUNCEMENTS: async (uid, body) => {
+    // The administrator's list is RECENT rows UNION EVERYTHING STILL IN FORCE, which is the union the person managing them
+    // needs. A window on `effective_date` alone would hide the notice that has been running since 2021 with no end date -
+    // precisely the one worth looking at - and "everything" is the read that grows without limit as a station accumulates
+    // notices. The live half is bounded by definition; the recent half is what the window caps. Naming no window still means
+    // the whole collection, which is what a harness asks for and what GET_SCHEDULE does with none.
+    const from = String((body && body.from) || '').trim();
+    if (!from) return { announcements: await rowsOf(collection(firestore(), 'announcements')) };
+
+    const [recent, live] = await Promise.all([
+      rowsInRange('announcements', 'effective_date', from, ''),
+      rowsInRange('announcements', 'live_until', toDateKey(new Date()), ''),
+    ]);
+    return { announcements: mergeRowsById(recent, live), announcements_window: { from } };
+  },
   ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
   // The officer's list: drafts included, because an author has to see what they are working on, and no rank filter,
   // because managing documents means seeing all of them. The item counts come along - the verification picker shows how
@@ -455,7 +533,7 @@ export const READERS = {
   // The officer's pending-approvals list: every offer, whole, which is why the rules give the permission its own branch.
   // One line, and it was missing - the tab was refreshing from the sheet after each approval, which is exactly the sort
   // of "it works today" that the two-direction check now makes visible.
-  ADMIN_GET_SCHEDULE_OFFERS: () => rowsOf(collection(firestore(), 'schedule_offers')).then((offers) => ({ offers })),
+  ADMIN_GET_SCHEDULE_OFFERS: async () => ({ offers: await pendingOffers(firestore()) }),
 
   // The notifications tab's per-member picture, which the sheet built from three sheets and this builds from three
   // collections: the member's row (for the name), their settings (for the preferences the table shows) and the device
@@ -566,26 +644,16 @@ export const READERS = {
     return answer.data || {};
   },
 
-// The pre-login payload: what the loading screen needs before anybody has signed in.
+// The pre-login payload: what the loading and login screens need before anybody has signed in.
 //
-// It reads what it can and OMITS what it cannot, rather than failing: the rules let anybody read `settings/public`,
-// and deliberately refuse roles, ranks and shifts to a caller with no identity - they are station data, not public
-// data. So those three are best-effort, and the sign-in payload fills them in a moment later. That asymmetry is the
-// point: this action is the ONE read the app makes before it knows who is asking.
+// IT IS ONE DOCUMENT, and that is the whole point. The rules let anybody read `settings/public` and deliberately refuse
+// everything else to a caller with no identity - roles, ranks and shifts are station data, not public data. This action
+// used to ask for those three anyway and omit them when refused, which is a round trip spent being told no, and it asked
+// for the login-screen announcements, which was the only reason a stranger needed to read a collection at all. That
+// location is gone (utils/announcements#ANNOUNCEMENT_LOCATIONS): the sign-in payload fills the rest in a moment later, and
+// anything that must be read before signing in is code in LoginScreen rather than a row in a form.
   GET_INITIAL_DATA: async () => {
-    const [settings, roles, ranks, shifts, announcements] = await Promise.all([
-      getDoc(doc(firestore(), 'settings', 'public')),
-      quietly(() => rowsOf(collection(firestore(), 'roles'))),
-      quietly(() => rowsOf(collection(firestore(), 'ranks'))),
-      quietly(() => rowsOf(collection(firestore(), 'shifts'))),
-      quietly(() => audienceRows('announcements', ['*'])),
-    ]);
-    return {
-      systemSettings: settingRows(settings),
-      ...(roles ? { roles } : {}),
-      ...(ranks ? { ranks } : {}),
-      ...(shifts ? { shifts } : {}),
-      ...(announcements ? { announcements } : {}),
-    };
+    const settings = await getDoc(doc(firestore(), 'settings', 'public'));
+    return { systemSettings: settingRows(settings) };
   },
 };

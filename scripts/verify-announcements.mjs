@@ -69,12 +69,22 @@ check('blank is false', announcementFlag(''), false);
 check('a missing column is false', announcementFlag(undefined), false);
 check('lowercase true is true', announcementFlag(' true '), true);
 
-check('locations are the flagged ones', announcementLocations(announcement()), ['is_visible_on_login', 'is_visible_on_dashboard']);
-check('a login-only announcement', announcementLocations(announcement({ is_visible_on_dashboard: '' })), ['is_visible_on_login']);
-check('nowhere', announcementLocations(announcement({ is_visible_on_login: '', is_visible_on_dashboard: '' })), []);
+// `is_visible_on_login` is left in the fixture ON PURPOSE: it was a real column, rows in the wild still carry it, and the
+// assertions below are that nothing acts on it any more.
+check('locations are the flagged ones', announcementLocations(announcement()), ['is_visible_on_dashboard']);
+check('a LEGACY login flag is ignored, not honoured', announcementShowsIn(announcement(), 'is_visible_on_login'), false);
+check('a login-flagged row still shows where it is flagged', announcementShowsIn(announcement(), 'is_visible_on_dashboard'), true);
+check('nothing flagged at all is nowhere', announcementLocations(announcement({ is_visible_on_dashboard: '' })), []);
 check('showsIn reports the dashboard', announcementShowsIn(announcement(), 'is_visible_on_dashboard'), true);
 check('and not the sidebar', announcementShowsIn(announcement(), 'is_visible_on_sidebar'), false);
-check('there are three places', ANNOUNCEMENT_LOCATIONS.length, 3);
+// The deletion guard. The login screen was a placement, it is not one now, and this is what says so - so a later edit that
+// reintroduces it has to argue with a failing check rather than with a comment.
+check('there are two places to show an announcement', ANNOUNCEMENT_LOCATIONS.length, 2);
+check(
+  'and the login screen is not one of them',
+  ANNOUNCEMENT_LOCATIONS.some((place) => place.key === 'is_visible_on_login'),
+  false
+);
 
 console.log('\n--- the date window ---');
 check('inside the window', announcementIsLiveOn(announcement(), '2026-03-15'), true);
@@ -134,10 +144,14 @@ check('an inverted window is refused', announcementValidation({ ...valid, end_da
 check('the same day is allowed', announcementValidation({ ...valid, end_date: '2026-03-01' }), '');
 // The one requirement that is easy to forget while writing: no place to show it.
 check('at least one place is required', announcementValidation({ ...valid, is_visible_on_dashboard: false }), 'Choose at least one place to show the announcement.');
-check('and either of the other two satisfies it', [
+check('the sidebar alone satisfies it', announcementValidation({ title: 'T', message: 'M', effective_date: '2026-03-01', is_visible_on_sidebar: true }), '');
+// A row placed only on the login screen is REFUSED rather than saved into nowhere: the location is gone, so the only honest
+// answer is to make the author choose one of the two that remain.
+check(
+  'and a login-only row is refused rather than saved into nowhere',
   announcementValidation({ title: 'T', message: 'M', effective_date: '2026-03-01', is_visible_on_login: true }),
-  announcementValidation({ title: 'T', message: 'M', effective_date: '2026-03-01', is_visible_on_sidebar: true }),
-], ['', '']);
+  'Choose at least one place to show the announcement.'
+);
 
 console.log('\n--- what a reader is shown ---');
 const list = [
@@ -158,26 +172,17 @@ check('the sidebar-only one is not here', ids(dashboard).includes('d'), false);
 check("another member's is not here", ids(visibleAnnouncementsFor({ announcements: list, location: 'is_visible_on_dashboard', audience: { roleId: '1', rankId: '10', userId: '999' }, dateKey: '2026-03-15' })).includes('e'), false);
 check('the sidebar view shows d', ids(visibleAnnouncementsFor({ announcements: list, location: 'is_visible_on_sidebar', audience: member, dateKey: '2026-03-15' })), ['d']);
 
-console.log('\n--- the login screen, and the leak it must not have ---');
-// No session exists at the login screen, so a targeted announcement cannot be resolved for anybody. The
-// component passes includeEveryoneOnly for that placement; this is the rule behind it.
-const loginRows = visibleAnnouncementsFor({
-  announcements: [announcement({ id: 'open' }), announcement({ id: 'targeted', user_id: '100' }), announcement({ id: 'byRole', role_id: '1' })],
+console.log('\n--- the login screen is not a placement, and that is asserted rather than assumed ---');
+// This section used to test `includeEveryoneOnly`: the rule that the login screen - read before anybody signs in - could
+// only show announcements aimed at everyone. The placement is gone now, so the parameter went with it, and what is left to
+// assert is the invalidity of the old placement itself. `announcementTargetsEveryone` is still exported and still used by
+// the administrator's audience label.
+check('a login-flagged row is shown nowhere', ids(visibleAnnouncementsFor({
+  announcements: [announcement({ id: 'legacy', is_visible_on_login: 'TRUE', is_visible_on_dashboard: 'FALSE' })],
   location: 'is_visible_on_login',
-  includeEveryoneOnly: true,
   dateKey: '2026-03-15',
-});
-check('only the untargeted one is shown', ids(loginRows), ['open']);
-check('the member-targeted one is NOT', ids(loginRows).includes('targeted'), false);
-check('nor the role-targeted one', ids(loginRows).includes('byRole'), false);
-// With the matching reader the same announcement DOES come through, which is what makes the flag above
-// load-bearing rather than incidental.
-check('and the flag is what excludes them', ids(visibleAnnouncementsFor({
-  announcements: [announcement({ id: 'targeted', user_id: '100' })],
-  location: 'is_visible_on_login',
-  audience: { userId: '100' },
-  dateKey: '2026-03-15',
-})), ['targeted']);
+})), []);
+check('and the parameter that served it is gone', /includeEveryoneOnly/.test(readFileSync('src/utils/announcements.js', 'utf8')), false);
 
 console.log('\n--- dismissal ---');
 check('a dismissed announcement is hidden', ids(visibleAnnouncementsFor({
@@ -239,12 +244,17 @@ check('no directory at all still yields a label', announcementAuthorLabel({ auth
 // dashboard use, which is filtered by audience - and on top of that the prop was never actually
 // passed, so the tab always received [] and reported "No announcements yet" while the sheet held two.
 // The admin list therefore has to come from ADMIN_GET_ANNOUNCEMENTS, which returns every row.
+//
+// ...and since then it asks for a WINDOW of them. The tab still owns its own fetch - that is what these assertions are
+// about - but the read that grows without limit needed a floor: the list opens on the last twelve months, and the reader
+// unions that with every row still in force, so a notice with no end date cannot fall out of sight. "Show older" moves the
+// floor back. The patterns below are the fetch itself, not the exact argument list, because the argument is the floor.
 console.log('\n--- the admin tab fetches the full list itself ---');
 const tabSource = readFileSync('src/components/admin/AdminAnnouncementsTab.jsx', 'utf8');
 const panelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
 
-check('the tab fetches announcements', /adminFetchAnnouncements\(token\)/.test(tabSource), true);
-check('the tab fetches on mount', /useEffect\(\(\) => \{[\s\S]*?loadRows\(\)/.test(tabSource), true);
+check('the tab fetches announcements', /adminFetchAnnouncements\(token/.test(tabSource), true);
+check('the tab fetches on mount', /useEffect\(\(\) => \{[\s\S]*?loadRows\(/.test(tabSource), true);
 check('the tab re-reads the list after a write', (tabSource.match(/await reload\(\)/g) || []).length, 2);
 check('the tab no longer renders an announcements prop', /announcements = \[\]/.test(tabSource), false);
 check('the tab renders its fetched rows', /rows\.map\(/.test(tabSource) && /rows\.length/.test(tabSource), true);

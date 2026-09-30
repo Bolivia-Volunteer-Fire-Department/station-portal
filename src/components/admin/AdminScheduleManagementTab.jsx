@@ -1735,7 +1735,7 @@ export default function AdminScheduleManagementTab({
                       <div>
                         <p className="font-medium">Decline</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Turn down the offer. The member can offer again.
+                          Turn down the offer. The member cannot offer for this shift again — assign it to them directly if you change your mind.
                         </p>
                       </div>
                     </div>

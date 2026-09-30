@@ -90,7 +90,20 @@ const main = async () => {
   check('everybody sees the whole schedule', asOfficer.schedule.length, 2);
   // The audience, which used to be filtered in a server function: an officer (role r1) sees the everyone-announcement
   // and the one for their role, but not the one addressed to a single member.
-  check('an officer sees the announcements for everyone and for their role', asOfficer.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'Officers only']);
+  check('an officer sees the announcements for everyone and for their role', asOfficer.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'Officers only', 'Starts next year']);
+  // THE BOUND IS A BOUND, and a fixture proves it. `Expired notice` is aimed at everyone and ended in February: it is in
+  // the collection and in NOBODY's payload. Without a row like it, "announcements are read as what is in force" would be a
+  // claim rather than a test - the other three stay visible either way.
+  checkIs(
+    'and an expired announcement is not in the payload at all',
+    !asOfficer.announcements.some((row) => row.title === 'Expired notice')
+  );
+  // ...while one dated in the FUTURE is still carried: the read bounds what has ENDED, and whether it has STARTED yet is
+  // the screen's decision (announcementIsLiveOn), not the query's.
+  checkIs(
+    'while a future-dated one is fetched and left to the screen to withhold',
+    asOfficer.announcements.some((row) => row.title === 'Starts next year')
+  );
   check('and the events for everyone and for their rank', asOfficer.events.map((row) => row.title).sort(), ['Everyone', 'Officer and firefighter']);
   checkIs('the settings arrive as key/value rows, the shape the app reads', Array.isArray(asOfficer.systemSettings) && asOfficer.systemSettings.every((row) => 'key' in row && 'value' in row));
 
@@ -99,11 +112,40 @@ const main = async () => {
   console.log('\n--- a member signs in ---');
   await signIn('bo');
   const asMember = await fetchMemberPayload(accountFor('u2'), null, FIXTURE_WINDOW);
-  // The mirror image of the officer's audience: the personal announcement and the everyone one, not the role one.
-  check('the audience flips for a plain member', asMember.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'For Bo']);
-  check('their own availability and nobody else', asMember.availability.map((row) => row.id), ['av2']);
-  check('their own clock history and nobody else', asMember.logs.map((row) => row.id), ['c2']);
-  check('their own offers', asMember.offers.map((row) => row.id), ['of1']);
+  // The mirror image of the officer's audience: the personal announcement and the everyone one, not the role one - and,
+  // once more, not the expired one.
+  check('the audience flips for a plain member', asMember.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'For Bo', 'Starts next year']);
+  checkIs(
+    'and the expired notice is missing for a member too, not just for an officer',
+    !asMember.announcements.some((row) => row.title === 'Expired notice')
+  );
+  // BOTH SHAPES OF CLAIM, because both are seeded while the module moves onto windows: the template-keyed row the
+  // current screens read, and the window-keyed rows the new derivation reads. What the check is really about is the
+  // SECOND half - the officer's own rows (av1, avw2) are absent.
+  //
+  // `avw3` is not here, and that is the other half of the same point: it is a claim for 2024, and the payload reads
+  // claims over a window (two years around today) rather than all of them - so the row is left out because of its DATE,
+  // not because of who owns it.
+  check(
+    'their own availability and nobody else, over the window the payload reads',
+    asMember.availability.map((row) => row.id).sort(),
+    ['av2', 'avw1']
+  );
+  // THE CLOCK HISTORY IS DELIBERATELY NOT IN THE PAYLOAD, and this is the assertion that keeps it out. It is the one
+  // per-member table that grows without limit - a five-year member has thousands of entries - and it was only read at sign-in
+  // so the dashboard could answer "am I clocked in", a question the on-duty row answers for free. It is read now by the screen
+  // that shows it, over a range.
+  check('the clock history is not part of the sign-in payload', asMember.logs, undefined);
+  checkIs('while the on-duty list it was standing in for is', Array.isArray(asMember.onDuty));
+  // THE MEMBER'S OFFERS ARE NARROWED TO WHAT A CALENDAR DRAWS FROM: pending and declined. `of2` was approved - approving
+  // fills the shift, so the slot is closed and there is no pill to colour - and it must NOT be here. `of3` was declined and
+  // must be, because the calendar shows a declined pill so the member knows the shift is closed to them rather than open.
+  check('their own offers, over the statuses a calendar draws from', asMember.offers.map((row) => row.id).sort(), ['of1', 'of3']);
+  checkIs(
+    'and an approved offer is not carried: the shift it filled has no open pill',
+    !asMember.offers.some((row) => row.status === 'approved'),
+    JSON.stringify(asMember.offers.map((row) => row.status))
+  );
   check('their own signatures', asMember.signatures.map((row) => row.id), ['ts1']);
   check('their own certifications', asMember.certifications.map((row) => row.id), ['cr1']);
   check('the certification catalogue they are named from', asMember.certificationSetup.map((row) => row.name), ['EMT']);
@@ -160,7 +202,10 @@ const main = async () => {
   // an apparatus name, so the collection was read on every load for no reader. The seed still holds it, which is what
   // makes this assertion mean something rather than being vacuous.
   check('the payload no longer reads the apparatus collection at all', asAdmin.apparatus, undefined);
-  check('and the whole offers table', asAdmin.scheduleOffers.map((row) => row.id), ['of1']);
+  // Not "the whole offers table" any more: the officer's read is narrowed to the offers STILL WAITING, which is what the
+  // board's slot flags are built from. The declined one is not an officer's business either - the member has been told, and
+  // the slot is open again - so `of3` is absent here as well as `of2`.
+  check('and the offers still waiting, not the whole table', asAdmin.scheduleOffers.map((row) => row.id).sort(), ['of1']);
   check('and every certification record, not only their own', asAdmin.certificationRecords.map((row) => row.id), ['cr1']);
 
   // --- and a member's payload does not carry any of them ---
@@ -220,6 +265,11 @@ const main = async () => {
   check('a reader asked for one day brings back one row', ranged.schedule.map((row) => row.id), ['s2']);
   check('and reports the window it applied', ranged.schedule_window, { from: '2026-03-09', to: '2026-03-09' });
   const unbounded = await routeRead('GET_SCHEDULE');
+  // AND A WINDOW WITH NOTHING IN IT RETURNS NOTHING. A check that only asks whether rows came back passes just as happily
+  // against a reader that ignored the window entirely - which is how a windowed read can look done while every member still
+  // downloads the whole collection.
+  const emptyWindow = await routeRead('GET_SCHEDULE', { from: '2035-01-01', to: '2035-01-31' });
+  check('a schedule window with nothing in it returns nothing, not everything', emptyWindow.schedule, []);
   checkIs(
     'while a reader asked for nothing still answers with the whole collection',
     unbounded.schedule.length >= ranged.schedule.length && unbounded.schedule_window.from === '',
@@ -470,6 +520,17 @@ const main = async () => {
   checkIs('and training its list', Array.isArray(training.trainings), 'no trainings');
   const logs = await routeRead('GET_TIMECLOCK_LOGS');
   checkIs('and the clock history the member may read their own of', Array.isArray(logs.logs), 'no logs');
+  // SCOPED TO THE VIEWER - the property that the payload no longer states by carrying the history around. This session is
+  // jane (u1), whose only seeded entry is c1, while bo's is c2: so this fails loudly if the reader ever loses its `user_id`
+  // filter and starts handing a member the whole station's history (refused by the rules if it is lucky, allowed if not).
+  check('and nothing else: it is the viewer\'s own entries', logs.logs.map((row) => row.id), ['c1']);
+  // WINDOWED, which is how the screen asks for it: a range is applied, and a range with nothing in it returns nothing rather
+  // than quietly returning everything - which is the failure that would turn a saving into a larger read than before.
+  const windowed = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-03-01', to: '2026-03-31' });
+  checkIs('a window narrows the history to that range', windowed.logs.every((row) => row.time_in >= '2026-03-01' && row.time_in <= '2026-03-31'), JSON.stringify(windowed.logs));
+  check('and says which window it applied', windowed.logs_window, { from: '2026-03-01', to: '2026-03-31' });
+  const empty = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-04-01', to: '2026-04-30' });
+  check('a window with nothing in it returns nothing, not everything', empty.logs, []);
 
   // A read that is NOT routed still answers null, so the hook in api.js leaves it alone.
   check('a read with no route still answers null', await routeRead('GET_SYSTEM_SETTINGS'), null);
@@ -481,6 +542,13 @@ const main = async () => {
     'an officer reads every announcement, not just their own audience',
     allAnnouncements.success === true && Array.isArray(allAnnouncements.announcements) && allAnnouncements.announcements.length > 0,
     JSON.stringify(allAnnouncements && Object.keys(allAnnouncements))
+  );
+  // NOTHING IS HIDDEN, ONLY NOT NARROWED. The active bound lives on the member-facing reads, so the expired notice is
+  // still here for the person who has to manage it - and that is the property that makes the bound safe to have: a row the
+  // filter keeps out of a payload is one an officer can still find, edit and re-date, rather than one that vanished.
+  checkIs(
+    'and the expired notice is still visible to an officer, which is what keeps the bound safe',
+    allAnnouncements.announcements.some((row) => row.title === 'Expired notice')
   );
   const allEvents = await routeRead('ADMIN_GET_EVENTS');
   checkIs('and every event', Array.isArray(allEvents.events), 'no events');
@@ -583,15 +651,20 @@ const main = async () => {
     (await routeRead('GET_DOCUMENT_SIGNATURES', { id: 'doc1' })) === null
   );
 
-  // The pre-login read, with NOBODY signed in - which is the whole point of it and the only read in the app that
-  // works that way. The asymmetry asserted here is the design: the station's own settings are readable by anybody,
-  // and roles are NOT, because they are station data rather than public data. Omitting them is the correct answer,
-  // not a failure, and the sign-in payload fills them in a moment later.
+  // The pre-login read, with NOBODY signed in - the one read in the app that works that way, and now ONE DOCUMENT: the
+  // public settings the login and loading screens draw. It used to ask for roles, ranks, shifts and the login-screen
+  // announcements as well; the rules refuse the first three to a stranger, so those were round trips spent being told no,
+  // and the fourth is gone with the placement it served (utils/announcements). The assertion is therefore about what is NOT
+  // asked for, which is the part that keeps this read cheap.
   await signOut(firebaseAuth());
   const preLogin = await routeRead('GET_INITIAL_DATA');
   checkIs('the loading screen reads without anybody signed in', preLogin !== null, 'nothing was routed');
   check('and gets the station settings it draws', [preLogin.success, Array.isArray(preLogin.systemSettings)], [true, true]);
-  checkIs('while roles are omitted, as the rules intend', preLogin.roles === undefined, JSON.stringify(preLogin.roles));
+  check(
+    'and asks for nothing else at all',
+    [preLogin.roles, preLogin.ranks, preLogin.shifts, preLogin.announcements],
+    [undefined, undefined, undefined, undefined]
+  );
 
   // The kill switch, which has to work whatever else is true.
   process.env.VITE_FIRESTORE_FEATURES = 'off';

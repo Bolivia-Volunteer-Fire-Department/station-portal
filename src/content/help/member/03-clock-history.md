@@ -1,4 +1,6 @@
-**Clock History** is your own record of every shift you have clocked, newest first. Use it to check your hours before a pay period closes, or to spot an entry you forgot to finish.
+**Clock History** is your own record of the shifts you have clocked, newest first. Use it to check your hours before a pay period closes, or to spot an entry you forgot to finish.
+
+The page opens on the **last twelve months**, and says so above the table — *"entries back to 2025-09-30"*. To reach further back, press **Load older entries**, which brings in the year before that; press it again for the year before that, as far back as your history goes. The entries it brings in are added to what you already have, so your filters and totals keep working across all of it.
 
 ## Filtering and sorting
 
@@ -23,7 +25,7 @@ Two cards at the top of the page:
 - **Total Hours Logged** — the sum of the entries currently listed. An entry still in progress does not count until it has a time out, so a forgotten clock-out will make this look low.
 - **Total Clock Entries** — how many entries are listed, including any that are still open.
 
-With no filters set these are your lifetime totals, which is how the page opens.
+With no filters set these are the totals for **what the page is holding** — the last twelve months when it opens, or more if you have pressed **Load older entries**. So if you are looking for a lifetime figure, load back until the date above the table is older than your first shift.
 
 ## The table
 

@@ -260,12 +260,10 @@ function memberBootstrapPayload(ss, auth) {
 function adminBootstrapPayload(ss, auth) {
   const payload = memberBootstrapPayload(ss, auth);
 
-  // The login-screen announcements the client keeps in their own state: they are shown before sign-in and are not
-  // cleared on sign-out, so they are a separate field from the member's dashboard/sidebar list above.
-  payload.loginAnnouncements = announcementRowsFor(ss, {
-    locations: ["is_visible_on_login"],
-    everyoneOnly: true
-  });
+  // The login screen carries no announcements. It is read before anybody has signed in, so a role-, rank- or
+  // member-targeted announcement cannot be resolved there, and it was the only reason the app issued a read with no
+  // session at all. Anything that has to be read before signing in belongs in LoginScreen as a line of code, not in a
+  // form - see utils/announcements.js#ANNOUNCEMENT_LOCATIONS, which is where the location was removed.
 
   if (hasRolePermission(ss, auth.userId, "can_edit_users")) {
     // Passwords stripped, as ADMIN_GET_USERS does - the client is an administrator's browser, not a trusted peer.
@@ -356,15 +354,9 @@ function doPost(e) {
           ranks: getSheetData(ss, "ranks"),
           shifts: getShiftsData(ss),
           systemSettings: publicSystemSettings(ss),
-          userSettings: publicUserSettings(ss),
-          // The login screen's announcements. Restricted to the ones aimed at EVERYONE: at this point there
-          // is no session, so a role-, rank- or member-targeted announcement cannot be resolved - and
-          // showing it anyway would leak it to whoever is standing at the keyboard. Targeted announcements
-          // reach their reader through MY_ANNOUNCEMENTS once they are signed in.
-          announcements: announcementRowsFor(ss, {
-            locations: ["is_visible_on_login"],
-            everyoneOnly: true
-          })
+          userSettings: publicUserSettings(ss)
+          // No announcements: the login-screen location is gone, so this read would return nothing by definition.
+          // See utils/announcements.js#ANNOUNCEMENT_LOCATIONS.
         };
         break;
 
@@ -4341,7 +4333,8 @@ function announcementFieldsFrom(data, payload) {
     message: String(read("message") || "").trim(),
     effective_date: toDateKeyValue(read("effective_date")),
     end_date: toDateKeyValue(read("end_date")),
-    is_visible_on_login: isTruthySetting(read("is_visible_on_login")),
+    // `is_visible_on_login` is no longer mapped: the location is gone (utils/announcements.js#ANNOUNCEMENT_LOCATIONS), and a
+    // row that does not carry the field cannot be selected by it - which is the point, rather than a column nobody reads.
     is_visible_on_dashboard: isTruthySetting(read("is_visible_on_dashboard")),
     is_visible_on_sidebar: isTruthySetting(read("is_visible_on_sidebar")),
     role_id: String(read("role_id") || "").trim(),
@@ -4363,7 +4356,8 @@ function announcementValidationError(fields, users) {
   if (fields.end_date && fields.end_date < fields.effective_date) {
     return "The end date must not be before the effective date.";
   }
-  if (!fields.is_visible_on_login && !fields.is_visible_on_dashboard && !fields.is_visible_on_sidebar) {
+  // Two places now, not three: the login-screen location was removed (utils/announcements.js#ANNOUNCEMENT_LOCATIONS).
+  if (!fields.is_visible_on_dashboard && !fields.is_visible_on_sidebar) {
     return "Choose at least one place to show the announcement.";
   }
 

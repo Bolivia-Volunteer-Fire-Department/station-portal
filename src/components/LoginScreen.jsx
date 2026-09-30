@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { Shield, AlertCircle, CheckCircle } from 'lucide-react';
 import { stationLogoUrl } from '../utils/assets';
-import AnnouncementList from './AnnouncementList';
 
-export default function LoginScreen({ onLogin, statusMessage, departmentName, announcements = [] }) {
+// THE LOGIN SCREEN CARRIES NO ANNOUNCEMENTS, and that is deliberate rather than an omission: it is read before anybody
+// has signed in, so it cannot be targeted at a role or a person, and it was the reason the app made a read without a
+// session at all. Anything that has to be read here belongs in this file, as a line of code somebody reviews - not in a
+// form. See utils/announcements#ANNOUNCEMENT_LOCATIONS.
+export default function LoginScreen({ onLogin, statusMessage, departmentName }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -23,14 +26,6 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName, an
           <h1 className="text-2xl font-bold tracking-wide text-slate-900 dark:text-white">{departmentName || 'Station'}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Please login to continue</p>
         </div>
-
-        {/* Announcements for the login screen sit directly beneath the prompt. Only the ones aimed at
-            everyone can arrive here - there is no signed-in reader to target. */}
-        {announcements.length > 0 && (
-          <div className="mb-6">
-            <AnnouncementList announcements={announcements} location="is_visible_on_login" />
-          </div>
-        )}
 
         {statusMessage.text && (
           <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 ${

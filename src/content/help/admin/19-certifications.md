@@ -12,7 +12,7 @@ Press **New record** at the right of the table, and the editor opens **over the 
 Choose the member, the certification, and the dates.
 
 - **Effective date** is when the period started. Leave it blank for one that has always applied.
-- **End date** is when it runs out. It is **disabled for a certification that cannot be renewed** — a one-off achievement has no expiry, and the server clears the field whatever is typed into it, so the rule holds even if the sheet is edited by hand.
+- **End date** is when it runs out. It is **disabled for a certification that cannot be renewed** — a one-off achievement has no expiry, and the server clears the field whatever is typed into it, so the rule holds even if the record is edited by hand.
 - **Notes** is a free line for a certificate number or a reminder.
 
 ## Renewals are new rows, not edits
@@ -20,7 +20,7 @@ Choose the member, the certification, and the dates.
 A renewal is a **new period**, recorded as another row. Editing an existing row is for correcting a mistake.
 
 > [!NOTE]
-> This is the point of the sheet. Overwriting the last period would leave the station able to answer "is this member certified today?" and nothing else — no history of when they were certified before, which is what an audit or an insurance question actually asks for.
+> This is the point of keeping the periods rather than overwriting one. Overwriting the last period would leave the station able to answer "is this member certified today?" and nothing else — no history of when they were certified before, which is what an audit or an insurance question actually asks for.
 
 A member with several periods of one certification therefore has several rows, and their own module shows all of them with their dates.
 

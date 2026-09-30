@@ -58,8 +58,6 @@ export default function AnnouncementList({
         location,
         audience,
         dismissedIds: dismissed,
-        // The login screen has no reader to target, so it only shows announcements meant for everyone.
-        includeEveryoneOnly: location === 'is_visible_on_login',
       }),
     [announcements, location, audience, dismissed]
   );

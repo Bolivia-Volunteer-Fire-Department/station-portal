@@ -1,4 +1,4 @@
-*Content → Announcements* is where you write the messages members see in the app: on the login screen, at the top of the timeclock dashboard, and in the sidebar. Each one can be aimed at everyone, or narrowed to a role, a rank or a single member.
+*Content → Announcements* is where you write the messages members see in the app: at the top of the timeclock dashboard, and in the sidebar. Each one can be aimed at everyone, or narrowed to a role, a rank or a single member. (The login screen used to be a third place; it has been removed — see **Where it shows** below.)
 
 > [!IMPORTANT]
 > Writing announcements requires the **Make announcements** role permission.
@@ -22,12 +22,13 @@ The author is recorded automatically and cannot be changed, so the list always s
 
 At least one place must be chosen, or the announcement would be saved and never seen.
 
-- **Login screen** — directly beneath *"Please login to continue"*.
 - **Timeclock dashboard** — above the clock, below the welcome message.
 - **Sidebar** — below the name card, above the menu.
 
 > [!IMPORTANT]
-> **The login screen only ever carries announcements aimed at everyone.** At that point nobody is signed in, so a role, rank or member target cannot be resolved — and showing a targeted message anyway would put it in front of whoever is standing at the keyboard. Targeted announcements reach their reader once they are signed in, on the dashboard and in the sidebar.
+> **There is no longer a login-screen placement.** An announcement used to be postable to the login screen, where it could only ever be aimed at everyone: nobody is signed in yet, so a role, a rank or a person cannot be resolved. That made it the one thing the app had to read before anyone signed in, and anything that has to be read at that point belongs in the app's own code rather than in a form. If you were using it for something that genuinely matters — a hall closure, a burn ban — say so and it can be built into the login screen properly. An old announcement that still has the login screen ticked shows now on **neither** screen: open it, tick the dashboard or the sidebar, and save.
+
+> **An announcement arrives as soon as you save it.** The app keeps an eye out for new ones, so a member who is already signed in sees it within moments rather than at their next sign-in — which is what makes an announcement worth writing in a hurry.
 
 ## Who it reaches
 
@@ -52,7 +53,7 @@ Tick **Also send a push notification** and the announcement also goes to the reg
 Members can turn announcement pushes off for themselves in *User Settings → Notifications*, and the station default sits beside the other notification switches in *System → Notifications*.
 
 > [!NOTE]
-> **Turning the push off never hides the announcement.** The switch is about being interrupted, not about being told: a member who silences announcement pushes still sees every announcement on the dashboard, in the sidebar and on the login screen. Silence the push and the notice is still waiting for them in the app.
+> **Turning the push off never hides the announcement.** The switch is about being interrupted, not about being told: a member who silences announcement pushes still sees every announcement on the dashboard and in the sidebar. Silence the push and the notice is still waiting for them in the app.
 
 The list shows a **Push** badge on announcements sent that way. A member with no registered device simply does not receive the push, which is the same for every notification the app sends. The save reports how many devices it reached, how many had no device, and how many had announcements switched off.
 
@@ -66,8 +67,12 @@ Use dismissal for something a member has read and acted on. Leave it off for any
 
 Announcements are listed newest first, with a badge saying whether each one is **Showing now** or **Not showing**, who it reaches, where it appears, its dates, and who created it. Edit any of them — including their dates — or delete them. Deleting is permanent, so to retire one you can also just set an **End Date** in the past and keep the record of what was sent.
 
+The list opens on the **last twelve months**, plus **everything still in force** — so a notice with no End Date never falls out of it, however old it is. The line beside the count says which floor you are looking at, and **Show older** moves it back a further year at a time. Reach for it when you are looking for something that has already ended.
+
+> **If a box appears above the list telling you some announcements are not showing to the crew**, those rows were saved before the app recorded an end date for them, so they cannot be read out to members. Open each one, check the dates, and save it: saving marks it, and nothing else about the announcement changes. The box disappears once every row has been saved.
+
 > [!NOTE]
 > **Created by** is stamped automatically when an announcement is first saved and cannot be changed afterwards — not by the person who wrote it, and not by an administrator. It appears only in this tab: members never see who wrote an announcement, only the message itself.
 
 > [!TIP]
-> To take an announcement down early, edit its **End Date** to yesterday rather than deleting it. The list keeps the history, and re-running it later is a single date change.
+> To take an announcement down early, edit its **End Date** to yesterday rather than deleting it. The record stays in the list — press **Show older** if it has been down for more than a year — and re-running it later is a single date change.

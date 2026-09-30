@@ -31,6 +31,8 @@ import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/fire
 import { firestore } from './firebase.js';
 // The same key derivation and the same settings shaping the readers use, so a live row and a read row cannot drift apart.
 import { audienceKeysFor, readUsersOnce, settingRows } from './firestorePayload.js';
+// The date key the announcements listener bounds by, from the same helper the reader uses.
+import { toDateKey } from '../utils/scheduleDate.js';
 
 // A collection snapshot as the rows the readers return: the document id plus its data, which is what `rowsOf` builds. The
 // shape matters more than it looks - the app hands both to the same setters, so a different key here is a screen that
@@ -96,12 +98,39 @@ export const subscribeLive = ({ userId, handlers = {}, onError } = {}) => {
         const keys = audienceKeysFor({ userId: id, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
         if (cancelled) return;
         if (handlers.announcements) {
+          // NARROWED EXACTLY AS THE READ IS, and for a reason that is easy to miss: this snapshot REPLACES what the read
+          // put in the app's state, so a payload bounded to "in force" beside a listener that is not would pay for the
+          // whole collection a moment after sign-in, and the narrowing would be theatre. See activeAudienceRows for why the
+          // bound is a materialized `live_until` rather than the `end_date` column itself.
+          //
+          // A listener cannot fall back the way a read can - it is a stream, and "no documents" is a legitimate state - so
+          // its fallback is a RE-SUBSCRIBE. If the bounded query cannot run (a missing composite index is the likely
+          // cause), the plain, unbounded one takes over and the console says why: a stream that quietly delivers nothing
+          // would empty the sidebar, which is the one failure this whole arrangement exists to prevent.
+          const audienceQuery = () =>
+            query(collection(db, 'announcements'), where('audience_keys', 'array-contains-any', keys));
+          const watchAnnouncements = (target, fellBack = false) =>
+            watch(target, rowsFrom, handlers.announcements, (error) => {
+              if (fellBack) {
+                if (onError) onError(error);
+                return;
+              }
+              console.warn(
+                '[firestore] announcements: the live listener could not use the "in force" bound, so it is watching the ' +
+                  `collection unfiltered. The composite index for \`audience_keys\` + \`live_until\` is the likely cause.`,
+                error
+              );
+              if (cancelled) return;
+              stops.push(watchAnnouncements(audienceQuery(), true));
+            });
+
           stops.push(
-            watch(
-              query(collection(db, 'announcements'), where('audience_keys', 'array-contains-any', keys)),
-              rowsFrom,
-              handlers.announcements,
-              onError
+            watchAnnouncements(
+              query(
+                collection(db, 'announcements'),
+                where('audience_keys', 'array-contains-any', keys),
+                where('live_until', '>=', toDateKey(new Date()))
+              )
             )
           );
         }

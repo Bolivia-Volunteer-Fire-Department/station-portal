@@ -73,6 +73,8 @@ Members set their availability themselves in their **My Availability** module, a
 
 When you approve an offer in **Pending Approvals**, the member is written onto the shift and the board reloads to show it. You do not need to fill the shift here yourself for an offer you intend to accept.
 
+**Declining is final for that member on that shift.** Their pill turns rose and reads *Declined*, and they cannot offer for it again from the app — which is the point: it stops the same offer going backwards and forwards. It does not lock them out of the shift. If they call you the next day with a good reason, assign them the same way you would for anyone else, by editing the shift and choosing their name.
+
 ## Printing the schedule
 
 The **Print** button beside the month arrows prints a clean, printer-friendly calendar of the month you are looking at — the department's patch at the top, the month, and every shift with the member's name, its times and its assignment. Lines marked **Open** are shifts nobody is on yet. Choose your printer or **Save as PDF** in the dialog.
@@ -81,7 +83,9 @@ It prints the **saved** schedule, not the board as you have edited it. If you ha
 
 ## Saving
 
-The board holds your edits until you save, so you can make several changes at once. A save writes the whole batch in one request — each write to the sheet has real overhead, and batching means the wait does not grow with the number of edits.
+The board holds your edits until you save, so you can make several changes at once. A save writes the whole batch in one request, so the wait does not grow with the number of edits.
+
+**A save only ever touches the month you are looking at.** The board works on the month on screen and saves that month, so editing and saving March cannot disturb April however many shifts the year holds — it is the difference between a tool that edits a board and one that quietly rewrites history.
 
 > [!WARNING]
 > Unsaved edits survive **switching tabs and reloading** — the board keeps a draft in the browser's session storage and restores it, with the pending badge still showing. Closing the tab discards it, and a draft is per browser, so switching to a different device will not find it. Save before leaving for the day.

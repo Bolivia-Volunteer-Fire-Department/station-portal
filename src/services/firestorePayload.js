@@ -16,6 +16,8 @@ import { firestore } from './firebase.js';
 // The app's time parser, shared rather than re-implemented (see templateMinutes below). It has no imports of its own,
 // which is what lets this module - loaded by plain Node in the harnesses - use it.
 import { toTimeInputValue } from '../utils/timeInputValue.js';
+// Date keys, for the "what is in force" bound on announcements (activeAudienceRows below).
+import { toDateKey } from '../utils/scheduleDate.js';
 // The window a load carries for `schedule`. Pure and dependency-free, so this module stays loadable by the Node
 // harnesses - see the note in that file.
 import { scheduleWindowFor } from '../utils/scheduleWindow.js';
@@ -49,6 +51,101 @@ export const audienceKeysFor = ({ userId, roleId, rankId }) => [
 
 export const audienceRows = (name, keys) =>
   rowsOf(query(collection(firestore(), name), where('audience_keys', 'array-contains-any', keys)));
+
+// A member's availability claims, over a window of dates. A claim is one row per window per day, so a year of claiming
+// every Tuesday is ~52 rows for that window alone - the shape the clock history had, and the same answer: the screens
+// ask for the months they can show, and loading another range grows what is held rather than replacing it (App.jsx).
+export const availabilityForMember = (uid, window) =>
+  rowsOf(
+    query(
+      collection(firestore(), 'availability'),
+      where('user_id', '==', uid),
+      where('date_from', '>=', String(window?.from || '0000-01-01')),
+      where('date_from', '<=', String(window?.to || '9999-12-31'))
+    )
+  );
+
+// SHIFT OFFERS: THE TWO STATUSES A CALENDAR CAN DRAW FROM, and only those.
+//
+// A member's offers were read in full on every sign-in - every offer they have ever raised, kept long after it resolved,
+// which is the shape of a request log rather than of something a screen draws. What the My Schedule pills need is two of
+// those states: `pending` (waiting on an officer) and `declined` (the officer said no, and the shift is closed to that
+// member - the pill says "Declined" so they know where they stand, and a second attempt is refused on the write as well as
+// hidden on the screen; see ScheduleCalendar#offerStateFor and firestoreWrites#makeOffer). An `approved` offer is not needed
+// at all: approving FILLS the shift, so the slot is no longer open and there is no pill to colour.
+//
+// `status` is written by every offer the app creates (firestoreWrites#makeOffer), so unlike the announcements' dates there is
+// no row where the field is absent and nothing to fall back to: a filter on it cannot hide an offer that would otherwise be
+// actionable. `scripts/verify-read-budget.mjs` asserts that write, because this filter depends on it.
+export const OFFER_STATUSES_ON_A_CALENDAR = ['pending', 'declined'];
+
+export const offersForMember = (uid) =>
+  rowsOf(
+    query(
+      collection(firestore(), 'schedule_offers'),
+      where('user_id', '==', uid),
+      where('status', 'in', OFFER_STATUSES_ON_A_CALENDAR)
+    )
+  );
+
+// The officer's view: the offers still waiting, which is what the slot flags on the schedule board are built from. This is
+// the station-wide read, and it is the one that matters - "every offer ever raised by anybody" reduced to the pending ones.
+// The handle is passed in because the scoped refresh reads through the caller's `db`, exactly as the other station-wide
+// sections do.
+export const pendingOffers = (db) =>
+  rowsOf(query(collection(db, 'schedule_offers'), where('status', '==', 'pending')));
+
+// ANNOUNCEMENTS ARE READ AS "WHAT IS IN FORCE", not as "everything aimed at me".
+//
+// The audience narrows the rows a member MAY read (the rule proves the same thing); the date bound narrows them again to
+// the ones that can be SHOWN, and that second half is what stops a collection every sign-in pays for from growing forever.
+// The bound is `live_until >= today`, a field the save path materializes - because neither `end_date` (blank means
+// indefinitely) nor `effective_date` (blank means in force) can be asked for directly. See firestoreWrites.
+//
+// IT FALLS BACK, LOUDLY, WHEN THE NARROW READ CANNOT BE TRUSTED. Two things can break it, and the dangerous one is quiet:
+// the composite index it needs may not be deployed yet, which ERRORS, or rows written before `live_until` existed have no
+// field to compare, which matches NOTHING and looks exactly like a station with nothing to say. For announcements that is
+// a safety failure rather than a cosmetic one, so an active read that errors or comes back empty is asked again WITHOUT
+// the date bound, and the console is told why. The fallback is close to free when it fires: a query matching no documents
+// bills no document reads.
+// There is no longer an allow-a-refusal read here. The pre-login payload used one because the rules refuse three of the
+// four things it asked for; it now asks for the one thing they allow (settings/public), so a refusal is a genuine fault
+// and should be seen rather than swallowed.
+export const activeAudienceRows = async (name, keys, { liveUntilField = '' } = {}) => {
+  if (!liveUntilField) return audienceRows(name, keys);
+
+  const today = toDateKey(new Date());
+  try {
+    const rows = await rowsOf(
+      query(
+        collection(firestore(), name),
+        where('audience_keys', 'array-contains-any', keys),
+        where(liveUntilField, '>=', today)
+      )
+    );
+    if (rows.length) return rows;
+
+    // Nothing at all: either a genuinely quiet station, or rows that carry no `live_until` yet.
+    const unfiltered = await audienceRows(name, keys);
+    if (unfiltered.length) {
+      console.warn(
+        `[firestore] ${name}: nothing matched the active filter, but ${unfiltered.length} row(s) are aimed at this ` +
+          `member and carry no \`${liveUntilField}\` - so that column is stale, and this read is unfiltered. Re-saving ` +
+          'each one from its own tab stamps it (see firestoreWrites#saveAudienceDocument); until then nothing is hidden, ' +
+          'but nothing is narrowed either.'
+      );
+      return unfiltered;
+    }
+    return rows;
+  } catch (error) {
+    console.warn(
+      `[firestore] ${name}: the active (${liveUntilField}) filter could not run, so this read is unfiltered.` +
+        (error && error.code ? ` (${error.code})` : ''),
+      error
+    );
+    return audienceRows(name, keys);
+  }
+};
 
 // ONE `users` READ PER WAVE, NOT ONE PER READER.
 //
@@ -246,7 +343,9 @@ const ADMIN_SECTIONS = {
 
   trainings: async (db) => ({ trainings: await rowsOf(collection(db, 'trainings')) }),
 
-  scheduleOffers: async (db) => ({ scheduleOffers: await rowsOf(collection(db, 'schedule_offers')) }),
+  // Pending only, for the same reason the member's is narrowed: the board flags slots from the offers still waiting, and
+  // "every offer ever raised by anybody" is the largest thing this half of the payload used to read. See pendingOffers.
+  scheduleOffers: async (db) => ({ scheduleOffers: await pendingOffers(db) }),
 
   // The station-wide ones, which are single collections read whole - the same reads the payload's member half makes, and
   // the reason a scoped refresh is worth having: one collection instead of eighteen.
@@ -312,12 +411,21 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
   const station = stationRows || (await readStationRows(db, scheduleWindow));
   const { roles, ranks, shifts, users, assignments, templates, schedule } = station;
 
+  // CLAIMS RIDE A WIDER WINDOW THAN THE SCHEDULE. A member browsing back through last year should still see what they
+  // had marked, and the grid's job is to show them the month in front of them - so the payload carries two years around
+  // today. One claim per window per day is still a small read at that width, and the scope is REPORTED back
+  // (`availability_window`) so a grid outside it can ask for the month rather than assume nobody marked anything.
+  const availabilityScope = {
+    from: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 12, new Date().getDate())),
+    to: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 12, new Date().getDate())),
+  };
+
   // The member's own rows, plus the two audience-filtered collections.
   const [
     settings,
     mySettings,
     availability,
-    logs,
+    availabilityWindows,
     onDutyRows,
     offers,
     signatures,
@@ -330,16 +438,28 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
   ] = await Promise.all([
     getDoc(doc(db, 'settings', 'public')),
     getDoc(doc(db, 'user_settings', account.userId)),
-    rowsFor('availability', 'user_id', account.userId),
-    rowsFor('timeclock', 'user_id', account.userId),
+    // The member's own availability claims, over the schedule window, and the WINDOWS they are made against. The
+    // windows are the options list - short, officer-maintained, and read whole (retired ones included, because a claim
+    // points at one and the history should read) - which is what replaced templates, assignments and ranks here.
+    availabilityForMember(account.userId, availabilityScope),
+    rowsOf(collection(firestore(), 'availability_windows')),
+    // NO CLOCK HISTORY HERE, deliberately. It is the one per-member table that grows without limit (a five-year member has
+    // thousands of entries), and it used to be read at every sign-in so that the DASHBOARD could answer "am I clocked in" -
+    // a question the `on_duty` row below answers for free, because the clock transaction writes the entry and that row
+    // together. The history is read when the History screen is opened, over a range: see GET_TIMECLOCK_LOGS.
     rowsOf(collection(db, 'on_duty')),
-    rowsFor('schedule_offers', 'user_id', account.userId),
+    // The member's own offers, narrowed to the two statuses a calendar draws from - not the request log. See offersForMember.
+    offersForMember(account.userId),
     rowsFor('training_signatures', 'user_id', account.userId),
     rowsFor('certifications', 'user_id', account.userId),
     rowsOf(collection(db, 'certification_setup')),
     rowsOf(collection(db, 'trainings')),
     rowsOf(collection(db, 'certification_badges')),
-    audienceRows('announcements', keys),
+    // ANNOUNCEMENTS ARE NARROWED TO THE ONES IN FORCE, not merely to the ones aimed at this member: see
+    // activeAudienceRows. Events carry no such bound, and the note on AUDIENCE_SAVES (firestoreRouting) says why - a
+    // recurring event is anchored on the date of its FIRST occurrence, so any range over `date_from` would drop the weekly
+    // meeting that is happening this week.
+    activeAudienceRows('announcements', keys, { liveUntilField: 'live_until' }),
     audienceRows('events', keys),
   ]);
 
@@ -367,7 +487,8 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
     // assignments come along because the tiebreak between two shifts that start together is the assignment's rank.
     scheduleTemplates: sortScheduleTemplates(templates, assignments),
     availability,
-    logs,
+    // `logs` is NOT here any more - the History screen reads its own, over a range. A payload field that no screen needs at
+    // sign-in is the same trap as a read that no screen needs: it looks free because it is spelled elsewhere.
     offers,
     trainings,
     signatures,
@@ -378,6 +499,11 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
     certificationBadges: Object.fromEntries(badges.map((row) => [String(row.user_id), row.badges || []])),
     announcements,
     events,
+    // The availability windows, and what this member has claimed against them. `availability` is the claims; the
+    // windows are the options list every member's grid draws from. `availability_window` is the scope the claims were
+    // read over, so a grid showing a month outside it can ask rather than guess.
+    availabilityWindows,
+    availability_window: availabilityScope,
     systemSettings: settingRows(settings),
     // A LIST of one, because that is the shape the app reads today: the sheet payload carried every member's
     // settings and the client picked its own out of them.

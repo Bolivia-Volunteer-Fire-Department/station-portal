@@ -7,9 +7,14 @@
 import { parseSheetDateKey, toDateKey } from './scheduleDate';
 import { unnamedLabel } from './displayLabel';
 
-// The three places an announcement can appear, in the order the form lists them.
+// The two places an announcement can appear, in the order the form lists them.
+//
+// THE LOGIN SCREEN USED TO BE THE FIRST OF THESE, and it is gone deliberately. It could only ever show announcements aimed
+// at everybody (nobody is signed in, so a role or a person cannot be resolved), which made it the one read the app issued
+// before it had a session - and a rule that had to allow strangers to read a collection. Anything that genuinely has to be
+// read before signing in is a hard-coded line in the login screen itself, where it is also reviewed as code rather than
+// typed into a form. Rows that still carry `is_visible_on_login` are simply not shown anywhere by that flag.
 export const ANNOUNCEMENT_LOCATIONS = [
-  { key: 'is_visible_on_login', label: 'Login screen', hint: 'Below "Please login to continue".' },
   { key: 'is_visible_on_dashboard', label: 'Timeclock dashboard', hint: 'Above the clock, below the welcome.' },
   { key: 'is_visible_on_sidebar', label: 'Sidebar', hint: 'Below the name card, above the menu.' },
 ];
@@ -123,7 +128,6 @@ export const visibleAnnouncementsFor = ({
   audience = {},
   dateKey = toDateKey(new Date()),
   dismissedIds = [],
-  includeEveryoneOnly = false,
 } = {}) => {
   const dismissed = new Set((Array.isArray(dismissedIds) ? dismissedIds : []).map((id) => text(id)));
 
@@ -132,9 +136,6 @@ export const visibleAnnouncementsFor = ({
     .filter((announcement) => announcementShowsIn(announcement, location))
     .filter((announcement) => announcementIsLiveOn(announcement, dateKey))
     .filter((announcement) => announcementMatchesAudience(announcement, audience))
-    // The login screen has no reader, so it may only show announcements aimed at everyone: a message
-    // targeted at a role or a person must not be readable by whoever is standing at the keyboard.
-    .filter((announcement) => !includeEveryoneOnly || announcementTargetsEveryone(announcement))
     .filter((announcement) => !(announcementFlag(announcement.is_dismissable) && dismissed.has(text(announcement.id))))
     .sort((a, b) => {
       const aFrom = announcementDateWindow(a).from;
