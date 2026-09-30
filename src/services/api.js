@@ -889,41 +889,22 @@ export const adminFetchAvailability = async (token, { from = '', to = '' } = {})
 
 // One availability slot in the shape the backend expects. `date_to` defaults to the start
 // date: a template occurrence is a single day.
-// One availability claim in the shape the backend writes: the window it is for, and the single day it means.
-const availabilitySlotFields = (claim) => ({
-  availability_window_id: claim?.windowId || '',
-  // ...AND THE TEMPLATE SHAPE WHILE THE SCREENS MOVE ACROSS. A save from the schedule-template calendar still lands as
-  // it did, so the migration never has a moment where a save goes nowhere; one of the two is always empty, and this
-  // line goes with the last screen.
-  schedule_template_id: claim?.templateId || '',
-  date_from: claim?.dateKey || '',
-});
-
-// Applies every availability change the caller accumulated, in ONE request.
-//
-// This used to be one call per click, which meant a request - and a full sheet read on the
-// server - for every tick. The screens now hold the edits locally until Save and send only
-// what actually changed, so a month of ticks costs one round trip.
-export const setMyAvailability = async ({ adds = [], removes = [] } = {}, token) => {
-  const request = {
-    action: 'SET_MY_AVAILABILITY',
-    token,
-    adds: adds.map(availabilitySlotFields),
-    // A removal is a row, and the only field that matters is which row: the write deletes by id, so sending the slot
-    // shape here (as it used to) produced a delete of "[object Object]" that never happened.
-    removes: removes.map((row) => ({ id: String((row && row.id) || '') })),
-  };
+// One month of availability in the shape the backend writes: the month key and the marks it holds, as a map of window id
+// -> the days claimed. There is no add/remove vocabulary any more, because the document IS the month
+// (utils/availability.js): a day that was un-marked is simply not in the map.
+export const setMyAvailability = async ({ month, claims = {} } = {}, token) => {
+  const request = { action: 'SET_MY_AVAILABILITY', token, month: String(month || ''), claims };
   return (await routeWrite('SET_MY_AVAILABILITY', request)) || dispatchRequest(request);
 };
 
-// Admin: the same batch, for another member.
-export const adminSetAvailability = async (userId, { adds = [], removes = [] } = {}, token) =>
+// Admin: one member's month, through the same route.
+export const adminSetAvailability = async (userId, { month, claims = {} } = {}, token) =>
   dispatchRequest({
     action: 'ADMIN_SET_AVAILABILITY',
     token,
     user_id: userId,
-    adds: adds.map(availabilitySlotFields),
-    removes: removes.map((row) => ({ id: String((row && row.id) || '') })),
+    month: String(month || ''),
+    claims,
   });
 
 // --- Admin: System Settings ---

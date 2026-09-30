@@ -277,7 +277,7 @@ console.log('\n--- what a load reads whole ---');
 console.log(`  shared wave (both payloads): ${[...new Set(wholeCollectionReads(stationBody))].join(', ')}`);
 console.log(`  member payload alone:        ${[...new Set(wholeCollectionReads(memberBody))].join(', ')}`);
 console.log(`  admin payload alone:         ${[...new Set(wholeCollectionReads(adminBody))].join(', ')}`);
-console.log('  filtered to the caller (per matching row, not per collection): availability, schedule_offers (pending + declined');
+console.log('  filtered to the caller (per matching row, not per collection): schedule_offers (pending + declined');
 console.log('  only - an approved offer filled its shift, so no pill is drawn from it), training_signatures, certifications,');
 console.log('  user_settings, settings/public, users/{uid}');
 console.log('  read when its own screen opens (NOT at sign-in): the clock history, over a range - it is the one per-member');

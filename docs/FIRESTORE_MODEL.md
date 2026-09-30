@@ -138,7 +138,8 @@ never disagree — a split costs no atomicity.
 | collection | fields | written by | read by | option | rule, in words |
 |---|---|---|---|---|---|
 | `schedule/{id}` | `schedule_template_id`, `assignment_id`, `user_id` (empty = open), `date_from`, `date_to`, `start_time`, `end_time`, `is_open` | officer with `can_edit_schedule`, in one batch per board save | **any signed-in member** | A + D | A member is meant to see the crew's shifts — that is what "Show everyone" draws and how the calendar labels other people's pills. So no row filtering: the collection is readable, and the *date range* is what the query narrows. |
-| `availability/{id}` | `user_id`, `schedule_template_id`, `date_from`, `date_to` | the member's own save (batch add/remove) | the member (own rows), officers (all) | A | One row per member per date — ten thousand a year at station scale — so this is exactly the table that must never travel whole. The rule states it: `user_id` is the caller. |
+| `availability_windows/{id}` | `nickname`, `start_time`, `end_time`, `is_sunday`…`is_saturday`, `effective_date`, `end_date` | an officer with `can_edit_availability_windows` | any signed-in member | A | Reference data: the recurring weekly patterns a member can claim, and the `is_<weekday>` flag is the day the window STARTS. Short and officer-maintained, so the whole collection is read at sign-in — the retired ones included, because a claim points at one and the history has to keep reading. Its own permission, deliberately: shaping the station's week is a different job from correcting one member's claims. |
+| `availability_months/{userId}_{YYYY-MM}` | `user_id`, `month`, `claims` (a map of window id → the days claimed) | the member's own save — **one document for the whole month** — or an officer with `can_edit_member_availability` | the member (own documents), officers (all) | A | The document IS the month, and that is the whole point: a claim is tiny, so a row-per-claim shape cost ~240 document reads for a month view of a 30-member station, and this costs ~30. The owner is in the document id, which is what the read rule proves, and `month` is what lets an officer ask for one month across the crew in a single query. |
 | `schedule_offers/{id}` | `user_id`, `schedule_id`, `date_from`, `assignment_id`, `status`, `slot_key`, `approved_by` | the member who offers; the officer who approves | the member (own), officers with `can_approve_shifts` (all), and other members' offers only as an approved schedule row | A | `can_make_offers` is what lets a member write; the approval is an officer's write. |
 | `on_duty/{userId}` | `user_id`, `time_in` | the clock-in/out **transaction**, never a client | any signed-in member | D | "Who is on duty" is derived from open clock entries — but members may only read their *own* clock rows, so the answer cannot be a query. One small document per clocked-in member, written by the same transaction that opens and closes their entry, is both cheaper and live. |
 
@@ -219,7 +220,7 @@ console.
 | schedule for a date range | `schedule`: `date_from` ascending |
 | my shifts | `schedule`: `user_id`, `date_from` |
 | open shifts | `schedule`: `is_open`, `date_from` |
-| my availability | `availability`: `user_id`, `date_from` |
+| my availability | `availability_months`: **no index** — the document ids are the month keys, and the officer's read is one equality on `month` |
 | my clock history, newest first | `timeclock`: `user_id`, `time_in` descending |
 | my offers | `schedule_offers`: `user_id`, `status` |
 | offers awaiting approval | `schedule_offers`: `status`, `date_from` |
@@ -463,7 +464,7 @@ port verifiable at all: the UI cannot silently change underneath it.
 4. This document agreed, with the open-shift shape decided (two queries, above).
 5. Guardrails: budget alerts, and App Check's console side (the client is wired — FIREBASE_SETUP step 7). A reads-per-screen budget is
    written down here rather than in code: a member's sign-in should read the roster, the settings, the roles, the
-   schedule for its window, its own availability, its own clock history and the on-duty list.
+   schedule for its window, its own availability months, its own clock history and the on-duty list.
 
 **One prerequisite, and it is not obvious:** `firebase-tools` now requires a **JDK 21 or above** for the Firestore
 emulator (Java 8 will not do). On this machine that meant `brew install openjdk@21`, which is keg-only and so
@@ -558,6 +559,19 @@ references them. Rank plays no part: a window is an hour of the station's week. 
 roster both read the windows and a month of claims now — the template-based derivations are gone, and with them the
 per-member reading of templates, assignments and ranks that used to be needed to draw one month of checkboxes.
 
+**A claim is stored one document per member per month**, in `availability_months/{userId}_{YYYY-MM}`, as a map of window
+id → the days claimed. That is a storage decision made entirely for reads and writes: a claim is a tiny fact, but a
+document *is* the unit Firestore bills for, so a row per claimed day meant ~240 document reads to draw one month for a
+station of 30, while the same view from a document per member per month is ~30 — and the questions both screens ask
+("who can cover this window this month", "what did I claim this month") are all month-scoped, which is what makes the
+month the right granularity rather than, say, the year. The owner is in the document id, which is what lets the rule
+prove who may read it without reading anything else (the same convention as `on_duty/{memberId}`), and the `month` field
+exists so an officer can query one month across the crew in one statement. A save is then ONE write that replaces the
+month: there is no add/remove vocabulary and no row ids to carry, so the "un-marking never deleted anything" class of bug
+cannot be expressed. The cost of the shape is that a save must send the whole month, which makes the "this month is not
+loaded yet" guard load-bearing — a grid that saved a month it had not read would write an empty month over it, which is
+why the calendar refuses to save until the month has been loaded.
+
 The login-screen placement these reads used to serve has been **removed** rather than fixed: it could only show
 announcements aimed at everybody, and it was the only reason the app read a collection before it had a session.
 `GET_INITIAL_DATA` is now one document — `settings/public` — and anything that must be read before signing in is code in
@@ -597,9 +611,9 @@ app yet - `api.js` still sends every action to Apps Script - but the other side 
 
 | piece | what it is |
 |---|---|
-| `src/services/firestoreWrites.js` | the member's writes: clock in and out (one transaction, writing the entry and the `on_duty` row together), availability (one batch per save), offers (raise and withdraw) |
+| `src/services/firestoreWrites.js` | the member's writes: clock in and out (one transaction, writing the entry and the `on_duty` row together), availability (**one document per member per month**, replaced wholesale), offers (raise and withdraw) |
 | `functions/index.js` | seven callables - `createMember`, `resetMemberPassword`, `completePasswordChange`, `whoami`, `setMemberStatus`, `saveScheduleBoard`, `approveOffer` - plus the `beforeUserCreated` Auth trigger, eight deployed functions in all |
-| `firestore.rules` | the write side: `timeclock`, `on_duty`, `availability`, `schedule_offers`, the audit log, and `users_private`. `schedule` is deliberately **write-denied** - a board save now goes through the callable |
+| `firestore.rules` | the write side: `timeclock`, `on_duty`, `availability_months`, `schedule_offers`, the audit log, and `users_private`. `schedule` is deliberately **write-denied** - a board save now goes through the callable |
 | `scripts/seed-emulator.mjs` | the seed the writes need: all 30 permission flags, and nested maps |
 | `scripts/verify-firestore-writes.mjs` | 38 cases, wired into `verify:all`: each write path run as the member who may, and refused for the member who may not |
 | `scripts/verify-rules.mjs` | the schedule assertion flipped to prove the new denial |

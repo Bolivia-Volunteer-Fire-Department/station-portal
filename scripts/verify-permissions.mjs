@@ -83,13 +83,19 @@ check('users is not', roleAllowsTab(approver, 'users'), false);
 check('the schedule board is not', roleAllowsTab(approver, 'schedule'), false);
 check('but Administration DOES open', roleHasAdministration(approver), true);
 check('with only that tab listed', allowedAdminTabs(approver), ['approvals', ...ADMIN_PERMISSIONLESS_TABS]);
-// ONE PERMISSION CAN OPEN MORE THAN ONE TAB, and the availability pair is the first that does: the windows are the
-// options list for member availability, so an officer who maintains one maintains the other. Asserted here rather than
-// left to the catalog, so a later edit cannot quietly separate them and leave an officer with a tab they cannot reach.
+// TWO PERMISSIONS, TWO TABS, AND THE SPLIT IS DELIBERATE: the windows are the station's own options list - a station-wide
+// configuration - while the roster is one member's claims. These assert the SEPARATION, which is what stops a later edit
+// folding them back together: one permission governing both meant an officer could not be given the roster without also
+// being handed the shape of the station's week.
 check(
-  'managing member availability opens the windows tab too',
+  'managing member availability opens only the roster',
   allowedAdminTabs({ can_edit_member_availability: true }),
-  ['availability', 'availability-windows', ...ADMIN_PERMISSIONLESS_TABS]
+  ['availability', ...ADMIN_PERMISSIONLESS_TABS]
+);
+check(
+  'and managing windows opens only the windows tab',
+  allowedAdminTabs({ can_edit_availability_windows: true }),
+  ['availability-windows', ...ADMIN_PERMISSIONLESS_TABS]
 );
 
 console.log('\n--- a role with nothing granted ---');

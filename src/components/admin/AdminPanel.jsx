@@ -119,7 +119,6 @@ export default function AdminPanel({
   schedule,
   scheduleTemplates,
   assignments,
-  availability,
   // Reference data and the crew's claims for the availability screens: the windows every member chooses from, the
   // claims themselves (loaded per range, not in the payload), and the scope they were read over.
   availabilityWindows = [],
@@ -386,7 +385,9 @@ export default function AdminPanel({
           assignments={assignments}
           ranks={ranks}
           users={users}
-          availability={availability}
+          // The CREW'S claims, not this officer's own: they are what the "nothing marked that day" warning below the
+          // board reads (read once by App.jsx and shared with the roster).
+          rosterAvailability={rosterAvailability}
           offers={offers}
           onOffersChanged={onOffersChanged}
           // Non-shift entries, so the board shows the month as a whole.

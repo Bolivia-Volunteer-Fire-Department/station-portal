@@ -23,7 +23,7 @@ import { windowCoversMonth } from '../../utils/scheduleWindow';
 // A day's SLOTS in the order that day reads: start time, then the assignment's required rank. The board tracks time
 // itself (mergeDayItems, which is stable), so this is what decides the order of two shifts that start together.
 import { sortSlotOrder } from '../../utils/crewOrder';
-import { isAvailableForSlot } from '../../utils/availability';
+import { memberDayKeys } from '../../utils/availability';
 import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
 // The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
 import { toast } from '../../utils/toast';
@@ -131,7 +131,7 @@ export default function AdminScheduleManagementTab({
   assignments = [],
   ranks = [],
   users = [],
-  availability = [],
+  rosterAvailability = [],
   offers = [],
   onOffersChanged,
   onAdminDataChanged,
@@ -301,30 +301,29 @@ export default function AdminScheduleManagementTab({
   const coversDate = (entry, dateKey) =>
     Boolean(entry._from && entry._to && entry._from <= dateKey && dateKey <= entry._to);
 
-  // Checks whether a member is available for a shift's time window on a
-  // particular date (availability is a whitelist: no rows = not available).
+  // An entry's template, and the time window shown for it: the template's, or (custom shifts) the start/end times stored
+  // on the schedule row itself.
   const entryTemplate = (entry) =>
     scheduleTemplates.find((t) => String(t.id) === String(entry.schedule_template_id ?? ''));
 
-  // Time window shown for an entry: its template's, or (custom shifts) the
-  // start/end times stored on the schedule row itself.
   const entryTimeRangeOf = (entry) => {
     const template = entryTemplate(entry);
     return template ? timeRangeOf(template) : rowTimeRangeOf(entry);
   };
 
-  // Whether the member has marked themselves available for THIS shift on THIS date.
+  // WHETHER THE MEMBER MARKED ANYTHING AVAILABLE THAT DAY - and that is the honest question this board can ask.
   //
-  // Availability is now expressed per shift - the `availability` sheet mirrors the
-  // schedule (member + template + date) - so this is a direct lookup rather than the old
-  // weekday-window coverage test. A custom shift has no template, so there is no slot the
-  // member could have marked; like every other missing piece of data, it stays silent.
+  // Availability is expressed as WINDOWS: a nickname, hours, and the days of the week the window runs on, claimed one day
+  // at a time (utils/availability.js). A window does not name a schedule template, so a board that schedules shifts cannot
+  // test "did they claim THIS shift" - only "did they claim anything that day". Asking the finer question would mean
+  // inventing a mapping the data does not have; asking this one costs no extra read, because the crew's claims are already
+  // in hand for the roster (`rosterAvailability`, read once by App.jsx).
+  const claimedDays = useMemo(() => memberDayKeys(rosterAvailability), [rosterAvailability]);
+
   const entryIsAvailable = (entry) => {
     const user = userById(entry.user_id);
-    if (!user) return true;
-    const templateId = String(entry.schedule_template_id ?? '').trim();
-    if (!templateId || !entry._from) return true;
-    return isAvailableForSlot(availability, user.id, templateId, entry._from);
+    if (!user || !entry._from) return true;
+    return claimedDays.has(`${String(user.id).trim()}|${String(entry._from).trim()}`);
   };
 
   // Flags warnings on the visible month's pills that fall outside the member's
@@ -1445,11 +1444,11 @@ export default function AdminScheduleManagementTab({
           <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="font-semibold">{visibleUnavailable.length} scheduled shift{visibleUnavailable.length === 1 ? '' : 's'} the member has not marked themselves available for:</p>
+              <p className="font-semibold">{visibleUnavailable.length} scheduled shift{visibleUnavailable.length === 1 ? '' : 's'} on a day the member has marked no availability for:</p>
               <ul className="list-disc pl-4 mt-1 space-y-0.5 text-xs">
                 {visibleUnavailable.slice(0, 5).map((u) => (
                   <li key={u._key}>
-                    {userName(u.user_id)} — {assignmentById(u.assignment_id)?.description || 'No assignment'} · {u._from || '?'} (not marked available for this shift)
+                    {userName(u.user_id)} — {assignmentById(u.assignment_id)?.description || 'No assignment'} · {u._from || '?'} (nothing marked available that day)
                   </li>
                 ))}
                 {visibleUnavailable.length > 5 && <li>…and {visibleUnavailable.length - 5} more.</li>}

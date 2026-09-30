@@ -11,12 +11,13 @@
 // through these, so the shapes are checked rather than hoped for.
 import { collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { activeAudienceRows, audienceKeysFor, audienceRows, availabilityForMember, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, settingRows } from './firestorePayload.js';
+import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFor, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
 // A window's date key, and the id-merge that makes two bounded queries answer as one list. Both are the app's own helpers
 // rather than service-local copies: the admin list merges the same way a screen does when it loads an older window.
 import { toDateKey } from '../utils/scheduleDate.js';
 import { mergeRowsById } from '../utils/savedRow.js';
+import { claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js';
 
 // The roster the calendar used to ask for separately (`GET_ROSTER`, now retired) is a projection of `users` that the sign-in
 // payload already carries - see the note where the route used to be listed, in firestoreRouting.js. Nothing in the app asks
@@ -286,32 +287,34 @@ export const READERS = {
     // The window comes back with the rows, so a caller can tell what it holds rather than assuming it holds everything.
     return { schedule, schedule_window: { from, to } };
   },
-  // The member's own claims, over a window - the same shape GET_TIMECLOCK_LOGS uses, and for the same reason: a claim
-  // is one row per window per day, so "all of them" is a growing set the screen does not need. A caller that names no
-  // window still gets everything, which is what the harnesses ask for.
+  // The member's own claims, over a range of dates: turned into the MONTHS that range covers (utils/availability.js) and
+  // read as one document per month. A caller that names no range reads every month the member has touched, which is what
+  // the harnesses ask for.
   GET_AVAILABILITY: async (uid, body) => {
     const from = String((body && body.from) || '').trim();
     const to = String((body && body.to) || '').trim();
-    if (!from && !to) return { availability: await rowsFor('availability', 'user_id', uid) };
+    if (!from && !to) {
+      return { availability: claimRowsFromMonths(await rowsFor('availability_months', 'user_id', uid)) };
+    }
     return {
-      availability: await availabilityForMember(uid, { from, to }),
+      availability: await memberAvailabilityFor(uid, monthKeysBetween(from, to)),
       availability_window: { from, to },
     };
   },
-  // EVERY member's claims for a month, for the two officer screens: the All Members roster and the board's "you are
-  // scheduling somebody who did not mark it" warning. The rules allow it (`can_edit_member_availability`), it is
-  // bounded by the month being looked at, and it is the read that did not exist before - which is why those screens
-  // used to be handed the officer's OWN rows.
+  // EVERY member's claims for the months a range covers, for the two officer screens: the All Members roster and the
+  // board's "you are scheduling somebody who did not mark it" warning. ONE query on `month` - the whole reason that field
+  // exists - allowed by the rules through the permission branch, and ~30 documents where a row-per-claim shape cost ~240.
   ADMIN_GET_AVAILABILITY: async (uid, body) => {
     const from = String((body && body.from) || '').trim();
     const to = String((body && body.to) || '').trim();
     if (!from && !to) {
-      return { availability: await rowsOf(collection(firestore(), 'availability')) };
+      return { availability: claimRowsFromMonths(await rowsOf(collection(firestore(), 'availability_months'))) };
     }
-    return {
-      availability: await rowsInRange('availability', 'date_from', from, to),
-      availability_window: { from, to },
-    };
+    const months = monthKeysBetween(from, to);
+    const docs = months.length
+      ? await rowsOf(query(collection(firestore(), 'availability_months'), where('month', 'in', months)))
+      : [];
+    return { availability: claimRowsFromMonths(docs), availability_window: { from, to } };
   },
   // The member's own offers, over the two statuses a calendar draws from. See OFFER_STATUSES_ON_A_CALENDAR.
   GET_SHIFT_OFFERS: (uid) => offersForMember(uid).then((offers) => ({ offers })),

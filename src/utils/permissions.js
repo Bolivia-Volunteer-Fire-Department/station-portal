@@ -77,11 +77,19 @@ export const ADMIN_PERMISSIONS = [
   {
     key: 'can_edit_member_availability',
     tab: 'availability',
-    // The windows a member chooses from are the same responsibility as the claims made against them, so ONE permission
-    // governs both tabs rather than two boxes an administrator has to remember to tick together.
-    moreTabs: ['availability-windows'],
     label: 'Manage member availability',
     description: 'View and edit the weekly availability of any member.',
+  },
+  {
+    key: 'can_edit_availability_windows',
+    tab: 'availability-windows',
+    // THE WINDOWS ARE THE OPTIONS LIST, and this is its own permission rather than half of the one above. They started as
+    // one - the windows were the options for the claims, so maintaining one meant maintaining the other - but they are
+    // different jobs: configuring what the station's week looks like is a station-wide decision, while reading and
+    // correcting a member's claims is day-to-day work. Sharing a permission meant an officer could not be given the roster
+    // without also being handed the shape of the station's week.
+    label: 'Manage availability windows',
+    description: 'Define the weekly availability windows members choose from: the nickname, hours and days of each.',
   },
   {
     key: 'can_edit_system_settings',

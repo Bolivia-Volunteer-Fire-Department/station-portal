@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Eye, Loader2, Save } from 'lucide-react';
-import { toDateKey, parseSheetDateKey } from '../utils/scheduleDate';
+import { toDateKey } from '../utils/scheduleDate';
 import { WEEKDAYS, MONTHS } from '../utils/calendarConstants';
 import { formatClockRange, timeToMinutes } from '../utils/shiftTime';
-import { availabilityKey, availabilityRowsFor, windowDaysForMonth } from '../utils/availability';
+import { availabilityKey, claimedKeysFor, claimsMapFromKeys, windowDaysForMonth } from '../utils/availability';
 import EventPill from './EventPill';
 import { eventSegmentsByDay, normalizeEventList } from '../utils/events';
 import { mergeDayItems } from '../utils/dayOrder';
@@ -129,7 +129,6 @@ export default function AvailabilityCalendar({
     }
     return map;
   }, [items]);
-  const itemByKey = useMemo(() => new Map(items.map((item) => [item.key, item])), [items]);
 
   // Events for the visible month, grouped by day. Normalized defensively so the calendar is correct
   // whichever caller hands it rows: the engine reads `isAllDay`/`startsAt`, and a raw sheet row would
@@ -146,16 +145,9 @@ export default function AvailabilityCalendar({
     );
   }, [showEvents, normalizedEvents, eventAudience, ranks, year, month]);
 
-  // What the server currently says, as window|day -> ROW ID. The id matters here: un-marking deletes a row, so the
-  // claim's identity travels with the mark instead of being reconstructed at save time.
-  const serverMarked = useMemo(() => {
-    const map = new Map();
-    for (const row of availabilityRowsFor(availability, member?.id)) {
-      const dateKey = parseSheetDateKey(row?.date_from);
-      if (dateKey) map.set(availabilityKey(row?.availability_window_id, dateKey), String(row.id || ''));
-    }
-    return map;
-  }, [availability, member]);
+  // What the server currently says, as the SET of `window|day` keys it holds. No row ids travel any more: a save replaces
+  // the month, so nothing is ever deleted by identity (utils/availability.js).
+  const serverMarked = useMemo(() => claimedKeysFor(availability, member?.id), [availability, member]);
 
   // Switching member must never carry a draft across.
   useEffect(() => {
@@ -188,17 +180,9 @@ export default function AvailabilityCalendar({
     overrides.has(item.key) ? overrides.get(item.key) : serverMarked.has(item.key);
   const markedCount = items.filter(isMarked).length;
 
-  // Only the window-days whose intent differs from the server travel. A removal carries the row id, because that is
-  // what a delete needs.
-  const adds = [];
-  const removes = [];
-  for (const [key, wanted] of overrides) {
-    const item = itemByKey.get(key);
-    if (!item) continue;
-    if (wanted && !serverMarked.has(key)) adds.push({ windowId: item.windowId, dateKey: item.dateKey });
-    else if (!wanted && serverMarked.has(key)) removes.push({ id: serverMarked.get(key) });
-  }
-  const changeCount = adds.length + removes.length;
+  // The pending count IS the draft's size. There is nothing else to reconcile: a save writes the whole month, so a mark
+  // that matches the server and a mark that does not are the same kind of thing - see `handleSave` below.
+  const changeCount = overrides.size;
   const dirty = changeCount > 0;
 
   const toggleItem = (item) => {
@@ -214,12 +198,21 @@ export default function AvailabilityCalendar({
     setMessage(null);
   };
 
+  // ONE WRITE FOR THE MONTH the grid is showing: the marks as they now stand. That is the payoff of one document per
+  // member per month - the screen sends the month it holds instead of a list of rows to add and rows to delete, and
+  // there is no add/remove bookkeeping left to get wrong.
   const handleSave = async () => {
     if (!dirty || !onSave || !monthLoaded) return;
     setSaving(true);
     setMessage(null);
     try {
-      const result = await onSave({ adds, removes });
+      const working = new Set(serverMarked);
+      for (const [key, wanted] of overrides) {
+        if (wanted) working.add(key);
+        else working.delete(key);
+      }
+      const monthKey = toDateKey(new Date(year, month, 1)).slice(0, 7);
+      const result = await onSave({ month: monthKey, claims: claimsMapFromKeys(working) });
       if (!result?.success) throw new Error(result?.message || 'Failed to save availability.');
       setOverrides(new Map());
       setMessage({ type: 'ok', text: `Saved ${changeCount} change${changeCount === 1 ? '' : 's'}.` });

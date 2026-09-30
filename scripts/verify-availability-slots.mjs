@@ -1,26 +1,26 @@
 // Verifies the availability derivation (utils/availability).
 //
-// Availability used to be a weekly whitelist of time windows. It is now a set of rows
-// that mirror the schedule itself (member + template + date), and both availability
-// screens are derived entirely from these functions - so a mistake here either shows the
-// wrong shifts or shows nobody as available for a shift somebody did mark.
+// Availability is a list of recurring WINDOWS (a nickname, hours, and the days of the week the window runs on) and, per
+// member, the days they claimed one - stored as one document per member per MONTH. Both availability screens are derived
+// entirely from these functions, so a mistake here either shows a window on the wrong day or shows nobody as available
+// for a shift somebody did mark.
 //
-// The interesting cases are the ones that make the two screens disagree with reality:
-// matching on the template but forgetting the date, counting a member twice for the same
-// slot, and letting a rank-ineligible shift through.
+// The cases that matter are the ones that make the two screens disagree with reality: the midnight crossing (a Tuesday
+// night belongs to Tuesday, not to the Wednesday morning it runs into), a retired or not-yet-effective configuration
+// leaking into a month, and the month documents themselves - the flattening, and the claims map a save writes back.
 //
 // Run with: npm run verify:availability-slots
 import {
   availabilityKey,
-  availabilityRosterForMonth,
-  availabilityRowsFor,
-  availableMembersForSlot,
+  availabilityMonthId,
   availableMembersForWindow,
-  availableSlotsForMonth,
+  claimRowsFromMonths,
   claimedKeysFor,
-  isAvailableForSlot,
+  claimsMapFromKeys,
   isAvailableForWindow,
-  slotsByDay,
+  memberDayKeys,
+  monthKeyOf,
+  monthKeysBetween,
   windowCoversDate,
   windowDaysForMonth,
   windowIsLiveOn,
@@ -36,134 +36,8 @@ const check = (label, actual, expected) => {
   );
 };
 
-console.log('--- fixtures ---');
-// September 2026: the 1st is a TUESDAY, so the month holds 4 Mondays (7, 14, 21, 28)
-// and 5 Tuesdays (1, 8, 15, 22, 29). The counts below depend on that, which is the point.
-const ranks = [
-  { id: 'k1', description: 'Firefighter', rank_order: 1 },
-  { id: 'k3', description: 'Officer', rank_order: 3 },
-];
-const assignments = [
-  { id: 'a-ff', description: 'Firefighter 3', rank_order_required: 1 },
-  { id: 'a-off', description: 'Officer', rank_order_required: 3 },
-  { id: 'a-any', description: 'Any rank' },
-];
-const templates = [
-  { id: 't-mon-ff', day_of_week: 'monday', start_time: '08:00', end_time: '18:00', assignment_id: 'a-ff' },
-  { id: 't-mon-off', day_of_week: 'monday', start_time: '18:00', end_time: '08:00', assignment_id: 'a-off' },
-  { id: 't-tue-any', day_of_week: 'tuesday', start_time: '09:00', end_time: '17:00', assignment_id: 'a-any' },
-];
-const firefighter = { id: 'u1', name: 'Member 1', rank_id: 'k1', status: 'active' };
-const officer = { id: 'u2', name: 'Member 3', rank_id: 'k3', status: 'active' };
-const SEPT = { year: 2026, month: 8 };
-
-console.log('\n--- which slots a member could fill ---');
-const ffSlots = availableSlotsForMonth({ ...SEPT, templates, assignments, ranks, member: firefighter });
-const offSlots = availableSlotsForMonth({ ...SEPT, templates, assignments, ranks, member: officer });
-check('firefighter: the 4 eligible Monday shifts', ffSlots.filter((s) => s.templateId === 't-mon-ff').length, 4);
-check('firefighter: the Officer shift is not offered', ffSlots.some((s) => s.templateId === 't-mon-off'), false);
-check('firefighter: 4 Mondays + 5 Tuesdays', ffSlots.length, 9);
-check('officer: gets both Monday shifts too', offSlots.length, 13);
-check('slots run in date order, earliest first', ffSlots[0].dateKey, '2026-09-01');
-check('a shift with no minimum rank is open to everyone', ffSlots.some((s) => s.templateId === 't-tue-any'), true);
-check('every slot carries its assignment', ffSlots.every((s) => s.assignmentId), true);
-check('slots without usable times still appear', availableSlotsForMonth({
-  ...SEPT,
-  templates: [{ id: 't-no-time', day_of_week: 'monday', assignment_id: 'a-any' }],
-  assignments,
-  ranks,
-  member: firefighter,
-}).length, 4);
-
-console.log('\n--- who is excluded from "could fill" ---');
-check('excluded from scheduling', availableSlotsForMonth({
-  ...SEPT, templates, assignments, ranks,
-  member: { ...firefighter, exclude_from_scheduling: 'TRUE' },
-}).length, 0);
-check('inactive member', availableSlotsForMonth({
-  ...SEPT, templates, assignments, ranks,
-  member: { ...firefighter, status: 'inactive' },
-}).length, 0);
-check('no member at all', availableSlotsForMonth({ ...SEPT, templates, assignments, ranks }).length, 0);
-// A member whose rank cannot be placed still qualifies for shifts with no minimum
-// rank - the same rule the schedule calendar applies, so the two stay in step.
-check('unknown rank still qualifies for no-minimum shifts', availableSlotsForMonth({
-  ...SEPT, templates, assignments, ranks, member: { ...firefighter, rank_id: 'missing' },
-}).length, 5);
-check('but not for the rank-gated ones', availableSlotsForMonth({
-  ...SEPT, templates, assignments, ranks, member: { ...firefighter, rank_id: 'missing' },
-}).every((s) => s.templateId === 't-tue-any'), true);
-
-console.log('\n--- reading what has been marked ---');
-const availability = [
-  // u1 on the first Monday, stored the way the sheet stores it (text).
-  { id: 1, schedule_template_id: 't-mon-ff', date_from: '2026-09-07', date_to: '2026-09-07', user_id: 'u1' },
-  // u2 on the second Monday, stored as a real Date - the sheet returns either.
-  { id: 2, schedule_template_id: 't-mon-ff', date_from: new Date(2026, 8, 14), date_to: new Date(2026, 8, 14), user_id: 'u2' },
-  // The SAME member twice for the same slot (a hand edit could leave this).
-  { id: 3, schedule_template_id: 't-mon-ff', date_from: '2026-09-07', user_id: 'u1' },
-  // A member the users list does not know about.
-  { id: 4, schedule_template_id: 't-mon-ff', date_from: '2026-09-07', user_id: 'u9' },
-  // Right template, wrong date - must never count.
-  { id: 5, schedule_template_id: 't-mon-ff', date_from: '2026-09-08', user_id: 'u2' },
-  // Right date, wrong template.
-  { id: 6, schedule_template_id: 't-mon-off', date_from: '2026-09-07', user_id: 'u2' },
-  // No template id at all.
-  { id: 7, date_from: '2026-09-07', user_id: 'u2' },
-];
-const users = [firefighter, officer];
-
-check(
-  'the date is part of the key, not just the template',
-  isAvailableForSlot(availability, 'u1', 't-mon-ff', '2026-09-21'),
-  false
-);
-check('a text date matches', isAvailableForSlot(availability, 'u1', 't-mon-ff', '2026-09-07'), true);
-check('a Date value matches too', isAvailableForSlot(availability, 'u2', 't-mon-ff', '2026-09-14'), true);
-check('a marker on another date does not leak', isAvailableForSlot(availability, 'u2', 't-mon-ff', '2026-09-07'), false);
-check('a marker on another template does not leak', isAvailableForSlot(availability, 'u1', 't-mon-off', '2026-09-07'), false);
-check('rows for one member only', availabilityRowsFor(availability, 'u1').length, 2);
-check('a missing member id yields nothing', availabilityRowsFor(availability, '').length, 0);
-
-console.log('\n--- who is available for one slot ---');
-const mondaySlot = { templateId: 't-mon-ff', dateKey: '2026-09-07' };
-const mondayMembers = availableMembersForSlot(availability, mondaySlot, users);
-// The slot carries two members: a named one and one whose roster entry has no name, which renders as
-// "Unnamed member". The sort is by name, so "Member 1" leads - the placeholder is not special-cased, and the point
-// of the assertion is that the list is sorted by name and that a duplicate row collapses to one entry, which the
-// single "Unnamed member" proves.
-check('named in name order, duplicates collapsed', mondayMembers.map((m) => m.name), ['Member 1', 'Unnamed member']);
-check('one entry per member', mondayMembers.length, 2);
-check('a member who said nothing is absent', mondayMembers.some((m) => m.id === 'u2'), false);
-check('the same slot on another date', availableMembersForSlot(availability, { ...mondaySlot, dateKey: '2026-09-14' }, users).map((m) => m.name), ['Member 3']);
-check('an id missing from users still appears', availableMembersForSlot(availability, mondaySlot, []).length, 2);
-check('a slot with no fields', availableMembersForSlot(availability, { templateId: '', dateKey: '' }, users), []);
-check('an empty sheet is safe', availableMembersForSlot(undefined, mondaySlot, users), []);
-
-console.log('\n--- the roster the administrator sees ---');
-const roster = availabilityRosterForMonth({ ...SEPT, templates, availability, users });
-const sept7 = roster.find((d) => d.dateKey === '2026-09-07');
-const sept8 = roster.find((d) => d.dateKey === '2026-09-08');
-const sept21 = roster.find((d) => d.dateKey === '2026-09-21');
-check('every day with a template occurrence is listed', roster.length, 9);
-check('both Monday shifts appear on the 7th', sept7.slots.map((s) => s.templateId), ['t-mon-ff', 't-mon-off']);
-check('the marked shift carries its members', sept7.slots[0].members.map((m) => m.name), ['Member 1', 'Unnamed member']);
-// The fixture marks the OTHER Monday shift for Member 3, which proves the roster keys on the
-// template and not just the date.
-check('so does the other shift that was marked', sept7.slots[1].members.map((m) => m.name), ['Member 3']);
-check('a shift nobody marked says so rather than hiding', sept21.slots.map((s) => s.members.length), [0, 0]);
-check('a Tuesday with nobody marked is still listed', sept8.slots[0].members, []);
-check('the roster is in date order', roster.every((d, i) => i === 0 || roster[i - 1].dateKey < d.dateKey), true);
-
-console.log('\n--- grid grouping ---');
-const grouped = slotsByDay(ffSlots);
-check('one entry per day that has slots', grouped.size, 9);
-check('the first day holds one slot', grouped.get('2026-09-01').length, 1);
-check('keys are template|date', availabilityKey('t1', '2026-09-07'), 't1|2026-09-07');
-check('an empty list groups to nothing', slotsByDay(undefined).size, 0);
-
 // ---------------------------------------------------------------------------------------------------------------
-// availability windows: the model the two screens are moving onto.
+// availability windows: which days a recurring pattern falls on.
 //
 // The cases that matter here are the ones that make a window appear on the wrong day or vanish from a week it applies
 // to. Top of the list is the midnight crossing: a window ticked for Tuesday and running 18:00-08:00 is a Tuesday night,
@@ -250,6 +124,64 @@ check('a Tuesday nobody claimed still lists the window', month[2].windows[0].cla
 check('the retired configuration is absent from the month', month.some((d) => d.windows.some((w) => w.id === 'aw3')), false);
 check('and the one not yet in force is too', month.some((d) => d.windows.some((w) => w.id === 'aw4')), false);
 check('a month with no windows at all is empty', windowDaysForMonth({ year: 2026, month: 8, windows: [] }), []);
+
+// ---------------------------------------------------------------------------------------------------------------
+// the month documents: the flattening, and the claims map a save writes back.
+//
+// A claim is stored as one document per member per month, so a "row" is now DERIVED - which is why its id is `window|day`
+// and not a database id. The two directions tested here are the ones the screens depend on: months -> rows at sign-in and
+// for the roster, and the grid's keys -> the map that gets written on Save.
+
+console.log('\n--- a month document flattens to the rows the screens work in ---');
+const monthDocs = [
+  { user_id: 'u2', month: '2026-09', claims: { aw1: ['2026-09-01', '2026-09-08'], aw2: ['2026-09-05'] } },
+  { user_id: 'u1', month: '2024-06', claims: { aw3: ['2024-06-03'] } },
+];
+const flatRows = claimRowsFromMonths(monthDocs);
+check('a row id is window|day, derived rather than stored', availabilityKey('aw1', '2026-09-01'), 'aw1|2026-09-01');
+check('one row per claimed day', flatRows.map((row) => row.id).sort(), [
+  'aw1|2026-09-01',
+  'aw1|2026-09-08',
+  'aw2|2026-09-05',
+  'aw3|2024-06-03',
+]);
+check('each row carries the member who claimed it', flatRows.filter((row) => row.user_id === 'u2').length, 3);
+check('a document with no claims contributes nothing', claimRowsFromMonths([{ user_id: 'u9', month: '2026-09' }]), []);
+check('and no documents at all is safe', claimRowsFromMonths(undefined), []);
+check('the id carries the owner, which is what a rule reads', availabilityMonthId('u2', '2026-09'), 'u2_2026-09');
+
+console.log('\n--- and the map a save writes back ---');
+// The round trip the calendar depends on: the keys its grid holds become the month document that replaces the old one.
+check('the grid keys round-trip into the claims map', claimsMapFromKeys(new Set(flatRows.map((row) => row.id))), {
+  aw1: ['2026-09-01', '2026-09-08'],
+  aw2: ['2026-09-05'],
+  aw3: ['2024-06-03'],
+});
+check('days within a window are sorted, so a save is deterministic', claimsMapFromKeys(['aw2|2026-09-09', 'aw2|2026-09-02']), {
+  aw2: ['2026-09-02', '2026-09-09'],
+});
+check('an empty grid writes an empty map - which is how un-marking works', claimsMapFromKeys(new Set()), {});
+check('a malformed key is skipped rather than written', claimsMapFromKeys(['aw1', '|2026-09-01', 'aw1|']), {});
+check('a date key maps to its month', monthKeyOf('2026-09-01'), '2026-09');
+check('and an unusable one to no month at all', monthKeyOf(''), '');
+check('a range spans every month it touches', monthKeysBetween('2026-11-15', '2027-02-02'), [
+  '2026-11',
+  '2026-12',
+  '2027-01',
+  '2027-02',
+]);
+check('a range inside one month is that month', monthKeysBetween('2026-09-02', '2026-09-28'), ['2026-09']);
+check('a backwards range is empty rather than invented', monthKeysBetween('2026-09-01', '2026-08-01'), []);
+
+console.log('\n--- the day keys the schedule board warns on ---');
+check('the warning reads user|day, because a window does not name a shift', [...memberDayKeys(flatRows)].sort(), [
+  'u1|2024-06-03',
+  'u2|2026-09-01',
+  'u2|2026-09-05',
+  'u2|2026-09-08',
+]);
+check('a day with two claims is one key', memberDayKeys([{ user_id: 'u2', date_from: '2026-09-01' }, { user_id: 'u2', date_from: '2026-09-01' }]).size, 1);
+check('nothing claimed is no keys', memberDayKeys([]).size, 0);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

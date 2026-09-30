@@ -156,7 +156,6 @@ console.log('\n--- every occurrence generator applies the gate ---');
 const callSites = [
   ['src/components/ScheduleCalendar.jsx', 'the member calendar', 1],
   ['src/components/admin/AdminScheduleManagementTab.jsx', "the administrator's board and picker", 2],
-  ['src/utils/availability.js', 'both availability views', 2],
 ];
 
 for (const [path, what, minimum] of callSites) {
@@ -192,15 +191,15 @@ check(
   true
 );
 
+// AVAILABILITY IS NOT PART OF THIS ANY MORE, and the negative is what is worth asserting: the availability screens used
+// to be derived from schedule templates, so they needed the template date gate in two separate loops. They are derived
+// from availability WINDOWS now, and a window carries its own life - `effective_date`/`end_date`, applied by
+// `windowIsLiveOn` in utils/availability.js and verified by verify-availability-slots. What this harness can still check
+// about that file is that no template machinery is left in it, which is the thing that would quietly come back.
 const availabilitySource = readFileSync('src/utils/availability.js', 'utf8');
 check(
-  'the availability grid gates',
-  /day_of_week[\s\S]{0,600}?templateIsActiveOn\(template, dateKey\)/.test(availabilitySource),
-  true
-);
-check(
-  'and the All Members roster gates',
-  (availabilitySource.match(/templateIsActiveOn\(template, dateKey\)/g) || []).length === 2,
+  'availability no longer knows about templates at all',
+  !/templateIsActiveOn|schedule_template_id|day_of_week/.test(availabilitySource),
   true
 );
 

@@ -318,31 +318,35 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
         </div>
       )}
 
-      {rows.length === 0 && !loading && (
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 text-sm text-slate-500 dark:text-slate-400">
-          No availability windows yet. Members have nothing to choose from until at least one exists.
+      {/* THE CARD AND ITS "New window" BUTTON RENDER WHETHER OR NOT THERE ARE ANY WINDOWS YET. The list and the empty state
+          used to be two separate panels behind `rows.length`, so a station with no windows - the state every station starts
+          in, and the state this one is in - got a sentence saying so and NO WAY TO ADD THE FIRST ONE. That is the one
+          moment the button is most needed, so the header is now unconditional and the empty state sits inside it. */}
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+            Availability windows ({rows.length})
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setEditorOpen(true);
+            }}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+          >
+            <Plus className="h-4 w-4" />
+            New window
+          </button>
         </div>
-      )}
 
-      {rows.length > 0 && (
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-              Availability windows ({rows.length})
-            </h3>
-            <button
-              type="button"
-              onClick={() => {
-                resetForm();
-                setEditorOpen(true);
-              }}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
-            >
-              <Plus className="h-4 w-4" />
-              New window
-            </button>
-          </div>
-
+        {rows.length === 0 ? (
+          <p className="px-6 py-6 text-sm text-slate-500 dark:text-slate-400">
+            {loading
+              ? 'Loading availability windows…'
+              : 'No availability windows yet. Members have nothing to choose from until at least one exists — press New window to add the first one.'}
+          </p>
+        ) : (
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
               <tr>
@@ -424,8 +428,8 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
               })}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard (ConfirmModal plays the
           tone), and it names what is about to be deleted. A window that members have claimed should normally be

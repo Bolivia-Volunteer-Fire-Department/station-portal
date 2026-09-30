@@ -155,7 +155,6 @@ console.log('\n--- every place the gate is needed ---');
 const generators = [
   ['src/components/ScheduleCalendar.jsx', 'the member calendar', 1],
   ['src/components/admin/AdminScheduleManagementTab.jsx', "the administrator's board and picker", 2],
-  ['src/utils/availability.js', 'both availability views', 2],
 ];
 for (const [path, what, minimum] of generators) {
   const source = readFileSync(path, 'utf8');

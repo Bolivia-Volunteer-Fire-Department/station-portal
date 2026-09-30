@@ -2,6 +2,8 @@
 
 *Scheduling → Availability Windows* is where you define the **weekly patterns members can mark themselves available for**. Until at least one window exists, members have nothing to choose from.
 
+> Editing this tab requires the **Manage availability windows** role permission. It is separate from *Manage member availability*, which governs the roster of members' own choices — shaping the station's week and correcting one member's claims are different jobs.
+
 A window is a recurring weekly block of time with a name:
 
 - **Nickname** — what a member sees on the pill in their own calendar. Keep it short: it has to fit in a day cell.

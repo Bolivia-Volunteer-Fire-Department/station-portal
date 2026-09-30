@@ -1,218 +1,13 @@
-// Availability, expressed in the same shape as the schedule itself.
+// Availability: the station's windows, and the days each member claimed one.
 //
-// One row on the `availability` sheet means "this member is available for THIS
-// template occurrence on THIS date":
+// TWO COLLECTIONS, and the split is what makes this cheap:
 //
-//   (id, schedule_template_id, date_from, date_to, apparatus_id, assignment_id, user_id)
+//   availability_windows/{windowId}          the station's weekly patterns, maintained by an officer
+//   availability_months/{userId}_{YYYY-MM}   one member's claims for ONE month
 //
-// This replaced the old weekday-window whitelist (id, user_id, day_of_week, start_time,
-// end_time). Availability is now per shift rather than per week, so a member can mark
-// exactly the shifts they could work, and an administrator can ask the far more useful
-// question "who is available for this shift on this date?". `apparatus_id` is carried
-// for a future use and ignored here.
+// A window is a recurring weekly block of time with a nickname:
 //
-// Everything in this module is pure, so the derivation can be verified without React -
-// see scripts/verify-availability-slots.mjs.
-
-import { toDateKey, parseSheetDateKey } from './scheduleDate';
-import { DAY_ORDER } from './calendarConstants';
-import { memberCanFillAssignment } from './rankEligibility';
-import { unnamedLabel } from './displayLabel';
-import { templateIsActiveOn } from './scheduleTemplates';
-import { assignmentIsActiveOn } from './assignmentDates';
-import { timeToMinutes } from './shiftTime';
-
-// A slot is identified by its template AND its date: the same template recurs weekly,
-// so the template id alone says nothing about which occurrence is meant.
-export const availabilityKey = (templateId, dateKey) =>
-  `${String(templateId ?? '').trim()}|${String(dateKey ?? '').trim()}`;
-
-const templateIdOf = (row) => String(row?.schedule_template_id ?? '').trim();
-
-// The assignment row for an id, or null when it cannot be found.
-//
-// A missing assignment is treated as "no restriction" by the date gate, which is the right failure mode:
-// an id pointing at a row nobody can find should not silently blank a whole day of shift slots.
-const findAssignment = (assignments, id) => {
-  const key = String(id ?? '').trim();
-  if (!key) return null;
-  return (
-    (Array.isArray(assignments) ? assignments : []).find(
-      (a) => String(a?.id ?? '').trim() === key
-    ) || null
-  );
-};
-
-export const availabilityRowsFor = (availability, userId) => {
-  const wanted = String(userId ?? '').trim();
-  if (!wanted) return [];
-  return (Array.isArray(availability) ? availability : []).filter(
-    (row) => String(row?.user_id ?? '').trim() === wanted
-  );
-};
-
-// The members who have marked themselves available for one slot, in name order.
-//
-// Rows pointing at a member missing from `users` still appear, labeled by id: silently
-// dropping someone the sheet says is available would be worse than showing an id.
-//
-// `rank_id` travels with each member so the roster can color the name and show the rank's icon.
-// It comes from the member record rather than the availability row, which does not carry one.
-export const availableMembersForSlot = (availability, slot, users = []) => {
-  const templateId = String(slot?.templateId ?? '').trim();
-  const dateKey = String(slot?.dateKey ?? '').trim();
-  if (!templateId || !dateKey) return [];
-
-  const seen = new Set();
-  const members = [];
-  for (const row of Array.isArray(availability) ? availability : []) {
-    if (templateIdOf(row) !== templateId) continue;
-    if (parseSheetDateKey(row?.date_from) !== dateKey) continue;
-    const userId = String(row?.user_id ?? '').trim();
-    if (!userId || seen.has(userId)) continue;
-    seen.add(userId);
-    const user = (Array.isArray(users) ? users : []).find(
-      (u) => String(u?.id ?? '').trim() === userId
-    );
-    members.push({
-      id: userId,
-      name: String(user?.name ?? '').trim() || unnamedLabel('member'),
-      rank_id: String(user?.rank_id ?? '').trim(),
-    });
-  }
-
-  return members.sort((a, b) => a.name.localeCompare(b.name));
-};
-
-// Whether one member has marked one specific slot as available.
-export const isAvailableForSlot = (availability, userId, templateId, dateKey) => {
-  const id = String(templateId ?? '').trim();
-  const day = String(dateKey ?? '').trim();
-  if (!id || !day) return false;
-  return availabilityRowsFor(availability, userId).some(
-    (row) => templateIdOf(row) === id && parseSheetDateKey(row?.date_from) === day
-  );
-};
-
-// Every template occurrence in a month that one member could actually fill.
-//
-// "Could fill" is the schedule calendar's own rule (memberCanFillAssignment): the
-// template's weekday has to match the day, and the member's rank has to qualify for the
-// template's assignment. This is what the availability editor preloads, so the two
-// views can never disagree about which shifts are on offer.
-export const availableSlotsForMonth = ({
-  year,
-  month,
-  templates = [],
-  assignments = [],
-  ranks = [],
-  member,
-} = {}) => {
-  const slots = [];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const list = Array.isArray(templates) ? templates : [];
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(year, month, day);
-    const dateKey = toDateKey(date);
-    const dow = DAY_ORDER[date.getDay()];
-    for (const template of list) {
-      if (String(template?.day_of_week ?? '').trim().toLowerCase() !== dow) continue;
-      // Retired and not-yet-effective templates offer nothing to be available for, and neither does one
-      // whose assignment is outside its own window.
-      if (!templateIsActiveOn(template, dateKey)) continue;
-      if (!assignmentIsActiveOn(findAssignment(assignments, template?.assignment_id), dateKey)) continue;
-      const assignmentId = String(template?.assignment_id ?? '').trim();
-      const assignment =
-        (Array.isArray(assignments) ? assignments : []).find(
-          (a) => String(a?.id ?? '').trim() === assignmentId
-        ) || null;
-      if (!memberCanFillAssignment({ member, assignment, ranks })) continue;
-      // Sort key for the day cell. A template with no usable time sorts last rather
-      // than pretending to start at midnight.
-      const startMin = timeToMinutes(template?.start_time);
-      slots.push({
-        key: availabilityKey(template.id, dateKey),
-        dateKey,
-        templateId: String(template?.id ?? '').trim(),
-        assignmentId,
-        template,
-        startMin: startMin === null ? Number.MAX_SAFE_INTEGER : startMin,
-      });
-    }
-  }
-
-  return slots.sort((a, b) => a.dateKey.localeCompare(b.dateKey) || a.startMin - b.startMin);
-};
-
-// Slots grouped by date key, for a month grid that draws one cell per day.
-export const slotsByDay = (slots) => {
-  const map = new Map();
-  for (const slot of Array.isArray(slots) ? slots : []) {
-    if (!map.has(slot.dateKey)) map.set(slot.dateKey, []);
-    map.get(slot.dateKey).push(slot);
-  }
-  return map;
-};
-
-// Every template occurrence in a month, with the members who marked themselves
-// available for it. This is the "All Members" view.
-//
-// Slots nobody has marked stay in the list - an uncovered shift is exactly what an
-// administrator needs to see - while members who said nothing are simply absent, which
-// is the point of the view.
-export const availabilityRosterForMonth = ({
-  year,
-  month,
-  templates = [],
-  availability = [],
-  users = [],
-  // Needed for the assignment date gate: a retired assignment must stop offering shifts here too.
-  assignments = [],
-} = {}) => {
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const list = Array.isArray(templates) ? templates : [];
-  const days = [];
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(year, month, day);
-    const dateKey = toDateKey(date);
-    const dow = DAY_ORDER[date.getDay()];
-    const slots = [];
-
-    for (const template of list) {
-      if (String(template?.day_of_week ?? '').trim().toLowerCase() !== dow) continue;
-      // Same gate as the member's own availability grid, so an administrator's All Members view
-      // lists exactly the shifts a member could have marked themselves available for.
-      if (!templateIsActiveOn(template, dateKey)) continue;
-      if (!assignmentIsActiveOn(findAssignment(assignments, template?.assignment_id), dateKey)) continue;
-      const slot = {
-        key: availabilityKey(template?.id, dateKey),
-        dateKey,
-        templateId: String(template?.id ?? '').trim(),
-        assignmentId: String(template?.assignment_id ?? '').trim(),
-        template,
-      };
-      slots.push({ ...slot, members: availableMembersForSlot(availability, slot, users) });
-    }
-
-    if (slots.length) days.push({ dateKey, date, slots });
-  }
-
-  return days;
-};
-
-// ---------------------------------------------------------------------------------------------------------------
-// AVAILABILITY WINDOWS: the model this module is moving to.
-//
-// A window is a station-wide, recurring weekly pattern with a nickname:
-//
-//   availability_windows/{id}: (id, nickname, start_time, end_time, is_sunday..is_saturday, effective_date, end_date)
-//
-// A member's claim points at one window and one day - the same day-by-day choice the module has always made. What
-// changes is where the OPTIONS come from. They used to be the member's rank-eligible schedule templates, so drawing a
-// month's grid needed templates, assignments AND ranks; windows are station-wide and rank-blind on purpose, so the
-// options come from one small collection an officer maintains, and a member sees every window that falls on the day.
+//   (id, nickname, start_time, end_time, is_sunday..is_saturday, effective_date, end_date)
 //
 // THE WEEKDAY FLAG IS THE DAY THE WINDOW STARTS. `is_tuesday` with 18:00-08:00 describes a Tuesday night: the shift
 // begins on Tuesday and runs into Wednesday morning, so its pill belongs to Tuesday - and the flags are the only thing
@@ -221,19 +16,134 @@ export const availabilityRosterForMonth = ({
 // EFFECTIVE AND END DATES ARE THE CONFIGURATION'S LIFE, NOT AN OCCURRENCE. A department that changes its shift
 // structure ends the old windows on the last day they applied - keeping them, because claims reference them and the
 // history should still read - and adds new ones with an effective date. Both ends are inclusive; a blank end means
-// "still current", and blank dates mean the window was never scheduled to start or stop.
+// "still current".
 //
-// The member module and the administration roster are being moved onto this. Until that lands, the template-based
-// derivations above stay in place and in use - both sets are tested in scripts/verify-availability-slots.mjs.
+// WHY ONE DOCUMENT PER MEMBER PER MONTH. A claim is a tiny fact ("this member could work this window on this day"), and
+// one row per claim means a month view for a station of 30 reads ~240 documents. Every question either screen asks is
+// scoped to a month - "who can cover this window in March", "what did I claim in March" - so a document per member per
+// month is the coarsest unit that answers all of them: the same view costs ~30 reads, a member's own sign-in carries a
+// couple of documents instead of a range of rows, and a SAVE is one write with no add/remove/delete bookkeeping at all.
+// Firestore bills per document, so the coarser shape is the cheaper one.
+//
+// The document id carries the owner (`u2_2026-09`), which is what lets a rule prove who may read it - the same
+// convention as `on_duty/{memberId}` - and a `month` field lets an officer query one month for the whole crew.
+//
+// Everything here is pure, so the derivation can be verified without React or Firestore - see
+// scripts/verify-availability-slots.mjs.
 
-// A window's own date fields, through the same parser the screens use, so a window cannot be live in one place and
-// expired in another.
-const windowDay = (value) => parseSheetDateKey(value);
+import { toDateKey, parseSheetDateKey } from './scheduleDate.js';
+import { DAY_ORDER } from './calendarConstants.js';
+import { unnamedLabel } from './displayLabel.js';
+import { timeToMinutes } from './shiftTime.js';
 
-// The window a claim points at, and the day it is for - the two halves of a claim's identity.
+// The key one claim is identified by: the window AND the day. Two members can claim the same window on the same day, and
+// one member can claim the same window on two days.
+export const availabilityKey = (windowId, dateKey) =>
+  `${String(windowId ?? '').trim()}|${String(dateKey ?? '').trim()}`;
+
 const windowIdOf = (row) => String(row?.availability_window_id ?? '').trim();
 
 const rowDayOf = (row) => parseSheetDateKey(row?.date_from);
+
+// One member's claims, as rows. THE SCREENS STILL WORK IN ROWS even though the store is month documents: the month
+// shape is flattened once, at the edge, so every derivation below has one shape to reason about.
+export const availabilityRowsFor = (availability, userId) => {
+  const wanted = String(userId ?? '').trim();
+  if (!wanted) return [];
+  return (Array.isArray(availability) ? availability : []).filter(
+    (row) => String(row?.user_id ?? '').trim() === wanted
+  );
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// the month documents: the id, the month key, and the two directions between documents and rows.
+
+const pad = (value) => String(value).padStart(2, '0');
+
+// '2026-09-01' -> '2026-09'. A blank or unreadable key gives '', which every caller treats as "no month".
+export const monthKeyOf = (dateKey) => {
+  const day = parseSheetDateKey(dateKey);
+  if (!day) return '';
+  return day.slice(0, 7);
+};
+
+// Every month key from one date to another, inclusive: what a range of screens can hold.
+export const monthKeysBetween = (fromDateKey, toDateKey_) => {
+  const from = monthKeyOf(fromDateKey);
+  const to = monthKeyOf(toDateKey_);
+  if (!from || !to || from > to) return [];
+  const keys = [];
+  let [year, month] = from.split('-').map(Number);
+  const [endYear, endMonth] = to.split('-').map(Number);
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    keys.push(`${year}-${pad(month)}`);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return keys;
+};
+
+// The document id for one member's month. The owner is in the id so a rule can prove who may read it.
+export const availabilityMonthId = (userId, monthKey) =>
+  `${String(userId ?? '').trim()}_${String(monthKey ?? '').trim()}`;
+
+// Month documents -> the rows every screen derives from. The row id is `window|day`: stable, readable, and the same key
+// the grid describes a cell with - so nothing has to carry a database id around to know what it is looking at.
+export const claimRowsFromMonths = (months) => {
+  const rows = [];
+  for (const doc of Array.isArray(months) ? months : []) {
+    if (!doc) continue;
+    const userId = String(doc.user_id ?? '').trim();
+    const claims = doc.claims && typeof doc.claims === 'object' ? doc.claims : {};
+    for (const [windowId, days] of Object.entries(claims)) {
+      for (const day of Array.isArray(days) ? days : []) {
+        const dateKey = parseSheetDateKey(day);
+        if (!userId || !windowId || !dateKey) continue;
+        rows.push({
+          id: availabilityKey(windowId, dateKey),
+          user_id: userId,
+          availability_window_id: String(windowId).trim(),
+          date_from: dateKey,
+        });
+      }
+    }
+  }
+  return rows;
+};
+
+// The `window|day` keys a grid holds -> one month's claims map, which is what gets written. Sorted, so the same marks
+// always produce the same document and a diff of two saves stays readable.
+export const claimsMapFromKeys = (keys) => {
+  const claims = {};
+  for (const key of keys instanceof Set ? keys : new Set(Array.isArray(keys) ? keys : [])) {
+    const [windowId, dateKey] = String(key).split('|');
+    if (!windowId || !dateKey) continue;
+    if (!claims[windowId]) claims[windowId] = [];
+    if (!claims[windowId].includes(dateKey)) claims[windowId].push(dateKey);
+  }
+  for (const key of Object.keys(claims)) claims[key].sort();
+  return claims;
+};
+
+// "Which member claimed SOMETHING on this day", as `user|day` keys. That is the question the schedule board asks when
+// it warns an officer about filling a shift with somebody who said nothing (see AdminScheduleManagementTab).
+export const memberDayKeys = (rows) => {
+  const keys = new Set();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const userId = String(row?.user_id ?? '').trim();
+    const dateKey = rowDayOf(row);
+    if (userId && dateKey) keys.add(`${userId}|${dateKey}`);
+  }
+  return keys;
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// windows: when a pattern applies, and which days it falls on.
+
+const windowDay = (value) => parseSheetDateKey(value);
 
 const flagOn = (value) => value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';
 
@@ -272,7 +182,7 @@ export const windowsOnDate = (windows, dateKey) =>
       return String(a?.nickname ?? '').localeCompare(String(b?.nickname ?? ''));
     });
 
-// One member's claims, as the set of `window|day` keys the grid diffs against.
+// One member's claims, as the set of `window|day` keys a grid diffs against.
 export const claimedKeysFor = (availability, userId) =>
   new Set(
     availabilityRowsFor(availability, userId)
@@ -309,8 +219,8 @@ export const availableMembersForWindow = (availability, windowId, dateKey, users
 };
 
 // Every day of a month with at least one window, and - when `availability` is given - who claimed each one. ONE
-// derivation for the member's grid and the administration's roster, so the two cannot disagree about which windows
-// fall on a day.
+// derivation for the member's grid and the administration's roster, so the two cannot disagree about which windows fall
+// on a day.
 export const windowDaysForMonth = ({ year, month, windows = [], availability = [], users = [] } = {}) => {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const days = [];
@@ -330,7 +240,3 @@ export const windowDaysForMonth = ({ year, month, windows = [], availability = [
   }
   return days;
 };
-
-// The member module and the administration roster are being moved onto this. Until that lands, the template-based
-// derivations above stay in place and in use - both sets are tested in scripts/verify-availability-slots.mjs.
-

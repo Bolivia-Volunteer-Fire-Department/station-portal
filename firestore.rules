@@ -193,9 +193,11 @@ service cloud.firestore {
     // choose from (utils/availability.js). Everybody reads it - a member's own module draws its options from it - and
     // only somebody who maintains member availability may change it. Rank plays no part here, deliberately: a window is
     // an hour of the station's week, not a slot somebody has to qualify for.
+    // The list every member chooses from, maintained by an officer: `can_edit_availability_windows` is the permission for
+    // shaping the station's week, kept separate from managing one member's claims (`can_edit_member_availability`).
     match /availability_windows/{windowId} {
       allow read: if signedIn();
-      allow write: if permission('can_edit_member_availability');
+      allow write: if permission('can_edit_availability_windows');
     }
 
     match /apparatus/{apparatusId} {
@@ -246,13 +248,26 @@ service cloud.firestore {
     // `resource != null` on the update and delete branches is not padding: Firestore checks those branches while
     // evaluating a CREATE, where `resource` is null, and reading `.data` off it is an evaluation error - which a
     // client cannot tell apart from a correct refusal. Guarding it is what makes the refusal a refusal.
-    match /availability/{availabilityId} {
+    // ONE MEMBER'S CLAIMS FOR ONE MONTH, and the document is the unit of both reading and writing.
+    //
+    // The id carries the owner (`u2_2026-09`) so this rule can prove who may read a document without reading anything
+    // else - the same convention as `on_duty/{memberId}` - and a `month` field lets an officer ask for one month across
+    // the whole crew in a single query. That query is the reason the shape changed: a row per claim cost ~240 document
+    // reads for a month of a 30-member station, and a document per member per month costs ~30.
+    //
+    // `resource != null` on the update and delete branches is not padding: Firestore checks those branches while
+    // evaluating a CREATE, where `resource` is null, and reading `.data` off it is an evaluation error - which a client
+    // cannot tell apart from a correct refusal.
+    match /availability_months/{docId} {
       allow read: if signedIn()
-        && resource != null
-        && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
-      allow create: if signedIn()
-        && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'));
-      allow update, delete: if signedIn()
+        && (resource == null
+          || resource.data.user_id == uid()
+          || permission('can_edit_member_availability'));
+      allow create, update: if signedIn()
+        && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'))
+        && request.resource.data.month is string
+        && request.resource.data.claims is map;
+      allow delete: if signedIn()
         && resource != null
         && (resource.data.user_id == uid() || permission('can_edit_member_availability'));
     }

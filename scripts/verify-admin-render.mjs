@@ -25,6 +25,7 @@ import AdminSystemLogTab from '../src/components/admin/AdminSystemLogTab.jsx';
 import MyAvailability from '../src/components/MyAvailability.jsx';
 import AvailabilityCalendar from '../src/components/AvailabilityCalendar.jsx';
 import AdminAvailabilityTab from '../src/components/admin/AdminAvailabilityTab.jsx';
+import AdminAvailabilityWindowsTab from '../src/components/admin/AdminAvailabilityWindowsTab.jsx';
 import AdminScheduleManagementTab from '../src/components/admin/AdminScheduleManagementTab.jsx';
 import HelpGuides from '../src/components/HelpGuides.jsx';
 import Markdown from '../src/components/Markdown.jsx';
@@ -606,6 +607,28 @@ check('and naming the members who claimed the window', String(adminAvailabilityH
 check(
   'while the member who said nothing is not listed as available',
   !String(adminAvailabilityHtml).includes('>Member 3</span>')
+);
+
+console.log('\n--- the availability windows tab, with nothing in it ---');
+// THE STATE A STATION STARTS IN, and the one this tab shipped broken in. The list and the empty message were two panels
+// behind `rows.length`, so a station with no windows yet got the message and NO CARD - and the card is where "New window"
+// lives, which left no way to create the first window at all. Nothing caught it because this harness never rendered the
+// tab: it was the one Administration screen with no coverage here.
+//
+// SSR renders the INITIAL state (`rows: []`, `loading: true`) and never runs the load effect, so rendering the tab is
+// exactly the empty-list render - if the button is in this markup, an officer with no windows has it.
+const windowsTabHtml = renderToStaticMarkup(
+  React.createElement(AdminAvailabilityWindowsTab, { token: 'test-token' })
+);
+check('the empty tab still offers New window', windowsTabHtml.includes('New window'));
+check('with the count it is listing', windowsTabHtml.includes('Availability windows (0)'));
+check('and says what it is doing rather than showing nothing', /Loading availability windows|No availability windows yet/.test(windowsTabHtml));
+// And the source, because the render above cannot reach the settled empty state: the button must sit ABOVE the
+// empty-list branch rather than inside it, which is precisely how the dead end was built.
+const windowsTabSource = readFileSync('src/components/admin/AdminAvailabilityWindowsTab.jsx', 'utf8');
+check(
+  'and the source puts New window above the empty-list branch, not inside it',
+  windowsTabSource.indexOf('New window') < windowsTabSource.indexOf('rows.length === 0 ?')
 );
 
 console.log('\n--- the Schedule Management board ---');

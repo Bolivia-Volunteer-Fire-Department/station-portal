@@ -111,8 +111,8 @@ const main = async () => {
   const open = await getDocs(query(collection(db, 'schedule'), where('is_open', '==', true)));
   checkIs('and asks for the open ones as a separate question', open.size === 1, `got ${open.size}`);
 
-  await read('reads its own availability', true, doc(db, 'availability', 'av2'));
-  await read('but not another member availability', false, doc(db, 'availability', 'av1'));
+  await read('reads its own availability month', true, doc(db, 'availability_months', 'u2_2026-09'));
+  await read('but not another member availability month', false, doc(db, 'availability_months', 'u1_2026-09'));
   await read('reads its own clock entry', true, doc(db, 'timeclock', 'c2'));
   await read('but not another member clock entry', false, doc(db, 'timeclock', 'c1'));
   await write('opens its own clock entry', true, doc(db, 'timeclock', 'c3'), {

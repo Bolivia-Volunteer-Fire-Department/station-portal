@@ -19,6 +19,10 @@ import { settingSide } from '../utils/systemSettings.js';
 // The app's own date parser, shared rather than re-implemented: what the save path materializes below and what the screen
 // compares against must be the same reading of the same column, or an announcement can be live on screen and expired in
 // the query that feeds it.
+import { availabilityMonthId } from '../utils/availability.js';
+// The app's own date parser, shared rather than re-implemented: what the save path materializes below and what the screen
+// compares against must be the same reading of the same column, or an announcement can be live on screen and expired in
+// the query that feeds it.
 import { parseSheetDateKey } from '../utils/scheduleDate.js';
 // The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
 // device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
@@ -111,39 +115,26 @@ export const clockOut = async ({ userId, entryId }) => {
 // AVAILABILITY: one batch per save, which is how the app already sends it - the slots marked and unmarked in one
 // commit. The sheet version held the script lock for this; a batch is atomic without one, and the rules see to it
 // that every row written belongs to the member writing it.
-// ONE ROW PER WINDOW PER DAY: "this member could work this window on this date". The window carries the hours and the
-// days it runs on, so a claim carries only the day the member means - there is no date RANGE here, which is what the
-// old schedule-template shape had.
+// A MONTH OF CLAIMS, IN ONE WRITE.
 //
-// `removes` are row IDS. They used to arrive as whole slot objects and be deleted as `String(rowId)`, which is
-// "[object Object]" - so un-marking a day never actually removed anything and the screen said it had saved. Ids are
-// the honest currency for a delete, and the screens keep the id beside the mark.
-export const saveAvailability = async ({ userId, adds = [], removes = [] }) => {
-  const db = firestore();
-  const batch = writeBatch(db);
-
-  adds.forEach((slot) => {
-    batch.set(doc(collection(db, 'availability')), {
-      user_id: userId,
-      availability_window_id: String(slot.availability_window_id || ''),
-      // AND THE OLD SHAPE WHILE THE SCREENS MOVE ACROSS: a save from the schedule-template calendar still lands as it
-      // did, so nothing is half-migrated in production. One of these two fields is always empty; this line goes when
-      // the last screen does.
-      schedule_template_id: String(slot.schedule_template_id || ''),
-      date_from: String(slot.date_from || ''),
-    });
+// `claims` is a map of window id -> the days claimed, e.g. `{ w1: ['2026-09-01', '2026-09-08'] }`, and the document is
+// replaced wholesale. That is the whole point of the shape: no rows to add, none to delete, no ids to carry, and nothing
+// that can get out of step - the screen holds the month it is editing and sends it back. The previous shape wrote one
+// row per claimed day and deleted one per day un-claimed, which is both more writes and more ways to be wrong.
+//
+// The owner is in the document id, so the rules prove who may write it without reading anything else.
+export const saveAvailabilityMonth = async ({ userId, month, claims = {} }) => {
+  const id = availabilityMonthId(userId, month);
+  await setDoc(doc(firestore(), 'availability_months', id), {
+    user_id: String(userId),
+    month: String(month),
+    claims,
   });
-  // An id, or a row that carries one: a delete takes IDs, and the screens hold rows. Both are accepted deliberately -
-  // the writer is called directly by tests and by the officer's path, and forcing one shape on both callers would be a
-  // convention nobody remembers.
-  const removeId = (row) => String((row && typeof row === 'object' ? row.id : row) || '').trim();
-  removes.forEach((row) => {
-    const id = removeId(row);
-    if (id) batch.delete(doc(db, 'availability', id));
-  });
-
-  await batch.commit();
-  return { added: adds.length, removed: removes.filter((row) => removeId(row)).length };
+  const claimed = Object.values(claims).reduce(
+    (total, days) => total + (Array.isArray(days) ? days.length : 0),
+    0
+  );
+  return { id, month, claimed };
 };
 
 // OFFERS: a member raises one, withdraws their own, and an officer approves one - and the approval is the write that
@@ -214,21 +205,30 @@ export const saveScheduleBoard = async ({ entries = [], deleteIds = [] }) => {
 // render one tab. The app's audits are Cloud Logging lines now (`audit` in functions/index.js), so there is nothing to
 // write here for - the callable, `saveDocumentWithAudit`, remains in the functions for a station that wants its
 // administrative saves to go through the server, and its audit lines go to the same place as everything else's.
+// The fields a save may carry, minus the envelope. `id` goes with the envelope: it is the DOCUMENT KEY, which the caller
+// passes separately, and a stored copy of it is a second place for the truth to live - one that is empty on every create,
+// and that would win over the real key when the row is read back (see rowsOf in firestorePayload.js).
 const withoutEnvelope = (body = {}) => {
-  const { action, token, row_version, ...fields } = body;
+  const { action, token, row_version, id, ...fields } = body;
   void action;
   void token;
   void row_version;
+  void id;
   return fields;
 };
 
-export const saveDocument = async ({ collection, id, body, extra = {} }) => {
+// One document, saved. `collection` arrives as a NAME - the routing decides which collection an action writes - and it is
+// bound here as `collectionName` rather than `collection`, which is not cosmetic: the SDK's `collection()` is an import,
+// and a local binding of the same name SHADOWS it. The auto-id line below used to call that shadowed value, so every
+// CREATE through this helper - New window, New shift, New role, New checklist item - failed with "collection is not a
+// function" while editing an existing row, which passes an id and never touches that branch, worked fine.
+export const saveDocument = async ({ collection: collectionName, id, body, extra = {} }) => {
   // An empty id means CREATE, exactly as it did on the sheet - and Firestore mints the id the sheet's generated
   // column used to. It has to be this way round: the caller awaits the reply and puts the new id in its table.
-  const target = String(id || '').trim() || doc(collection(firestore(), collection)).id;
+  const target = String(id || '').trim() || doc(collection(firestore(), collectionName)).id;
   const document = { ...withoutEnvelope(body), ...extra };
 
-  await setDoc(doc(firestore(), collection, target), document, { merge: true });
+  await setDoc(doc(firestore(), collectionName, target), document, { merge: true });
   return { id: target };
 };
 
@@ -794,9 +794,12 @@ export const deleteTimeclockEntry = async ({ id }) => {
   return removed ? { success: true, message: 'Entry deleted.' } : { success: false, message: 'Entry not found.' };
 };
 
-export const deleteDocument = async ({ collection, id }) => {
+// A document, gone. Bound the same way and for the same reason as saveDocument above: `collection` is a name the routing
+// chose, and it must not shadow the SDK's `collection()` - the day somebody adds an auto-id lookup here, that shadowing
+// would be a runtime error rather than a lint warning.
+export const deleteDocument = async ({ collection: collectionName, id }) => {
   const target = String(id || '');
-  await deleteDoc(doc(firestore(), collection, target));
+  await deleteDoc(doc(firestore(), collectionName, target));
   return { id: target };
 };
 

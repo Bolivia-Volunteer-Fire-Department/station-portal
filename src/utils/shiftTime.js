@@ -6,7 +6,7 @@
 // helpers live here rather than inside a single component - the calendar and the
 // pending-approvals table previously drifted apart on exactly this.
 
-import { toTimeInputValue } from './timeInputValue';
+import { toTimeInputValue } from './timeInputValue.js';
 
 // Time window stored on the schedule row itself.
 export const rowTimeText = (row) => {

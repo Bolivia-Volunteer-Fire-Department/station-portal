@@ -31,6 +31,7 @@ const PERMISSION_FLAGS = [
   'can_approve_shifts',
   'can_create_events',
   'can_edit_assignments',
+  'can_edit_availability_windows',
   'can_edit_member_availability',
   'can_edit_notification_settings',
   'can_edit_own_availability',
@@ -243,14 +244,14 @@ export const seed = async () => {
     is_open: true,
   });
 
-  // --- an availability row each, so "not the other member's" has something to fail on ---
-  await put('availability/av1', { user_id: 'u1', schedule_template_id: 't1', date_from: '2026-03-06', date_to: '2026-03-06' });
-  await put('availability/av2', { user_id: 'u2', schedule_template_id: 't1', date_from: '2026-03-07', date_to: '2026-03-07' });
-
-  // --- availability windows, and claims made against them ---
-  // The model the Member Availability module is moving to (utils/availability.js): a station-wide list of recurring
-  // weekly patterns, and one claim per member per window per day. The template-based rows above stay until that
-  // switchover lands, which is why both shapes are seeded.
+  // --- availability: one document per member per month ---
+  // The store the Member Availability module uses (utils/availability.js): a map of window id -> the days that member
+  // claimed, one document per member per MONTH. The id carries the owner (`u2_2026-09`), which is what lets the rules
+  // prove who may read a document without reading anything else, and the `month` field is what lets an officer ask for
+  // one month across the whole crew - ~30 documents where a row per claim cost ~240.
+  //
+  // The claims here are the shape the APP writes (SET_MY_AVAILABILITY sends exactly this), so the harnesses below test
+  // what production will hold rather than a fixture-only shape.
   //
   // The four windows are the four cases the derivation has to get right: a night window that crosses midnight and
   // belongs to its START day, an ordinary day window, a RETIRED configuration (ended, kept so old claims still read),
@@ -289,11 +290,24 @@ export const seed = async () => {
     effective_date: '2027-01-01',
     end_date: '',
   });
-  // Two members on the same window and day, which is what the roster view is for, and one claim against a retired
-  // window - kept, because that is the whole point of retiring rather than deleting.
-  await put('availability/avw1', { user_id: 'u2', availability_window_id: 'aw1', date_from: '2026-09-01' });
-  await put('availability/avw2', { user_id: 'u1', availability_window_id: 'aw1', date_from: '2026-09-01' });
-  await put('availability/avw3', { user_id: 'u2', availability_window_id: 'aw3', date_from: '2024-06-03' });
+  // Two members on the same window and day, which is what the roster view is for, and one claim against a RETIRED window
+  // - in its own month document, because the month is the unit: `u2_2024-06` is what a claim for 2024 looks like, and it
+  // is also the fixture that proves the sign-in payload leaves old months out (verify-firestore-reads).
+  await put('availability_months/u2_2026-09', {
+    user_id: 'u2',
+    month: '2026-09',
+    claims: { aw1: ['2026-09-01'] },
+  });
+  await put('availability_months/u1_2026-09', {
+    user_id: 'u1',
+    month: '2026-09',
+    claims: { aw1: ['2026-09-01'] },
+  });
+  await put('availability_months/u2_2024-06', {
+    user_id: 'u2',
+    month: '2024-06',
+    claims: { aw3: ['2024-06-03'] },
+  });
 
   // --- u1 on duty: the open clock entry, and the on_duty document the same transaction writes ---
   await put('timeclock/c1', { user_id: 'u1', time_in: '2026-03-02 07:55', time_out: '', is_manual: false });

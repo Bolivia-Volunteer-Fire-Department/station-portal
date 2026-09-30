@@ -13,6 +13,7 @@
  *   - and owning a row does not mean being able to change the field that matters. A member owns their offer; they
  *     still cannot approve it.
  */
+import { readFileSync } from 'node:fs';
 import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -32,7 +33,7 @@ import {
   clockIn,
   clockOut,
   makeOffer,
-  saveAvailability,
+  saveAvailabilityMonth,
   saveScheduleBoard,
   withdrawOffer,
 } from '../src/services/firestoreWrites.js';
@@ -125,6 +126,49 @@ const main = async () => {
   // The assertion that matters most is that NOTHING was written. A refusal that still leaves a shift open behind it is worse
   // than the queued write it was avoiding - and the last two checks are the other half of the rule: the guard covers the
   // clock and NOTHING else, because a station with patchy coverage must keep accepting the writes that queue safely.
+  console.log('\n--- the write layer never shadows a helper it calls ---');
+  // THE BUG THIS EXISTS FOR WAS LIVE, and it is the reason "New window" did not save: `saveDocument({ collection, id, body })`
+  // bound the SDK's `collection()` to a local of the same name, then called it to mint an id when the caller had none. So
+  // every CREATE through that helper - New window, New shift, New role, New checklist item - died with "collection is not a
+  // function", while editing an existing row (which passes an id, and never reaches that branch) worked perfectly.
+  //
+  // Neither the build nor the linter can see it: shadowing an import is valid JavaScript. And no harness had ever created a
+  // document through this helper, so the first thing to try was an officer pressing Add window.
+  //
+  // The rule is mechanical, so it is checked mechanically: an SDK name that is BOTH bound by a shorthand destructure and
+  // CALLED in the same file is an import that cannot be reached - the call is a TypeError. Binding it under a different
+  // name (`{ collection: collectionName }`) is the fix, and is exactly what this allows.
+  const writesSource = readFileSync('src/services/firestoreWrites.js', 'utf8');
+  // The source with the three things that are NOT code removed: whole import STATEMENTS (an import list is a
+  // `{ collection, doc, ... }` that matches every name by construction, and this file's runs over several lines), block
+  // comments, and whole-line comments - because the comments above quote the broken line verbatim, and a detector that
+  // fires on its own documentation is worse than none.
+  const code = writesSource
+    .replace(/^\s*import[\s\S]*?from\s*'[^']*';?/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  const shadowsSdkName = (source, name) =>
+    new RegExp(`[{,]\\s*${name}\\s*[,}]`).test(source) && new RegExp(`(?<![.\\w])${name}\\(`).test(source);
+  const sdkNames = [...writesSource.matchAll(/import\s*\{([^}]*)\}\s*from\s*'firebase\/firestore'/g)]
+    .flatMap((match) => match[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop()))
+    .filter(Boolean);
+  check('the write layer imports the SDK this checks against', sdkNames.includes('collection') && sdkNames.includes('doc'), true);
+  check(
+    'no SDK helper is shadowed by a binding of its own name',
+    sdkNames.filter((name) => shadowsSdkName(code, name)),
+    []
+  );
+  // And the check bites: the line as it was written is caught, so a reintroduction fails here rather than in front of an
+  // officer who cannot save their first shift.
+  check(
+    'and it catches the binding it was written for',
+    shadowsSdkName(
+      'const { collection, id } = body;\nconst target = doc(collection(firestore(), collection)).id;',
+      'collection'
+    ),
+    true
+  );
+
   console.log('\n--- offline: clocking in refuses rather than queues ---');
   setOffline(true);
   await refused('the writer refuses', 'offline', () => clockIn({ userId: 'u2' }));
@@ -134,7 +178,9 @@ const main = async () => {
   check('no shift was opened behind the refusal', (await getDoc(doc(db, 'on_duty', 'u2'))).exists(), false);
   const openEntries = await getDocs(query(collection(db, 'timeclock'), where('user_id', '==', 'u2'), where('time_out', '==', '')));
   check('and no entry was left open either', openEntries.docs.length, 0);
-  const otherWrite = await routeWrite('SET_MY_AVAILABILITY', { adds: [], removes: [] });
+  // A REAL month, because the write is now "here is the month" and an empty payload is refused - which is the guard doing
+  // its job (a missing month would otherwise write an empty document over a month the member had marked).
+  const otherWrite = await routeWrite('SET_MY_AVAILABILITY', { month: '2026-10', claims: { aw1: ['2026-10-06'] } });
   checkIs('while a write that queues safely still goes through', otherWrite.success === true, JSON.stringify(otherWrite));
   setOffline(false);
   const backOnline = await routeWrite('CLOCK_IN', { gps_lat: '', gps_lon: '', is_manual: false });
@@ -143,38 +189,78 @@ const main = async () => {
   if (backOnline.id) await clockOut({ userId: 'u2', entryId: backOnline.id });
 
   console.log('\n--- availability ---');
-  await saveAvailability({
+  // ONE WRITE REPLACES THE MONTH: the screen sends the month it was editing and the marks it now holds, and the document
+  // is overwritten wholesale (utils/availability.js). So the cases worth asserting are that the whole month is one
+  // document, and that a save REPLACES rather than merges - a merge would leave an un-marked day behind, which is the bug
+  // this shape makes structurally impossible.
+  const saved = await saveAvailabilityMonth({
     userId: 'u2',
-    adds: [
-      { schedule_template_id: 't1', date_from: '2026-03-20', date_to: '2026-03-20' },
-      { schedule_template_id: 't1', date_from: '2026-03-21', date_to: '2026-03-21' },
-    ],
+    month: '2026-09',
+    claims: { aw1: ['2026-09-01', '2026-09-08'], aw2: ['2026-09-05'] },
   });
-  const mine = await rowsOf(query(collection(db, 'availability'), where('user_id', '==', 'u2')));
-  // Five rows, not two: the seed already gave u2 one template-keyed row for 2026-03-07, and - because the module is
-  // moving onto availability windows - two window-keyed claims as well. Both shapes live in the same collection while
-  // that switchover lands, and this assertion is about the WRITES, so it lists everything the member holds.
-  check('both slots were written alongside the one the seed left', mine.map((row) => row.date_from).sort(), [
-    '2024-06-03',
-    '2026-03-07',
-    '2026-03-20',
-    '2026-03-21',
-    '2026-09-01',
-  ]);
-  const removal = mine.find((row) => row.date_from === '2026-03-20');
-  await saveAvailability({ userId: 'u2', removes: [removal.id] });
-  const afterRemoval = await rowsOf(query(collection(db, 'availability'), where('user_id', '==', 'u2')));
-  check('and one was removed in the same batch', afterRemoval.map((row) => row.date_from).sort(), [
-    '2024-06-03',
-    '2026-03-07',
-    '2026-03-21',
-    '2026-09-01',
-  ]);
+  check('the month is written as one document', saved.id, 'u2_2026-09');
+  check('and the write reports what it holds', saved.claimed, 3);
+  const monthDoc = (await getDoc(doc(db, 'availability_months', 'u2_2026-09'))).data();
+  check('carrying the owner and the month', [monthDoc.user_id, monthDoc.month], ['u2', '2026-09']);
+  check('and the claims map the screen sent', monthDoc.claims, {
+    aw1: ['2026-09-01', '2026-09-08'],
+    aw2: ['2026-09-05'],
+  });
+  // THE REPLACEMENT CASE, and the reason it is here: two days simply are not in the map any more. Nothing was deleted by
+  // id, because there are no row ids left to delete - so this is the assertion that un-marking actually un-marks.
+  await saveAvailabilityMonth({ userId: 'u2', month: '2026-09', claims: { aw1: ['2026-09-01'] } });
+  const replaced = (await getDoc(doc(db, 'availability_months', 'u2_2026-09'))).data();
+  check('a save replaces the month rather than merging into it', replaced.claims, { aw1: ['2026-09-01'] });
   await refused(
-    'an availability row cannot be written for somebody else',
+    'an availability month cannot be written for somebody else',
     'permission-denied',
-    () => saveAvailability({ userId: 'u1', adds: [{ schedule_template_id: 't1', date_from: '2026-04-01' }] })
+    () => saveAvailabilityMonth({ userId: 'u1', month: '2026-09', claims: { aw1: ['2026-09-15'] } })
   );
+
+  // --- the windows those claims are made against -------------------------------------------------
+  // Windows are edited here too, and they have their OWN permission: shaping the station's week is a different job from
+  // correcting one member's claims, so the rules ask for `can_edit_availability_windows` rather than sharing the
+  // availability permission as they used to. The seed has two roles - an administrator and a firefighter - so this is the
+  // case that proves which of them may, which is the whole reason the split was worth making.
+  const sundayWindow = {
+    // NO ID: this is the "New window" path, and it is the one that matters. The id is empty, so the write has to MINT one
+    // - and that is the branch that was broken, because the helper called the SDK's `collection()` through a parameter
+    // that shadowed it ("collection is not a function"). Passing an id here, as this case first did, skips that branch
+    // entirely and lets the bug through, so the empty id is deliberate and load-bearing.
+    id: '',
+    nickname: 'Sunday day',
+    start_time: '08:00',
+    end_time: '18:00',
+    is_sunday: true,
+    effective_date: '2026-01-01',
+    end_date: '',
+  };
+  await signIn('bo');
+  const windowAttempt = await routeWrite('ADMIN_SAVE_AVAILABILITY_WINDOW', sundayWindow);
+  checkIs(
+    'a member without the windows permission cannot save one',
+    windowAttempt && windowAttempt.success === false,
+    JSON.stringify(windowAttempt).slice(0, 160)
+  );
+  await signIn('jane');
+  const created = await routeWrite('ADMIN_SAVE_AVAILABILITY_WINDOW', sundayWindow);
+  checkIs('but an officer with it can', created.success === true, JSON.stringify(created).slice(0, 160));
+  checkIs(
+    'and the id the server minted comes back to the caller',
+    typeof created.id === 'string' && created.id.length > 0,
+    JSON.stringify(created.id)
+  );
+  const savedWindow = (await getDoc(doc(firestore(), 'availability_windows', created.id))).data();
+  check('and the window is on the list every member reads', savedWindow?.nickname, 'Sunday day');
+  check('with its days intact', savedWindow?.is_sunday, true);
+  // AND THE LIST MUST HAND THE ID BACK. A save body carries `id` - empty when it is creating - and anything that reads that
+  // field back over the document key leaves the row with no identity at all: Edit would save a SECOND window and Delete
+  // would do nothing. So the assertion is that the id the server minted is the id the officer's own list shows.
+  const listed = await routeRead('ADMIN_GET_AVAILABILITY_WINDOWS');
+  const listedWindow = (listed.availabilityWindows || []).find((row) => row.nickname === 'Sunday day');
+  check('and the officer list hands back the id the server minted', listedWindow?.id, created.id);
+  // Put the session back where this section found it, so the offers below are raised by the member they are about.
+  await signIn('bo');
 
   // --- offers: raise one, and the hole that is not there ---
   console.log('\n--- offers ---');
@@ -565,37 +651,35 @@ const main = async () => {
   await refused('an unsigned caller cannot ask whose device a token is', 'functions/unauthenticated', () => pushDeviceOwner({ token: 'token-of-bo' }));
 
   // The officer's availability edit: the SAME write as a member's own, for the member the form names. The permission is
-  // the rules' - an officer with can_edit_member_availability may write another member's rows, and a member may not - so
+  // the rules' - an officer with can_edit_member_availability may write another member's months, and a member may not - so
   // these assert the rules rather than the dispatcher, which deliberately does not repeat the check. This is the
   // assumption the dispatcher was written on, and it is worth proving.
   await signIn('jane');
   await routeWrite('ADMIN_SET_AVAILABILITY', {
     user_id: 'u2',
-    adds: [{ schedule_template_id: 't1', date_from: '2026-04-01', date_to: '2026-04-01' }],
-    removes: [],
+    month: '2026-04',
+    claims: { aw1: ['2026-04-07'] },
   });
-  const forBo = await rowsOf(query(collection(firestore(), 'availability'), where('user_id', '==', 'u2')));
-  checkIs('an officer adds availability for another member', forBo.some((row) => row.date_from === '2026-04-01'));
+  const forBo = (await getDoc(doc(firestore(), 'availability_months', 'u2_2026-04'))).data();
+  checkIs('an officer writes another member\u2019s month', forBo?.claims?.aw1?.[0] === '2026-04-07');
 
   await signIn('bo');
   const boAttempt = await routeWrite('ADMIN_SET_AVAILABILITY', {
     user_id: 'u1',
-    adds: [{ schedule_template_id: 't1', date_from: '2026-04-02', date_to: '2026-04-02' }],
-    removes: [],
+    month: '2026-04',
+    claims: { aw1: ['2026-04-14'] },
   });
   checkIs(
     'but a member cannot write somebody else\u2019s',
     boAttempt && boAttempt.success === false,
     JSON.stringify(boAttempt).slice(0, 140)
   );
-  // Asked as an OFFICER, which is the only way it can be asked: a member cannot even list another member's availability
-  // (the read rule needs `user_id == uid()` or the permission), which is why this query came back permission-denied when
-  // it was run as bo - the rules refusing the read of somebody else's rows, exactly as they refused the write.
+  // Asked as an OFFICER, which is the only way it can be asked: a member cannot even READ another member's month (the
+  // read rule wants the owner in the document id or the permission), which is why this read came back permission-denied
+  // when it was run as bo - the rules refusing the document, exactly as they refused the write.
   await signIn('jane');
-  const forJane = await rowsOf(
-    query(collection(firestore(), 'availability'), where('user_id', '==', 'u1'))
-  );
-  check('and no row is left behind by the refused batch', forJane.filter((row) => row.date_from === '2026-04-02').length, 0);
+  const boMonth = (await getDoc(doc(firestore(), 'availability_months', 'u1_2026-04'))).data();
+  check('and no month is left behind by the refused write', boMonth, undefined);
 
   // --- signing and verifying: the everyday half of documents ---------------------------------------------------------
   //

@@ -483,20 +483,27 @@ const DISPATCH = {
     return ok({ id: open.id });
   },
 
+  // ONE MONTH, ONE WRITE: the month the screen was editing, and the marks it now holds (utils/availability.js). There is
+  // no add/remove vocabulary any more - the document IS the month - and no ids travel, because nothing is deleted
+  // individually: a day that has been un-marked is simply not in the map that gets written.
   SET_MY_AVAILABILITY: async (body, uid) => {
-    const { saveAvailability } = await writes();
-    return ok(await saveAvailability({ userId: uid, adds: body.adds || [], removes: body.removes || [] }));
+    const { saveAvailabilityMonth } = await writes();
+    const month = String(body.month || '').trim();
+    if (!month) return fail('A month is needed to save availability.', 'REFUSED');
+    return ok(await saveAvailabilityMonth({ userId: uid, month, claims: body.claims || {} }));
   },
 
-  // The officer's half of the same write: the same rows, for the member the form names. The rules decide whether this
-  // caller may - `can_edit_member_availability` - so the permission is not repeated here where it could drift.
+  // The officer's half of the same write: one member's month, named by the form. The rules decide whether this caller
+  // may - `can_edit_member_availability` - so the permission is not repeated here where it could drift.
   ADMIN_SET_AVAILABILITY: async (body) => {
     const target = String(body.user_id || '').trim();
-    // Refused rather than written with an empty owner: a batch of availability rows with no user_id is invisible to
-    // every member AND to the officer who just saved it, which is the worst kind of "saved successfully".
+    // Refused rather than written with an empty owner: a month document with no user_id is invisible to every member AND
+    // to the officer who just saved it, which is the worst kind of "saved successfully".
     if (!target) throw new Error('Which member is this availability for?');
-    const { saveAvailability } = await writes();
-    return ok(await saveAvailability({ userId: target, adds: body.adds || [], removes: body.removes || [] }));
+    const month = String(body.month || '').trim();
+    if (!month) return fail('A month is needed to save availability.', 'REFUSED');
+    const { saveAvailabilityMonth } = await writes();
+    return ok(await saveAvailabilityMonth({ userId: target, month, claims: body.claims || {} }));
   },
 
   // A device registering itself. The callable is the door - see registerPushDevice in functions/index.js - and `ok()`

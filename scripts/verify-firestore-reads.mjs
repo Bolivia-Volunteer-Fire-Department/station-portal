@@ -123,13 +123,15 @@ const main = async () => {
   // current screens read, and the window-keyed rows the new derivation reads. What the check is really about is the
   // SECOND half - the officer's own rows (av1, avw2) are absent.
   //
-  // `avw3` is not here, and that is the other half of the same point: it is a claim for 2024, and the payload reads
-  // claims over a window (two years around today) rather than all of them - so the row is left out because of its DATE,
-  // not because of who owns it.
+  // The row id is `window|day` (utils/availability.js), because the store is a month per member: a row is derived, not
+  // stored, so it has no database id to carry. `aw1|2024-06-03` is not here, and that is the other half of the same
+  // point: it lives in the member's 2024-06 month document, and the payload carries a NARROW band of months around today
+  // (a quarter, not two years - see availabilityScope in services/firestorePayload.js) - so the row is absent because of
+  // its MONTH, not because of who owns it.
   check(
-    'their own availability and nobody else, over the window the payload reads',
+    'their own availability and nobody else, over the months the payload reads',
     asMember.availability.map((row) => row.id).sort(),
-    ['av2', 'avw1']
+    ['aw1|2026-09-01']
   );
   // THE CLOCK HISTORY IS DELIBERATELY NOT IN THE PAYLOAD, and this is the assertion that keeps it out. It is the one
   // per-member table that grows without limit - a five-year member has thousands of entries - and it was only read at sign-in

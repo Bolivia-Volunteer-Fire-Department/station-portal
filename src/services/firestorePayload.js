@@ -11,20 +11,26 @@
 //   - The per-member tables are narrowed by the rule as well as by the query. A member cannot read another member's
 //     availability or clock history even if this module asked for it - which is the guarantee the sheet version
 //     enforced on the server, now enforced by the database.
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, documentId, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from './firebase.js';
 // The app's time parser, shared rather than re-implemented (see templateMinutes below). It has no imports of its own,
 // which is what lets this module - loaded by plain Node in the harnesses - use it.
 import { toTimeInputValue } from '../utils/timeInputValue.js';
-// Date keys, for the "what is in force" bound on announcements (activeAudienceRows below).
+// Date keys, for the "what is in force" bound on announcements (activeAudienceRows below), and the availability helpers
+// the month documents are read and flattened with.
 import { toDateKey } from '../utils/scheduleDate.js';
+import { availabilityMonthId, claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js';
 // The window a load carries for `schedule`. Pure and dependency-free, so this module stays loadable by the Node
 // harnesses - see the note in that file.
 import { scheduleWindowFor } from '../utils/scheduleWindow.js';
 
 // Shared with firestoreReads.js, which serves the refresh reads: one implementation of each query, so a read moved
 // to Firestore cannot answer differently depending on which action asked for it.
-export const rowsOf = async (target) => (await getDocs(target)).docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+// Documents, as the app's rows. THE DOCUMENT ID WINS OVER ANY FIELD CALLED `id`, which is why the spread comes first: a
+// save body carries the form's `id` - empty when the form is creating - so a stored copy of that field would shadow the
+// real key. That is not hypothetical: a freshly created row came back with an EMPTY id, so pressing Edit saved a second
+// copy of it and Delete did nothing at all. Nothing else about the row is special-cased.
+export const rowsOf = async (target) => (await getDocs(target)).docs.map((entry) => ({ ...entry.data(), id: entry.id }));
 
 export const rowsFor = (name, field, value) => rowsOf(query(collection(firestore(), name), where(field, '==', value)));
 
@@ -52,18 +58,20 @@ export const audienceKeysFor = ({ userId, roleId, rankId }) => [
 export const audienceRows = (name, keys) =>
   rowsOf(query(collection(firestore(), name), where('audience_keys', 'array-contains-any', keys)));
 
-// A member's availability claims, over a window of dates. A claim is one row per window per day, so a year of claiming
-// every Tuesday is ~52 rows for that window alone - the shape the clock history had, and the same answer: the screens
-// ask for the months they can show, and loading another range grows what is held rather than replacing it (App.jsx).
-export const availabilityForMember = (uid, window) =>
-  rowsOf(
-    query(
-      collection(firestore(), 'availability'),
-      where('user_id', '==', uid),
-      where('date_from', '>=', String(window?.from || '0000-01-01')),
-      where('date_from', '<=', String(window?.to || '9999-12-31'))
-    )
+// A MEMBER'S AVAILABILITY FOR A SET OF MONTHS, flattened to rows.
+//
+// One document per month rather than one per claimed day (utils/availability.js) - and because the month keys are the
+// document ids, this is a get-by-id list rather than a query, so it costs one read per month and no index. The screens
+// keep working in rows: the month shape is flattened HERE, at the edge, so nothing downstream has two shapes to reason
+// about.
+export const memberAvailabilityFor = async (uid, months) => {
+  const ids = (Array.isArray(months) ? months : []).map((month) => availabilityMonthId(uid, month));
+  if (!ids.length) return [];
+  const docs = await rowsOf(
+    query(collection(firestore(), 'availability_months'), where(documentId(), 'in', ids))
   );
+  return claimRowsFromMonths(docs);
+};
 
 // SHIFT OFFERS: THE TWO STATUSES A CALENDAR CAN DRAW FROM, and only those.
 //
@@ -411,13 +419,12 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
   const station = stationRows || (await readStationRows(db, scheduleWindow));
   const { roles, ranks, shifts, users, assignments, templates, schedule } = station;
 
-  // CLAIMS RIDE A WIDER WINDOW THAN THE SCHEDULE. A member browsing back through last year should still see what they
-  // had marked, and the grid's job is to show them the month in front of them - so the payload carries two years around
-  // today. One claim per window per day is still a small read at that width, and the scope is REPORTED back
-  // (`availability_window`) so a grid outside it can ask for the month rather than assume nobody marked anything.
+  // CLAIMS COME IN MONTHS, and the range is narrow on purpose: a member's grid shows one month at a time and asks for
+  // another if they navigate to it (the Load <month> button in the calendar), so carrying a quarter here costs three
+  // reads instead of one per month of history. See memberAvailabilityFor.
   const availabilityScope = {
-    from: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 12, new Date().getDate())),
-    to: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 12, new Date().getDate())),
+    from: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)),
+    to: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0)),
   };
 
   // The member's own rows, plus the two audience-filtered collections.
@@ -438,10 +445,10 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
   ] = await Promise.all([
     getDoc(doc(db, 'settings', 'public')),
     getDoc(doc(db, 'user_settings', account.userId)),
-    // The member's own availability claims, over the schedule window, and the WINDOWS they are made against. The
+    // The member's own claims, for the months this sign-in carries, and the WINDOWS they are made against. The
     // windows are the options list - short, officer-maintained, and read whole (retired ones included, because a claim
     // points at one and the history should read) - which is what replaced templates, assignments and ranks here.
-    availabilityForMember(account.userId, availabilityScope),
+    memberAvailabilityFor(account.userId, monthKeysBetween(availabilityScope.from, availabilityScope.to)),
     rowsOf(collection(firestore(), 'availability_windows')),
     // NO CLOCK HISTORY HERE, deliberately. It is the one per-member table that grows without limit (a five-year member has
     // thousands of entries), and it used to be read at every sign-in so that the DASHBOARD could answer "am I clocked in" -
