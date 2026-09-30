@@ -283,12 +283,9 @@ service cloud.firestore {
       allow write: if signedIn() && (memberId == uid() || permission('can_edit_timeclock'));
     }
 
-    // The audit trail. Officers read it; NOBODY writes it from a client, because an audit row a browser can forge
-    // is not an audit row. Functions write it with the Admin SDK, which bypasses this file.
-    match /system_log/{entryId} {
-      allow read: if permission('can_view_system_log');
-      allow write: if false;
-    }
+    // The audit trail is NOT here any more, and there is no permission to hold for it: the app's audit lines go to
+    // Cloud Logging (see `audit` in functions/index.js), which is free to write, searchable in the Firebase console, and
+    // does not need a collection that grows without limit and a whole-collection scan to render one screen.
 
     // ---------------------------------------------------------------------------------------------
     // The member payload's remaining collections

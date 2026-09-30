@@ -19,6 +19,8 @@ import {
   fetchInitialData,
   fetchBootstrap,
   adminFetchBootstrap,
+  fetchAdminSections,
+  fetchScheduleWindow,
   fetchTimeclockLogs,
   fetchTraining,
   fetchOnDutyUsers,
@@ -33,6 +35,10 @@ import {
   fetchMyPushDevices
 } from './services/api';
 import { signInAlongside, signOutAlongside } from './services/firebaseAuth.js';
+import { firebaseConfigured } from './services/firebase';
+// The four small collections where a listener is cheaper than re-reading. See the module: the rule for which
+// collections qualify is written there rather than implied by the list.
+import { subscribeLive } from './services/liveReads';
 
 import LoginScreen from './components/LoginScreen';
 import ReauthModal from './components/ReauthModal';
@@ -72,7 +78,9 @@ import DigitalClock from './components/DigitalClock';
 import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
 import { mergeSavedUser } from './utils/userRow';
-import { mergeSavedRow } from './utils/savedRow';
+import { mergeSavedRow, mergeRowsById } from './utils/savedRow';
+// The trustworthy-clock rule, for the clock card: it must not offer a button it cannot honour, and it must say why.
+import { OFFLINE_CLOCK_MESSAGE, isOffline } from './utils/connectivity';
 import { createWaveReporter, nextWaveId } from './utils/activity';
 import {
   IDLE_RESET_EVENTS,
@@ -121,6 +129,10 @@ export default function App() {
   const [ranks, setRanks] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [schedule, setSchedule] = useState([]);
+  // WHAT THE `schedule` ARRAY HOLDS: the window the last payload carried - last month, this month and next. A screen that
+  // navigates outside it asks for the month it needs, which is why this travels with the rows rather than being worked
+  // out again: without it a screen cannot tell "this month is empty" from "I have not asked for this month".
+  const [scheduleWindow, setScheduleWindow] = useState({ from: '', to: '' });
   const [availability, setAvailability] = useState([]);
   // Training: the activities, and the signatures this member may see (their own, unless the
   // role can administer trainings - the server decides which).
@@ -172,6 +184,21 @@ export default function App() {
   // than in the clock card so both refusal paths can raise it: the client-side geofence check and
   // the backend's own OUT_OF_RANGE refusal.
   const [clockNotice, setClockNotice] = useState(null);
+  // Whether this device has a network, for the clock card - which must not offer a button it cannot honour.
+  //
+  // AN EVENT LISTENER, NOT A POLL, and not a value read once at render: the browser already knows, and a member who walks
+  // back into signal should see the buttons return without reloading the page. `isOffline` treats an absent
+  // `navigator.onLine` as online, so a harness or an old browser gets the working card rather than a disabled one.
+  const [offline, setOffline] = useState(() => isOffline());
+  useEffect(() => {
+    const update = () => setOffline(isOffline());
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -635,6 +662,98 @@ const getLoadingMessage = () => {
     }
   };
 
+  // WHERE A SECTION LANDS WHEN IT COMES BACK ON ITS OWN: the same setters the full payload uses, so a scoped refresh and
+  // a sign-in cannot put one collection in two different places.
+  const ADMIN_SECTION_SETTERS = {
+    users: setUsers,
+    roles: setRoles,
+    ranks: setRanks,
+    shifts: setShifts,
+    schedule: setSchedule,
+    scheduleTemplates: setScheduleTemplates,
+    assignments: setAssignments,
+    scheduleOffers: setAdminOffers,
+    certificationRecords: setCertificationRecords,
+    certificationSetup: setCertificationSetup,
+    trainings: setTrainings,
+  };
+
+  // AFTER A SAVE, re-read only what that save could have changed.
+  //
+  // Every admin save used to reload the whole payload - eighteen collections, including every shift the station has ever
+  // scheduled, and the roster twice - because the sheet-era wave had to reconcile everything at once. Firestore needs no
+  // such thing: the write went where the writer said it did, the tab has already merged its own row (`onRowSaved`), and
+  // the only open question is the OTHER screens that read the same collection.
+  //
+  // NO NAMES MEANS THE WHOLE PAYLOAD, which is what makes this safe to adopt one tab at a time: a save that has not been
+  // scoped yet is slow rather than wrong. A scoped refresh that FAILS falls back to the payload for the same reason -
+  // being wrong is worse than being expensive.
+  const refreshAdminCollections = async (names, token = authToken) => {
+    const wanted = (Array.isArray(names) ? names : [names])
+      .filter(Boolean)
+      .filter((name) => ADMIN_SECTION_SETTERS[name]);
+    if (!wanted.length) return refreshAdminData(token);
+
+    try {
+      const data = await fetchAdminSections(wanted);
+      wanted.forEach((name) => ADMIN_SECTION_SETTERS[name](data[name]));
+      // A scoped refresh REPLACES the schedule array, so the window has to be recorded with it: the array no longer holds
+      // the months a navigation fetched, and saying otherwise would leave a screen showing an empty month it believes it
+      // has. The board asks again for any month it needs.
+      if (data && data.schedule_window) setScheduleWindow(data.schedule_window);
+      return REFRESH_OK;
+    } catch (err) {
+      console.error(`[refresh] could not re-read ${wanted.join(', ')}, so the whole payload is being read instead`, err);
+      return refreshAdminData(token);
+    }
+  };
+
+  // A WINDOW of the schedule the sign-in did not carry, for a screen that navigated to it: a month further back or
+  // further forward than last/this/next, which is all the payload reads (see utils/scheduleWindow).
+  //
+  // MERGED, never replaced: the window that arrived at sign-in is still valid, and a range that lands later must not drop
+  // rows an earlier one brought - the calendar draws whatever it holds, and the board diffs a month of it.
+  const loadScheduleWindow = async (from, to) => {
+    const data = await fetchScheduleWindow(from, to, authToken);
+    const rows = data && Array.isArray(data.schedule) ? data.schedule : [];
+    if (rows.length) setSchedule((prev) => mergeRowsById(prev, rows));
+    // The window grows to cover what was just read, so the same month is never asked for twice.
+    if (data && data.schedule_window) {
+      setScheduleWindow((prev) => ({
+        from: prev.from && prev.from < data.schedule_window.from ? prev.from : data.schedule_window.from,
+        to: prev.to && prev.to > data.schedule_window.to ? prev.to : data.schedule_window.to,
+      }));
+    }
+    return rows;
+  };
+
+  // LIVE READS (services/liveReads.js): the four small collections where a listener is cheaper than re-reading - a listener
+  // bills per CHANGE, and while one is attached a repeated read of the same query is answered from the local cache.
+  //
+  // KEYED ON THE UID, NOT THE TOKEN, and that detail is what decides whether this costs anything: an ID token refreshes
+  // hourly, and re-attaching on each one would pay a fresh initial snapshot for no new data at all. Firestore
+  // re-authenticates its own streams when the token changes, so this effect has no business watching it.
+  //
+  // Each handler REPLACES its list rather than merging: a snapshot is the whole answer to its query, which is exactly what
+  // these setters already store - the payload hands them the same shape.
+  useEffect(() => {
+    const userId = currentUser?.id ? String(currentUser.id) : '';
+    if (!userId || !firebaseConfigured()) return undefined;
+    const stop = subscribeLive({
+      userId,
+      handlers: {
+        onDuty: setOnDutyUsers,
+        announcements: setAnnouncements,
+        events: (rows) => setEvents(normalizeEventList(rows)),
+        systemSettings: setSystemSettings,
+      },
+      // A listener that fails must not throw into a render: it is logged, the last data stays on screen, and the next
+      // sign-in or refresh reads the collection the way it always did. Nothing here is load-bearing.
+      onError: (error) => console.warn('[live] a live read could not be kept open:', error && error.message),
+    });
+    return stop;
+  }, [currentUser?.id]);
+
   // When auth token changes, refresh all admin-scoped data if we're an admin
   useEffect(() => {
     if (!isAdmin || !authToken) return;
@@ -660,6 +779,8 @@ const getLoadingMessage = () => {
     // Only present for a role that may manage certifications - see adminBootstrapPayload.
     if (data.certificationRecords) setCertificationRecords(data.certificationRecords);
     if (data.schedule) setSchedule(data.schedule);
+    // The window those rows came in, which every screen that draws a month depends on. Load-bearing, not bookkeeping.
+    if (data.schedule_window) setScheduleWindow(data.schedule_window);
     if (data.availability) setAvailability(data.availability);
     if (data.roster) setRoster(data.roster);
     if (data.offers) setOffers(data.offers);
@@ -1090,6 +1211,18 @@ const getLoadingMessage = () => {
     // Clear any refusal left over from a previous attempt, so a second press does not show a stale
     // modal while this one is in flight.
     setClockNotice(null);
+
+    // BEFORE THE GPS PROMPT, not after. A permission dialog is a poor first answer to a request that cannot work, and this
+    // is the documented behaviour rather than a nicety: clocking in and out requires connectivity and says so when it is
+    // missing (docs/FIRESTORE_MODEL.md, "Offline"). The writers refuse too - that is what protects the record itself; this
+    // is what stops the member from being asked for their location first and told second.
+    if (isOffline()) {
+      setStatusMessage({ type: 'error', text: OFFLINE_CLOCK_MESSAGE });
+      toast.error(OFFLINE_CLOCK_MESSAGE);
+      setGlobalLoading({ active: false, message: '' });
+      return;
+    }
+
     setGlobalLoading({ active: true, message: getLoadingMessage() });
 
     try {
@@ -1439,11 +1572,11 @@ const getLoadingMessage = () => {
             <div ref={pageHeadingRef} className="mb-8 md:shrink-0">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
-                {activeTab === 'clock-history' && 'My Clock History'}
-                {activeTab === 'schedule' && 'My Schedule'}
-                {activeTab === 'availability' && 'My Availability'}
+                {activeTab === 'clock-history' && 'Clock History'}
+                {activeTab === 'schedule' && 'Schedule'}
+                {activeTab === 'availability' && 'Availability'}
                 {activeTab === 'training' && 'Training'}
-                {activeTab === 'certifications' && 'My Certifications'}
+                {activeTab === 'certifications' && 'Certifications'}
                 {activeTab === 'help' && 'Help'}
                 {activeTab === 'settings' && 'User Settings'}
                 {activeTab === 'admin' && 'Administration'}
@@ -1488,6 +1621,7 @@ const getLoadingMessage = () => {
                   <ClockCard
                     isClockedIn={isClockedIn}
                     loading={globalLoading.active}
+                    offline={offline}
                     onClockAction={handleClockAction}
                   />
                 )}
@@ -1505,6 +1639,8 @@ const getLoadingMessage = () => {
               <ScheduleCalendar
                 currentUser={currentUser}
                 schedule={schedule}
+                scheduleWindow={scheduleWindow}
+                onNeedSchedule={loadScheduleWindow}
                 assignments={assignments}
                 scheduleTemplates={scheduleTemplates}
                 ranks={ranks}
@@ -1608,6 +1744,8 @@ const getLoadingMessage = () => {
                 ranks={ranks}
                 shifts={shifts}
                 schedule={schedule}
+                scheduleWindow={scheduleWindow}
+                onNeedSchedule={loadScheduleWindow}
                 scheduleTemplates={scheduleTemplates}
                 assignments={assignments}
                 availability={availability}
@@ -1615,20 +1753,20 @@ const getLoadingMessage = () => {
                 logs={logs}
                 timeFormat={activeTimeFormat}
                 token={authToken}
-                // One callback for every admin save: refreshAdminData reloads all the
-                // caches the tabs read (roles, ranks, shifts, settings, users, templates,
-                // assignments, offers, the schedule rows and the roster), so a tab cannot
-                // refresh "its half" and leave another screen stale.
-                onDataChanged={refreshAdminData}
+                // One callback for every admin save, SCOPED: `onDataChanged('ranks')` re-reads the ranks and nothing
+                // else, because the tab has already merged its own row and the write went where the writer said it did.
+                // Called with no names it still reloads the whole payload, so a tab that has not been scoped yet is
+                // slow rather than wrong.
+                onDataChanged={refreshAdminCollections}
                 onAvailabilityChanged={refreshAvailability}
                 onLogsChanged={refreshLogs}
-                onAdminDataChanged={refreshAdminData}
+                onAdminDataChanged={refreshAdminCollections}
                 // Non-shift entries, for the board and the availability grid this module hosts.
                 events={events}
                 offers={adminOffers}
-                // The offers table is part of the sign-in payload now, so a change to it reloads the same batch
-                // every other admin save does - one request, and no second way for the table to be fetched.
-                onOffersChanged={refreshAdminData}
+                // Resolving an offer fills the shift, so this one save touches two collections: the offers table and
+                // the schedule row it just filled.
+                onOffersChanged={() => refreshAdminCollections(['scheduleOffers', 'schedule'])}
                 trainings={trainings}
                 trainingSignatures={trainingSignatures}
                 // Lets any admin tab show a saved row immediately instead of waiting for the

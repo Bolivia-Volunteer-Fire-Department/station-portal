@@ -96,6 +96,10 @@ export default function AdminDocumentsTab({
   // the queue at the bottom. A role may have either, or both.
   canManageDocuments = false,
   canVerifyDocuments = false,
+  // NOT CALLED, deliberately, and kept in the signature so the panel's prop list stays uniform: every save in this tab
+  // already reloads the list it changed (`refresh()` / `loadSignatures`), and DOCUMENTS ARE NOT IN THE SIGN-IN PAYLOAD AT
+  // ALL - so asking for it re-read eighteen collections, including every shift ever scheduled, to update a screen that
+  // reads none of them. See verify-read-budget.
   onDataChanged,
 }) {
   const [rows, setRows] = useState([]);
@@ -339,7 +343,6 @@ export default function AdminDocumentsTab({
       if (!result?.success) throw new Error(result?.message || 'Could not remove the signature.');
       toast.success(wasVerification ? 'Verification removed.' : 'Signature removed.');
       await loadSignatures(form.id);
-      onDataChanged?.();
     } catch (err) {
       toast.error(err?.message || 'Could not remove the signature.');
     } finally {
@@ -430,7 +433,6 @@ export default function AdminDocumentsTab({
       }
 
       await refresh();
-      onDataChanged?.();
     } catch (err) {
       setError(err?.message || 'Could not save the document.');
     } finally {
@@ -569,7 +571,6 @@ export default function AdminDocumentsTab({
       toast.success('Document deleted.');
       if (form.id === target.id) setForm(EMPTY_DOCUMENT_FORM);
       await refresh();
-      onDataChanged?.();
     } catch (err) {
       // The refusal for a SIGNED document arrives here, and it is the useful case: it names the signature count
       // and says to unpublish instead.
@@ -596,7 +597,6 @@ export default function AdminDocumentsTab({
       setRenaming({ from: '', to: '' });
       setForm((current) => (current.folder === from ? { ...current, folder: to } : current));
       await refresh();
-      onDataChanged?.();
     } catch (err) {
       toast.error(err?.message || 'Could not rename the folder.');
     }

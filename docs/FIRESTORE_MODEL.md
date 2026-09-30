@@ -266,6 +266,50 @@ config and VAPID key become build-time `VITE_FIREBASE_*` values in `.env` (alrea
 App Check that protect the project, not the key. That also removes today's round trip through
 `system_settings` to hand the browser its config.
 
+## What is personal data here, and what protects it
+
+Names and usernames are the first thing anybody asks about, so it is worth writing down why they are **not** encrypted — and
+in particular why encrypting them in the browser would be theatre rather than protection.
+
+**The roster is member-readable by design.** An id, a name and a rank, read by every signed-in member: the schedule labels
+other people's shifts with it, and the directory an officer edits is the private half. So the set of people who must be able
+to read a name includes everyone who can read it at all — which means a shared key is not a secret, and a key each member
+holds alone leaves the calendar unable to draw anybody's name. That is the whole argument: browser-side encryption either
+uses a key nobody is excluded from knowing, or it breaks the feature it was meant to protect.
+
+**It would also break what the app does with names** — projecting them into a roster, labelling shifts, sorting and labelling
+exports, and putting them in push copy. Firestore cannot index or order ciphertext, and deterministic encryption (so you can
+at least match on it) leaks equality, which is most of what a name lookup is.
+
+**And it does not address the realistic threat.** The app's own server paths need these fields where they use them — an audit
+line names the member it acted on, push copy names them — so the key has to live somewhere the server can reach, and anyone
+holding both the database and the deployment has the key as well. The one model where browser crypto genuinely wins is
+zero-knowledge, where the member's own password derives the key and the server never sees plaintext: that is a different
+product, with no shared roster, no officer directory and no password reset.
+
+### What is worth doing instead, in order of leverage
+
+1. **The rules**, which are the real access control and already unusually tight: an officer's `users` save is `hasOnly` on
+   five fields, `users_private` is `write: if false` (callables only) and readable by the member or an officer, and clock
+   entries are readable by their owner or `can_edit_timeclock`. `npm run verify:rules` is the drift check.
+2. **App Check, whose client side is now wired and whose console side is not.** The gap it closes is real: without it, the
+   public web config can be driven from a script as if it were a signed-in client. `initializeAppCheck` runs whenever a site
+   key is configured (see `src/services/firebase.js`), and what remains is console work with an order that matters —
+   **`docs/FIREBASE_SETUP.md`, step 7**, which also spells out the quota arithmetic that decides whether this is affordable
+   before enforcement goes on.
+3. **Minimisation, before encryption.** The app already did this once — `calc_address` was dropped because the radius check
+   made a street address "extra data to keep in step for no decision it changed". The same question now applies to the GPS
+   COORDINATES the clock stores: the fence check is what decides whether a clock-in is allowed, so what the record needs is
+   *that it was inside*, not six decimal places of where the member stood. Keeping them makes every shift a location record;
+   a boolean makes it a fact about the shift. That is a policy choice for the station, and it is the privacy lever that
+   actually moves something.
+4. **Encryption with a server-held key**, for a field that is both genuinely sensitive and read by very few — an officer-only
+   free-text note, say. That protects against someone reading the database WITHOUT going through the app (a backup, the
+   console, a leaked admin credential), which is exactly the scenario the browser-side version fails to cover. Nothing in
+   the store needs it today; `admin_note` on assignments and templates is the closest, and it is officer-only by rule.
+5. **The audit trail**, for accountability rather than confidentiality — which for a volunteer station's records is usually
+   the control that matters more. `audit()` writes to Cloud Logging, and an officer reads it on demand (see `readSystemLog`).
+
 ## The client seam
 
 `src/services/api.js` keeps its exported functions — 87 of them, 84 naming a server action — and
@@ -293,12 +337,65 @@ holds hashed passwords rather than plaintext, those accounts arrive with tempora
 reset flow already in `functions/index.js`. The dispatch is per FEATURE and not per action, deliberately - a write
 and the read that shows it move together, or the write is invisible.
 
-## Offline
+## Live reads
+
+Four collections are watched rather than re-read: `on_duty`, `settings/public`, and the member's own audience of
+`announcements` and `events` (see `src/services/liveReads.js`). A one-shot read bills every document it returns on every
+mount, whether or not anything changed; a listener bills the CHANGED documents after its first snapshot, so the mounts after
+the first pay nothing at all. On a screen opened as often as the dashboard, that is paying per change instead of paying per
+look.
+
+One thing a listener does NOT do here, and it is worth writing down because the opposite is widely repeated: it does not make
+a one-shot read of the same query cheaper. `scripts/verify-firestore-reads.mjs` attaches a listener and then runs a `getDocs`
+of the same collection, and prints what the SDK says — `fromCache=false`, a server read. So a watched query has not made the
+sign-in payload cheaper; what a listener saves is the repeat mount, and only that.
+
+What qualifies is a RULE rather than a list, and it is worth stating because the temptation is to listen to everything:
+
+1. **Small.** A listener's first snapshot is a read of everything it matches, paid on every attach — so `schedule`, which
+   holds every shift the station has ever scheduled, stays windowed and one-shot.
+2. **The rules must prove the query.** Firestore refuses a listener whose query it cannot prove is allowed. The audience
+   collections are read with `array-contains-any` on `audience_keys`, which is the same query — so if the read works, the
+   listener works, and no new index or rule is needed for one.
+3. **Not the member's own edits.** `user_settings` and `push_devices` are written by the member on the screen that reads
+   them, through a save that already applies its own row locally; a listener there would race the optimistic update to say
+   the same thing. They stay one-shot.
+4. **Worth keeping live.** If nobody benefits from the connection, the subscription should go — a listener nobody answers is
+   a socket held open for nothing.
+
+Two things the implementation has to get right, because both fail silently:
+
+- **Attach on the MEMBER, not on the token.** The effect is keyed on the user id. An ID token refreshes hourly, and
+  re-attaching on each one would pay a fresh initial snapshot — a read of every matched document — for no new data.
+  Firestore re-authenticates its own streams when the token changes.
+- **Tear down on the one call, and obey a teardown that arrives early.** The audience listeners can only attach after the
+  member's own keys are read, so `subscribeLive` returns one teardown and honours a cancel that lands before those listeners
+  exist; otherwise a screen that unmounted during that read leaves a listener running behind it.
+
 
 Reads work with no signal: the schedule, the roster and a member's own history all come from cache,
 which is a real win for a station with dead spots. Writes queue, and a queued write carries the
 *device's* clock rather than the server's — so **clock in/out and shift approvals require
 connectivity** and say so when they are offline. Everything else may queue safely.
+
+Three details of that, because they are decisions rather than defaults:
+
+- **The cache is persistent and multi-tab** (`persistentLocalCache` with the multiple-tab manager — see
+  `src/services/firebase.js`). Two tabs of this portal open at once is normal, and the single-tab cache
+  takes the database away from whichever tab opens second. The emulator harnesses get the in-memory
+  cache instead, because the persistent one is IndexedDB and Node has none: an unconditional one would
+  stop every harness from starting.
+- **A read is still a server read, watched or not.** The cache answers when there is no connection, and that is why turning
+  persistence on does not weaken the rule the rest of the app is built on — a read after a write sees the write, because both
+  are online. It is sometimes said that an attached **listener** makes a one-shot read of the same query cache-served; in this
+  SDK it does not, and `verify:firestore-reads` prints the SDK's own answer on every run (`fromCache=false`, a server read).
+  So a listener saves the repeat mount and nothing else.
+- **The refusal is enforced in the WRITER, not the screen** — `clockIn`/`clockOut` throw `offline`, which
+  the routing turns into a sentence (`utils/connectivity.js`). A guard in the screen would protect the
+  screen only; this one covers every path into those two functions. The clock card additionally disables
+  its buttons and says why, so a member is not asked for their location by a request that cannot work.
+  Nothing else refuses anything: notes and availability edits queue exactly as they did, because a
+  station with patchy coverage must keep accepting the writes that are safe to delay.
 
 ## What disappears
 
@@ -364,7 +461,7 @@ port verifiable at all: the UI cannot silently change underneath it.
    member, one filled shift, one open shift, one member on duty. It writes over the emulator's REST API with the
    owner token, which is how it can seed what no client may write.
 4. This document agreed, with the open-shift shape decided (two queries, above).
-5. Guardrails: budget alerts and App Check, still to do in the Firebase console. A reads-per-screen budget is
+5. Guardrails: budget alerts, and App Check's console side (the client is wired — FIREBASE_SETUP step 7). A reads-per-screen budget is
    written down here rather than in code: a member's sign-in should read the roster, the settings, the roles, the
    schedule for its window, its own availability, its own clock history and the on-duty list.
 
@@ -528,4 +625,6 @@ payoff - and it is the one that needs the transaction and the materialized open-
   missing after go-live.
 - **Presence**, when chat arrives: Realtime Database's `onDisconnect` is the honest tool for online/offline and
   typing indicators, and it can live in this same project as a second database.
-- **App Check and budget alerts** are console work, not code, and neither is done yet.
+- **App Check and budget alerts** are console work, not code. The App Check *client* is wired now (`initializeAppCheck`,
+  behind a site key — FIREBASE_SETUP step 7); what is not done is the console: create the key, watch the metrics, then
+  enforce, and set the token TTL before enforcing because the assessment quota fails closed.

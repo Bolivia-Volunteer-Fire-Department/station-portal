@@ -4,6 +4,8 @@ import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
 import { isReadAction } from '../utils/readCoalescing';
 import { routeRead, routeWrite, routingBlocker } from './firestoreRouting.js';
+// The payload's section readers, so the refresh after a save reads the same shapes a sign-in does.
+import { readAdminSections } from './firestorePayload.js';
 import {
   changeOwnPassword,
   createMember,
@@ -89,7 +91,15 @@ const notAnswered = async (action) => {
   return error;
 };
 
-function appScriptFetch(body) {
+// WHAT THE REQUESTS GO TO: one of two routed dispatchers, and nothing else. Reads go to the reader dispatcher
+// (firestoreReads.js, through firestoreRouting.js), writes to the writer dispatcher, and an action that neither answers is
+// an ERROR rather than a silent no-op - `notAnswered` logs the action and says what is missing.
+//
+// IT USED TO BE CALLED `appScriptFetch`, and the rename is the point rather than tidiness: the sheet is gone from this path
+// entirely (there is no fallback behind it any more - see the note above about what was removed), so a name that said "fetch
+// this from Apps Script" described a backend that no longer exists. `routeRead` and `routeWrite` are what it dispatches to,
+// and now its name says so.
+function dispatchRequest(body) {
   const action = body?.action ?? '';
 
   // Reads answer from firestoreReads.js, one slice at a time.
@@ -109,7 +119,7 @@ function appScriptFetch(body) {
 }
 
 export const fetchInitialData = async () =>
-  appScriptFetch({ action: 'GET_INITIAL_DATA' }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'GET_INITIAL_DATA' });
 
 // The whole member sign-in in ONE request: schedule, availability, roster, offers, training, announcements,
 // events, clock history and who is on duty.
@@ -141,6 +151,15 @@ export const adminFetchBootstrap = async () => {
   return payload;
 };
 
+// ONE OR TWO SECTIONS OF THAT PAYLOAD, for the refresh after a save.
+//
+// A save knows what it changed (`onDataChanged('ranks')`), so re-reading the whole payload for it is waste: the payload
+// is eighteen collections, one of which is every shift the station has ever scheduled. This reads just the named
+// sections, through the same readers the payload itself uses - so a scoped refresh cannot answer with a different shape
+// than a sign-in. An unknown name throws rather than quietly refreshing nothing, because a screen that failed to update
+// looks exactly like a scoped refresh that did not run.
+export const fetchAdminSections = (names) => readAdminSections(names);
+
 export const loginUser = async (username, password) => {
   // FIREBASE, AND ONLY FIREBASE.
   //
@@ -162,20 +181,16 @@ export const loginUser = async (username, password) => {
 };
 
 export const fetchTimeclockLogs = async (token) =>
-  appScriptFetch({ action: 'GET_TIMECLOCK_LOGS', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'GET_TIMECLOCK_LOGS', token });
 
 export const fetchOnDutyUsers = async (token) =>
-  appScriptFetch({ action: 'GET_ON_DUTY', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'GET_ON_DUTY', token });
 
-export const fetchUserSchedule = async (token) =>
-  appScriptFetch({ action: 'GET_SCHEDULE', token }, { retryOnNetworkError: true });
-
-// Minimal member-visible roster (id/name/rank_id) used to label other members'
-// shifts on the schedule calendar. Degrades gracefully: a backend deployment
-// that predates GET_ROSTER simply returns no roster and the calendar falls back
-// to member ids.
-export const fetchRoster = async (token) =>
-  appScriptFetch({ action: 'GET_ROSTER', token }, { retryOnNetworkError: true });
+// A WINDOW of the schedule, for a screen that navigated outside the one the sign-in carried. Both ends are 'YYYY-MM-DD'
+// keys, and the reader answers with the rows inside them plus the window it applied - so the caller can keep track of what
+// it holds rather than assuming this delivered everything.
+export const fetchScheduleWindow = async (from, to, token) =>
+  dispatchRequest({ action: 'GET_SCHEDULE', token, from, to });
 
 export const submitClockAction = async (action, userId, coords = {}, token) => {
   const request = {
@@ -189,7 +204,7 @@ export const submitClockAction = async (action, userId, coords = {}, token) => {
   // The station boundary is checked in the browser before this is ever called (utils/clockLocation.js), which is
   // why the Firestore path never answers OUT_OF_RANGE_CODE: it cannot be reached from a routed clock action. The
   // server-side half of that check stays on Apps Script with the rest of Code.gs, by decision.
-  return (await routeWrite(action, request)) || appScriptFetch(request);
+  return (await routeWrite(action, request)) || dispatchRequest(request);
 };
 
 // Push devices. Registration is per DEVICE (see the Push devices section of Code.gs): a member's
@@ -199,7 +214,7 @@ export const submitClockAction = async (action, userId, coords = {}, token) => {
 // and the refusal names them. `options.transfer` is the one way to insist - it is set by the settings
 // card's "use this computer for me" button, and by nothing else.
 export const registerPushDevice = async (deviceToken, deviceLabel, token, options) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'REGISTER_PUSH_DEVICE',
     token, // the session
     // The device token travels as `device_token`, because `token` is the session in the envelope.
@@ -209,14 +224,14 @@ export const registerPushDevice = async (deviceToken, deviceLabel, token, option
   });
 
 export const unregisterPushDevice = async (deviceToken, token) =>
-  appScriptFetch({ action: 'UNREGISTER_PUSH_DEVICE', token, device_token: String(deviceToken || '') });
+  dispatchRequest({ action: 'UNREGISTER_PUSH_DEVICE', token, device_token: String(deviceToken || '') });
 
 // The member's own devices, plus whose device this browser is when its token is passed in. The second
 // half has to come from the server: the local subscription only says a device is enabled, never whose
 // alerts it is set up to receive - and assuming it was the signed-in member's is what let a shared
 // computer be taken over by simply signing in on it.
 export const fetchMyPushDevices = async (token, deviceToken) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'MY_PUSH_DEVICES',
     token,
     device_token: String(deviceToken || ''),
@@ -226,11 +241,11 @@ export const fetchMyPushDevices = async (token, deviceToken) =>
 
 // The member's own records, the catalog they are named and iconed from, and whichever are expiring. The
 // bootstrap carries all three at sign-in; this is for a re-read without signing in again.
-export const fetchCertifications = async (token) => appScriptFetch({ action: 'GET_CERTIFICATIONS', token });
+export const fetchCertifications = async (token) => dispatchRequest({ action: 'GET_CERTIFICATIONS', token });
 
 // The catalog: what the station tracks, how each one is shown, and what should happen when it runs out.
 export const adminSaveCertificationSetup = async (certification, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_CERTIFICATION_SETUP',
     token,
     id: String(certification.id || ''),
@@ -247,12 +262,12 @@ export const adminSaveCertificationSetup = async (certification, token) =>
   });
 
 export const adminDeleteCertificationSetup = async (id, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_CERTIFICATION_SETUP', token, id: String(id || '') });
+  dispatchRequest({ action: 'ADMIN_DELETE_CERTIFICATION_SETUP', token, id: String(id || '') });
 
 // One member's record of one certification, for one period. Renewing saves a NEW row rather than editing the
 // last, which is what keeps the history.
 export const adminSaveCertification = async (certification, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_CERTIFICATION',
     token,
     id: String(certification.id || ''),
@@ -265,7 +280,7 @@ export const adminSaveCertification = async (certification, token) =>
   });
 
 export const adminDeleteCertification = async (id, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_CERTIFICATION', token, id: String(id || '') });
+  dispatchRequest({ action: 'ADMIN_DELETE_CERTIFICATION', token, id: String(id || '') });
 
 // The member's own settings row: time format, theme, and which notifications they want.
 //
@@ -277,7 +292,7 @@ export const adminDeleteCertification = async (id, token) =>
 // send must not arrive as `false`, because "not stated" means "inherit the station default" - and writing false is how a
 // member ends up silently unsubscribed by a form that never asked about it.
 export const saveUserSettings = async (updatedSettings, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'UPDATE_USER_SETTINGS',
     token,
     payload: {
@@ -389,12 +404,12 @@ export const adminSaveUser = async (userData) => {
 };
 
 export const adminDeleteUser = async (userId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_USER', token, id: userId });
+  dispatchRequest({ action: 'ADMIN_DELETE_USER', token, id: userId });
 
 // --- Admin: Roles ---
 
 export const adminSaveRole = async (roleData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_ROLE',
     token,
     id: roleData.id || '',
@@ -408,12 +423,12 @@ export const adminSaveRole = async (roleData, token) =>
   });
 
 export const adminDeleteRole = async (roleId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_ROLE', token, id: roleId });
+  dispatchRequest({ action: 'ADMIN_DELETE_ROLE', token, id: roleId });
 
 // --- Admin: Ranks ---
 
 export const adminSaveRank = async (rankData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_RANK',
     token,
     id: rankData.id || '',
@@ -424,12 +439,12 @@ export const adminSaveRank = async (rankData, token) =>
   });
 
 export const adminDeleteRank = async (rankId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_RANK', token, id: rankId });
+  dispatchRequest({ action: 'ADMIN_DELETE_RANK', token, id: rankId });
 
 // --- Admin: Shifts ---
 
 export const adminSaveShift = async (shiftData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_SHIFT',
     token,
     id: shiftData.id || '',
@@ -447,11 +462,11 @@ export const adminSaveShift = async (shiftData, token) =>
   });
 
 export const adminDeleteShift = async (shiftId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_SHIFT', token, id: shiftId });
+  dispatchRequest({ action: 'ADMIN_DELETE_SHIFT', token, id: shiftId });
 // --- Admin: Schedule Templates ---
 
 export const adminSaveScheduleTemplate = async (templateData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_SCHEDULE_TEMPLATE',
     token,
     id: templateData.id || '',
@@ -474,7 +489,7 @@ export const adminSaveScheduleTemplate = async (templateData, token) =>
   });
 
 export const adminDeleteScheduleTemplate = async (templateId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_SCHEDULE_TEMPLATE', token, id: templateId });
+  dispatchRequest({ action: 'ADMIN_DELETE_SCHEDULE_TEMPLATE', token, id: templateId });
 
 // The Firefighter Runner sound prefix for a member. It is an administrator-managed attribute on
 // the users sheet, so it is saved with the rest of the row by adminSaveUser above - the backend
@@ -486,12 +501,12 @@ export const adminDeleteScheduleTemplate = async (templateId, token) =>
 // filtered server-side by role: a member receives only their own, and the full set travels
 // only to someone who can administer trainings.
 export const fetchTraining = async (token) =>
-  appScriptFetch({ action: 'GET_TRAINING', token });
+  dispatchRequest({ action: 'GET_TRAINING', token });
 
 // Signs a batch of trainings in one request. Add-only on purpose - the backend refuses any
 // removal, because a signature is an acknowledgment of attendance rather than a preference.
 export const signTraining = async (trainingIds, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'SIGN_TRAINING',
     token,
     payload: { training_ids: trainingIds.map((id) => String(id)) },
@@ -500,7 +515,7 @@ export const signTraining = async (trainingIds, token) =>
 // Adding and editing training details, for a role with can_edit_trainings. No deletion - that
 // is adminBulkSaveTraining's job, and the backend refuses a delete here.
 export const saveTraining = async ({ trainings = [] }, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'SAVE_TRAINING',
     token,
     payload: { trainings },
@@ -509,7 +524,7 @@ export const saveTraining = async ({ trainings = [] }, token) =>
 // The admin Training report: saves training definitions (blank id = new row) and deletes the
 // ones named in deleteIds, in a single request.
 export const adminBulkSaveTraining = async ({ trainings = [], deleteIds = [] }, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_BULK_SAVE_TRAINING',
     token,
     payload: {
@@ -520,7 +535,7 @@ export const adminBulkSaveTraining = async ({ trainings = [], deleteIds = [] }, 
 
 // Removes one signature. The only path that can, and it needs can_administer_trainings.
 export const adminRemoveTrainingSignature = async (signatureId, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_REMOVE_TRAINING_SIGNATURE',
     token,
     signature_id: String(signatureId),
@@ -533,13 +548,13 @@ export const adminRemoveTrainingSignature = async (signatureId, token) =>
 // GET_INITIAL_DATA instead, since there is no session yet at that point.
 
 export const fetchMyAnnouncements = async (token) =>
-  appScriptFetch({ action: 'MY_ANNOUNCEMENTS', token });
+  dispatchRequest({ action: 'MY_ANNOUNCEMENTS', token });
 
 export const adminFetchAnnouncements = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_ANNOUNCEMENTS', token });
+  dispatchRequest({ action: 'ADMIN_GET_ANNOUNCEMENTS', token });
 
 export const adminSaveAnnouncement = async (announcementData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_ANNOUNCEMENT',
     token,
     // A blank id creates; otherwise it updates in place. author_user_id is deliberately not sent:
@@ -563,7 +578,7 @@ export const adminSaveAnnouncement = async (announcementData, token) =>
   });
 
 export const adminDeleteAnnouncement = async (id, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_ANNOUNCEMENT', token, id });
+  dispatchRequest({ action: 'ADMIN_DELETE_ANNOUNCEMENT', token, id });
 
 // --- Documents -------------------------------------------------------------------
 //
@@ -572,16 +587,16 @@ export const adminDeleteAnnouncement = async (id, token) =>
 // ONLY - the body is fetched one document at a time - which is what keeps opening the module
 // cheap however large the library gets.
 
-export const fetchDocuments = async (token) => appScriptFetch({ action: 'GET_DOCUMENTS', token });
+export const fetchDocuments = async (token) => dispatchRequest({ action: 'GET_DOCUMENTS', token });
 
-export const fetchDocument = async (id, token) => appScriptFetch({ action: 'GET_DOCUMENT', token, id });
+export const fetchDocument = async (id, token) => dispatchRequest({ action: 'GET_DOCUMENT', token, id });
 
-export const adminFetchDocuments = async (token) => appScriptFetch({ action: 'ADMIN_GET_DOCUMENTS', token });
+export const adminFetchDocuments = async (token) => dispatchRequest({ action: 'ADMIN_GET_DOCUMENTS', token });
 
-export const adminFetchDocument = async (id, token) => appScriptFetch({ action: 'ADMIN_GET_DOCUMENT', token, id });
+export const adminFetchDocument = async (id, token) => dispatchRequest({ action: 'ADMIN_GET_DOCUMENT', token, id });
 
 export const adminSaveDocument = async (documentData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_DOCUMENT',
     token,
     // A blank id creates; otherwise it updates in place. author_user_id is deliberately not sent: the
@@ -600,13 +615,13 @@ export const adminSaveDocument = async (documentData, token) =>
   });
 
 export const adminDeleteDocument = async (id, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_DOCUMENT', token, id });
+  dispatchRequest({ action: 'ADMIN_DELETE_DOCUMENT', token, id });
 
 // Renames a folder by rewriting the column on the documents that carry the name. A blank `to` moves the
 // folder's documents back to unfiled, which is the only way to get rid of a folder - there is no folder
 // row to delete, because a folder is a name here rather than a record.
 export const adminRenameDocumentFolder = async (from, to, token) =>
-  appScriptFetch({ action: 'ADMIN_RENAME_DOCUMENT_FOLDER', token, from, to: to || '' });
+  dispatchRequest({ action: 'ADMIN_RENAME_DOCUMENT_FOLDER', token, from, to: to || '' });
 
 // Drag-and-drop ordering. The pairs are worked out by `reorderDocuments` / `reorderFolders` in
 // utils/documents - the rule belongs on the side that can be tested - and the server only checks that the rows
@@ -614,7 +629,7 @@ export const adminRenameDocumentFolder = async (from, to, token) =>
 // from being a save: no `row_version` moves, so an open editor does not get told somebody else changed the
 // document when all that happened is a row moving up.
 export const adminReorderDocuments = async (order, token) =>
-  appScriptFetch({ action: 'ADMIN_REORDER_DOCUMENTS', token, order });
+  dispatchRequest({ action: 'ADMIN_REORDER_DOCUMENTS', token, order });
 
 // --- Document signatures -----------------------------------------------------------
 //
@@ -622,7 +637,7 @@ export const adminReorderDocuments = async (order, token) =>
 // one, and removing a signature is an administrator's action. Note what is NOT sent by `signDocument`: the date,
 // who signed it and who it was for. All three are stamped from the session on the server.
 
-export const signDocument = async (id, token) => appScriptFetch({ action: 'SIGN_DOCUMENT', token, id });
+export const signDocument = async (id, token) => dispatchRequest({ action: 'SIGN_DOCUMENT', token, id });
 
 // The signature report for one document: administrators who manage documents, and the officers who verify
 // checklists. Named for what it returns rather than for who calls it - a verifier is not an administrator.
@@ -630,13 +645,13 @@ export const signDocument = async (id, token) => appScriptFetch({ action: 'SIGN_
 // rules, applied by the server to the NAMED member's rank rather than the caller's. Gated on
 // can_verify_documents, which is the permission that means "I read other people's paperwork to confirm it".
 export const fetchMemberDocumentRecords = async (userId, token) =>
-  appScriptFetch({ action: 'GET_MEMBER_DOCUMENT_RECORDS', token, user_id: userId });
+  dispatchRequest({ action: 'GET_MEMBER_DOCUMENT_RECORDS', token, user_id: userId });
 
 export const fetchDocumentSignatures = async (id, token) =>
-  appScriptFetch({ action: 'GET_DOCUMENT_SIGNATURES', token, id });
+  dispatchRequest({ action: 'GET_DOCUMENT_SIGNATURES', token, id });
 
 export const adminRemoveDocumentSignature = async (signatureId, token) =>
-  appScriptFetch({ action: 'ADMIN_REMOVE_DOCUMENT_SIGNATURE', token, id: signatureId });
+  dispatchRequest({ action: 'ADMIN_REMOVE_DOCUMENT_SIGNATURE', token, id: signatureId });
 
 // --- Checklist items ---------------------------------------------------------------
 //
@@ -650,7 +665,7 @@ export const adminRemoveDocumentSignature = async (signatureId, token) =>
 // seconds per call, with no way to tell which of them had landed.
 
 export const signChecklistItems = async (documentId, itemIds, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'SIGN_CHECKLIST_ITEM',
     token,
     document_id: documentId,
@@ -660,7 +675,7 @@ export const signChecklistItems = async (documentId, itemIds, token) =>
   });
 
 export const verifyChecklistItem = async (documentId, itemId, userId, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'VERIFY_CHECKLIST_ITEM',
     token,
     document_id: documentId,
@@ -669,7 +684,7 @@ export const verifyChecklistItem = async (documentId, itemId, userId, token) =>
   });
 
 export const verifyChecklistRemaining = async (documentId, userId, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'VERIFY_CHECKLIST_REMAINING',
     token,
     document_id: documentId,
@@ -677,7 +692,7 @@ export const verifyChecklistRemaining = async (documentId, userId, token) =>
   });
 
 export const adminSaveChecklistItem = async (item, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_CHECKLIST_ITEM',
     token,
     // A blank id creates; an id edits IN PLACE, which is what keeps the signatures pointing at it.
@@ -689,7 +704,7 @@ export const adminSaveChecklistItem = async (item, token) =>
   });
 
 export const adminDeleteChecklistItem = async (id, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_CHECKLIST_ITEM', token, id });
+  dispatchRequest({ action: 'ADMIN_DELETE_CHECKLIST_ITEM', token, id });
 
 // --- Events ---------------------------------------------------------------------
 //
@@ -708,12 +723,12 @@ const eventWeekdayFields = (eventData) => {
   return fields;
 };
 
-export const fetchEvents = async (token) => appScriptFetch({ action: 'GET_EVENTS', token });
+export const fetchEvents = async (token) => dispatchRequest({ action: 'GET_EVENTS', token });
 
-export const adminFetchEvents = async (token) => appScriptFetch({ action: 'ADMIN_GET_EVENTS', token });
+export const adminFetchEvents = async (token) => dispatchRequest({ action: 'ADMIN_GET_EVENTS', token });
 
 export const adminSaveEvent = async (eventData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_EVENT',
     token,
     // A blank id creates; otherwise it updates in place. author_user_id is deliberately not sent: the
@@ -738,10 +753,10 @@ export const adminSaveEvent = async (eventData, token) =>
   });
 
 export const adminDeleteEvent = async (id, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_EVENT', token, id });
+  dispatchRequest({ action: 'ADMIN_DELETE_EVENT', token, id });
 
 export const adminSaveAssignment = async (assignmentData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_ASSIGNMENT',
     token,
     id: assignmentData.id || '',
@@ -764,7 +779,7 @@ export const adminSaveAssignment = async (assignmentData, token) =>
   });
 
 export const adminDeleteAssignment = async (assignmentId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_ASSIGNMENT', token, id: assignmentId });
+  dispatchRequest({ action: 'ADMIN_DELETE_ASSIGNMENT', token, id: assignmentId });
 
 // Bulk-saves schedule entries in one request: `entries` are upserted by id
 // (blank id = new row) and `deleteIds` are removed. Used by the Schedule
@@ -774,7 +789,7 @@ export const adminDeleteAssignment = async (assignmentId, token) =>
 // is every build until the payload layer lands (see firestoreRouting.js).
 export const adminBulkSaveSchedule = async ({ entries = [], deleteIds = [] }, token) => {
   const request = { action: 'ADMIN_BULK_SAVE_SCHEDULE', token, entries, deleteIds };
-  return (await routeWrite('ADMIN_BULK_SAVE_SCHEDULE', request)) || appScriptFetch(request);
+  return (await routeWrite('ADMIN_BULK_SAVE_SCHEDULE', request)) || dispatchRequest(request);
 };
 
 // --- Shift offers (member request -> admin approval) ---
@@ -783,7 +798,7 @@ export const adminBulkSaveSchedule = async ({ entries = [], deleteIds = [] }, to
 // ('pending' | 'approved' | 'declined') and the `slot_key` the calendar matches
 // its open pills against.
 export const fetchMyShiftOffers = async (token) =>
-  appScriptFetch({ action: 'GET_SHIFT_OFFERS', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'GET_SHIFT_OFFERS', token });
 
 // Offers to fill an open shift. `schedule_id` links an offer made on an existing
 // unassigned row; template occurrences leave it blank.
@@ -797,36 +812,33 @@ export const submitShiftOffer = async ({ schedule_template_id, date_from, date_t
     assignment_id: assignment_id || '',
     schedule_id: schedule_id || '',
   };
-  return (await routeWrite('SUBMIT_SHIFT_OFFER', request)) || appScriptFetch(request);
+  return (await routeWrite('SUBMIT_SHIFT_OFFER', request)) || dispatchRequest(request);
 };
 
 // Admin: every offer, so the Schedule Management calendar can flag the slots
 // waiting on approval.
 export const adminFetchScheduleOffers = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_SCHEDULE_OFFERS', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'ADMIN_GET_SCHEDULE_OFFERS', token });
 
-// One page of the system log. The filter, sort and page travel with the request because the sheet is
-// never sent whole - see the System Log tab and systemLogPage in Code.gs.
-//
-// The body comes from systemLogRequest, which is where the RPC envelope and the query are composed.
-// Building it inline here is what broke this tab: `{ action: 'ADMIN_GET_SYSTEM_LOG', token, ...params }`
-// looks right, but the query carries an `action` key of its own (the log's action FILTER), and
-// spreading it afterwards replaced the action name with ''.
+// One page of the audit log, which is read ON DEMAND from Cloud Logging - see readSystemLog in functions/index.js. The
+// filter, the sort and the page token travel with the request, and the body is composed by systemLogRequest, which is
+// where the RPC envelope meets the query: the one place the action FILTER (`action_filter`) can be kept from shadowing
+// the action NAME.
 export const adminFetchSystemLog = async (params = {}, token) =>
-  appScriptFetch(systemLogRequest(params, token), { retryOnNetworkError: true });
+  dispatchRequest(systemLogRequest(params, token));
 
 // Admin: approve (fills the shift) or decline a single offer. Other pending
 // offers for the same shift are closed out on approval.
 export const adminResolveShiftOffer = async (offerId, decision, token) => {
   const request = { action: 'ADMIN_RESOLVE_SHIFT_OFFER', token, id: offerId, decision };
   // Only an approval is implemented on the Firestore side; a decline answers null and is sent as it always was.
-  return (await routeWrite('ADMIN_RESOLVE_SHIFT_OFFER', request)) || appScriptFetch(request);
+  return (await routeWrite('ADMIN_RESOLVE_SHIFT_OFFER', request)) || dispatchRequest(request);
 };
 
 // --- Availability ---
 
 export const fetchAvailability = async (token) =>
-  appScriptFetch({ action: 'GET_AVAILABILITY', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'GET_AVAILABILITY', token });
 
 // One availability slot in the shape the backend expects. `date_to` defaults to the start
 // date: a template occurrence is a single day.
@@ -848,12 +860,12 @@ export const setMyAvailability = async ({ adds = [], removes = [] } = {}, token)
     adds: adds.map(availabilitySlotFields),
     removes: removes.map(availabilitySlotFields),
   };
-  return (await routeWrite('SET_MY_AVAILABILITY', request)) || appScriptFetch(request);
+  return (await routeWrite('SET_MY_AVAILABILITY', request)) || dispatchRequest(request);
 };
 
 // Admin: the same batch, for another member.
 export const adminSetAvailability = async (userId, { adds = [], removes = [] } = {}, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SET_AVAILABILITY',
     token,
     user_id: userId,
@@ -864,7 +876,7 @@ export const adminSetAvailability = async (userId, { adds = [], removes = [] } =
 // --- Admin: System Settings ---
 
 export const adminSaveSystemSetting = async (key, value, token) =>
-  appScriptFetch({ action: 'ADMIN_SAVE_SYSTEM_SETTING', token, key, value });
+  dispatchRequest({ action: 'ADMIN_SAVE_SYSTEM_SETTING', token, key, value });
 
 // Saves many settings in ONE request, all-or-nothing.
 //
@@ -872,26 +884,26 @@ export const adminSaveSystemSetting = async (key, value, token) =>
 // requests - and a failure part-way left some saved and some not, which reads as the app lying about what it
 // stored. The backend validates every pair before writing any of them.
 export const adminSaveSystemSettings = async (settings, token) =>
-  appScriptFetch({ action: 'ADMIN_SAVE_SYSTEM_SETTINGS', token, settings });
+  dispatchRequest({ action: 'ADMIN_SAVE_SYSTEM_SETTINGS', token, settings });
 
 // True when the deployment serving us predates an action, which is how a page newer than its backend detects
 // that it has to fall back rather than fail. See the UNKNOWN_ACTION reply in Code.gs.
 export const isUnknownAction = (result) => !!result && result.code === 'UNKNOWN_ACTION';
 
 export const adminDeleteSystemSetting = async (key, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_SYSTEM_SETTING', token, key });
+  dispatchRequest({ action: 'ADMIN_DELETE_SYSTEM_SETTING', token, key });
 
 // --- Admin: Push notifications ---
 
 // Per-member push status: whether a device is registered and which
 // notification types that member has switched on (blank = station default).
 export const adminFetchPushStatus = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_PUSH_STATUS', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'ADMIN_GET_PUSH_STATUS', token });
 
 // Sends a one-off push to a single member so an admin can verify the FCM
 // setup end to end. Returns { success, message, detail }.
 export const adminSendTestPush = async (userId, token) =>
-  appScriptFetch({ action: 'ADMIN_SEND_TEST_PUSH', token, user_id: userId });
+  dispatchRequest({ action: 'ADMIN_SEND_TEST_PUSH', token, user_id: userId });
 
 // Turns a member's notifications off for every device they have, or lets them back in.
 //
@@ -900,7 +912,7 @@ export const adminSendTestPush = async (userId, token) =>
 // flag this would quietly undo itself. Lifting it only clears the flag: each device has to be enabled
 // again from the device itself, which is the only place its push subscription can be turned back on.
 export const adminSetPushDisabled = async (userId, disabled, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SET_PUSH_DISABLED',
     token,
     user_id: String(userId || ''),
@@ -910,12 +922,12 @@ export const adminSetPushDisabled = async (userId, disabled, token) =>
 // Which FCM credentials are present, as booleans - the service-account private
 // key is write-only and is never returned, not even to an authenticated admin.
 export const adminFetchFcmStatus = async (token) =>
-  appScriptFetch({ action: 'ADMIN_GET_FCM_STATUS', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'ADMIN_GET_FCM_STATUS', token });
 
 // --- Admin: Clock Management ---
 
 export const adminSaveTimeclockEntry = async (entryData, token) =>
-  appScriptFetch({
+  dispatchRequest({
     action: 'ADMIN_SAVE_TIMECLOCK_ENTRY',
     token,
     id: entryData.id || '',
@@ -925,15 +937,15 @@ export const adminSaveTimeclockEntry = async (entryData, token) =>
   });
 
 export const adminDeleteTimeclockEntry = async (entryId, token) =>
-  appScriptFetch({ action: 'ADMIN_DELETE_TIMECLOCK_ENTRY', token, id: entryId });
+  dispatchRequest({ action: 'ADMIN_DELETE_TIMECLOCK_ENTRY', token, id: entryId });
 
 // --- Firefighter Runner (easter egg) ---
 
 // The station leaderboard: personal bests above zero, highest first.
 export const fetchRunnerLeaderboard = async (token) =>
-  appScriptFetch({ action: 'GET_RUNNER_LEADERBOARD', token }, { retryOnNetworkError: true });
+  dispatchRequest({ action: 'GET_RUNNER_LEADERBOARD', token });
 
 // Records a finished run. The backend keeps the higher of the two scores, so this can be
 // called after every game without risking a personal best.
 export const saveRunnerScore = async (score, token) =>
-  appScriptFetch({ action: 'SAVE_RUNNER_SCORE', token, score });
+  dispatchRequest({ action: 'SAVE_RUNNER_SCORE', token, score });

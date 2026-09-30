@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from '../src/utils/refreshWave.js';
-import { createReadCoalescer, isReadAction, readKey } from '../src/utils/readCoalescing.js';
+import { isReadAction } from '../src/utils/readCoalescing.js';
 
 const root = process.cwd();
 const read = (rel) => fs.readFileSync(path.resolve(root, rel), 'utf8');
@@ -136,7 +136,10 @@ const SHARED_READS = [
   ['the member assignment projection', 'GET_SCHEDULE', 'memberAssignmentRows('],
   ['the member template projection', 'GET_SCHEDULE', 'memberScheduleTemplateRows('],
   ['availability, cut to the viewer', 'GET_AVAILABILITY', 'availabilityForViewer('],
-  ['the member roster', 'GET_ROSTER', 'rosterRowsFor('],
+// The roster is NOT in this list any more. `GET_ROSTER` was reachable code with no caller: the roster a screen draws comes
+// from the sign-in payload, where it is a projection of the `users` read the payload was making anyway. It was retired from
+// both backends together - the route, the reader, the api.js function, the Code.gs action and this row - because a route
+// check that is only satisfied on one side is exactly the drift this list exists to catch.
   ['who is on duty', 'GET_ON_DUTY', 'onDutyRowsFor('],
   ['the member\u2019s own offers', 'GET_SHIFT_OFFERS', 'offersForUser('],
   ['clock history, cut to the viewer', 'GET_TIMECLOCK_LOGS', 'clockLogsForViewer('],
@@ -205,11 +208,10 @@ console.log('\n--- App wires the callbacks the tabs call ---');
 const panelBlock = appSource.slice(appSource.indexOf('<AdminPanel'));
 const panelProps = panelBlock.slice(0, panelBlock.indexOf('/>'));
 for (const [prop, fn] of [
-  ['onDataChanged', 'refreshAdminData'],
-  ['onAdminDataChanged', 'refreshAdminData'],
-  // The offers table travels in the sign-in payload, so a change to it reloads the same batch every other admin
-  // save does - there is no second fetcher for it to drift from.
-  ['onOffersChanged', 'refreshAdminData'],
+  // The refresh after a save is SCOPED: the tab names the collection it changed, and App re-reads that one collection
+  // rather than the whole payload. See refreshAdminCollections in App.jsx and verify-read-budget.
+  ['onDataChanged', 'refreshAdminCollections'],
+  ['onAdminDataChanged', 'refreshAdminCollections'],
   ['onLogsChanged', 'refreshLogs'],
   ['onAvailabilityChanged', 'refreshAvailability'],
 ]) {
@@ -219,6 +221,13 @@ for (const [prop, fn] of [
     'missing or pointing elsewhere'
   );
 }
+// Resolving an offer fills the shift, so this one save re-reads TWO collections - the offers table and the schedule row
+// it just filled - and it is written as an arrow because of it.
+check(
+  'onOffersChanged is wired to the scoped refresh, naming both collections',
+  /onOffersChanged=\{\(\) => refreshAdminCollections\(\['scheduleOffers', 'schedule'\]\)\}/.test(panelProps),
+  'missing or pointing elsewhere'
+);
 // A callback passed but not declared by AdminPanel would be silently dropped.
 check(
   'AdminPanel forwards every refresh callback it is given',
@@ -475,11 +484,15 @@ check('App starts the wave before the request goes out', /report\.start\(\)/.tes
 
 // The two certification tabs, named. Their calls used to read `onDataChanged?.()` - not the `void` form the rest
 // of the panel uses - and so were invisible to the check above. That is how a screen quietly stops asking for a
-// refresh without failing anything, which is the failure this whole file exists to catch.
-for (const name of ['AdminCertificationsTab.jsx', 'AdminCertificationSetupTab.jsx']) {
+// refresh without failing anything, which is the failure this whole file exists to catch. They now name their section
+// too, which verify-read-budget checks against the sections that actually exist.
+for (const [name, section] of [
+  ['AdminCertificationsTab.jsx', 'certificationRecords'],
+  ['AdminCertificationSetupTab.jsx', 'certificationSetup'],
+]) {
   check(
-    `${name} asks for its refresh after saving`,
-    /void onDataChanged\?\.\(\)/.test(read('src/components/admin/' + name)),
+    `${name} asks for its own section after saving`,
+    new RegExp(`void onDataChanged\\?\\.\\('${section}'\\)`).test(read('src/components/admin/' + name)),
     true
   );
 }
@@ -609,51 +622,19 @@ check('nor a clock action', !isReadAction('CLOCK_IN'));
 check('nor a sign-in', !isReadAction('LOGIN'));
 check('nor an empty action', !isReadAction(undefined));
 
-const sameRead = readKey({ action: 'GET_SCHEDULE', token: 't1' });
-check('an identical request has one key', sameRead === readKey({ action: 'GET_SCHEDULE', token: 't1' }));
-check('another session is another read', sameRead !== readKey({ action: 'GET_SCHEDULE', token: 't2' }));
-check('another action is another read', sameRead !== readKey({ action: 'GET_ROSTER', token: 't1' }));
-check(
-  'and a different payload is another read',
-  sameRead !== readKey({ action: 'GET_SCHEDULE', token: 't1', payload: { month: 3 } })
-);
-
-const coalescer = createReadCoalescer();
-const shared = coalescer.hold('k', new Promise(() => {}));
-check('a read in flight can be joined', coalescer.join('k') === shared);
-check('an unknown key cannot', coalescer.join('other') === null);
-check('and it is held only while it is in flight', coalescer.size() === 1, String(coalescer.size()));
-
-const settledRead = createReadCoalescer();
-let resolveIt;
-const pendingRead = new Promise((resolve) => {
-  resolveIt = resolve;
-});
-settledRead.hold('k', pendingRead);
-check('the entry exists while the request runs', settledRead.size() === 1, String(settledRead.size()));
-resolveIt('data');
-await pendingRead;
-// One more turn, so the release handler attached with .then has run.
-await Promise.resolve();
-check('and is dropped the moment it settles', settledRead.size() === 0, String(settledRead.size()));
-check('so a later read is never served a stale answer', settledRead.join('k') === null);
-
-const failedRead = createReadCoalescer();
-const boom = Promise.reject(new Error('nope'));
-boom.catch(() => {});
-failedRead.hold('k', boom);
-await boom.catch(() => {});
-await Promise.resolve();
-check('a failed read is not left holding the key', failedRead.size() === 0, String(failedRead.size()));
-
-// And the fetch layer USED to be wired to it, with writes kept out. That wiring is gone with the backend it was for:
-// the coalescer existed because Apps Script runs one execution at a time behind a script lock, so two callers asking
-// the same question paid for two executions of the same answer. Firestore has no such queue - an identical read is two
-// ordinary reads - so appScriptFetch no longer joins anything, and the util above is exercised by its own assertions
-// rather than by the app.
+// The REQUEST coalescer that used to be asserted here - a shared in-flight Apps Script read, keyed on
+// [action, token, payload] - has been retired along with the layer it keyed on. Apps Script ran one execution at a time
+// behind a script lock, so two callers asking the same question paid for the same answer twice; Firestore has no such
+// queue, a read now goes straight to the reader dispatcher, and there is nothing left for that key to match.
 //
-// The READ/WRITE SPLIT it relied on is still wired, and still worth asserting, because it is what sends a write to the
-// dispatchers rather than to the readers:
+// The discipline did not go away, though, and this is the note that says where it lives now: ONE SHARED IN-FLIGHT READ OF
+// A COLLECTION (firestorePayload.js#readUsersOnce - six readers project off `users`, and Firestore bills per document).
+// Its rule is asserted where it can be: the release-on-settle source check and the "read in exactly one place" count in
+// `npm run verify:read-budget`, and the identity check in `npm run verify:firestore-reads` that proves two readers in the
+// same moment are handed one read while a later one is handed a new one.
+//
+// The READ/WRITE SPLIT that coalescer relied on is still wired, and still worth asserting, because it is what sends a
+// read to the dispatchers rather than to the writers:
 const fetchLayerSource = read('src/services/api.js');
 check('reads and writes take different doors', /if \(isReadAction\(action\)\)/.test(fetchLayerSource), 'the split is gone');
 check(

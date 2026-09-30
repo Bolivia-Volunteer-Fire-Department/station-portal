@@ -33,6 +33,11 @@ const NUMERIC_COLUMNS = new Set([
   'rank_order_required',
   'warn_days_before',
   'recurring_amount',
+  // The easter-egg score, and it is here because a QUERY compares it: the leaderboard is
+  // `where('runner_score', '>', 0).orderBy('runner_score', 'desc').limit(25)`, and Firestore compares types - a score that
+  // arrived as text is not greater than zero, so its owner silently disappears from the board rather than appearing with a
+  // wrong number. The only other writer is the `saveRunnerScore` callable, which parses to an integer.
+  'runner_score',
   'date_of_month',
   'duration',
   'calc_hours',

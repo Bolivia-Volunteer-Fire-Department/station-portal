@@ -122,7 +122,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
       // hold the button for the whole request when nothing depends on the answer. It IS told, though - written
       // as `void` so this call is greppable, which is how verify-refresh-wiring checks that every saving screen
       // still asks for its refresh.
-      void onDataChanged?.();
+      void onDataChanged?.('certificationSetup');
     } catch (err) {
       setError(err.message || 'Could not save this certification.');
     } finally {
@@ -146,7 +146,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         return;
       }
       if (formData.id === target.id) closeEditor();
-      void onDataChanged?.();
+      void onDataChanged?.('certificationSetup');
     } catch (err) {
       setError(err.message || 'Could not delete this certification.');
     } finally {

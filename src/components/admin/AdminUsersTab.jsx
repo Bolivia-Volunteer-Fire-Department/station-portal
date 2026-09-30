@@ -93,7 +93,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
     try {
       const result = await adminDeleteUser(user.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete user.');
-      void onDataChanged();
+      void onDataChanged('users');
       if (String(formData.id) === String(user.id)) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete user.');

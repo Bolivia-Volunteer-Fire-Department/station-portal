@@ -6,6 +6,18 @@ const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
+// The audit trail's filter, sorts and row mapping: pure, no dependencies, and tested without an emulator.
+const {
+  buildAuditFilter,
+  orderByFor,
+  pageSizeFor,
+  auditRowFrom,
+  facetsFrom,
+  FACET_SAMPLE_SIZE,
+} = require('./auditLog');
+// The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
+// searchable in the Firebase console. See the note on `audit` below.
+const { logger } = require('firebase-functions/logger');
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 
 // What an event MEANS: recipients, preferences and copy. Pure and separate so it can be asserted without FCM.
@@ -84,20 +96,25 @@ const stationTimestamp = (date = new Date()) => {
   return `${at('year')}-${at('month')}-${at('day')} ${at('hour')}:${at('minute')}:${at('second')}`;
 };
 
-// The audit trail: every one of these functions leaves a row naming who did it and to whom. An officer-driven
-// password reset is only accountable if the officer's name is written down with it.
+// The audit trail: every one of these functions leaves a line naming who did it and to whom. An officer-driven password
+// reset is only accountable if the officer's name is written down with it.
 //
-// TWO timestamps, deliberately. `created_at` is the exact instant, which is what an investigation wants; `timestamp`
-// is the station-time text the System Log tab reads and sorts by, which is the format the whole app uses. Writing only
-// the ISO instant left the tab's own contract unsatisfied by the app writing it - and an ISO instant rendered as
-// station time is four or five hours wrong in a way that looks like a real time rather than like a bug.
+// IT GOES TO CLOUD LOGGING, NOT TO A COLLECTION. The app used to write a `system_log` document per action and show them
+// in a tab of its own, which cost a Firestore write per action plus a WHOLE-COLLECTION SCAN every time that tab was
+// opened - the one collection that grew without limit, read to render one screen. Cloud Logging takes the same line for
+// nothing, keeps it searchable in the Firebase console, and is a tool an administrator already has.
+//
+// `logger.info` with an OBJECT is a structured entry, so it can be filtered on `jsonPayload.audit.action` rather than
+// grepping text. The station-time text stays a field because that is the form a person reads; the entry's own timestamp
+// is the exact instant, recorded by Cloud Logging itself, which is why no ISO copy is written.
 const audit = (userId, action, details) =>
-  db.collection('system_log').add({
-    user_id: userId,
-    action,
-    details,
-    created_at: new Date().toISOString(),
-    timestamp: stationTimestamp(),
+  logger.info({
+    audit: {
+      user_id: userId,
+      action,
+      details,
+      timestamp: stationTimestamp(),
+    },
   });
 
 // Claims carry role_id and is_admin so the client can shape its own navigation without a read. The RULES never
@@ -292,22 +309,73 @@ exports.saveScheduleBoard = onCall(async (request) => {
   const saved = await db.runTransaction(async (transaction) => {
     // The conflict check, inside the transaction and after reading the rows: a slot already held by somebody else
     // cannot be handed to a second member. The sheet version made this check under its script lock.
-    const conflicts = [];
+    //
+    // IT ASKS ABOUT THE SCHEDULE THIS SAVE WOULD LEAVE BEHIND, which is the part the first version got wrong. Two passes,
+    // and together they are the whole question:
+    //
+    //   1. the request against ITSELF - does the final state put two members in one slot?
+    //   2. the request against the STORED rows, ignoring every row this save rewrites or deletes - because a row the
+    //      request is changing cannot hold a slot against it. Its slot and its member are exactly what the request
+    //      decides.
+    //
+    // THE SWAP IS WHAT PROVED IT. A hold-to-swap exchanges two rows' positions while each keeps its own id and member
+    // (utils/scheduleDrop), so at the moment of the check EACH ROW HOLDS THE SLOT THE OTHER IS BEING GIVEN - the old
+    // check refused it, which turned a normal board operation into "Already filled by somebody else". The sheet's board
+    // had no server check at all, so it never had to ask this question; the honest version has to ask it properly rather
+    // than decline the answer.
+    //
+    // And the duplicate report, from the same field report as the swap: two entries for one slot each found the same
+    // stored row, so one problem was named twice and read like two. A Set answers that.
+    const conflicts = new Set();
+    // THE SLOT A ROW OCCUPIES, AS THE BOARD DEFINES IT: `slot-${dateKey}-${template.id}` in
+    // AdminScheduleManagementTab, and `schedule_template_id` leads swapSlotFields' list of "the fields that say WHERE a
+    // row sits". Keying on the ASSIGNMENT instead - which is what this check did - merges shifts the board keeps apart:
+    // two templates on one date that happen to share an assignment, and any two custom shifts on one day (a custom shift
+    // has no assignment at all, so they all keyed identically). A swap between two same-day shifts was then reported as
+    // two members claiming one place, which is the 400 the board got on a plain swap.
+    //
+    // A CUSTOM SHIFT has no template, and that is not a missing key: it is a row that cannot collide, because the sheet
+    // let a day hold several of them and the board draws each as its own pill rather than in a slot.
+    const slotKey = (entry) => {
+      const templateId = String(entry.fields.schedule_template_id || '').trim();
+      return templateId ? `${entry.fields.date_from} ${templateId}` : '';
+    };
+    const claimed = new Map();
+    // Every row this save touches: rewritten by an entry, or deleted. A row being rewritten keeps its identity but not
+    // its position, so it must not count as an occupant below.
+    const rewritten = new Set([...prepared.map((entry) => entry.id).filter(Boolean), ...deleteIds]);
+
+    prepared.forEach((entry) => {
+      if (!entry.fields.user_id) return;
+      const key = slotKey(entry);
+      if (!key) return;
+      // A second, DIFFERENT member for a slot this save already gives away. The same member twice is a duplicate
+      // rather than a contention, and it is not what this check is for.
+      if (claimed.has(key) && claimed.get(key) !== entry.fields.user_id) conflicts.add(key);
+      claimed.set(key, entry.fields.user_id);
+    });
+
     for (const entry of prepared) {
-      if (!entry.fields.user_id) continue;
+      const key = slotKey(entry);
+      if (!entry.fields.user_id || !key || conflicts.has(key)) continue;
       const sameSlot = await transaction.get(
         db
           .collection('schedule')
           .where('date_from', '==', entry.fields.date_from)
-          .where('assignment_id', '==', entry.fields.assignment_id)
+          // The template, not the assignment - the same key the pass above uses, because a check that asks one question
+          // in one place and a different one in another is how a swap passes the first test and fails the second.
+          .where('schedule_template_id', '==', String(entry.fields.schedule_template_id || '').trim())
       );
-      const taken = sameSlot.docs.find(
-        (row) => row.id !== entry.id && String(row.data().user_id || '') !== '' && String(row.data().user_id) !== entry.fields.user_id
+      const held = sameSlot.docs.find(
+        (row) =>
+          !rewritten.has(row.id) &&
+          String(row.data().user_id || '') !== '' &&
+          String(row.data().user_id) !== entry.fields.user_id
       );
-      if (taken) conflicts.push(`${entry.fields.date_from} ${entry.fields.assignment_id}`);
+      if (held) conflicts.add(key);
     }
-    if (conflicts.length) {
-      throw new HttpsError('failed-precondition', `Already filled by somebody else: ${conflicts.join(', ')}.`);
+    if (conflicts.size) {
+      throw new HttpsError('failed-precondition', `Already filled by somebody else: ${[...conflicts].join(', ')}.`);
     }
 
     const stamped = [];
@@ -587,11 +655,23 @@ exports.saveRunnerScore = onCall(async (request) => {
     // A member who is gone is an ERROR rather than a reply: their browser is mid-session and there is no score to report.
     if (!snapshot.exists) throw new HttpsError('not-found', 'That member no longer exists.');
 
-    const previous = Number((snapshot.data() || {}).runner_score) || 0;
-    if (score <= 0 || score <= previous) return { best: previous, improved: false };
+    const stored = (snapshot.data() || {}).runner_score;
+    const previous = Number(stored) || 0;
+    if (score > previous) {
+      transaction.update(reference, { runner_score: score });
+      return { best: score, improved: true };
+    }
 
-    transaction.update(reference, { runner_score: score });
-    return { best: score, improved: true };
+    // A STORED VALUE THAT IS NOT A NUMBER IS REPAIRED HERE, even though this run is not a personal best, and what is written
+    // is the SAME number: a repair rather than a change. It matters because the leaderboard is a QUERY
+    // (`where('runner_score', '>', 0)`), and Firestore compares types - so a score stored as text is invisible to it, and
+    // its owner stays off the board until they beat a score they already hold. If they never do, they never appear. This is
+    // the same repair scripts/normalize-runner-scores.mjs makes in bulk; doing it here means the data heals itself as people
+    // play, and nobody has to run anything.
+    if (typeof stored !== 'number' && previous > 0) {
+      transaction.update(reference, { runner_score: previous });
+    }
+    return { best: previous, improved: false };
   });
 
   // `success` is not in here on purpose: the route wraps this in ok(), which is the single place it comes from. A second
@@ -933,183 +1013,86 @@ exports.sendTestPush = onCall(async (request) => {
 });
 
 // -------------------------------------------------------------------------------------------------------------
-// The system log: one page at a time, and the last read in the app.
+// The audit trail, read from CLOUD LOGGING on demand.
 // -------------------------------------------------------------------------------------------------------------
 //
-// WHY A CALLABLE rather than a client query, since this is the one place that is a genuine choice:
+// WHY THIS IS AN API CALL AND NOT A COLLECTION. The audit trail used to be a `system_log` collection: one document per
+// action, plus a whole-collection scan every time the tab was opened, on the one collection in the app that grows
+// without limit. Both are gone - `audit` above writes a Cloud Logging line for nothing - and this reads those lines
+// back when an officer asks for them, and nowhere else. THE READ IS ON DEMAND, which is the property the collection
+// could never offer: a Firestore query bills per document, and a Logging read bills nothing.
 //
-//   1. The response is not a page. It carries `total`/`total_pages` for the footer and `actions`/`members` for the
-//      filter dropdowns, and the facets come from the WHOLE log - a dropdown offering only the values on the current
-//      page could never select the value somebody is looking for. No single page can supply that.
-//   2. The log names members and records failed sign-ins, so the permission is checked here, on the server, where the
-//      rules cannot be talked around.
+// The filter, the sorts and the row mapping live in ./auditLog.js, which is pure and tested by
+// scripts/verify-audit-log.mjs - a filter string built by concatenation is the part that most needs a test.
 //
-// And WHY IT SCANS rather than paging with a Firestore query, which it could:
-//
-//   The tab asks for any combination of four sorts and four filters. Native paging would need a composite index for
-//   every filtered sort - around eight of them - and it would still behave differently from the sheet in two ways a
-//   reader would notice: Firestore matches strings case-sensitively, where the sheet's action filter is
-//   case-insensitive, and it treats a missing value as lowest rather than last in both directions.
-//
-//   The facets already require reading the whole log, so the page and the counts ride along on that same read for
-//   nothing. At a station's scale that is a few hundred documents per request. If this log ever grows past that, the
-//   facets are the piece to denormalize at write time - they can be, because ONLY this file writes the log - and then
-//   the page can move to a query with the indexes it needs.
-const LOG_SORTS = ['timestamp_desc', 'timestamp_asc', 'action_asc', 'member_asc'];
-const LOG_SORT_DEFAULT = 'timestamp_desc';
-const LOG_PAGE_SIZE_DEFAULT = 20;
-const LOG_PAGE_SIZE_MAX = 100;
-// The contract version, matching SYSTEM_LOG_API_VERSION in src/utils/systemLog.js and Code.gs. The tab compares the two
-// and says so when they differ, because the failure is otherwise invisible: a backend reading the action filter under
-// an older name answers an empty page, which looks exactly like an empty log.
-const SYSTEM_LOG_API_VERSION = 2;
-
-const logCellText = (value) => String(value === undefined || value === null ? '' : value).trim();
-
-// The timestamp as the app stores it: 'YYYY-MM-DD HH:mm:ss' in station time.
-//
-// An ISO instant is CONVERTED rather than trimmed, and that is the whole reason this cannot be left to the client: the
-// tab parses this text and displays it, so an ISO string would render its UTC hour as if it were station time - four or
-// five hours wrong, and looking like a real time rather than a bug.
-const logTimestampText = (value) => {
-  const raw = logCellText(value);
-  if (raw === '') return '';
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw)) return raw.slice(0, 19);
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) {
-    const parsed = new Date(raw);
-    return isNaN(parsed.getTime()) ? raw.replace('T', ' ').slice(0, 19) : stationTimestamp(parsed);
-  }
-  return raw;
-};
-
-// One row in the shape the tab reads - the same fields the sheet's reader returned, derived the same way. Rows written
-// before the audit writer wrote both timestamps carry only `created_at`, which is why the conversion above exists.
-const normalizeLogEntry = (id, row) => {
-  const source = row || {};
-  const timestamp = logTimestampText(source.timestamp || source.created_at);
-  return {
-    id: String(id || ''),
-    timestamp,
-    date_key: /^\d{4}-\d{2}-\d{2}/.test(timestamp) ? timestamp.slice(0, 10) : '',
-    user_id: logCellText(source.user_id),
-    action: logCellText(source.action),
-    details: logCellText(source.details),
-  };
-};
-
-// Missing values sort last in EITHER direction, so an unreadable timestamp is never presented as the newest entry.
-const compareLogText = (aValue, bValue, direction) => {
-  const a = String(aValue || '');
-  const b = String(bValue || '');
-  if (a === b) return 0;
-  if (!a) return 1;
-  if (!b) return -1;
-  return (a < b ? -1 : 1) * direction;
-};
-
-// The id breaks a tie last, so the order is total: paging over an order two rows can share is how a boundary repeats
-// one row and drops another.
-const compareLogTimestamp = (a, b, direction) => {
-  const aKey = a.timestamp || '';
-  const bKey = b.timestamp || '';
-  if (!aKey && !bKey) return compareLogText(a.id, b.id, direction);
-  if (!aKey) return 1;
-  if (!bKey) return -1;
-  if (aKey !== bKey) return (aKey < bKey ? -1 : 1) * direction;
-  return compareLogText(a.id, b.id, direction);
-};
-
-const sortLogEntries = (entries, sort) => {
-  const mode = LOG_SORTS.includes(String(sort || '')) ? String(sort) : LOG_SORT_DEFAULT;
-  return entries.slice().sort((a, b) => {
-    if (mode === 'timestamp_asc') return compareLogTimestamp(a, b, 1);
-    if (mode === 'action_asc') return compareLogText(a.action, b.action, 1) || compareLogTimestamp(a, b, -1);
-    if (mode === 'member_asc') return compareLogText(a.user_id, b.user_id, 1) || compareLogTimestamp(a, b, -1);
-    return compareLogTimestamp(a, b, -1);
-  });
-};
-
-// A row against the filter set. A blank filter is ignored rather than matching nothing - the one mistake that would make
-// an empty table look exactly like an empty log.
-const logEntryMatches = (entry, filters) => {
-  if (!entry) return false;
-
-  if (filters.from || filters.to) {
-    // A row with no readable date cannot be inside a date range, whichever end is open.
-    if (!entry.date_key) return false;
-    if (filters.from && entry.date_key < filters.from) return false;
-    if (filters.to && entry.date_key > filters.to) return false;
-  }
-
-  // Whole value and case-insensitive, as the sheet matched it: 'user_login' and 'USER_LOGIN' are one group rather than
-  // two. The dropdown offers the stored values, so in practice this is an exact match.
-  if (filters.action && entry.action.toUpperCase() !== filters.action.toUpperCase()) return false;
-  if (filters.member && entry.user_id !== filters.member) return false;
-
-  return true;
-};
-
-// One page of rows plus the numbers the footer and the pager need. The page is CLAMPED, so asking for page 99 of a
-// 3-page result returns the last page rather than an empty table - which is what would otherwise happen after narrowing
-// a filter.
-const paginateLogEntries = (entries, page, pageSize) => {
-  const size = Math.min(LOG_PAGE_SIZE_MAX, Math.max(1, parseInt(pageSize, 10) || LOG_PAGE_SIZE_DEFAULT));
-  const total = entries.length;
-  const totalPages = Math.max(1, Math.ceil(total / size));
-  const current = Math.min(Math.max(1, parseInt(page, 10) || 1), totalPages);
-
-  return {
-    rows: entries.slice((current - 1) * size, (current - 1) * size + size),
-    page: current,
-    page_size: size,
-    total,
-    total_pages: totalPages,
-  };
-};
-
-// Every distinct action and member id in the log, for the filter dropdowns. From the WHOLE log rather than the page, and
-// as ids - the client already has the roster to put names to them, and the log holds ids that are not members too, since
-// a failed sign-in is recorded against the username that was typed.
-const logFacets = (entries) => {
-  const actions = new Set();
-  const members = new Set();
-  entries.forEach((entry) => {
-    if (entry.action) actions.add(entry.action);
-    if (entry.user_id) members.add(entry.user_id);
-  });
-  return { actions: [...actions].sort(), members: [...members].sort() };
-};
-
+// THE CLIENT LIBRARY IS REQUIRED LAZILY, and that is not a micro-optimisation: the Functions emulator loads this file to
+// run every OTHER function and implements no Logging API at all, so a top-level require would make every harness depend
+// on a package none of them use.
 exports.readSystemLog = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
-  await requirePermission(request.auth.uid, 'can_view_system_log', 'read the system log');
+  await requirePermission(request.auth.uid, 'can_view_system_log', 'read the audit log');
 
   const data = request.data || {};
-  const filters = {
-    from: logCellText(data.from),
-    to: logCellText(data.to),
-    // `action_filter`, not `action`: `action` is the RPC envelope's own key, so the log's action FILTER has to travel
-    // under a different name. Reading data.action here would filter every page on 'ADMIN_GET_SYSTEM_LOG' and answer
-    // nothing - which is what broke this tab once already, on the client side of the same collision.
-    action: logCellText(data.action_filter),
-    member: logCellText(data.member),
-  };
-  const sort = LOG_SORTS.includes(logCellText(data.sort)) ? logCellText(data.sort) : LOG_SORT_DEFAULT;
+  const { filter, problem } = buildAuditFilter({
+    action: data.action_filter,
+    member: data.member,
+    from: data.from,
+    to: data.to,
+  });
+  if (problem) throw new HttpsError('invalid-argument', problem);
 
-  const snapshot = await db.collection('system_log').get();
-  const all = snapshot.docs.map((entry) => normalizeLogEntry(entry.id, entry.data()));
-  const matched = all.filter((entry) => logEntryMatches(entry, filters));
-  const paged = paginateLogEntries(sortLogEntries(matched, sort), data.page, data.page_size);
-  const facets = logFacets(all);
+  let Logging;
+  try {
+    ({ Logging } = require('@google-cloud/logging'));
+  } catch {
+    throw new HttpsError(
+      'failed-precondition',
+      'Reading the audit log needs the Cloud Logging client, which is not installed in this deployment.'
+    );
+  }
+
+  const pageSize = pageSizeFor(data.page_size);
+  const orderBy = orderByFor(data.sort);
+  const pageToken = String(data.page_token || '') || undefined;
+  const logging = new Logging();
+
+  let page;
+  let sample;
+  try {
+    // TWO read-only calls, in parallel: the page the officer asked for, and a recent sample the filter dropdowns are
+    // built from. The sample is what makes the dropdowns possible without scanning the log, and it is deliberately the
+    // recent end - see the note on FACET_SAMPLE_SIZE.
+    [page, sample] = await Promise.all([
+      logging.getEntries({ filter, orderBy, pageSize, pageToken }),
+      logging.getEntries({ filter, orderBy, pageSize: FACET_SAMPLE_SIZE }),
+    ]);
+  } catch (error) {
+    // Log reading is IAM-controlled on the FUNCTION'S service account, and a missing grant surfaces here. Saying so beats
+    // a generic failure: the fix is one role, and it is not something an officer can work out from "internal".
+    throw new HttpsError(
+      'permission-denied',
+      `The audit log could not be read (${(error && error.code) || (error && error.message) || 'unknown'}). ` +
+        'The function’s service account needs permission to read Cloud Logging - see the note in the README.'
+    );
+  }
+
+  const [entries, nextQuery] = page;
+  const rows = entries.map((entry) => auditRowFrom(entry, stationTimestamp));
+  // The facets describe the SAMPLE, so the dropdowns offer what the log has held recently rather than everything it has
+  // ever held. A value missing from the list can still be typed into the URL of a future request; what the list must not
+  // do is pretend to be exhaustive.
+  const facets = facetsFrom(sample[0].map((entry) => auditRowFrom(entry, stationTimestamp)));
 
   return {
-    api: SYSTEM_LOG_API_VERSION,
-    ...paged,
-    // Echoed back, so the client can trust what was APPLIED rather than what it asked for.
-    sort,
+    rows,
+    sort: String(data.sort || '') || 'timestamp_desc',
+    page_size: pageSize,
+    // Forward-only paging, because that is what the Logging API offers: a token for the next page, and no total. Asking
+    // for a page number was the sheet's shape, and this does not pretend to have it.
+    next_page_token: (nextQuery && nextQuery.pageToken) || '',
+    has_more: Boolean(nextQuery && nextQuery.pageToken),
     actions: facets.actions,
     members: facets.members,
-    log_total: all.length,
   };
 });
 

@@ -133,8 +133,9 @@ export const ADMIN_PERMISSIONS = [
   {
     key: 'can_view_system_log',
     tab: 'system-log',
-    label: 'View the system log',
-    description: 'Read the station activity log: sign-ins and failures, changes made, and notification events.',
+    label: 'View the audit log',
+    description:
+      'Read the station audit trail: sign-ins and failures, the account actions officers take, and notification events. Read on demand from Cloud Logging when the tab is opened, so it costs nothing to keep.',
   },
   {
     key: 'can_access_debug',
@@ -149,24 +150,24 @@ export const MEMBER_PERMISSIONS = [
   {
     key: 'can_view_my_schedule',
     label: 'View their schedule',
-    description: 'Open the My Schedule module and see their own shifts.',
+    description: 'Open the Schedule module and see their own shifts.',
   },
   {
     key: 'can_make_offers',
     label: 'Offer to fill open shifts',
-    description: 'Offer to take an open shift from My Schedule. Requires "View their schedule".',
+    description: 'Offer to take an open shift from Schedule. Requires "View their schedule".',
     requires: 'can_view_my_schedule',
   },
   {
     key: 'can_view_full_schedule',
     label: 'See the whole crew\'s schedule',
-    description: 'Use the "Show everyone" toggle in My Schedule. Requires "View their schedule".',
+    description: 'Use the "Show everyone" toggle in Schedule. Requires "View their schedule".',
     requires: 'can_view_my_schedule',
   },
   {
     key: 'can_edit_own_availability',
     label: 'Set their own availability',
-    description: 'Open the My Availability module and mark the shifts they could work.',
+    description: 'Open the Availability module and mark the shifts they could work.',
   },
   {
     key: 'can_use_timeclock',

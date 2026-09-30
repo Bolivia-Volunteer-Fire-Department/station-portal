@@ -175,33 +175,14 @@ const main = async () => {
     await signIn(username, 'chosen-by-me-passw0rd').then(() => true, () => false)
   );
 
-  // --- the audit trail, which is the reason resets are officer-driven ---
-  console.log('\n--- the audit trail ---');
-  await signOut(auth);
-  await signIn('jane');
-  const log = await getDocs(collection(db, 'system_log'));
-  // The log holds whatever the station has written, so this filters to the actions this harness is ABOUT rather than
-  // asserting an exact set for the whole collection: the seed contributes rows of its own, and a real station's log
-  // will hold clock-ins, sign-ins and everything else alongside these. (SEED was the only one here until the log's
-  // fixtures were added, which is what an assertion written against a whole collection looks like when it meets a
-  // second writer.)
-  const rows = log.docs
-    .map((entry) => entry.data())
-    .filter((row) => /^(ADMIN_|COMPLETE_)/.test(row.action || ''));
-  check(
-    'every account action left a row',
-    rows.map((row) => row.action).sort(),
-    [
-      'ADMIN_CREATE_MEMBER',
-      'ADMIN_RESET_PASSWORD',
-      'ADMIN_SET_MEMBER_STATUS',
-      'ADMIN_SET_MEMBER_STATUS',
-      'COMPLETE_PASSWORD_CHANGE',
-    ].sort()
-  );
-  const resetRow = rows.find((row) => row.action === 'ADMIN_RESET_PASSWORD');
-  check('and the reset row names the officer who did it', resetRow.user_id, 'u1');
-  checkIs('with the member it was done to in its details', /recruit/.test(resetRow.details), resetRow.details);
+  // The audit trail is NO LONGER ASSERTED HERE. Every one of those functions still writes a line - and the reset, the
+// status change and the password change are all still asserted to have HAPPENED, by the account behaving the way it
+// should afterwards - but that line is a Cloud Logging entry now (see `audit` in functions/index.js) rather than a
+// `system_log` document, and the functions emulator does not hand its logs back to a test.
+//
+// The trade, stated plainly: what an action DID is covered; that it left a RECORD is not, and the record's home is
+// Cloud Logging, where an officer reads it in the Firebase console. Recovering the assertion would mean querying the
+// emulator's Logging emulator - the follow-up if the audit trail ever needs a regression test of its own.
 
   // --- signing in alongside the app's own session --------------------------------------------------------------
   //
@@ -271,6 +252,31 @@ const main = async () => {
   // Both halves are wired into the app, and the sign-OUT count is the one worth asserting: every path that drops the
   // app's session has to drop Firebase's too, and there is more than one such path - which is how this check earned
   // its place, by failing on the first version that wired only the obvious one.
+  // --- App Check: the wiring, asserted from the source because it cannot run here --------------------------------
+  //
+  // App Check only exists in a browser, and the emulator does not verify it at all - so the emulator harnesses cannot
+  // exercise it. What they CAN do is hold the wiring still, and three of these assertions are the ones that cost an
+  // afternoon if they quietly change: the Enterprise provider, the auto-refresh flag (the web SDK defaults to NOT
+  // refreshing), and the fact that both the debug token and the whole feature are opt-in.
+  console.log('\n--- app check ---');
+  const firebaseSource = readFileSync(new URL('../src/services/firebase.js', import.meta.url), 'utf8');
+  const envExample = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
+  checkIs('the app initialises App Check', /initializeAppCheck\(app, \{/.test(firebaseSource));
+  checkIs(
+    'with the Enterprise provider, which is what the console issues now',
+    /provider: new ReCaptchaEnterpriseProvider\(appCheckSiteKey\)/.test(firebaseSource)
+  );
+  // The web SDK does NOT refresh App Check tokens unless told to, and an expired token is a request that fails once
+  // enforcement is on - so this flag is load-bearing rather than decorative.
+  checkIs('and token auto-refresh explicitly ON', /isTokenAutoRefreshEnabled: true/.test(firebaseSource));
+  checkIs('only when a site key is configured, so a build without one is unaffected', /if \(appCheckSiteKey && !usingEmulator/.test(firebaseSource));
+  checkIs('and never in a harness, where there is no browser to attest with', /!usingEmulator && typeof window !== 'undefined'/.test(firebaseSource));
+  // The debug token is a project credential: it must not be something the site key implies, and the file that documents the
+  // variables has to say so, because the person who sets it up is the one who would otherwise put it in CI.
+  checkIs('the debug token is a separate, opt-in variable', /const appCheckDebugToken = String\(env\.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN/.test(firebaseSource));
+  checkIs('documented as a build value', /^VITE_FIREBASE_APPCHECK_SITE_KEY=$/m.test(envExample));
+  checkIs('and documented as development only', /VITE_FIREBASE_APPCHECK_DEBUG_TOKEN=[\s\S]*$/.test(envExample) && /NEVER A REPOSITORY SECRET/.test(envExample));
+
   const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
   checkIs(
     'the login signs in alongside, and so does the reauth',

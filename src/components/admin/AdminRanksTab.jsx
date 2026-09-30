@@ -55,7 +55,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
       if (!result?.success) throw new Error(result?.message || 'Failed to save rank.');
       // Straight onto the table; the refresh wave lands on its own time.
       onRowSaved?.('ranks', formData);
-      void onDataChanged();
+      void onDataChanged('ranks');
       resetForm();
     } catch (err) {
       setError(err.message || 'Failed to save rank.');
@@ -77,7 +77,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
     try {
       const result = await adminDeleteRank(rank.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete rank.');
-      void onDataChanged();
+      void onDataChanged('ranks');
       if (String(formData.id) === String(rank.id)) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete rank.');

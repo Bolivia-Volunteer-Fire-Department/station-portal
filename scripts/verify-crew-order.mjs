@@ -8,7 +8,7 @@
 // required rank, not the member's own rank.
 //
 // Run with: npm run verify:crew-order
-import { compareCrewOrder, sortCrewOrder } from '../src/utils/crewOrder.js';
+import { compareCrewOrder, sortCrewOrder, sortSlotOrder } from '../src/utils/crewOrder.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -160,6 +160,59 @@ const original = shuffled.slice();
 sortCrewOrder(shuffled);
 check('sortCrewOrder does not mutate its input', shuffled, original);
 check('non-array input is safe', sortCrewOrder(null), []);
+
+// A SLOT is the board's version of the same question: a shift nobody holds yet, so there is no member and nothing is
+// open or filled. Its order is the same rule with the middle key removed - time, then the assignment's required rank -
+// which is what "the slots by time, then by assignment rank" means for the Schedule Management board and for the
+// Templates tab's cards.
+console.log('\n--- a SLOT: time first, then the shift rank ---');
+const slots = [
+  { name: 'Firefighter 08:00', startMin: 480, requiredRankOrder: FIREFIGHTER },
+  { name: 'Officer 08:00', startMin: 480, requiredRankOrder: OFFICER },
+  { name: 'Officer 06:00', startMin: 360, requiredRankOrder: OFFICER },
+];
+check('the earliest slot leads, whatever its rank', sortSlotOrder(slots).map((s) => s.name), [
+  'Officer 06:00',
+  'Officer 08:00',
+  'Firefighter 08:00',
+]);
+check('and the same three reversed come out the same', sortSlotOrder(slots.slice().reverse()).map((s) => s.name), [
+  'Officer 06:00',
+  'Officer 08:00',
+  'Firefighter 08:00',
+]);
+
+console.log('\n--- and an unknown rank is not rank 0 ---');
+check(
+  'a slot with no requirement sorts after the ranked ones at the same time',
+  sortSlotOrder([
+    { name: 'Unknown rank', startMin: 480, requiredRankOrder: null },
+    { name: 'Rank 0', startMin: 480, requiredRankOrder: 0 },
+    { name: 'Rank 1', startMin: 480, requiredRankOrder: FIREFIGHTER },
+  ]).map((s) => s.name),
+  ['Rank 1', 'Rank 0', 'Unknown rank']
+);
+check(
+  'and a slot with no readable start time sorts after every timed one',
+  sortSlotOrder([
+    { name: 'No time', startMin: null, requiredRankOrder: OFFICER },
+    { name: 'Late', startMin: 1380, requiredRankOrder: FIREFIGHTER },
+  ]).map((s) => s.name),
+  ['Late', 'No time']
+);
+check(
+  'the name breaks a tie the rank could not, so the order is total',
+  sortSlotOrder([
+    { name: 'Bravo', startMin: 480, requiredRankOrder: OFFICER },
+    { name: 'Alpha', startMin: 480, requiredRankOrder: OFFICER },
+  ]).map((s) => s.name),
+  ['Alpha', 'Bravo']
+);
+const slotOriginal = slots.slice();
+sortSlotOrder(slots);
+check('sortSlotOrder does not mutate its input either', slots, slotOriginal);
+check('and non-array input is safe here too', sortSlotOrder(null), []);
+
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

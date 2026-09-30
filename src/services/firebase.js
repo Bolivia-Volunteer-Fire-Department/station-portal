@@ -4,11 +4,19 @@
 // firestore.rules and App Check rather than by hiding these values. They arrive at build time from .env (see
 // .env.example), which also removes the round trip through system_settings that hands the browser its config today.
 //
-// Everything here is lazy, so importing this module costs nothing until the app is actually configured - until the
-// VITE_FIREBASE_* values exist, the app stays entirely on Apps Script and none of this is reached.
+// Everything here is lazy, so importing this module costs nothing until the app is actually configured. (This used to say
+// that without the VITE_FIREBASE_* values "the app stays entirely on Apps Script" - there is no sheet to stay on any more,
+// so an unconfigured build is a build that cannot reach its data, which is what `firebaseConfigured()` says out loud.)
 import { getApp, getApps, initializeApp } from 'firebase/app';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { connectAuthEmulator, getAuth } from 'firebase/auth';
-import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
+import {
+  connectFirestoreEmulator,
+  initializeFirestore,
+  memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 
 // `import.meta.env` is Vite's, so it is absent when a Node harness imports this module to check the wiring (see
@@ -46,7 +54,7 @@ export const firebaseConfigured = () => {
     console.info(
       configured
         ? `[firebase] configured for ${config.projectId}${usingEmulator ? ' (emulators)' : ''}.`
-        : '[firebase] no Firebase config in this build, so everything stays on Apps Script. If .env has the values, restart the dev server: Vite reads it at startup only.'
+        : '[firebase] no Firebase config in this build, so nothing can be read or written: there is no sheet behind the app any more. If .env has the values, restart the dev server: Vite reads it at startup only.'
     );
   }
   return configured;
@@ -54,11 +62,41 @@ export const firebaseConfigured = () => {
 
 let app = null;
 
+// APP CHECK: the site key, and the debug token that is only ever for local development (see docs/FIREBASE_SETUP.md, step 7).
+//
+// TWO THINGS ABOUT THE WEB SDK THAT COST AN AFTERNOON IF YOU DO NOT KNOW THEM:
+//
+//   - TOKENS DO NOT REFRESH THEMSELVES. The default for `isTokenAutoRefreshEnabled` is FALSE, and an expired token is a
+//     request that FAILS once enforcement is switched on - so passing it is not a nicety.
+//   - LOCALHOST IS NOT A VALID SITE, so local development uses the debug provider. That token is a credential for this
+//     project: it must never reach a production build, which is why it is a separate opt-in variable rather than something
+//     the site key implies.
+const appCheckSiteKey = String(env.VITE_FIREBASE_APPCHECK_SITE_KEY || '').trim();
+const appCheckDebugToken = String(env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN || '').trim();
+
 export const firebaseApp = () => {
   // Reuse an app that already exists rather than initialising a second one: a Node harness imports this module after
   // creating its own, and two apps cannot both be named '[DEFAULT]'. Whoever gets there first wins, and everybody
   // else shares it - which is also what keeps the auth state and the database instance the same in both.
-  if (!app) app = getApps().length ? getApp() : initializeApp(config);
+  if (!app) {
+    app = getApps().length ? getApp() : initializeApp(config);
+    // Attached HERE so it is in place before any client asks for a token: Auth, Firestore and the callables all come through
+    // this function first. Skipped in a harness (there is no browser to attest with, and the emulator does not verify App
+    // Check at all) and skipped when no key is configured, so a build without one behaves exactly as it did before.
+    if (appCheckSiteKey && !usingEmulator && typeof window !== 'undefined') {
+      try {
+        if (appCheckDebugToken) window.FIREBASE_APPCHECK_DEBUG_TOKEN = appCheckDebugToken;
+        initializeAppCheck(app, {
+          provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+          isTokenAutoRefreshEnabled: true,
+        });
+      } catch (error) {
+        // A misconfigured App Check must not stop the station from working: it is a guard against abuse, not a dependency.
+        // The App Check console reports unverified requests, so a failure here is visible without this throwing.
+        console.warn('[appcheck] could not initialise App Check:', error && error.message);
+      }
+    }
+  }
   return app;
 };
 
@@ -74,9 +112,38 @@ export const firebaseAuth = () => {
   return authInstance;
 };
 
+// The browser's cache, with a way out. `persistentLocalCache` reaches for IndexedDB, and a browser that refuses it -
+// private mode, storage disabled, an embedded webview - must not take the app down with it: the in-memory cache is the same
+// Firestore with the same behaviour on the wire, and what is lost is the offline gap rather than the app.
+const browserCache = () => {
+  try {
+    return persistentLocalCache({ tabManager: persistentMultipleTabManager() });
+  } catch (error) {
+    console.info(
+      '[firebase] the persistent cache is unavailable here, so this session runs from memory:',
+      error && error.message
+    );
+    return memoryLocalCache();
+  }
+};
+
 export const firestore = () => {
   if (!firestoreInstance) {
-    firestoreInstance = getFirestore(firebaseApp());
+    // OFFLINE PERSISTENCE, which is the "dead spots" half of docs/FIRESTORE_MODEL.md: a station's coverage is patchy, and
+    // with no local cache every read made in one is a FAILURE rather than a slightly old answer. `getDoc`/`getDocs` remain
+    // server-first while there is a connection - the cache is what answers when there is not - so switching this on does
+    // not weaken the rule the rest of the app is built on: a read after a write still sees the write, because the write
+    // that just landed and the read that follows it are both online.
+    //
+    // THE MULTI-TAB MANAGER, not the single-tab one: two tabs of this portal open at once is normal (the calendar in one,
+    // the clock in the other), and the single-tab cache takes the database away from whichever tab opens second.
+    //
+    // NOT IN THE EMULATOR - and not out of taste: the persistent cache IS IndexedDB, which does not exist in Node, so the
+    // harnesses that import this module under `firebase emulators:exec` could not construct a database at all. They get
+    // the in-memory cache: the same Firestore, with the same behaviour on the wire.
+    firestoreInstance = initializeFirestore(firebaseApp(), {
+      localCache: usingEmulator ? memoryLocalCache() : browserCache(),
+    });
     if (usingEmulator) connectFirestoreEmulator(firestoreInstance, '127.0.0.1', 8080);
   }
   return firestoreInstance;

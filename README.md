@@ -302,34 +302,33 @@ in the publish checklist below.
 (administrator, single-tab, member-only, nothing granted). `npm run verify:all` runs
 every verifier in the project.
 
-## Backend Deployment (Google Apps Script)
+## The Apps Script backend: retired, kept as the record
 
-The backend (`src/services/Code.gs`) is tracked in this repository — it holds no
-credentials, and the front end and back end are versioned together (see the note in
-`.gitignore`). Committing it is not deploying it, though: when the backend changes you
-must paste it into the Apps Script editor, save, and redeploy, or the station keeps
-running the old script. The app keeps working as long as the URL in your env still
-points at your latest deployment. The schedule calendar endpoints (`GET_SCHEDULE`,
-`GET_ROSTER`) are part of that backend script, so redeploy the script after pulling
-this change.
+**Nothing here needs deploying.** `src/services/Code.gs` is no longer a backend for anything: there is no
+`VITE_APPS_SCRIPT_URL`, every read and write goes to Firestore, and the login is Firebase's. The script stays in the
+repository for one reason — it is the specification the Firestore implementation was built from, and two harnesses hold the
+two of them together (`verify:refresh-wiring` checks that every routed action has a branch there, `verify:bootstrap` runs the
+sheet's payload builders against a fake spreadsheet and compares them with the Firestore ones). That is also why the
+instructions that used to be here are gone: pasting it into the Apps Script editor and redeploying it would change nothing
+about the running app.
 
-> **Deploy the backend BEFORE (or with) the client, not after.** Sign-in is two batched
-> requests now — `GET_BOOTSTRAP` for a member, `ADMIN_GET_BOOTSTRAP` for an administrator —
-> and a deployment that predates them answers `Invalid action`. The app says so in the
-> console (`[refresh] this Apps Script deployment does not know GET_BOOTSTRAP…`) instead of
-> showing an empty calendar and a 12-hour clock, but the fix is the redeploy: nine separate
-> requests became one, which is what stops the tail of the old sign-in wave from timing out
-> at 60 seconds. The individual actions are all still there, so an older *client* keeps
-> working against the newer backend.
+What replaced that deployment is two commands — `firebase deploy --only firestore:rules,firestore:indexes` and
+`firebase deploy --only functions` — plus the client build. See `docs/FIREBASE_SETUP.md`.
 
-> **First-request redirect / CORS:** Apps Script answers the very first fetch to a
-> deployment with a 302 redirect that browsers follow as a GET (no POST body). The
-> backend's `doGet` returns `{"ok": true, "redirected": true}` via `ContentService`
-> (which carries `Access-Control-Allow-Origin`) so that first request completes
-> instead of failing with a CORS error. The API layer detects that marker and
-> transparently re-sends the original action once. Read-only calls also retry once
-> on a network/CORS failure, so the app still boots even if the backend hasn't been
-> redeployed with `doGet` yet.
+The rest of this section is kept as the record of what the app used to do, because the *why* behind several decisions still
+refers to it (the single batched sign-in request, the refusal to show an empty station, the retry policy):
+
+> **The sign-in wave, and why it became one request.** Sign-in used to be nine separate Apps Script executions, each paying a
+> second or three of startup, and the tail of that queue is what ran out of the client's 60-second patience — which showed up
+> as a calendar with no shifts and a clock that had gone back to 12-hour. So the nine became two: `GET_BOOTSTRAP` for a
+> member, `ADMIN_GET_BOOTSTRAP` for an administrator. The Firestore payloads keep that shape, and the app still refuses to
+> render a failed sign-in as an empty station.
+
+> **First-request redirect / CORS:** Apps Script answered the very first fetch to a deployment with a 302 redirect that
+> browsers follow as a GET (no POST body). The backend's `doGet` returned `{"ok": true, "redirected": true}` via
+> `ContentService` so that first request completed instead of failing with a CORS error, and the API layer detected that
+> marker and re-sent the original action once. None of that exists any more — Firestore is asked directly — but it is why the
+> fetch layer has no retry loop and no script URL to warm, which `verify:refresh-wiring` asserts.
 
 ## Firestore (in progress)
 
@@ -892,11 +891,18 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
   12-hour clock for a member who chose 24. Now one request returns everything a member's sign-in needs
   (`GET_BOOTSTRAP`) and one returns everything an admin screen reads (`ADMIN_GET_BOOTSTRAP`) — both built
   from the same helpers the individual actions use, so the two paths cannot disagree about what a roster or a
-  schedule is. Reads an older client asks for twice in the same moment are sent **once** and shared
-  (`utils/readCoalescing`), and whatever still fails is **retried once, one at a time**, with one console line
-  naming what is missing (`utils/refreshWave`). Nothing is cached: a read after a write always sees the write,
-  and a write never joins anything. `npm run verify:bootstrap` runs the new payloads against a fake spreadsheet,
-  `verify:refresh-wiring` audits both halves of the wiring, and `verify:read-coalescing` counts the requests.
+  schedule is. The one collection several readers want at once — `users`, which the roster, the on-duty join, the
+  notifications tab and the users directory all project off — is read through a single
+  shared in-flight read (`readUsersOnce`), so four readers wanting it in the same moment cost one collection read
+  rather than five. Whatever still fails is **retried once, one at a time**, with one console line naming what is
+  missing (`utils/refreshWave`). Nothing is cached: the shared read is dropped the moment it settles, so a read
+  after a write always sees the write, and a write never joins anything. **The four collections worth watching are watched**
+  rather than re-read — `on_duty`, the station settings document, and the member's own audience of announcements and events
+  (`services/liveReads.js`) — so a change arrives while a screen sits still, and re-opening a screen costs nothing. (What a
+  listener does NOT do is make a one-shot read of the same query cheaper: `verify:firestore-reads` prints the SDK's own
+  answer to that, and it is a server read.) `npm run verify:bootstrap` runs the new
+  payloads against a fake spreadsheet, `verify:refresh-wiring` audits both halves of the wiring, and
+  `verify:read-budget` prints what a load reads and fails if a collection is read twice.
 - **A calendar day reads in the order it happens.** Events used to be drawn above every shift, so a
   6 PM event sat over the morning shift. The pills are interleaved by start time instead, and where an
   event and a shift start at the same moment the event goes first — it is context for the day rather than

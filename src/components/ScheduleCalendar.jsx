@@ -14,6 +14,9 @@ import { assignmentIsActiveOn } from '../utils/assignmentDates';
 import { parseRankOrder, memberCanFillAssignment } from '../utils/rankEligibility';
 import { compareCrewOrder } from '../utils/crewOrder';
 import { mergeDayItems } from '../utils/dayOrder';
+// Whether the window the schedule arrived in covers the month on screen: the difference between "this month is empty" and
+// "I have not asked for this month".
+import { windowCoversMonth } from '../utils/scheduleWindow';
 import { submitShiftOffer } from '../services/api';
 import ViewToggle from './ViewToggle';
 import ShiftOfferModal from './ShiftOfferModal';
@@ -31,6 +34,10 @@ const OPEN_SHIFT_LABEL = 'Open';
 export default function ScheduleCalendar({
   currentUser,
   schedule = [],
+  // The window `schedule` holds (last month, this month, next) and the way to ask for a month the window does not cover.
+  // A calendar's arrows reach further than the sign-in does, so a month outside the window is normal rather than an error.
+  scheduleWindow = { from: '', to: '' },
+  onNeedSchedule,
   assignments = [],
   scheduleTemplates = [],
   ranks = [],
@@ -82,6 +89,15 @@ export default function ScheduleCalendar({
 
   const monthStartKey = toDateKey(new Date(year, month, 1));
   const monthEndKey = toDateKey(new Date(year, month + 1, 0));
+
+  // THE MONTH ON SCREEN IS NOT ALWAYS IN THE WINDOW: the sign-in carries last month, this month and next, and these
+  // arrows walk years. Asking for the month is what keeps them working without reading the whole schedule - and it is why
+  // the window travels with the rows rather than being worked out again here.
+  useEffect(() => {
+    if (!onNeedSchedule) return;
+    if (windowCoversMonth(scheduleWindow, monthStartKey.slice(0, 7))) return;
+    void onNeedSchedule(monthStartKey, monthEndKey);
+  }, [onNeedSchedule, scheduleWindow, monthStartKey, monthEndKey]);
 
   // Friendly label for a member: the signed-in user always resolves from the
   // session, everyone else comes from the name directory (the admin directory

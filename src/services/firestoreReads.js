@@ -9,23 +9,32 @@
 // because the app hands both to the same setters - a different key here would be a screen that empties on refresh,
 // which is the failure this whole module exists to avoid. scripts/verify-firestore-reads.mjs signs in and asks
 // through these, so the shapes are checked rather than hoped for.
-import { collection, doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { audienceKeysFor, audienceRows, rowsFor, rowsOf, settingRows } from './firestorePayload.js';
+import { audienceKeysFor, audienceRows, readUsersOnce, rowsFor, rowsInRange, rowsOf, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
 
-// The roster as the schedule stores it: an id, a name and a rank. Read while the calendar labels other people's
-// shifts, so it is deliberately the narrow projection.
-const rosterRows = async () => {
-  const users = await rowsOf(collection(firestore(), 'users'));
-  return users.map((user) => ({ id: user.id, name: user.name, rank_id: user.rank_id }));
-};
+// The roster the calendar used to ask for separately (`GET_ROSTER`, now retired) is a projection of `users` that the sign-in
+// payload already carries - see the note where the route used to be listed, in firestoreRouting.js. Nothing in the app asks
+// for it as its own read, so there is no reader here for it.
 
-// Who is on duty, joined to names - the same join the payload does, because the dashboard draws names.
+// Who is on duty, joined to names and ranks - the same join the payload does, because the dashboard draws a name and a rank
+// icon. The reader used to leave `rank_id` out, so the same member appeared with a rank after a sign-in and with a generic
+// icon after a refresh; the payload's row has always carried it (see services/liveReads.js, which builds the same three
+// fields).
 const onDutyRows = async (uid) => {
-  const [duty, users] = await Promise.all([rowsOf(collection(firestore(), 'on_duty')), rowsOf(collection(firestore(), 'users'))]);
-  const nameById = Object.fromEntries(users.map((user) => [user.id, user.name]));
-  return duty.map((row) => ({ ...row, name: nameById[row.id] || '' , user_id: row.id }));
+  const [duty, users] = await Promise.all([rowsOf(collection(firestore(), 'on_duty')), readUsersOnce()]);
+  const byId = Object.fromEntries(users.map((user) => [user.id, user]));
+  const rankFor = (id) => {
+    const member = byId[id] || {};
+    return member.rank_id ?? '';
+  };
+  return duty.map((row) => ({
+    ...row,
+    name: (byId[row.id] || {}).name || '',
+    rank_id: rankFor(row.id),
+    user_id: row.id,
+  }));
 };
 
 // The caller's own keys, from their own document: the role and rank decide which announcements they may see, and a
@@ -58,11 +67,146 @@ const stationDateKey = (date = new Date()) => {
 const documentIsLive = (document, today) => {
   const row = document || {};
   if (row.is_published !== true && String(row.is_published || '').trim().toUpperCase() !== 'TRUE') return false;
-  const from = String(row.date_from || '').trim();
-  const to = String(row.date_to || '').trim();
+  // `effective_date` and `end_date` - the columns the app's own editor writes and the ones utils/effectiveDates reads.
+  // The first version of this function asked for `date_from`/`date_to`, which are NOT document columns at all: nothing
+  // wrote them, so every window read as open and a retired document stayed on everybody's list. A field name that exists
+  // nowhere fails silently and in the PERMISSIVE direction, which is the worst way for it to fail.
+  const from = String(row.effective_date || '').trim();
+  const to = String(row.end_date || '').trim();
   if (from && today < from) return false;
   if (to && today > to) return false;
   return true;
+};
+
+// One document's checklist items, in the order a reader works through them.
+//
+// Mirrors documentItemRows in Code.gs, including its two refusals: a row with no id or no label is not an item, and the
+// order is the checklist's own - sort_order, then the label - rather than whatever the database hands back. THE ITEMS
+// TRAVEL WITH THE DOCUMENT because the member's screen draws them from there (checklistSections(openDocument.items)), so
+// a document opened without them reads as a checklist with nothing in it - which is exactly what it did, while the items
+// sat in the collection the whole time.
+const checklistItemRows = async (documentId) => {
+  const wanted = String(documentId || '').trim();
+  if (!wanted) return [];
+
+  const items = await rowsFor('document_checklist_items', 'document_id', wanted);
+  return items
+    .map((item) => ({
+      id: String(item.id || '').trim(),
+      document_id: String(item.document_id || '').trim(),
+      sort_order: parseInt(item.sort_order, 10) || 0,
+      section: String(item.section || '').trim(),
+      label: String(item.label || '').trim(),
+    }))
+    .filter((item) => item.id !== '' && item.label !== '')
+    .sort((a, b) => a.sort_order - b.sort_order || (a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1));
+};
+
+// How many items each checklist holds, and how many of them one member has signed - the two numbers a checklist's
+// progress needs, because a checklist is signed item by item and a document-level signature says nothing about it.
+//
+// One pass over each collection rather than a lookup per row, which is what the sheet did and why a library of a hundred
+// documents stays cheap. `userId` of '' (the officer's list) leaves `items_signed` at 0: "signed by whom" is not a
+// question the editor asks, and the sheet answered it the same way.
+const documentItemSummaries = async (userId) => {
+  const wantedUser = String(userId || '').trim();
+  const items = await rowsOf(collection(firestore(), 'document_checklist_items'));
+  const summaries = {};
+
+  items.forEach((item) => {
+    const documentId = String(item.document_id || '').trim();
+    if (!documentId || !String(item.id || '').trim()) return;
+    if (!summaries[documentId]) summaries[documentId] = { item_count: 0, items_signed: 0 };
+    summaries[documentId].item_count += 1;
+  });
+
+  if (wantedUser) {
+    const signatures = await rowsFor('document_signatures', 'user_id', wantedUser);
+    signatures.forEach((signature) => {
+      if (String(signature.signature_role || '') !== 'member') return;
+      // An ITEM signature: a whole-document signature carries no item, and counting those would report progress nobody
+      // made.
+      if (String(signature.checklist_item_id || '') === '') return;
+      const documentId = String(signature.document_id || '').trim();
+      if (!summaries[documentId]) return;
+      summaries[documentId].items_signed += 1;
+    });
+  }
+
+  return summaries;
+};
+
+// The two counts attached to a list row, for checklists only: a plain document has no items to count, and the screen
+// reads `item_count === 0` as "nothing is being asked of anybody here".
+const withItemSummaries = (rows, summaries) =>
+  rows.map((row) => {
+    const summary = String(row.doc_type || '').trim().toLowerCase() === 'checklist' ? summaries[row.id] : null;
+    return { ...row, item_count: summary ? summary.item_count : 0, items_signed: summary ? summary.items_signed : 0 };
+  });
+
+// The library's order, which is a decision rather than a detail: folders A-Z with the unfiled ones last, then the
+// document's own order, then its title. The sheet's list came back in this order and the client draws it as it arrives -
+// so a backend that returns whatever order the database prefers silently reorders somebody's library, and a drag that
+// moved a document to the top appears to have done nothing. The same reasoning as the schedule templates' order in
+// firestorePayload.js, and the same failure: a row order nobody maintained is not a row order nobody needs.
+const documentSort = (a, b) => {
+  const aFolder = String(a.folder || '');
+  const bFolder = String(b.folder || '');
+  if (aFolder !== bFolder) {
+    if (!aFolder) return 1;
+    if (!bFolder) return -1;
+    return aFolder.toLowerCase() < bFolder.toLowerCase() ? -1 : 1;
+  }
+  const aOrder = parseInt(a.sort_order, 10) || 0;
+  const bOrder = parseInt(b.sort_order, 10) || 0;
+  if (aOrder !== bOrder) return aOrder - bOrder;
+  return String(a.title || '').toLowerCase() < String(b.title || '').toLowerCase() ? -1 : 1;
+};
+
+// One document as the DETAIL view needs it: the row, its length, and - for a checklist - its items.
+//
+// The body is ON THE ROW (`content`), which is worth stating because docs/FIRESTORE_MODEL.md describes a
+// `document_bodies` split that was never built: no writer, no rules, no migration entry. A reader that looked for the
+// body there got a permission-denied from the deny-by-default catch-all and no content at all - so this reads the row,
+// and the doc is the thing to fix when the split is wanted for real.
+const documentFullRow = async (row) => {
+  const source = row || {};
+  const content = String(source.content ?? '');
+  return {
+    ...source,
+    content,
+    // The list never carries a length (it has no body to measure where the body is split out); the sheet sent one with
+    // every row, and the screens that show a document's size read it from here.
+    content_length: content.length,
+    items: String(source.doc_type || '').trim().toLowerCase() === 'checklist' ? await checklistItemRows(source.id) : [],
+  };
+};
+
+// This member's own whole-document signature for one document, and whether it predates the wording it is attached to.
+//
+// The caller reads the member's OWN signatures and finds the document here rather than querying by document, because a
+// member may read their own rows and nobody else's: a query filtered by document alone would be refused for a plain
+// member, and this read is theirs. The two rules are the sheet's, unchanged - only a `member` row with no checklist item
+// is a document signature, and an unreadable revision on either side reads as NOT stale.
+const documentSignatureFor = (signatures, documentId, userId) => {
+  const wantedDocument = String(documentId || '').trim();
+  const wantedUser = String(userId || '').trim();
+  return (
+    signatures.find(
+      (signature) =>
+        String(signature.document_id || '').trim() === wantedDocument &&
+        String(signature.user_id || '').trim() === wantedUser &&
+        String(signature.checklist_item_id || '') === '' &&
+        String(signature.signature_role || '') === 'member'
+    ) || null
+  );
+};
+
+const signatureIsStale = (signature, document) => {
+  const signedAt = parseInt(signature && signature.content_revision, 10);
+  const current = parseInt(document && document.content_revision, 10);
+  if (!Number.isFinite(signedAt) || !Number.isFinite(current)) return false;
+  return signedAt < current;
 };
 
 // One document, if THIS viewer may see it. Null covers both "no such document" and "not for you", deliberately: what a
@@ -102,9 +246,21 @@ const RUNNER_LEADERBOARD_LIMIT = 25;
 
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
-  GET_ROSTER: () => rosterRows().then((roster) => ({ roster })),
   GET_TIMECLOCK_LOGS: (uid) => rowsFor('timeclock', 'user_id', uid).then((logs) => ({ logs })),
-  GET_SCHEDULE: () => rowsOf(collection(firestore(), 'schedule')).then((schedule) => ({ schedule })),
+  // The station's schedule, optionally WINDOWED - and a window is what the app always asks for, because `schedule` is the
+  // one collection that grows without limit. A caller that names no window is asking for every shift the station has ever
+  // scheduled: that is what the harnesses do, and what a screen that has not been scoped yet would do. Slow rather than
+  // wrong, which is the right way round for the default.
+  GET_SCHEDULE: async (uid, body) => {
+    const from = String((body && body.from) || '').trim();
+    const to = String((body && body.to) || '').trim();
+    const schedule =
+      from || to
+        ? await rowsInRange('schedule', 'date_from', from, to)
+        : await rowsOf(collection(firestore(), 'schedule'));
+    // The window comes back with the rows, so a caller can tell what it holds rather than assuming it holds everything.
+    return { schedule, schedule_window: { from, to } };
+  },
   GET_AVAILABILITY: (uid) => rowsFor('availability', 'user_id', uid).then((availability) => ({ availability })),
   GET_SHIFT_OFFERS: (uid) => rowsFor('schedule_offers', 'user_id', uid).then((offers) => ({ offers })),
   GET_TRAINING: () => rowsOf(collection(firestore(), 'trainings')).then((trainings) => ({ trainings })),
@@ -147,37 +303,59 @@ export const READERS = {
   // against an audience rule is a query Firestore refuses to prove.
   ADMIN_GET_ANNOUNCEMENTS: () => rowsOf(collection(firestore(), 'announcements')).then((announcements) => ({ announcements })),
   ADMIN_GET_EVENTS: () => rowsOf(collection(firestore(), 'events')).then((events) => ({ events })),
-  ADMIN_GET_DOCUMENTS: () => rowsOf(collection(firestore(), 'documents')).then((documents) => ({ documents })),
+  // The officer's list: drafts included, because an author has to see what they are working on, and no rank filter,
+  // because managing documents means seeing all of them. The item counts come along - the verification picker shows how
+  // many items each checklist has, and it costs one pass rather than one per row - and the order is the library's.
+  ADMIN_GET_DOCUMENTS: async () => {
+    const documents = await rowsOf(collection(firestore(), 'documents'));
+    return { documents: withItemSummaries(documents, await documentItemSummaries('')).sort(documentSort) };
+  },
 
   // The member's own library: the documents they may see, and their own signatures so the screen can show what is
   // outstanding without asking once per document. Deliberately WITHOUT the document bodies - those are fetched one at a
   // time by GET_DOCUMENT, which is what keeps opening the module cheap however large the library gets.
   GET_DOCUMENTS: async (uid) => {
-    const [visible, signatures] = await Promise.all([
+    const [visible, signatures, summaries] = await Promise.all([
       audienceRows('documents', await keysFor(uid)),
       rowsFor('document_signatures', 'user_id', uid),
+      documentItemSummaries(uid),
     ]);
     const today = stationDateKey();
-    return { documents: visible.filter((document) => documentIsLive(document, today)), signatures };
+    const live = visible.filter((document) => documentIsLive(document, today));
+    // Counts attached and the order decided here, because the client draws the list as it arrives: a checklist's row
+    // needs `item_count`/`items_signed` to say "3 of 12" at all, and without the sort the library comes back in whatever
+    // order the database prefers.
+    return { documents: withItemSummaries(live, summaries).sort(documentSort), signatures };
   },
 
   // One document's body, for a viewer who may see it. A refusal is a REPLY rather than a thrown error, because the
   // screens show `result.message` and the message is the useful part.
   GET_DOCUMENT: async (uid, body) => {
-    const document = await visibleDocumentFor(uid, body && body.id);
+    const wanted = String((body && body.id) || '').trim();
+    const document = await visibleDocumentFor(uid, wanted);
     if (!document) return { success: false, message: 'That document is not available.' };
-    return { success: true, document };
+
+    // The reader's OWN signatures - the rows they are allowed to read - and the document's signature is found among
+    // them. The screen shows `signature` as "Signed 12 Mar 2026" and warns with `signature_stale`; without both, a
+    // signed document reads as unsigned on its own page while the list, which is handed the signatures, shows the tick.
+    const signature = documentSignatureFor(await rowsFor('document_signatures', 'user_id', uid), wanted, uid);
+    return {
+      success: true,
+      document: await documentFullRow(document),
+      signature,
+      signature_stale: signatureIsStale(signature, document),
+    };
   },
 
   // The officer's view of the same document: no visibility question, because managing documents is the job - and the
   // WHOLE row, because the editor round-trips every field it shows and a projection would quietly blank the ones it
-  // did not return.
+  // did not return. The body and the checklist items join it here for the same reason.
   ADMIN_GET_DOCUMENT: async (uid, body) => {
     const wanted = String((body && body.id) || '').trim();
     if (!wanted) return { success: false, message: 'Which document?' };
     const snapshot = await getDoc(doc(firestore(), 'documents', wanted));
     if (!snapshot.exists()) return { success: false, message: 'That document is not available.' };
-    return { success: true, document: { id: snapshot.id, ...snapshot.data() } };
+    return { success: true, document: await documentFullRow({ id: snapshot.id, ...snapshot.data() }) };
   },
 
   // A verifier's view of ONE member's paperwork: the documents that MEMBER can see, and their signatures. The same
@@ -202,12 +380,16 @@ export const READERS = {
       rankId: String(row.rank_id || ''),
     });
 
-    const [visible, signatures] = await Promise.all([
+    const [visible, signatures, summaries] = await Promise.all([
       audienceRows('documents', keys),
       rowsFor('document_signatures', 'user_id', memberId),
+      documentItemSummaries(memberId),
     ]);
     const today = stationDateKey();
-    return { documents: visible.filter((document) => documentIsLive(document, today)), signatures };
+    // The counts are THAT MEMBER's progress, not the verifier's: the verifier is looking at what this person has done,
+    // which is the whole point of the screen.
+    const live = visible.filter((document) => documentIsLive(document, today));
+    return { documents: withItemSummaries(live, summaries).sort(documentSort), signatures };
   },
 
   // A document's checklist items and the signatures taken on it: the one read the Documents tab makes per document.
@@ -281,7 +463,7 @@ export const READERS = {
   // nothing arriving" - one silent device is a device problem, none is a member who never set one up.
   ADMIN_GET_PUSH_STATUS: async () => {
     const [users, settings, devices] = await Promise.all([
-      rowsOf(collection(firestore(), 'users')),
+      readUsersOnce(),
       rowsOf(collection(firestore(), 'user_settings')),
       rowsOf(collection(firestore(), 'push_devices')),
     ]);
@@ -324,18 +506,39 @@ export const READERS = {
   // member who has never played, because a document without the field is not in the index at all - so "everybody who has
   // played, highest first" would come back as "everybody who has played, with the newly joined missing". Filtering here
   // costs one read of a collection this file already reads whole in three other readers.
+  // THE STATION LEADERBOARD, as a QUERY rather than a scan. This used to read the whole `users` collection and pick the top
+  // rows out of it in the browser: N reads on every play, on the most repeated screen in the app. It is now bounded by the
+  // limit it actually needs, plus one count for the total ("you are 30th of 40" needs a number, not 40 rows).
+  //
+  // IT IS SAFE BECAUSE `runner_score` IS NUMERIC IN THE DATABASE, and that claim has two keepers rather than a hope: the only
+  // thing that writes it in the app is the `saveRunnerScore` callable, which parses to an integer and clamps it, and the
+  // sheet migration carries the column as a number (`runner_score` is in NUMERIC_COLUMNS, scripts/migration-map.mjs - it was
+  // not, until this read needed it to be). A score stored as TEXT is not greater than zero, so a text score makes its owner
+  // disappear from the board rather than appear with a wrong figure - which is why scripts/normalize-runner-scores.mjs
+  // exists, and why scripts/verify-firestore-reads.mjs shows what a text score does here before normalizing one away.
+  //
+  // THE ORDER IS BY THE FIELD THAT IS FILTERED, so no composite index is involved. One difference from the sheet this
+  // replaces: a TIE comes back in the database's order, where the sheet's own row order broke it. That is the one guarantee
+  // the sheet could make and this cannot, so the pure harness that pins tie-breaking pins the SHEET's implementation, which
+  // is still live until the sheet is retired.
   GET_RUNNER_LEADERBOARD: async () => {
-    const users = await rowsOf(collection(firestore(), 'users'));
-    const scored = users
-      .map((user) => ({
-        id: String(user.id || ''),
-        name: String(user.name || '').trim(),
-        score: Number(user.runner_score) || 0,
-      }))
-      .filter((entry) => entry.id && entry.score > 0)
-      .sort((a, b) => b.score - a.score);
+    // The filter is the whole condition; the board adds an order and a cap TO IT, and the count does not. Building the count
+    // from the capped query instead is how a station with more than 25 scorers reports "of 25" - a wrong number nothing else
+    // would notice, which is why the harness seeds more than a board's worth and asserts both numbers.
+    const scored = () => query(collection(firestore(), 'users'), where('runner_score', '>', 0));
+    const [rows, counted] = await Promise.all([
+      getDocs(query(scored(), orderBy('runner_score', 'desc'), limit(RUNNER_LEADERBOARD_LIMIT))),
+      getCountFromServer(scored()),
+    ]);
 
-    return { leaderboard: scored.slice(0, RUNNER_LEADERBOARD_LIMIT), total: scored.length };
+    return {
+      leaderboard: rows.docs.map((entry) => {
+        const data = entry.data() || {};
+        return { id: String(entry.id), name: String(data.name || '').trim(), score: Number(data.runner_score) || 0 };
+      }),
+      // Everyone with a score, which is what the board needs to say where a member stands; the rows themselves are capped.
+      total: counted.data().count,
+    };
   },
 
   // Whether this deployment can send pushes at all, answered by the runtime rather than inferred by the browser: the
@@ -346,23 +549,20 @@ export const READERS = {
     return answer.data || {};
   },
 
-  // The system log, one page at a time - and the one officer read that is a callable rather than a query, for reasons
-  // that come from the shape of the contract rather than from convenience: the response carries the counts and the
-  // filter dropdown's facets for the WHOLE log, which no page can supply, and the log names members and records failed
-  // sign-ins. See readSystemLog in functions/index.js, where the permission is checked server-side and the sheet's
-  // filtering, sorting and paging are reproduced exactly - including the two things a Firestore query would do
-  // differently (case-sensitive matching, and missing values sorting first).
+  // The audit log, read ON DEMAND from Cloud Logging. Nothing in the app reads it otherwise, and that is the point: the
+  // lines are written for nothing by the functions, and this asks the Logging API for one page when an officer opens the
+  // tab. The response is FORWARD-PAGED (a token, and no total) because that is what the API offers - the sheet's
+  // "page 3 of 12" needed the whole log in hand, which is the cost this design exists to avoid.
   ADMIN_GET_SYSTEM_LOG: async (uid, body) => {
-    const query = {
-      page: (body && body.page) || 1,
+    const answer = await httpsCallable(firebaseFunctions(), 'readSystemLog')({
       page_size: (body && body.page_size) || '',
       sort: (body && body.sort) || '',
       from: (body && body.from) || '',
       to: (body && body.to) || '',
       action_filter: (body && body.action_filter) || '',
       member: (body && body.member) || '',
-    };
-    const answer = await httpsCallable(firebaseFunctions(), 'readSystemLog')(query);
+      page_token: (body && body.page_token) || '',
+    });
     return answer.data || {};
   },
 

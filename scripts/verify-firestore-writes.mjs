@@ -19,13 +19,16 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { firebaseAuth, firebaseFunctions, firestore } from '../src/services/firebase.js';
 import { routeRead, routeWrite } from '../src/services/firestoreRouting.js';
+// The board's own swap helper: the entries below are built with the code the client runs, so this cannot drift from
+// what a swap really sends. It has no imports of its own, which is what makes it usable from here at all.
+import { swapSlotFields } from '../src/utils/scheduleDrop.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
+import { OFFLINE_CLOCK_MESSAGE } from '../src/utils/connectivity.js';
 import {
   approveOffer,
   audienceKeysForWrite,
   badgeForRecord,
-  clientWritesAreAudited,
   clockIn,
   clockOut,
   makeOffer,
@@ -58,6 +61,18 @@ const refused = async (label, expected, run) => {
   } catch (error) {
     checkIs(label, error.message === expected || error.code === expected, `threw ${error.code || error.message}`);
   }
+};
+
+// Making the device answer "no connection", for the clock guard. The property is SHADOWED on the existing navigator rather
+// than the global being replaced, so everything else the runtime and the SDKs read there stays intact; deleting the shadow
+// restores whatever the platform said (in Node, nothing - which the guard reads as online).
+const setOffline = (offline) => {
+  if (!globalThis.navigator) return;
+  if (!offline) {
+    delete globalThis.navigator.onLine;
+    return;
+  }
+  Object.defineProperty(globalThis.navigator, 'onLine', { value: false, configurable: true, writable: true });
 };
 
 const auth = firebaseAuth();
@@ -100,7 +115,33 @@ const main = async () => {
     () => clockOut({ userId: 'u2', entryId: 'c1' })
   );
 
-  // --- availability: one batch, own rows only ---
+  // --- offline: the pair of writes that must NOT queue ------------------------------------------------------------------
+  //
+  // A queued clock-in carries the DEVICE's clock rather than the server's (docs/FIRESTORE_MODEL.md, "Offline"), so a member
+  // in a dead spot would create a record asserting they arrived at a time nobody can vouch for - and that record is what the
+  // station uses to say who was on duty. The guard lives in the WRITER, which is why this asserts through BOTH doors: the
+  // function the app calls, and the route it travels.
+  //
+  // The assertion that matters most is that NOTHING was written. A refusal that still leaves a shift open behind it is worse
+  // than the queued write it was avoiding - and the last two checks are the other half of the rule: the guard covers the
+  // clock and NOTHING else, because a station with patchy coverage must keep accepting the writes that queue safely.
+  console.log('\n--- offline: clocking in refuses rather than queues ---');
+  setOffline(true);
+  await refused('the writer refuses', 'offline', () => clockIn({ userId: 'u2' }));
+  const offlineRoute = await routeWrite('CLOCK_IN', { gps_lat: '', gps_lon: '', is_manual: false });
+  check('the route answers with the sentence, not a transport error', offlineRoute.message, OFFLINE_CLOCK_MESSAGE);
+  check('and says it was refused', offlineRoute.code, 'REFUSED');
+  check('no shift was opened behind the refusal', (await getDoc(doc(db, 'on_duty', 'u2'))).exists(), false);
+  const openEntries = await getDocs(query(collection(db, 'timeclock'), where('user_id', '==', 'u2'), where('time_out', '==', '')));
+  check('and no entry was left open either', openEntries.docs.length, 0);
+  const otherWrite = await routeWrite('SET_MY_AVAILABILITY', { adds: [], removes: [] });
+  checkIs('while a write that queues safely still goes through', otherWrite.success === true, JSON.stringify(otherWrite));
+  setOffline(false);
+  const backOnline = await routeWrite('CLOCK_IN', { gps_lat: '', gps_lon: '', is_manual: false });
+  checkIs('and the same clock-in works the moment there is a connection', backOnline.success === true, JSON.stringify(backOnline));
+  // Put the member back where this section found them, so the sections after it are unaffected by it.
+  if (backOnline.id) await clockOut({ userId: 'u2', entryId: backOnline.id });
+
   console.log('\n--- availability ---');
   await saveAvailability({
     userId: 'u2',
@@ -195,30 +236,136 @@ const main = async () => {
   check('the blank member survived, because that is what "open" means', openRow.user_id, '');
   check('and is_open was derived from it', openRow.is_open, true);
 
-  // The conflict: a NEW row claiming a slot that is already somebody else's. Sending the same id would be a
-  // hand-over of that row - which the board legitimately does - so this one arrives without an id, which is what a
-  // second slot on an occupied date looks like.
+  // The conflict: a NEW row claiming a TEMPLATE SLOT that is already somebody else's. Sending the same id would be a
+  // hand-over of that row - which the board legitimately does - so this one arrives without an id. The template is what
+  // makes it a slot at all: the board keys its slots by date and template (AdminScheduleManagementTab), so a row with no
+  // template is a custom shift and belongs to no slot.
   await refused('a slot already held cannot be handed to somebody else', 'functions/failed-precondition', () =>
-    saveScheduleBoard({ entries: [{ date_from: '2026-03-09', date_to: '2026-03-09', assignment_id: 'a1', user_id: 'u2' }] })
+    saveScheduleBoard({
+      entries: [
+        { date_from: '2026-03-09', date_to: '2026-03-09', schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u2' },
+      ],
+    })
   );
+
+  // Two members claimed by ONE save for one slot: the entries are compared with EACH OTHER, because both rows would land
+  // in that slot and nothing else would notice - the check only ever looked at what was already stored, and the sheet had
+  // no such check at all. The message also names the slot exactly ONCE, which is the other half of the field report:
+  // "Already filled by somebody else: 2026-09-29 <id>, 2026-09-29 <id>" was one problem described twice, and it read like
+  // two. Counted rather than matched, because the count is the claim.
+  let doubleClaim = '';
+  try {
+    await saveScheduleBoard({
+      entries: [
+        { date_from: '2026-06-01', date_to: '2026-06-01', schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u1' },
+        { date_from: '2026-06-01', date_to: '2026-06-01', schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u2' },
+      ],
+    });
+  } catch (error) {
+    doubleClaim = String((error && error.message) || '');
+  }
+  checkIs('one save cannot give one slot to two members', doubleClaim.includes('Already filled by somebody else'), doubleClaim || 'the write was allowed');
+  check('and the slot is named exactly once', doubleClaim.split('2026-06-01 t1').length - 1, 1);
+  // Refused inside the transaction, so the refusal is the whole save and nothing was written for it.
+  check(
+    'with nothing written for the refused save',
+    (await getDocs(query(collection(db, 'schedule'), where('date_from', '==', '2026-06-01')))).docs.length,
+    0
+  );
+
+  // THE SWAP, in the shape the board really produces - and the operation this check broke twice over.
+  //
+  // The two rows are DIFFERENT TEMPLATES ON ONE DAY (t1 and t0 share "Engine 1", and the date is a Monday so both
+  // templates really are due that day), which is what swapping two people on a single day looks like. Two things have to
+  // hold for it to be accepted: each row must be able to take the slot the other is vacating - the version that read only
+  // stored rows refused that - and the two slots must be told apart by the TEMPLATE, because keying on the assignment
+  // merged them and the swap read as two members claiming one place.
+  const swapDate = '2026-07-06';
+  const setup = await saveScheduleBoard({
+    entries: [
+      { date_from: swapDate, date_to: swapDate, schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u1' },
+      { date_from: swapDate, date_to: swapDate, schedule_template_id: 't0', assignment_id: 'a1', user_id: 'u2' },
+    ],
+  });
+  checkIs('two templates are staffed on one day to set the swap up', setup.ids.length === 2 && setup.ids.every(Boolean), JSON.stringify(setup.ids));
+
+  const swap = await saveScheduleBoard({
+    entries: [
+      { id: setup.ids[0], date_from: swapDate, date_to: swapDate, schedule_template_id: 't0', assignment_id: 'a1', user_id: 'u1' },
+      { id: setup.ids[1], date_from: swapDate, date_to: swapDate, schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u2' },
+    ],
+  });
+  check('the swap is accepted', [...swap.ids].sort(), [...setup.ids].sort());
+  check(
+    'and each row took the other’s template, keeping its own member',
+    [
+      (await getDoc(doc(db, 'schedule', setup.ids[0]))).data().schedule_template_id,
+      (await getDoc(doc(db, 'schedule', setup.ids[1]))).data().schedule_template_id,
+      (await getDoc(doc(db, 'schedule', setup.ids[0]))).data().user_id,
+    ],
+    ['t0', 't1', 'u1']
+  );
+  // ...and the guard still bites: this save does not rewrite the row holding t1, so a NEW row for somebody else in it is
+  // exactly what the check exists for. A swap may move rows; it may not hand a slot to a stranger.
+  await refused('a swap does not open its slots to anybody else', 'functions/failed-precondition', () =>
+    saveScheduleBoard({
+      entries: [{ date_from: swapDate, date_to: swapDate, schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u1' }],
+    })
+  );
+
+  // And here the same swap is built by the CLIENT'S OWN HELPER (swapSlotFields) rather than by hand, so this cannot drift
+  // from what the board actually sends: it is the check that would have caught the assignment key, because the helper
+  // moves the TEMPLATE as well as the date and the old key ignored it. Swapping back also proves the exchange works in
+  // both directions rather than only out of a slot nobody is holding.
+  const current = await Promise.all(
+    setup.ids.map(async (id) => ({ id, ...(await getDoc(doc(db, 'schedule', id))).data() }))
+  );
+  const [swappedA, swappedB] = swapSlotFields(current[0], current[1]);
+  check('the client helper moves the template, not just the date', [swappedA.schedule_template_id, swappedB.schedule_template_id], ['t1', 't0']);
+  const asEntry = (row) => ({
+    id: row.id,
+    schedule_template_id: row.schedule_template_id,
+    date_from: row.date_from,
+    date_to: row.date_to,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    apparatus_id: row.apparatus_id,
+    assignment_id: row.assignment_id,
+    user_id: row.user_id,
+  });
+  const back = await saveScheduleBoard({ entries: [asEntry(swappedA), asEntry(swappedB)] });
+  checkIs('and the save it produces is accepted', back.ids.length === 2 && back.ids.every(Boolean), JSON.stringify(back.ids));
+  check(
+    'which puts the two rows back where they started',
+    [
+      (await getDoc(doc(db, 'schedule', setup.ids[0]))).data().schedule_template_id,
+      (await getDoc(doc(db, 'schedule', setup.ids[1]))).data().schedule_template_id,
+    ],
+    ['t1', 't0']
+  );
+
+  // ...and a CUSTOM shift has no slot to collide in: a day may hold several, which is how the sheet's board worked and
+  // why templates are what identify a slot. Two in one save, so this covers the request-against-itself pass as well.
+  const custom = await saveScheduleBoard({
+    entries: [
+      { date_from: '2026-07-08', date_to: '2026-07-08', assignment_id: 'a1', user_id: 'u1', start_time: '06:00', end_time: '09:00' },
+      { date_from: '2026-07-08', date_to: '2026-07-08', assignment_id: 'a1', user_id: 'u2', start_time: '09:00', end_time: '12:00' },
+    ],
+  });
+  check('two custom shifts share a day without colliding', custom.ids.length, 2);
 
   const boardRemoval = await saveScheduleBoard({ deleteIds: [board.ids[1]] });
   check('the delete count comes back', boardRemoval.deleted, 1);
   check('and the row is gone', (await getDoc(doc(db, 'schedule', board.ids[1]))).exists(), false);
 
-  // The audit trail, which is one of the reasons this is a function: a client may not write the log at all. Two
-  // rows, because the harness made two calls - one saving, one deleting - and the function reports each as it
+  // The board's audit trail is NO LONGER ASSERTABLE HERE, and that is a deliberate trade: the app's audit lines are
+  // Cloud Logging entries now (see `audit` in functions/index.js) rather than `system_log` documents, and this harness
+  // runs against the emulator, which does not hand its function logs back to a test. What the save DID is still
+  // asserted all around this: the rows, the ids, the derived `is_open`. What is no longer asserted anywhere is that a
+  // given action left a RECORD - the functionality behind it is Firestore's writes, and the record is Cloud Logging's.
+  // (The emulator does run a Logging emulator, so this could be recovered by querying it; that is the follow-up if the
+  // audit trail ever needs a regression test of its own.)
   // happened rather than pretending a save and a delete are one action.
-  const log = await getDocs(collection(db, 'system_log'));
-  const boardRows = log.docs.map((entry) => entry.data()).filter((row) => row.action === 'ADMIN_BULK_SAVE_SCHEDULE');
-  checkIs('the board save left audit rows', boardRows.length >= 2, `${boardRows.length} rows`);
-  check('each naming the officer who did it', [...new Set(boardRows.map((row) => row.user_id))], ['u1']);
-  checkIs(
-    'and saying what it did',
-    boardRows.some((row) => /Saved 2 schedule entries/.test(row.details)) &&
-      boardRows.some((row) => /deleted 1/.test(row.details)),
-    boardRows.map((row) => row.details).join(' | ')
-  );
 
   // And a member cannot reach the board at all.
   await signOut(auth);
@@ -589,8 +736,6 @@ const main = async () => {
     transfer: true,
   });
   checkIs('a transfer moves it', moved && moved.success === true, JSON.stringify(moved).slice(0, 140));
-  const transferRows = await rowsOf(query(collection(firestore(), 'system_log'), where('action', '==', 'PUSH_DEVICE_TRANSFERRED')));
-  checkIs('and is recorded in the audit log', transferRows.length >= 1, `${transferRows.length} rows`);
   const afterMove = await rowsOf(query(collection(firestore(), 'push_devices'), where('token', '==', 'token-of-jane-phone')));
   check('with the new owner on the row', afterMove.map((row) => row.user_id), ['u1']);
 
@@ -631,73 +776,6 @@ const main = async () => {
   checkIs('the runtime reports that it can send notifications', fcm.ready === true, JSON.stringify(fcm).slice(0, 140));
   checkIs('with the device count alongside it', typeof fcm.devices === 'number', String(fcm.devices));
 
-  // The system log, one page at a time: the last read in the app, and the one whose answer is more than a page. The
-  // fixtures live in March 2026 while the audit rows this harness provokes are written "now", so a date range that stops
-  // in March isolates the fixtures from everything else in the collection - which is what makes these deterministic
-  // rather than hopeful.
-  const readSystemLog = httpsCallable(firebaseFunctions(), 'readSystemLog');
-  const march = { from: '2026-03-01', to: '2026-03-31' };
-  await signIn('jane');
-
-  const firstPage = await readSystemLog({ ...march, page_size: 2 });
-  check('the log answers the contract version the tab checks', firstPage.data.api, 2);
-  check('the fixtures page in timestamp order, newest first', firstPage.data.rows.map((row) => row.id), ['log4', 'log2']);
-  // Five rows in March, not four: the seed has an audit row of its own (l1, 2026-03-02 08:00:00), and it is welcome here
-  // - it holds station-time text in `created_at`, which is the OTHER legacy shape, and it sorts between log1 and log3.
-  check('and the counts describe the filtered set', [firstPage.data.total, firstPage.data.total_pages, firstPage.data.page], [5, 3, 1]);
-
-  const secondPage = await readSystemLog({ ...march, page_size: 2, page: 2 });
-  check('the second page holds the rest', secondPage.data.rows.map((row) => row.id), ['log1', 'l1']);
-  const thirdPage = await readSystemLog({ ...march, page_size: 2, page: 3 });
-  const pastTheEnd = await readSystemLog({ ...march, page_size: 2, page: 99 });
-  checkIs('a page past the end is clamped to the last page rather than rendering empty', pastTheEnd.data.page === 3 && pastTheEnd.data.rows.length === 1, String(pastTheEnd.data.page));
-
-  // The two legacy timestamps, both CONVERTED or normalized rather than trimmed:
-  //   log3 carries an ISO `created_at` and no `timestamp` at all, and 12:00 UTC is 07:00 in station time in March -
-  //   rendering it as 12:00 would look like a real time rather than like a bug.
-  //   l1 carries station-time text in `created_at` (what a row written before both fields existed looks like), which
-  //   has to be read as it stands rather than re-parsed as if it were UTC.
-  check('an ISO timestamp is converted to station time', thirdPage.data.rows[0].timestamp, '2026-03-02 07:00:00');
-  check('and station-time text in created_at is taken as it stands', secondPage.data.rows[1].timestamp, '2026-03-02 08:00:00');
-
-  // The action filter is case-INSENSITIVE, as the sheet matched it: a station whose log holds both 'USER_LOGIN' and
-  // 'user_login' sees one group rather than two. Whole value, though - not a prefix.
-  const lowercase = await readSystemLog({ ...march, action_filter: 'user_login' });
-  check('the action filter matches a differently-cased action', lowercase.data.rows.map((row) => row.id).sort(), ['log1', 'log3']);
-  check('and it matches the whole value rather than a prefix', (await readSystemLog({ ...march, action_filter: 'CLOCK' })).data.total, 0);
-
-  const byMember = await readSystemLog({ ...march, member: 'u2' });
-  check('the member filter matches on the id', byMember.data.rows.map((row) => row.id), ['log4', 'log2']);
-
-  const oneDay = await readSystemLog({ from: '2026-03-04', to: '2026-03-04' });
-  check('a one-day range includes both of that day\u2019s rows', oneDay.data.rows.map((row) => row.id), ['log2', 'log1']);
-
-  const byMemberAsc = await readSystemLog({ ...march, sort: 'member_asc' });
-  check('member order sorts by id, newest first within it', byMemberAsc.data.rows.map((row) => row.id), ['log1', 'l1', 'log3', 'log4', 'log2']);
-  const byActionAsc = await readSystemLog({ ...march, sort: 'action_asc' });
-  check('action order sorts by action, newest first within it', byActionAsc.data.rows.map((row) => row.id), ['log2', 'l1', 'log4', 'log1', 'log3']);
-  check('an unknown sort falls back to the default rather than to unsorted', (await readSystemLog({ ...march, sort: 'nonsense' })).data.sort, 'timestamp_desc');
-
-  // The facets come from the WHOLE log rather than the page, because a dropdown offering only the values on the current
-  // page could never select the value somebody is looking for.
-  check(
-    'the action facets cover the whole log',
-    // Case-insensitive on purpose: the facets carry the RAW values, which is what lets this list hold both 'USER_LOGIN'
-    // and 'user_login' - and a case-sensitive filter here would silently skip the lowercase one and prove nothing.
-    firstPage.data.actions.filter((action) => /login|clock|sign_in/i.test(action)).sort(),
-    ['CLOCK_IN', 'SIGN_IN_FAILED', 'USER_LOGIN', 'user_login']
-  );
-  check('and the member facets are ids, which the roster puts names to', firstPage.data.members.includes('u2'), true);
-  checkIs('and the log total counts every row, not just the filtered ones', firstPage.data.log_total >= 4, String(firstPage.data.log_total));
-
-  // The permission, checked where it cannot be talked around: the tab is officer-only, and the log names members and
-  // records failed sign-ins. Bo is a firefighter, and the seed gives that role no `can_view_system_log`.
-  await signOut(firebaseAuth());
-  await refused('nobody signed in cannot read the log at all', 'functions/unauthenticated', () => readSystemLog({ ...march }));
-  await signIn('bo');
-  await refused('a member without the permission cannot read the log', 'functions/permission-denied', () => readSystemLog({ ...march }));
-  await signIn('jane');
-
   // --- the runner: a personal best, and the board that shows it ---
   console.log('\n--- the runner ---');
   await signIn('bo');
@@ -712,6 +790,44 @@ const main = async () => {
     best: 120,
     improved: false,
   });
+
+  // A SCORE THAT ARRIVED AS TEXT, and the repair the next run makes whatever it scores. Only a MIGRATION can leave text
+  // here - a client cannot write this field at all (the `users` rule is `hasOnly`) - so this writes it the way a migration
+  // would, with the Admin SDK.
+  //
+  // Why the repair exists: the leaderboard is a query comparing types, so a text score is invisible to it and its owner stays
+  // off the board until they beat a score they already hold - for good, if they never do. The repair writes the SAME number,
+  // so it changes nothing about what the member earned.
+  const { initializeApp } = await import('firebase-admin/app');
+  const { getFirestore: getAdminFirestore } = await import('firebase-admin/firestore');
+  const admin = getAdminFirestore(
+    initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'demo-station-portal' }, 'verify-writes')
+  );
+  const storeScore = (value) => admin.doc('users/u2').set({ runner_score: value }, { merge: true });
+  const scoreOf = async () => (await getDoc(doc(db, 'users', 'u2'))).data().runner_score;
+
+  await storeScore('1450');
+  check('a run that beats nothing answers with the standing best', await routeWrite('SAVE_RUNNER_SCORE', { score: 90 }), {
+    success: true,
+    best: 1450,
+    improved: false,
+  });
+  check('and repays it as a number, so the board can see it', await scoreOf(), 1450);
+  check('a better run still wins, and stores a number too', await routeWrite('SAVE_RUNNER_SCORE', { score: 2000 }), {
+    success: true,
+    best: 2000,
+    improved: true,
+  });
+  // NOT EVERY VALUE IS A SCORE: spelling is not a personal best, and turning it into a 0 would be inventing one. It is left
+  // exactly as it was, which is also why the bulk repair script counts these and reports them rather than rewriting them.
+  await storeScore('abc');
+  check('a value that is not a score is not repaired into one', await routeWrite('SAVE_RUNNER_SCORE', { score: 0 }), {
+    success: true,
+    best: 0,
+    improved: false,
+  });
+  check('so it is left exactly as it was', await scoreOf(), 'abc');
+  await storeScore(2000);
 
   // The clamp, which is the whole reason this is a callable rather than a client write: the board is SHARED, so an
   // impossible number must not reach it. 999999 becomes the station's ceiling rather than a refusal, because a doctored
@@ -790,19 +906,10 @@ const main = async () => {
     message: 'User not found.',
   });
 
-  // The audit toggle, asserted BOTH ways because the wrong default here is invisible: the save succeeds either way,
-  // and only the audit row differs. Off unless an officer asks for it is the owner's decision, so 'off' is a case
-  // rather than a comment. Written last, and switched back off, so nothing above it is affected.
-  //
-  // Jane writes it because the setting needs can_edit_system_settings - and bo, who is a plain member here, is
-  // refused by the rules at exactly that line. The READ is open to anybody, which is why the client can consult it.
-  const settingsDoc = doc(firestore(), 'settings', 'public');
-  check('the audit toggle is off unless an officer asks for it', await clientWritesAreAudited(), false);
-  await signIn('jane');
-  await setDoc(settingsDoc, { audit_client_writes: 'TRUE' }, { merge: true });
-  check('and it turns on as soon as the setting says so', await clientWritesAreAudited(), true);
-  await setDoc(settingsDoc, { audit_client_writes: 'FALSE' }, { merge: true });
-  check('and off again when it is set to anything but TRUE', await clientWritesAreAudited(), false);
+  // The audit toggle is GONE, with the collection it wrote to. An officer used to be able to route straightforward
+  // saves through a callable that wrote an audit row first, off by default; the app's audits are Cloud Logging lines
+  // now (`audit` in functions/index.js), and the functions that need one always write it. So there is no setting to
+  // read and no row to assert - see the note by the board's section above for what that costs this harness.
 
   checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };

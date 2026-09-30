@@ -58,6 +58,18 @@ this document exists.
 6. **`on_duty` is derived from open `timeclock` rows** (`time_out` empty), one small document per member. It is not a
    column anywhere, and the roster reads it.
 
+A seventh thing is not a copy either, though it is only a TYPE: **`runner_score` must arrive as a number.** The leaderboard
+is a query — `where('runner_score', '>', 0).orderBy('runner_score', 'desc').limit(25)` — and Firestore compares types, so a
+score stored as text is not greater than zero: that member does not appear with a wrong score, they leave the board. Every
+column the app compares or does arithmetic with is in `NUMERIC_COLUMNS` in the map for the same reason. `runner_score` is
+there now; `npm run scores:normalize` reports — and, with `--apply`, repairs — anything a migration run before that change
+left as text, and it is safe to run twice, which is what makes it usable as a check as well as a fix.
+
+The map's first cut did not include it, and that is the shape of the risk worth remembering: a column that is only ever
+*displayed* can be a string for years without anybody noticing, and it is a query arriving later that turns the type into a
+bug. What pins it now is `npm run verify:firestore-reads`, which stores a text score, shows it missing from the board,
+repairs it, and shows it appear — so the hazard is demonstrated on every run rather than described in a comment.
+
 Two smaller moves: `settings` splits into `public` and `private` **by key**, and `user_settings.fcm_token` is dropped,
 because the rules deliberately keep device tokens out of that document - `push_devices` is where they belong and
 already has them.

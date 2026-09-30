@@ -9,8 +9,8 @@
 export const PAGE_BAR_LABELS = {
   dashboard: 'Dashboard',
   'clock-history': 'Clock History',
-  schedule: 'My Schedule',
-  availability: 'My Availability',
+  schedule: 'Schedule',
+  availability: 'Availability',
   training: 'Training',
   documents: 'Documents',
   certifications: 'Certifications',
@@ -43,9 +43,10 @@ export const ADMIN_BAR_LABELS = {
   documents: 'Documents',
   system: 'Settings',
   notifications: 'Notifications',
-  // The nav id is `system-log`, not `log`: an id-based lookup has to match the navigation exactly, and a
-  // test asserts every id in ADMIN_NAV_CATEGORIES has an entry here.
-  'system-log': 'System Log',
+  // The audit log's tab id is `system-log`, unchanged from when its rows lived in a collection: an id-based lookup has
+  // to match the navigation exactly, and a test asserts every id in ADMIN_NAV_CATEGORIES has an entry here. The LABEL is
+  // what changed, because where the rows come from did.
+  'system-log': 'Audit Log',
   debug: 'Debug',
   help: 'Help',
 };

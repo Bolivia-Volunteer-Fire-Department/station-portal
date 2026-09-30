@@ -13,12 +13,30 @@
 //     enforced on the server, now enforced by the database.
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from './firebase.js';
+// The app's time parser, shared rather than re-implemented (see templateMinutes below). It has no imports of its own,
+// which is what lets this module - loaded by plain Node in the harnesses - use it.
+import { toTimeInputValue } from '../utils/timeInputValue.js';
+// The window a load carries for `schedule`. Pure and dependency-free, so this module stays loadable by the Node
+// harnesses - see the note in that file.
+import { scheduleWindowFor } from '../utils/scheduleWindow.js';
 
 // Shared with firestoreReads.js, which serves the refresh reads: one implementation of each query, so a read moved
 // to Firestore cannot answer differently depending on which action asked for it.
 export const rowsOf = async (target) => (await getDocs(target)).docs.map((entry) => ({ id: entry.id, ...entry.data() }));
 
 export const rowsFor = (name, field, value) => rowsOf(query(collection(firestore(), name), where(field, '==', value)));
+
+// Rows whose date field falls inside a window, inclusive at both ends. `date_from` is stored as a 'YYYY-MM-DD' key, which
+// sorts chronologically as text - so two range filters on the SAME field are all this needs: no composite index, and no
+// parsing on either side. An end that is not given is left open rather than narrowed to an epoch.
+export const rowsInRange = (name, field, from, to) =>
+  rowsOf(
+    query(
+      collection(firestore(), name),
+      where(field, '>=', String(from || '0000-01-01')),
+      where(field, '<=', String(to || '9999-12-31'))
+    )
+  );
 
 // The four keys an audience query carries: everyone, this member, their role, their rank. The rules answer the same
 // list with hasAny - see firestore.rules - which is what makes the query provable rather than merely convenient.
@@ -32,11 +50,243 @@ export const audienceKeysFor = ({ userId, roleId, rankId }) => [
 export const audienceRows = (name, keys) =>
   rowsOf(query(collection(firestore(), name), where('audience_keys', 'array-contains-any', keys)));
 
+// ONE `users` READ PER WAVE, NOT ONE PER READER.
+//
+// FOUR PLACES READ THIS WHOLE COLLECTION - the payload's station wave (which the roster is projected from), the on-duty
+// join, the notifications tab's per-member picture and the users admin section - and Firestore bills per
+// DOCUMENT read. A station with 40 members was paying 40 reads for each of them to learn the same thing, and at a sign-in
+// several fire at once.
+//
+// The rule is narrow, and it is the same discipline the old request coalescer used (utils/readCoalescing): share an
+// IN-FLIGHT read, and drop it the moment it settles. Nothing is cached across time, so a read issued after a write still
+// sees the write - which is what keeps this from ever showing a save that has not landed. Two callers a minute apart get
+// two reads; two callers in the same moment get one.
+//
+// What this does NOT do is make a sequential repeat cheap; the leaderboard still reads the collection on every play, and
+// narrowing THAT is a data question (a numeric runner_score) rather than a coalescing one. See the note in
+// firestoreReads.js#GET_RUNNER_LEADERBOARD.
+//
+// THE ARRAY IS SHARED, so treat it as read-only: map, filter and spread it, but never sort or splice it in place, or the
+// next reader inherits the change.
+let usersInFlight = null;
+export const readUsersOnce = () => {
+  if (!usersInFlight) {
+    usersInFlight = rowsOf(collection(firestore(), 'users'));
+    const release = () => {
+      usersInFlight = null;
+    };
+    usersInFlight.then(release, release);
+  }
+  return usersInFlight;
+};
+
 // A settings document turned back into the key/value rows the app reads today. The shape stays a list until the
 // settings screen itself is migrated: keeping it is what lets this module drop in behind api.js unchanged.
 export const settingRows = (snapshot) => Object.entries(snapshot.data() || {}).map(([key, value]) => ({ key, value }));
 
-export const fetchMemberPayload = async (account) => {
+// The station's week, in the order the calendars draw it: Monday first, then each day's shifts in the order they happen,
+// then by nickname so the order is total rather than merely sorted.
+//
+// MONDAY FIRST, deliberately, and worth saying because the app holds both conventions: the month grid's weekday header
+// (`calendarConstants.WEEKDAYS`) is Sunday first, while every WEEK view - the printed sheet (`PRINT_WEEKDAYS`) and the
+// Templates tab's own grid - starts on Monday. Templates are a week, so they follow the week.
+//
+// WHY THIS EXISTS AT ALL: the sheet sent `schedule_templates` in its own ROW order, which is an order a person
+// maintains - and a collection has none. It comes back by document id, so after a migration every list that shows
+// templates in the order they arrived shows them shuffled. The Templates tab still reads correctly because it sorts its
+// own grid, but every picker, dropdown and legend fed by this payload does not.
+const TEMPLATE_DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+// Minutes since midnight, or null when the value is not a readable time.
+//
+// THE APP'S OWN PARSER, and not a second one: `toTimeInputValue` handles every shape a spreadsheet time cell arrives in -
+// 'HH:MM', '8:30 AM', a Date, and the '1899-12-30T13:30:00.000Z' a Sheets API read produces - and utils/shiftTime's
+// timeToMinutes is a thin wrapper around it. The hand-rolled regex that was here instead matched '8:00 PM' as 08:00, so
+// every evening shift sorted as a morning one: an ordering bug that looks like the data being wrong.
+//
+// Imported WITH its extension because this module is loaded by plain Node in the harnesses as well as by Vite, and Node
+// does not resolve extension-less specifiers. `timeInputValue.js` has no imports of its own, which is what makes it safe
+// to share; see the note in firestoreWrites.js about the app util that could not be shared for the opposite reason.
+const templateMinutes = (value) => {
+  const parsed = toTimeInputValue(value);
+  if (!parsed) return null;
+  const [hours, minutes] = parsed.split(':').map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : null;
+};
+
+// An assignment's required rank: the SHIFT's own minimum rather than the member's, which is the key utils/crewOrder
+// orders a day's crew by - "Officer above Driver above Firefighter" - whatever order the rows arrive in and whoever is
+// filling them.
+const requiredRankFor = (assignments, assignmentId) => {
+  const wanted = String(assignmentId || '').trim();
+  if (!wanted) return null;
+  const found = (Array.isArray(assignments) ? assignments : []).find((row) => String(row && row.id) === wanted);
+  const order = Number(found && found.rank_order_required);
+  return Number.isFinite(order) ? order : null;
+};
+
+// A day the app does not recognise sorts last, and so does a time it cannot read - the convention the calendars already
+// use for a shift with no readable start, rather than pretending either is midnight.
+const scheduleTemplateSort = (assignments) => {
+  const dayOf = (row) => {
+    const day = TEMPLATE_DAY_ORDER.indexOf(String((row && row.day_of_week) || '').trim().toLowerCase());
+    return day === -1 ? TEMPLATE_DAY_ORDER.length : day;
+  };
+
+  return (a, b) => {
+    if (dayOf(a) !== dayOf(b)) return dayOf(a) - dayOf(b);
+
+    const aMinutes = templateMinutes(a && a.start_time);
+    const bMinutes = templateMinutes(b && b.start_time);
+    if (aMinutes === null && bMinutes !== null) return 1;
+    if (bMinutes === null && aMinutes !== null) return -1;
+    if (aMinutes !== bMinutes) return aMinutes - bMinutes;
+
+    // The SAME TIME, so the assignment decides: highest required rank first, and an assignment with no requirement after
+    // the ranked ones. This is utils/crewOrder's rule for a day's pills, applied to the slots the board draws from these
+    // rows - so a board and a picker fed by this payload cannot disagree about which shift comes first.
+    const aRank = requiredRankFor(assignments, a && a.assignment_id);
+    const bRank = requiredRankFor(assignments, b && b.assignment_id);
+    if (aRank !== bRank) {
+      if (aRank === null) return 1;
+      if (bRank === null) return -1;
+      return bRank - aRank;
+    }
+
+    // Total rather than merely sorted: two templates at one time on one day with the same rank still need an order.
+    const aName = String((a && a.nickname) || '').localeCompare(String((b && b.nickname) || ''));
+    return aName !== 0 ? aName : String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  };
+};
+
+// Non-mutating, and it needs the assignments because the tiebreak is about them.
+const sortScheduleTemplates = (rows, assignments) =>
+  Array.isArray(rows) ? rows.slice().sort(scheduleTemplateSort(assignments)) : [];
+
+// The station-wide rows BOTH payloads need: reference data and the crew's shifts. Extracted so an administrator's load
+// reads each of these once rather than twice - fetchAdminPayload needs the same collections for its own sections, and it
+// used to read them again (see the parameter on fetchMemberPayload).
+//
+// `schedule` IS READ AS A WINDOW - last month, this month, next month - and it is the only one here that is: it grows
+// without limit, while every other collection is bounded by the station's size. The window travels back with the rows so
+// the client can tell what it holds and ask for the month it is missing.
+const readStationRows = async (db, scheduleWindow = scheduleWindowFor()) => {
+  const [roles, ranks, shifts, users, assignments, templates, schedule] = await Promise.all([
+    rowsOf(collection(db, 'roles')),
+    rowsOf(collection(db, 'ranks')),
+    rowsOf(collection(db, 'shifts')),
+    // The SHARED `users` read: the roster projection, the on-duty join and the users directory all project off this same
+    // array rather than reading the collection again - see readUsersOnce.
+    readUsersOnce(),
+    rowsOf(collection(db, 'assignments')),
+    rowsOf(collection(db, 'schedule_templates')),
+    rowsInRange('schedule', 'date_from', scheduleWindow.from, scheduleWindow.to),
+  ]);
+  return { roles, ranks, shifts, users, assignments, templates, schedule, window: scheduleWindow };
+};
+
+// ONE ADMIN SECTION AT A TIME, by the name the payload uses for it.
+//
+// WHY THIS EXISTS: the payload is the right shape for a SIGN-IN - everything an officer's screens need, in one wave - and
+// the wrong shape for what happens AFTER a save. Every admin save called the whole payload again (36 call sites), so
+// changing one rank's description re-read the schedule, the roster, every private half, and the documents tab's save -
+// whose data is not in the payload at all - read the lot for nothing.
+//
+// A section reader reads what one screen's save could have changed. `station` is the shared wave when the caller has
+// already read it (fetchAdminPayload does, so nothing is read twice); a scoped refresh passes nothing and reads only its
+// own collections.
+const ADMIN_SECTIONS = {
+  users: async (db, station) => {
+    const [users, privateRows] = await Promise.all([
+      station ? station.users : readUsersOnce(),
+      rowsOf(collection(db, 'users_private')),
+    ]);
+    const privateById = Object.fromEntries(privateRows.map((row) => [row.id, row]));
+    // The sheet's own field name for the username, and the row SPREAD rather than projected: the form edits attributes
+    // that live on the roster row (`exclude_from_scheduling`, the runner sound profile, the change-password flag), and a
+    // projection silently blanks whichever ones it forgets.
+    return {
+      users: users.map((user) => ({
+        ...user,
+        user_name: (privateById[user.id] || {}).username || '',
+        status: (privateById[user.id] || {}).status || '',
+      })),
+    };
+  },
+
+  assignments: async (db, station) => {
+    const [assignments, notes] = await Promise.all([
+      station ? station.assignments : rowsOf(collection(db, 'assignments')),
+      rowsOf(collection(db, 'assignment_private')),
+    ]);
+    const noteById = Object.fromEntries(notes.map((row) => [row.id, row.admin_note || '']));
+    return { assignments: assignments.map((row) => ({ ...row, admin_note: noteById[row.id] || '' })) };
+  },
+
+  scheduleTemplates: async (db, station) => {
+    // The assignments come along even when the caller did not bring them: the order this payload is famous for (time,
+    // then the assignment's rank) needs their rank orders, and a scoped refresh must produce the same order as a sign-in.
+    const [templates, notes, assignments] = await Promise.all([
+      station ? station.templates : rowsOf(collection(db, 'schedule_templates')),
+      rowsOf(collection(db, 'schedule_template_private')),
+      station ? station.assignments : rowsOf(collection(db, 'assignments')),
+    ]);
+    const noteById = Object.fromEntries(notes.map((row) => [row.id, row.admin_note || '']));
+    return {
+      scheduleTemplates: sortScheduleTemplates(
+        templates.map((row) => ({ ...row, admin_note: noteById[row.id] || '' })),
+        assignments
+      ),
+    };
+  },
+
+  certificationRecords: async (db) => ({ certificationRecords: await rowsOf(collection(db, 'certifications')) }),
+
+  certificationSetup: async (db) => ({ certificationSetup: await rowsOf(collection(db, 'certification_setup')) }),
+
+  trainings: async (db) => ({ trainings: await rowsOf(collection(db, 'trainings')) }),
+
+  scheduleOffers: async (db) => ({ scheduleOffers: await rowsOf(collection(db, 'schedule_offers')) }),
+
+  // The station-wide ones, which are single collections read whole - the same reads the payload's member half makes, and
+  // the reason a scoped refresh is worth having: one collection instead of eighteen.
+  //
+  // `apparatus` is deliberately NOT among them, and no longer read at all: the client carries `apparatus_id` on rows and
+  // never renders an apparatus name, so the collection was read on every load for no reader. It is still written by the
+  // migration and by nobody in the app - see docs/MIGRATION_MAP.md when the data phase comes.
+  roles: async (db) => ({ roles: await rowsOf(collection(db, 'roles')) }),
+  ranks: async (db) => ({ ranks: await rowsOf(collection(db, 'ranks')) }),
+  shifts: async (db) => ({ shifts: await rowsOf(collection(db, 'shifts')) }),
+  // `schedule` is the one section read as a WINDOW, exactly as the payload's own read is: a scoped refresh must not read
+  // what the payload deliberately stopped reading. It comes back with its window, so a screen that replaced its rows from
+  // this still knows what it holds.
+  schedule: async (db) => {
+    const window = scheduleWindowFor();
+    return {
+      schedule: await rowsInRange('schedule', 'date_from', window.from, window.to),
+      schedule_window: window,
+    };
+  },
+};
+
+// The names a caller may ask for, so a typo is visible rather than silent: a scoped refresh that quietly refreshed
+// nothing would look exactly like a screen that failed to update.
+export const ADMIN_SECTION_NAMES = Object.keys(ADMIN_SECTIONS);
+
+export const readAdminSection = async (name, station = null) => {
+  const wanted = String(name || '');
+  if (!ADMIN_SECTIONS[wanted]) throw new Error(`There is no admin section called "${wanted}".`);
+  return ADMIN_SECTIONS[wanted](firestore(), station);
+};
+
+// Read several sections at once, merged into the shape the payload returns.
+export const readAdminSections = async (names) => {
+  const wanted = (Array.isArray(names) ? names : [names]).filter(Boolean);
+  const parts = await Promise.all(wanted.map((name) => readAdminSection(name)));
+  return Object.assign({}, ...parts);
+};
+
+export const fetchMemberPayload = async (account, stationRows = null, scheduleWindow = scheduleWindowFor()) => {
   const db = firestore();
 
   // Where the caller's own keys come from MATTERS. The role and rank are read from the member's own document, not
@@ -54,15 +304,13 @@ export const fetchMemberPayload = async (account) => {
   });
 
   // Reference data and the crew's shifts: everything a member may read for the whole station.
-  const [roles, ranks, shifts, users, assignments, templates, schedule] = await Promise.all([
-    rowsOf(collection(db, 'roles')),
-    rowsOf(collection(db, 'ranks')),
-    rowsOf(collection(db, 'shifts')),
-    rowsOf(collection(db, 'users')),
-    rowsOf(collection(db, 'assignments')),
-    rowsOf(collection(db, 'schedule_templates')),
-    rowsOf(collection(db, 'schedule')),
-  ]);
+  //
+  // `stationRows` is that same wave, already read by a caller that needed it anyway - fetchAdminPayload does. Passing it
+  // in is what stops an administrator's load reading `users`, `assignments` and `schedule_templates` a second time; the
+  // parameter is internal and defaults to reading them, so every other caller is unaffected. The window is only used when
+  // this call is the one doing the reading.
+  const station = stationRows || (await readStationRows(db, scheduleWindow));
+  const { roles, ranks, shifts, users, assignments, templates, schedule } = station;
 
   // The member's own rows, plus the two audience-filtered collections.
   const [
@@ -111,8 +359,13 @@ export const fetchMemberPayload = async (account) => {
       return { id: String(row.user_id), name: member.name, rank_id: member.rank_id };
     }),
     schedule,
+    // WHAT THE WINDOW IS, alongside the rows it produced: a screen that navigates outside it needs to know that it must
+    // ask, rather than showing an empty month and calling it a schedule. See utils/scheduleWindow and GET_SCHEDULE.
+    schedule_window: station.window,
     assignments,
-    scheduleTemplates: templates,
+    // Sorted, not as it arrived: the sheet's own row order is the order the week reads in, and a collection has none. The
+    // assignments come along because the tiebreak between two shifts that start together is the assignment's rank.
+    scheduleTemplates: sortScheduleTemplates(templates, assignments),
     availability,
     logs,
     offers,
@@ -140,13 +393,15 @@ export const fetchMemberPayload = async (account) => {
 export const diagnoseMemberPayload = async (uid) => {
   const db = firestore();
   const probes = [
-    ['users', () => rowsOf(collection(db, 'users'))],
+    ['users', () => readUsersOnce()],
     ['roles', () => rowsOf(collection(db, 'roles'))],
     ['ranks', () => rowsOf(collection(db, 'ranks'))],
     ['shifts', () => rowsOf(collection(db, 'shifts'))],
     ['assignments', () => rowsOf(collection(db, 'assignments'))],
     ['schedule_templates', () => rowsOf(collection(db, 'schedule_templates'))],
-    ['schedule', () => rowsOf(collection(db, 'schedule'))],
+    // The schedule probe reads the SAME window the payload does: this list exists to name which read was refused, and a
+    // probe that asked a different question would misname it.
+    ['schedule', () => rowsInRange('schedule', 'date_from', scheduleWindowFor().from, scheduleWindowFor().to)],
     ['settings/public', () => getDoc(doc(db, 'settings', 'public'))],
     ['user_settings', () => getDoc(doc(db, 'user_settings', uid))],
     ['availability', () => rowsFor('availability', 'user_id', uid)],
@@ -182,63 +437,56 @@ export const diagnoseMemberPayload = async (uid) => {
 // of the payload working, a read the rules refuse THROWS - so an ungated section would take the whole payload down
 // for the role that cannot see it. The viewer's role document is read first, and every extra section sits behind the
 // same flag the action it replaces was gated on.
-export const fetchAdminPayload = async (account) => {
+export const fetchAdminPayload = async (account, scheduleWindow = scheduleWindowFor()) => {
   const db = firestore();
-  const payload = await fetchMemberPayload(account);
 
-  // The role comes from the member's own DOCUMENT when the caller did not supply it, for the same reason the member
-  // payload does: a claim can be an hour stale after a role change, and these flags decide which sections an officer
-  // gets. It also means either payload can be called with nothing but a uid - which is what a router has.
-  const roleId = account.roleId || String(((await getDoc(doc(db, 'users', account.userId))).data() || {}).role_id || '');
-  const role = roleId ? (await getDoc(doc(db, 'roles', roleId))).data() || {} : {};
+  // EVERYTHING SHARED IS READ ONCE: one wave for the station-wide rows (handed to the member payload rather than read
+  // again by it), one read of the caller's own document when they did not say who they are, and NO read for the role -
+  // it is in `roles`, which is already in hand. Reading each of those separately is what this did, so a single
+  // administrator's load paid twice for three whole collections, a document and a role.
+  //
+  // The role comes from the member's own DOCUMENT rather than the Auth claim, for the same reason the member payload
+  // does: a claim can be an hour stale after somebody's role changes, and these flags decide which sections an officer
+  // gets. It also means either payload can be called with nothing but a uid, which is what a router has.
+  const [station, meSnapshot] = await Promise.all([
+    readStationRows(db, scheduleWindow),
+    account.roleId && account.rankId ? null : getDoc(doc(db, 'users', account.userId)),
+  ]);
+  const me = meSnapshot && meSnapshot.exists() ? meSnapshot.data() || {} : {};
+  const roleId = String(account.roleId || me.role_id || '');
+  const rankId = String(account.rankId || me.rank_id || '');
+  const payload = await fetchMemberPayload({ ...account, roleId, rankId }, station);
+
+  const role = station.roles.find((row) => String(row.id) === roleId) || {};
   const may = (flag) => role.is_admin === true || role[flag] === true;
 
   if (may('can_edit_users')) {
     // The directory the Users tab shows: the roster row joined to the private half, because a username and an account
-    // status are the officer's business and deliberately absent from the roster document.
-    const [users, privateRows] = await Promise.all([
-      rowsOf(collection(db, 'users')),
-      rowsOf(collection(db, 'users_private')),
-    ]);
-    const privateById = Object.fromEntries(privateRows.map((row) => [row.id, row]));
-    payload.users = users.map((user) => ({
-      id: user.id,
-      name: user.name,
-      rank_id: user.rank_id,
-      role_id: user.role_id,
-      username: (privateById[user.id] || {}).username || '',
-      status: (privateById[user.id] || {}).status || '',
-    }));
+    // status are the officer's business and deliberately absent from the roster document. The projection itself lives in
+    // the section reader, so a sign-in and a save's own refresh cannot drift apart on it.
+    Object.assign(payload, await readAdminSection('users', station));
   }
 
   if (may('can_edit_schedule_templates') || may('can_edit_assignments') || may('can_edit_schedule')) {
     // The FULL rows, with their private halves merged back: an officer's pickers and notes read the whole record, and
-    // the member projection must never replace it.
-    const [assignments, assignmentNotes, templates, templateNotes, apparatus] = await Promise.all([
-      rowsOf(collection(db, 'assignments')),
-      rowsOf(collection(db, 'assignment_private')),
-      rowsOf(collection(db, 'schedule_templates')),
-      rowsOf(collection(db, 'schedule_template_private')),
-      rowsOf(collection(db, 'apparatus')),
+    // the member projection must never replace it. The public halves come from `station`, so only the private notes and
+    // the apparatus list are new reads here.
+    const [assignments, templates] = await Promise.all([
+      readAdminSection('assignments', station),
+      readAdminSection('scheduleTemplates', station),
     ]);
-    const notesFor = (rows) => Object.fromEntries(rows.map((row) => [row.id, row.admin_note || '']));
-    const assignmentNotesById = notesFor(assignmentNotes);
-    const templateNotesById = notesFor(templateNotes);
-
-    payload.assignments = assignments.map((row) => ({ ...row, admin_note: assignmentNotesById[row.id] || '' }));
-    payload.scheduleTemplates = templates.map((row) => ({ ...row, admin_note: templateNotesById[row.id] || '' }));
-    payload.apparatus = apparatus;
+    Object.assign(payload, assignments, templates);
   }
 
   if (may('can_approve_shifts') || may('can_edit_schedule')) {
     // The whole offers table, so Schedule Management can flag the slots waiting on approval.
-    payload.scheduleOffers = await rowsOf(collection(db, 'schedule_offers'));
+    Object.assign(payload, await readAdminSection('scheduleOffers'));
   }
 
   if (may('can_manage_certifications')) {
     // Every record, for the table that shows what is expiring next. The STATE is not stored and not added here: it
     // is a function of the two dates and today, so it would go stale with nobody writing anything.
-    payload.certificationRecords = await rowsOf(collection(db, 'certifications'));
+    Object.assign(payload, await readAdminSection('certificationRecords'));
   }
 
   return payload;

@@ -11,13 +11,33 @@
  */
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, seed } from './seed-emulator.mjs';
-import { fetchAdminPayload, fetchMemberPayload } from '../src/services/firestorePayload.js';
-import { doc, setDoc } from 'firebase/firestore';
+import { fetchAdminPayload, fetchMemberPayload, readUsersOnce } from '../src/services/firestorePayload.js';
+// The live reads, driven for real against the emulator: a listener has to be proven to FIRE, not inspected in the source.
+import { subscribeLive } from '../src/services/liveReads.js';
+// The decision the score-repair script makes, tested here against a real text score in the emulator rather than in isolation.
+import { scoreToStore } from './normalize-runner-scores.mjs';
+import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { firebaseAuth, firebaseConfigured, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
+// The window the payload's `schedule` read is built from: pure and dependency-free, so the harness can assert that the
+// default really is the same computation the screens use.
+import { scheduleWindowFor } from '../src/utils/scheduleWindow.js';
 
 let failures = 0;
 let cases = 0;
+
+// Waiting for something a listener will do on its own: a snapshot arrives over the wire, so there is no promise to await.
+// The timeout is generous because a CI machine is slow, and a failure says what never arrived rather than hanging.
+const waitUntil = async (condition, label = 'a listener snapshot', timeout = 8000) => {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (condition()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  checkIs(`WAITED for ${label} and it never arrived`, false);
+  return false;
+};
+const settle = (ms = 500) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const check = (label, actual, expected) => {
   cases++;
@@ -47,6 +67,10 @@ const accountFor = (uid) => {
   return { userId: uid, roleId: entry.role, rankId: entry.rank };
 };
 
+// The fixtures are dated in 2026 while the payload reads `schedule` as a WINDOW - last month, this month and next - so
+// the harness NAMES the window it wants instead of depending on the calendar. See utils/scheduleWindow.
+const FIXTURE_WINDOW = { from: '2026-01-01', to: '2026-12-31' };
+
 const main = async () => {
   console.log('--- the demo station ---');
   await seed();
@@ -55,7 +79,7 @@ const main = async () => {
   // --- the officer's own payload: an administrator is a member too ---
   console.log('\n--- an officer signs in and reads the payload ---');
   await signIn('jane');
-  const asOfficer = await fetchMemberPayload(accountFor('u1'));
+  const asOfficer = await fetchMemberPayload(accountFor('u1'), null, FIXTURE_WINDOW);
   check('the payload reports success', asOfficer.success, true);
   // The roster is the projection, not the row: three fields, and no role for anybody.
   check('the roster is the three columns the client draws', Object.keys(asOfficer.roster[0]).sort(), ['id', 'name', 'rank_id']);
@@ -74,7 +98,7 @@ const main = async () => {
   await signOut(auth);
   console.log('\n--- a member signs in ---');
   await signIn('bo');
-  const asMember = await fetchMemberPayload(accountFor('u2'));
+  const asMember = await fetchMemberPayload(accountFor('u2'), null, FIXTURE_WINDOW);
   // The mirror image of the officer's audience: the personal announcement and the everyone one, not the role one.
   check('the audience flips for a plain member', asMember.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'For Bo']);
   check('their own availability and nobody else', asMember.availability.map((row) => row.id), ['av2']);
@@ -83,7 +107,9 @@ const main = async () => {
   check('their own signatures', asMember.signatures.map((row) => row.id), ['ts1']);
   check('their own certifications', asMember.certifications.map((row) => row.id), ['cr1']);
   check('the certification catalogue they are named from', asMember.certificationSetup.map((row) => row.name), ['EMT']);
-  check('and the training list', asMember.trainings.map((row) => row.title), ['SCBA Fit Test']);
+  // Both courses, and deliberately not an order: the sheet had none of its own for trainings (it sent row order, which a
+  // collection cannot inherit), so this asserts the CONTENT rather than inventing a sequence the station never chose.
+  check('and the training list', asMember.trainings.map((row) => row.title).sort(), ['Hazmat Awareness', 'SCBA Fit Test']);
   // On duty is materialized by the clock transaction, joined to the roster here, and still three columns.
   check('who is on duty, with the name resolved', asMember.onDuty.map((row) => row.name), ['Jane Smith']);
   check('in the same three columns as the roster', Object.keys(asMember.onDuty[0]).sort(), ['id', 'name', 'rank_id']);
@@ -100,29 +126,47 @@ const main = async () => {
   await signOut(auth);
   console.log('\n--- an administrator reads the full payload ---');
   await signIn('jane');
-  const asAdmin = await fetchAdminPayload(accountFor('u1'));
+  const asAdmin = await fetchAdminPayload(accountFor('u1'), FIXTURE_WINDOW);
   checkIs(
     'the member half is still all there',
     asAdmin.schedule.length === 2 && asAdmin.roster.length === 2,
     JSON.stringify({ schedule: asAdmin.schedule.length, roster: asAdmin.roster.length })
   );
-  // The directory joins the private half back on, which is exactly what the Users tab shows.
-  check('the user directory carries names, usernames and status', asAdmin.users.map((user) => [user.name, user.username, user.status]), [
+  // The directory joins the private half back on, which is exactly what the Users tab shows - under the SHEET'S field
+  // name. The tab reads `user.user_name`; the first version of this payload called it `username`, so the column was blank
+  // while the data it came from looked perfectly correct, which is how it was reported. This assertion follows the
+  // COMPONENT rather than the payload, because a harness that agrees with the bug proves nothing.
+  check('the user directory carries names, usernames and status', asAdmin.users.map((user) => [user.name, user.user_name, user.status]), [
     ['Jane Smith', 'jane', 'active'],
     ['Bo Jones', 'bo', 'active'],
   ]);
   checkIs('and no password, because there is none to leak', !JSON.stringify(asAdmin.users).toLowerCase().includes('password'));
   // The private halves come back merged for an officer's pickers and notes.
   check('the full assignment rows, note and all', asAdmin.assignments[0].admin_note, 'checked monthly');
-  check('and the full template rows', asAdmin.scheduleTemplates[0].admin_note, 'temporary cover');
-  check('with the apparatus list', asAdmin.apparatus.map((row) => row.description), ['Engine 1']);
+  // ...by ID rather than by index: the payload's order is now a rule (time, then the assignment's rank) instead of the
+  // collection's, so a row's position is not a stable way to name it - which is exactly how this assertion broke.
+  check('and the full template rows', asAdmin.scheduleTemplates.find((row) => row.id === 't1').admin_note, 'temporary cover');
+  // ...in the order the week reads in, not the order the collection hands them over: the sheet sent its own ROW order and
+  // a collection has none, so every picker fed by this payload was shuffled. The seed's ids are deliberately NOT in this
+  // order, and t3 and t1 START AT THE SAME TIME on the same day with different required ranks (a2 is the senior one), so
+  // this asserts both keys: time first, then the assignment's rank.
+  check('and in the week order: time first, then the assignment rank', asAdmin.scheduleTemplates.map((row) => row.id), [
+    't3',
+    't1',
+    't0',
+    't2',
+  ]);
+  // `apparatus` is deliberately NOT in the payload any more: the client carries `apparatus_id` on rows and never renders
+  // an apparatus name, so the collection was read on every load for no reader. The seed still holds it, which is what
+  // makes this assertion mean something rather than being vacuous.
+  check('the payload no longer reads the apparatus collection at all', asAdmin.apparatus, undefined);
   check('and the whole offers table', asAdmin.scheduleOffers.map((row) => row.id), ['of1']);
   check('and every certification record, not only their own', asAdmin.certificationRecords.map((row) => row.id), ['cr1']);
 
   // --- and a member's payload does not carry any of them ---
   await signOut(auth);
   await signIn('bo');
-  const asMemberAgain = await fetchMemberPayload(accountFor('u2'));
+  const asMemberAgain = await fetchMemberPayload(accountFor('u2'), null, FIXTURE_WINDOW);
   ['users', 'apparatus', 'scheduleOffers', 'certificationRecords'].forEach((section) => {
     checkIs(`a member payload has no ${section} section`, !(section in asMemberAgain), 'an officer-only section travelled');
   });
@@ -147,6 +191,246 @@ const main = async () => {
   const { routeRead } = await import('../src/services/firestoreRouting.js');
 
   await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
+  // --- the schedule WINDOW: the one collection the payload does not read whole ----------------------------------
+  //
+  // `schedule` grows without limit - every shift the station has ever scheduled - so a load carries a window instead of
+  // the collection, and the window travels back WITH the rows. That is what lets a screen tell "this month is empty"
+  // from "I have not asked for this month", which is the difference between an empty calendar and a broken one.
+  console.log('\n--- the schedule window ---');
+  const narrow = await fetchMemberPayload(accountFor('u2'), null, { from: '2026-03-09', to: '2026-03-09' });
+  check('a one-day window brings back only that day', narrow.schedule.map((row) => row.id), ['s2']);
+  check('and says which window it applied', narrow.schedule_window, { from: '2026-03-09', to: '2026-03-09' });
+
+  // The window the APP passes when it does not name one: last month, this month and next, which must be the same
+  // computation the screens use rather than a second copy of it.
+  const defaultWindow = await fetchMemberPayload(accountFor('u2'));
+  check('the default window is the three months around today', defaultWindow.schedule_window, scheduleWindowFor());
+  checkIs(
+    'and nothing outside it is returned, however full the collection is',
+    defaultWindow.schedule.every(
+      (row) => row.date_from >= defaultWindow.schedule_window.from && row.date_from <= defaultWindow.schedule_window.to
+    ),
+    JSON.stringify(defaultWindow.schedule.map((row) => row.date_from))
+  );
+
+  // And the reader's own window, which is what a screen navigated outside the payload's months asks for. The session is
+  // left exactly as it was found: everything after this point is signed in as jane, and a section that quietly changed
+  // WHO is signed in would make the next permission assertion mean something else (as it did the first time).
+  const ranged = await routeRead('GET_SCHEDULE', { from: '2026-03-09', to: '2026-03-09' });
+  check('a reader asked for one day brings back one row', ranged.schedule.map((row) => row.id), ['s2']);
+  check('and reports the window it applied', ranged.schedule_window, { from: '2026-03-09', to: '2026-03-09' });
+  const unbounded = await routeRead('GET_SCHEDULE');
+  checkIs(
+    'while a reader asked for nothing still answers with the whole collection',
+    unbounded.schedule.length >= ranged.schedule.length && unbounded.schedule_window.from === '',
+    JSON.stringify(unbounded.schedule_window)
+  );
+
+  // --- the shared `users` read: one read while in flight, never one across time --------------------------------
+  //
+  // Six readers project off this collection, and Firestore bills per document. The rule that makes sharing them safe is
+  // that the entry is dropped the moment the read settles - so this asserts BOTH halves, and the second is the one that
+  // matters: a shared read must never become a cache, or a save followed by a read could show the save that had not
+  // landed. Identity is the proof, because the emulator cannot count reads.
+  console.log('\n--- the shared users read ---');
+  const [firstUsers, secondUsers] = await Promise.all([readUsersOnce(), readUsersOnce()]);
+  checkIs('two readers in the same moment are handed one read', firstUsers === secondUsers);
+  checkIs('and it is the collection, not an empty answer', Array.isArray(firstUsers) && firstUsers.length > 0);
+  const laterUsers = await readUsersOnce();
+  checkIs('while a later read is a new read rather than a cached one', laterUsers !== firstUsers);
+  check(
+    'with the same rows either way',
+    laterUsers.map((row) => row.id).sort(),
+    firstUsers.map((row) => row.id).sort()
+  );
+
+  // --- live reads: a listener fires on its own, with the shape the setters store ----------------------------------------
+  //
+  // This is the whole point of a listener and the two claims that matter are measured rather than assumed. First, that a
+  // CHANGE reaches the app while it sits still - which is the thing a one-shot read cannot do, and what the dashboard's
+  // "who is on duty" is for. Second, that what arrives has the SHAPE a payload row has: the app hands a live row and a read
+  // row to the same setter, so a missing key here would empty the dashboard the moment somebody clocked in.
+  //
+  // The writes are the signed-in member's OWN on-duty row, because that is what the rules allow from here (`on_duty` is
+  // `memberId == uid()`), and the seed leaves u1 on duty - so this restores the seed's value before it finishes.
+  console.log('\n--- live reads ---');
+  const live = { onDuty: [], announcements: [], errors: [] };
+  const stopLive = subscribeLive({
+    userId: 'u1',
+    handlers: {
+      onDuty: (rows) => live.onDuty.push(rows),
+      announcements: (rows) => live.announcements.push(rows),
+    },
+    onError: (error) => live.errors.push(String((error && error.message) || error)),
+  });
+  await waitUntil(() => live.onDuty.length > 0 && live.announcements.length > 0, 'the two opening snapshots');
+  checkIs('the duty list arrives unasked', live.onDuty.length > 0);
+  checkIs('and so does the member’s own audience of announcements', live.announcements.length > 0);
+  check('with nothing raised along the way', live.errors, []);
+
+  const onDutyRef = doc(firestore(), 'on_duty', 'u1');
+  const seedTimeIn = '2026-03-02 07:55';
+  await setDoc(onDutyRef, { user_id: 'u1', time_in: '2026-03-09 08:00:00' });
+  await waitUntil(() => live.onDuty.at(-1).some((row) => row.time_in === '2026-03-09 08:00:00'), 'the clock-in to arrive');
+  const arrived = live.onDuty.at(-1).find((row) => row.id === 'u1') || {};
+  check('a clock-in reaches the app while it sits still', arrived.time_in, '2026-03-09 08:00:00');
+  checkIs('joined to a name', arrived.name === 'Jane Smith', JSON.stringify(arrived));
+  // The field the dashboard's card draws its rank icon from, and the one the reader used to omit - which is why the reader
+  // and this listener are asserted to AGREE below rather than trusted to.
+  checkIs('and to a rank', Boolean(arrived.rank_id), JSON.stringify(arrived.rank_id));
+  check(
+    'in the same columns the payload fills',
+    Object.keys(arrived).filter((key) => ['id', 'name', 'rank_id'].includes(key)).sort(),
+    ['id', 'name', 'rank_id']
+  );
+
+  await deleteDoc(onDutyRef);
+  await waitUntil(() => !live.onDuty.at(-1).some((row) => row.id === 'u1'), 'the clock-out to arrive');
+  checkIs('and so does a clock-out, which is a removal rather than an edit', !live.onDuty.at(-1).some((row) => row.id === 'u1'));
+  await setDoc(onDutyRef, { user_id: 'u1', time_in: seedTimeIn });
+  await waitUntil(() => live.onDuty.at(-1).some((row) => row.time_in === seedTimeIn), 'the seed state to be restored');
+
+  // What a one-shot read gives for the same collection, compared with what arrived live.
+  const readBack = await routeRead('GET_ON_DUTY');
+  check('the reader and the listener agree on who is on duty', readBack.onDuty.map((row) => row.id).sort(), live.onDuty.at(-1).map((row) => row.id).sort());
+  checkIs('and both carry the rank the card draws', readBack.onDuty.every((row) => 'rank_id' in row));
+  check('with the same rank for the same member', readBack.onDuty.find((row) => row.id === 'u1').rank_id, arrived.rank_id);
+
+  // WHAT A ONE-SHOT READ OF A WATCHED QUERY DOES, measured rather than assumed. The design note says a listener can make a
+  // get() of the same query cache-served - and every collection watched here is also read by the sign-in payload, so that is
+  // the difference between a payload read being free and it being a full collection read. `fromCache` is the SDK's own
+  // answer; it is PRINTED as well as checked, so a change in that behaviour shows up in this output instead of being
+  // inferred from a bill three months later.
+  const watched = await getDocs(collection(firestore(), 'on_duty'));
+  console.log(`     [live] a get() of a watched collection reports fromCache=${watched.metadata.fromCache}`);
+  checkIs('and the cache question is answered rather than guessed', typeof watched.metadata.fromCache === 'boolean');
+
+  stopLive();
+  // AFTER THE TEARDOWN, SILENCE. A listener left running behind a signed-out screen is exactly the cost this pass exists to
+  // remove, and it is invisible without a test like this one.
+  //
+  // Any snapshot already in flight is allowed to land FIRST, before the baseline is taken: otherwise the test would fail on
+  // the write before it rather than on the write it makes, which is the sort of flake that teaches nobody anything.
+  await settle();
+  const beforeTeardown = live.onDuty.length;
+  await setDoc(onDutyRef, { user_id: 'u1', time_in: '2026-03-09 09:00:00' });
+  await settle();
+  check('after the teardown a change is no longer delivered', live.onDuty.length, beforeTeardown);
+  await setDoc(onDutyRef, { user_id: 'u1', time_in: seedTimeIn });
+
+  // --- the leaderboard query, and the one way it can lose a member ------------------------------------------------------
+  //
+  // The board used to scan `users` and pick the top rows out in the browser; it is a bounded query now - 25 rows plus a
+  // count, on the most repeated screen in the app. That trade has exactly ONE hazard, and it is demonstrated here rather
+  // than described: a score stored as TEXT is not `> 0`, so its owner does not appear with a wrong number - they vanish.
+  //
+  // The assertions are relative to whatever the seed left, because this is not the only section that can put a score in.
+  //
+  // IT ENABLES ITS OWN ROUTE. Earlier in this harness a NARROW feature list is pinned on purpose (so a route that is not named
+  // is proven to fall back), and `runner` is not in it - so the board would answer null here and this section would either
+  // have to skip (proving nothing) or read a null as an empty board. It names the feature for its own length and puts the
+  // list back, and the first assertion below is that the naming worked: if the flag stops being read live, this says so
+  // rather than quietly testing nothing.
+  const pinnedFeatures = process.env.VITE_FIRESTORE_FEATURES;
+  process.env.VITE_FIRESTORE_FEATURES = `${pinnedFeatures},runner`;
+  const board = () => routeRead('GET_RUNNER_LEADERBOARD');
+  const beforeBoard = await board();
+  checkIs('the board is routed for this section', Boolean(beforeBoard && Array.isArray(beforeBoard.leaderboard)));
+  const beforeTotal = Number(beforeBoard.total) || 0;
+
+  // HOW A TEXT SCORE CAN EXIST AT ALL: not from the app. The `users` rule allows only
+  // ['name','rank_id','role_id','exclude_from_scheduling','runner_sound_profile'] - `hasOnly`, so a client CANNOT write this
+  // field, and the assertion below proves it. The writers are the `saveRunnerScore` callable (which parses to an integer and
+  // clamps it - asserted in verify-firestore-writes, where the functions emulator is running) and the MIGRATION, whose Admin
+  // SDK ignores the rules. That is why this section drives the text-score case with the Admin SDK: a client-side test cannot
+  // produce the state being tested, which is the whole reason the hazard is a migration-time one.
+  const { initializeApp } = await import('firebase-admin/app');
+  const { getFirestore: getAdminFirestore, FieldValue: AdminFieldValue } = await import('firebase-admin/firestore');
+  const admin = getAdminFirestore(
+    initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'demo-station-portal' }, 'verify-reads')
+  );
+  const setScore = (id, value) => admin.doc(`users/${id}`).set({ runner_score: value }, { merge: true });
+  const clearScore = (id) => admin.doc(`users/${id}`).update({ runner_score: AdminFieldValue.delete() });
+
+  // A score as the callable leaves it, and one as an untyped migration leaves it.
+  await setScore('u1', 700);
+  await setScore('u2', '1450');
+  const typed = await board();
+  check('a numeric score is on the board', typed.leaderboard.some((row) => row.id === 'u1' && row.score === 700), true);
+  checkIs(
+    'while one stored as text is invisible to the filter, which is the whole hazard',
+    !typed.leaderboard.some((row) => row.id === 'u2')
+  );
+  check('and the total does not count it either', typed.total, beforeTotal + 1);
+  checkIs('with the rows capped at the limit the reader asks for', typed.leaderboard.length <= 25);
+  // ...and the app itself cannot create one, which is what keeps this a migration concern rather than a live bug: the rule is
+  // `hasOnly`, so even an officer's own save is refused for carrying a field this document does not have.
+  let clientRefused = '';
+  try {
+    await setDoc(doc(firestore(), 'users', 'u2'), { runner_score: 999 }, { merge: true });
+  } catch (error) {
+    clientRefused = String((error && error.code) || error);
+  }
+  check('a client cannot write a score at all', clientRefused, 'permission-denied');
+
+  // The decision the repair script makes, asserted directly: a numeric string becomes a number, and anything that is not a
+  // number is LEFT ALONE rather than turned into a 0 or a deletion.
+  check('a numeric string is a score', scoreToStore('1450'), 1450);
+  check('with the padding a cell can carry', scoreToStore(' 1450 '), 1450);
+  check('a number needs nothing doing to it', scoreToStore(700), null);
+  check('a blank is not a score', scoreToStore(''), null);
+  check('nor is junk', scoreToStore('abc'), null);
+  check('nor is an absent field', scoreToStore(undefined), null);
+
+  // The repair, applied exactly as scripts/normalize-runner-scores.mjs applies it - through the Admin SDK, because that is the
+  // door a repair has to use (see the note above about why a client cannot).
+  await setScore('u2', scoreToStore('1450'));
+  const fixed = await board();
+  check('a repaired score joins the board', fixed.leaderboard.find((row) => row.id === 'u2')?.score, 1450);
+  check('and the total follows it', fixed.total, beforeTotal + 2);
+  check('in descending order', fixed.leaderboard.map((row) => row.score), [...fixed.leaderboard.map((row) => row.score)].sort((a, b) => b - a));
+
+  // THE QUERY AND THE SCAN MUST AGREE, which is the real claim: the board is the same board the old client-side filter
+  // produced, just computed by the database. Anything the query can do differently - a dropped document, a different order,
+  // a count that misses - shows up here as a difference from the scan.
+  const scanned = (await getDocs(collection(firestore(), 'users'))).docs
+    .map((entry) => ({ id: entry.id, score: Number((entry.data() || {}).runner_score) || 0 }))
+    .filter((row) => row.id && row.score > 0)
+    .sort((a, b) => b.score - a.score);
+  check('the query lists exactly the members the scan finds', fixed.leaderboard.map((row) => row.id).sort(), scanned.slice(0, fixed.leaderboard.length).map((row) => row.id).sort());
+  check('with the same scores in the same order', fixed.leaderboard.map((row) => row.score), scanned.slice(0, fixed.leaderboard.length).map((row) => row.score));
+  check('and a total the scan agrees with', fixed.total, scanned.length);
+  check('projecting only the three fields the game draws', Object.keys(fixed.leaderboard[0]).sort(), ['id', 'name', 'score']);
+
+  // A CAP AND A TOTAL ARE DIFFERENT NUMBERS, and the difference is invisible until a station has more scorers than a board
+  // holds: the rows are capped at 25, the total counts everybody. Seeding more than a board's worth is the only way to see
+  // it, and it is worth the writes - a total that reports "of 25" because the count inherited the cap is a wrong number on
+  // a screen, with nothing else to notice it.
+  const extras = Array.from({ length: 30 }, (_, index) => ({ id: `cap${index + 1}`, score: index + 1 }));
+  for (let index = 0; index < extras.length; index += 15) {
+    const batch = admin.batch();
+    extras.slice(index, index + 15).forEach((extra) => {
+      batch.set(admin.doc(`users/${extra.id}`), { name: `Cap ${extra.score}`, runner_score: extra.score }, { merge: true });
+    });
+    await batch.commit();
+  }
+  const capped = await board();
+  check('the board holds no more rows than it draws', capped.leaderboard.length, 25);
+  check('in descending order', capped.leaderboard.map((row) => row.score), [...capped.leaderboard.map((row) => row.score)].sort((a, b) => b - a));
+  check('with the seeded extras on it', capped.leaderboard.some((row) => String(row.id).startsWith('cap')), true);
+  check('while the total counts everybody with a score', capped.total, 30 + beforeTotal + 2);
+  checkIs('which is more than the board is allowed to show', capped.total > capped.leaderboard.length);
+  await Promise.all(extras.map((extra) => admin.doc(`users/${extra.id}`).delete()));
+
+  // Left as it was found: neither member had a score before this section, and the sections after it read the roster.
+  await clearScore('u1');
+  await clearScore('u2');
+  const restored = await board();
+  check('and cleaning up returns the board to where it started', restored.total, beforeTotal);
+  // ...and the feature list goes back exactly as it was, so every section after this one sees the environment it would have
+  // seen if this one did not exist.
+  process.env.VITE_FIRESTORE_FEATURES = pinnedFeatures;
+
   const routed = await routeRead('GET_BOOTSTRAP');
   checkIs('the router answers at all, with a Firebase user signed in', routed !== null, 'nothing was routed');
   check('and in the shape the caller decides on', routed.success, true);
@@ -177,12 +461,11 @@ const main = async () => {
     [onDuty.success, Array.isArray(onDuty.onDuty)],
     [true, true]
   );
-  const roster = await routeRead('GET_ROSTER');
-  checkIs(
-    'and the roster arrives as the narrow projection the calendar labels shifts with',
-    roster.roster.length > 0 && roster.roster.every((row) => row.id && 'name' in row && 'rank_id' in row),
-    JSON.stringify(roster.roster.slice(0, 2))
-  );
+  // The roster is not a read of its own any more: it comes from the sign-in payload (asserted above, where its three columns
+  // are pinned). Retiring the action means an old client asking for it gets nothing rather than a second way to read the same
+  // projection - and the calendar already falls back to member ids when a roster is missing, which is the behaviour this used
+  // to degrade to anyway.
+  check('the retired roster read answers nothing', await routeRead('GET_ROSTER'), null);
   const training = await routeRead('GET_TRAINING');
   checkIs('and training its list', Array.isArray(training.trainings), 'no trainings');
   const logs = await routeRead('GET_TIMECLOCK_LOGS');
@@ -239,9 +522,27 @@ const main = async () => {
   const library = await routeRead('GET_DOCUMENTS');
   check('a member sees the documents aimed at them', library.documents.map((entry) => entry.id).sort(), ['doc1', 'doc5', 'doc6']);
   checkIs('and their own signatures come with it, so one read answers signed and outstanding', library.signatures.length >= 1, String(library.signatures.length));
+  // The ORDER is the backend's job: the client draws the list as it arrives, so the folders-then-sort_order-then-title
+  // rule has to survive the move or a library reads shuffled - and a drag that moved a document looks like it did
+  // nothing. All three fixtures are unfiled, so this is the title order.
+  check('and the library arrives in the order it is drawn in', library.documents.map((entry) => entry.id), ['doc1', 'doc6', 'doc5']);
+  // A checklist's two counts, without which its row cannot say "3 of 12" at all: `item_count === 0` means "nothing is
+  // being asked of you here", so a checklist with items and no counts reads as a document that asks nothing.
+  const checklistRow = library.documents.find((entry) => entry.id === 'doc5');
+  check('a checklist carries how many items it has', checklistRow.item_count, 2);
+  check('and how many of them the reader has signed', checklistRow.items_signed, 0);
 
+  // The detail read: the body, the items, and the reader's OWN signature. A document has to read as signed on its own
+  // page exactly as it does in the list, and a checklist has to arrive WITH its items, because the screen draws them from
+  // the document it opened (checklistSections(openDocument.items)) rather than fetching them.
   const opened = await routeRead('GET_DOCUMENT', { id: 'doc1' });
   check('and one document opens with its body', opened.document.title, 'Annual SOG Acknowledgement');
+  checkIs('the body coming from its own collection', opened.document.content.includes('Annual SOG'), JSON.stringify(opened.document.content));
+  check('with the signature that is on file for this reader', opened.signature.id, 'sg1');
+  check('which is not stale, because it was taken against the current wording', opened.signature_stale, false);
+  checkIs('and a plain document carries no items', Array.isArray(opened.document.items) && opened.document.items.length === 0);
+  const openedChecklist = await routeRead('GET_DOCUMENT', { id: 'doc5' });
+  check('while a checklist opens with its items in order', openedChecklist.document.items.map((item) => item.id), ['it3', 'it4']);
 
   // UNAVAILABLE, not forbidden: a document aimed at another rank answers as though it were not there, which is why a
   // crafted request learns nothing about what exists above the caller's rank.
@@ -255,6 +556,12 @@ const main = async () => {
   const officerView = await routeRead('ADMIN_GET_DOCUMENT', { id: 'doc2' });
   check('an officer opens any document, audience or not', officerView.success, true);
   check('with the whole row rather than a projection', officerView.document.audience_keys, ['rank:k1']);
+  // Jane's own signature on doc1 was taken against revision 1 while the document now stands at 2, so the page has to warn
+  // her - the same staleness judgment the sheet made in the same place, and the reason the flag is decided by the reader
+  // rather than by each screen.
+  const janeOpened = await routeRead('GET_DOCUMENT', { id: 'doc1' });
+  check('a signature older than the wording it is on', janeOpened.signature.id, 'sg2');
+  check('reads as stale on the page', janeOpened.signature_stale, true);
 
   // A document's checklist items and the signatures taken on it: the read that failed in the field, because the
   // collections and the rules existed and only the reader was missing - which nothing noticed while the sheet answered.

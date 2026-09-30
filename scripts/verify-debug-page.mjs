@@ -59,7 +59,7 @@ checkEqual(
   roleFieldsFromForm({ can_access_debug: true }).can_access_debug,
   true
 );
-checkEqual('a role without it cannot use the tab', roleAllowsTab({ can_view_system_log: true }, 'debug'), false);
+checkEqual('a role without it cannot use the tab', roleAllowsTab({ can_manage_roles: true }, 'debug'), false);
 check('a role with it can', roleAllowsTab({ can_access_debug: true }, 'debug'), true);
 checkEqual('and an unrecognized tab is still refused', roleAllowsTab({ can_access_debug: true }, 'debbug'), false);
 check('is_admin passes it like every other tab', roleAllowsTab({ is_admin: true }, 'debug'), true);
@@ -109,17 +109,17 @@ check(
   debugOnlyPanel.includes('data-debug-preview="overlay"'),
   'the panel did not render the debug controls for a role that has the permission'
 );
-const logOnlyPanel = renderToString(
-  React.createElement(AdminPanel, { currentRole: { can_view_system_log: true } })
+const otherPermissionPanel = renderToString(
+  React.createElement(AdminPanel, { currentRole: { can_manage_roles: true } })
 );
 check(
   'and a role without it cannot reach that page',
-  !logOnlyPanel.includes('data-debug-preview='),
+  !otherPermissionPanel.includes('data-debug-preview='),
   'the Debug page rendered for a role that does not have can_access_debug'
 );
 check(
   'which is the same panel, only a different role',
-  logOnlyPanel.length > 0 && !logOnlyPanel.includes('Fires the app')
+  otherPermissionPanel.length > 0 && !otherPermissionPanel.includes('Fires the app')
 );
 
 // The transport, stubbed BEFORE anything renders. The page's safety claim is that it asks for nothing and makes no

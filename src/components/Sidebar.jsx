@@ -127,7 +127,7 @@ export default function Sidebar({
                             }`}
                     >
                         <CalendarDays className="w-5 h-5" />
-                        <span>My Schedule</span>
+                        <span>Schedule</span>
                     </button>
                     )}
 
@@ -140,7 +140,7 @@ export default function Sidebar({
                             }`}
                     >
                         <Clock className="w-5 h-5" />
-                        <span>My Availability</span>
+                        <span>Availability</span>
                     </button>
                     )}
 
@@ -170,7 +170,7 @@ export default function Sidebar({
                             }`}
                     >
                         <BadgeCheck className="w-5 h-5" />
-                        <span>My Certifications</span>
+                        <span>Certifications</span>
                         <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5 text-current opacity-80" />
                     </button>
 

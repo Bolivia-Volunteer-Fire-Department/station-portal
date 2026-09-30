@@ -15,6 +15,8 @@ import { assignmentColor } from '../../utils/assignmentColor';
 import ViewportModal from '../ViewportModal';
 import { choosableAssignments } from '../../utils/assignmentDates';
 import { MINUTES_PER_DAY, layoutWeekDayCards } from '../../utils/weekLayout';
+// The same day order the board uses: start time, then the assignment's required rank (utils/crewOrder).
+import { sortSlotOrder } from '../../utils/crewOrder';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
@@ -68,14 +70,20 @@ const durationMinutes = (startMin, endMin) => {
   return d;
 };
 
-const cardFor = (template) => {
+const cardFor = (assignments) => (template) => {
   const startMin = toMinuteOfDay(template.start_time);
   const endMin = toMinuteOfDay(template.end_time);
+  const assignment = (Array.isArray(assignments) ? assignments : []).find((row) => String(row.id) === String(template.assignment_id));
+  const rank = parseInt(assignment && assignment.rank_order_required, 10);
   return {
     template,
     startMin,
     durMin: durationMinutes(startMin, endMin),
     key: String(template.id ?? template.start_time ?? 'card'),
+    // The order two cards that start together are drawn in: the shift's required rank first (from its assignment, not
+    // from anybody filling it), then a name so the layout is deterministic. The same keys the board and the payload use.
+    requiredRankOrder: Number.isFinite(rank) ? rank : null,
+    name: `${(assignment && assignment.description) || unnamedLabel('assignment')} ${template.nickname || ''}`.trim(),
   };
 };
 
@@ -143,7 +151,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
       if (!result?.success) throw new Error(result?.message || 'Failed to save schedule template.');
       // Straight onto the week grid; the refresh wave lands on its own time.
       onRowSaved?.('scheduleTemplates', formData);
-      void onDataChanged();
+      void onDataChanged('scheduleTemplates');
       resetForm();
     } catch (err) {
       setError(err.message || 'Failed to save schedule template.');
@@ -165,7 +173,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     try {
       const result = await adminDeleteScheduleTemplate(template.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete schedule template.');
-      void onDataChanged();
+      void onDataChanged('scheduleTemplates');
       if (String(formData.id) === String(template.id)) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete schedule template.');
@@ -177,16 +185,17 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
   // Lay out each day's templates into side-by-side columns so overlapping (or
   // identically timed) cards never hide each other (see utils/weekLayout).
   const dayLayouts = DAYS.map((day) => {
-    const cards = scheduleTemplates
-      .map(cardFor)
-      .filter(
-        (c) =>
-          c.startMin !== null &&
-          c.durMin !== null &&
-          c.durMin > 0 &&
-          String(c.template.day_of_week ?? '').trim().toLowerCase() === day.value
-      )
-      .sort((a, b) => a.startMin - b.startMin || b.durMin - a.durMin);
+    const cards = sortSlotOrder(
+      scheduleTemplates
+        .map(cardFor(assignments))
+        .filter(
+          (c) =>
+            c.startMin !== null &&
+            c.durMin !== null &&
+            c.durMin > 0 &&
+            String(c.template.day_of_week ?? '').trim().toLowerCase() === day.value
+        )
+    );
 
     return { day, cards, segments: layoutWeekDayCards(cards) };
   });
@@ -269,7 +278,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
         start_time: formatMinutes(newStartMin),
         end_time: formatMinutes(newEndMin),
       });
-      void onDataChanged();
+      void onDataChanged('scheduleTemplates');
     } catch (err) {
       setError(err.message || 'Failed to move template.');
     } finally {

@@ -15,8 +15,6 @@ import ToggleSwitch from '../ToggleSwitch';
 const FCM_KEYS = {
   webConfig: 'fcm_web_config',
   vapidPublicKey: 'fcm_vapid_public_key',
-  serviceAccountEmail: 'fcm_service_account_email',
-  serviceAccountKey: 'fcm_service_account_private_key',
 };
 
 // Notification types a member or admin can switch on/off.
@@ -102,15 +100,17 @@ export default function AdminNotificationsTab({ token, systemSettings, isAdmin =
 }
 
 function FcmConfigCard({ token, systemSettings, status, onSaved }) {
-  // Public values are prefilled from system_settings. The service-account email
-  // comes from the admin status action, and the private key is never sent to a
-  // client at all - it is write-only, so the field starts empty and staying
-  // empty means "keep whatever is already stored".
+  // The two values the browser actually needs to subscribe: the Firebase web config and the VAPID public key. Both are
+  // PUBLIC by nature (a web config is public by design and the VAPID key is handed to the browser to register), which is why
+  // they live in system settings and are prefilled here.
+  //
+  // THE SERVICE-ACCOUNT FIELDS ARE GONE, and that is the change rather than a tidy-up: they were write-only data nothing
+  // read. The email shown below comes from the server's own status, and the private key a station used to paste in is now
+  // simply the Cloud Functions service account - the runtime's own identity, which no browser should ever hold. A credential
+  // in a system-settings document is exactly what docs/FIRESTORE_MODEL.md says never to do.
   const [form, setForm] = useState({
     webConfig: settingValue(systemSettings, FCM_KEYS.webConfig),
     vapidPublicKey: settingValue(systemSettings, FCM_KEYS.vapidPublicKey),
-    serviceAccountEmail: status?.service_account_email || '',
-    serviceAccountKey: '',
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -121,8 +121,6 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
       ...prev,
       webConfig: settingValue(systemSettings, FCM_KEYS.webConfig),
       vapidPublicKey: settingValue(systemSettings, FCM_KEYS.vapidPublicKey),
-      // Don't clobber what the admin is currently typing.
-      serviceAccountEmail: prev.serviceAccountEmail || status?.service_account_email || '',
     }));
   }, [systemSettings, status]);
 
@@ -149,22 +147,11 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
         [FCM_KEYS.vapidPublicKey, String(form.vapidPublicKey || '').trim()],
       ];
 
-      // Blank credential fields mean "leave the stored value alone", so an admin
-      // can correct the web config without having to re-paste the private key
-      // (which they can never read back).
-      const email = String(form.serviceAccountEmail || '').trim();
-      if (email) entries.push([FCM_KEYS.serviceAccountEmail, email]);
-
-      const privateKey = String(form.serviceAccountKey || '').trim();
-      if (privateKey) entries.push([FCM_KEYS.serviceAccountKey, privateKey]);
-
       for (const [key, value] of entries) {
         const result = await adminSaveSystemSetting(key, value, token);
         if (!result?.success) throw new Error(result?.message || `Failed to save ${key}.`);
       }
 
-      // Clear the write-only field so it never lingers in component state.
-      setForm((prev) => ({ ...prev, serviceAccountKey: '' }));
       await onSaved();
       setSaved(true);
     } catch (err) {
@@ -253,42 +240,13 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-              Service account email
+              Who sends the pushes
             </label>
-            <input
-              type="text"
-              value={form.serviceAccountEmail}
-              onChange={(e) => setForm({ ...form, serviceAccountEmail: e.target.value })}
-              placeholder="firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com"
-              className="w-full font-mono text-xs bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-              Service account private key
-            </label>
-            <textarea
-              rows={4}
-              value={form.serviceAccountKey}
-              onChange={(e) => setForm({ ...form, serviceAccountKey: e.target.value })}
-              placeholder={status?.has_private_key
-                ? 'A key is already stored - leave blank to keep it'
-                : '-----BEGIN PRIVATE KEY-----   ...   -----END PRIVATE KEY-----'}
-              className="w-full font-mono text-xs bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-start gap-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-start gap-1">
               <KeyRound className="w-3 h-3 mt-0.5 shrink-0" />
               <span>
-                Write-only: the <span className="font-mono">private_key</span> from the service
-                account JSON is stored but never sent back to any browser
-                {status?.has_private_key ? ' (one is already saved - type a new one only to replace it)' : ''}.
-                For tighter handling, store it in Apps Script Script Properties as
-                <span className="font-mono"> FCM_SERVICE_ACCOUNT_PRIVATE_KEY</span> instead; the backend
-                prefers that store.
-                {status?.credential_source === 'script_properties' && (
-                  <> Currently reading credentials from Script Properties.</>
-                )}
+                Nothing to enter here: {status?.credential || 'pushes are sent by this deployment\u2019s own Cloud Functions service account, which nothing is stored for.'}
+                {' '}A browser never holds that credential, so no key belongs in this form.
               </span>
             </p>
           </div>

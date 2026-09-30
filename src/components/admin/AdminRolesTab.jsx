@@ -91,7 +91,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
       // The row shows on the table straight away; the refresh wave lands in the background. A role edit
       // changes permissions, so the screen that depends on them (this one, and the nav) must not wait for it.
       onRowSaved?.('roles', formData);
-      void onDataChanged();
+      void onDataChanged('roles');
       resetForm();
     } catch (err) {
       setError(err.message || 'Failed to save role.');
@@ -115,7 +115,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
       if (!result?.success) throw new Error(result?.message || 'Failed to delete role.');
       // A deletion has no row to merge, so the table is honest for a moment longer than it was; the wave
       // removes it. Nothing is held open for it.
-      void onDataChanged();
+      void onDataChanged('roles');
       if (String(formData.id) === String(role.id)) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete role.');

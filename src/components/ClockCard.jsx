@@ -1,7 +1,11 @@
 import React from 'react';
-import { LogIn, LogOut } from 'lucide-react';
+import { LogIn, LogOut, WifiOff } from 'lucide-react';
+import { OFFLINE_CLOCK_MESSAGE } from '../utils/connectivity';
 
-export default function ClockCard({ isClockedIn, loading, onClockAction }) {
+// `offline` disables the buttons AND says why, rather than leaving them live and refusing on the press: the refusal is
+// still enforced in the writer (see firestoreWrites.js), but a member should not have to press a button to learn that it
+// cannot work. Defaults to false, so a caller that knows nothing about connectivity gets the working card.
+export default function ClockCard({ isClockedIn, loading, offline = false, onClockAction }) {
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 md:p-8 shadow-xl">
       <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -17,13 +21,19 @@ export default function ClockCard({ isClockedIn, loading, onClockAction }) {
               ? 'Click below to end your active shift.'
               : 'Click below to start a new shift record.'}
           </p>
+          {offline && (
+            <p className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 text-sm mt-2 font-medium">
+              <WifiOff className="w-4 h-4 shrink-0" />
+              {OFFLINE_CLOCK_MESSAGE}
+            </p>
+          )}
         </div>
 
         <div>
           {!isClockedIn ? (
             <button
               onClick={() => onClockAction('CLOCK_IN')}
-              disabled={loading}
+              disabled={loading || offline}
               className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold py-3.5 px-8 rounded-xl transition shadow-lg shadow-emerald-600/20"
             >
               <LogIn className="w-5 h-5" />
@@ -32,7 +42,7 @@ export default function ClockCard({ isClockedIn, loading, onClockAction }) {
           ) : (
             <button
               onClick={() => onClockAction('CLOCK_OUT')}
-              disabled={loading}
+              disabled={loading || offline}
               className="w-full md:w-auto flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold py-3.5 px-8 rounded-xl transition shadow-lg shadow-red-600/20"
             >
               <LogOut className="w-5 h-5" />

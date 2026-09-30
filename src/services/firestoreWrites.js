@@ -16,6 +16,9 @@ import { rowsFor, rowsOf } from './firestorePayload.js';
 // exists as far as a member is concerned, and two implementations of that would drift.
 import { visibleDocumentFor } from './firestoreReads.js';
 import { settingSide } from '../utils/systemSettings.js';
+// The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
+// device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
+import { isOffline } from '../utils/connectivity.js';
 import { deleteField } from 'firebase/firestore';
 
 // The timestamp format the app reads everywhere: 'YYYY-MM-DD HH:MM:SS' in station time. Apps Script had
@@ -45,7 +48,20 @@ export const openClockEntryFor = async (userId) => {
   return open.docs[0] ? { id: open.docs[0].id, ...open.docs[0].data() } : null;
 };
 
+// REFUSED BEFORE ANYTHING IS ATTEMPTED, and thrown as a name `failureFor` already knows (firestoreRouting.js), so the
+// member gets a sentence rather than Firestore's `unavailable`.
+//
+// WHY THIS IS IN THE WRITER RATHER THAN THE SCREEN: a guard in the UI protects the UI. This one protects the DATA, and it
+// covers every path that reaches these two functions - the clock card, a replayed action after a session refresh, and
+// anything added later. The transaction itself cannot queue (a transaction needs a server round trip to read), so what
+// this really buys is the honest message and the fact that nothing half-happens: a clock-in that cannot be recorded must
+// not leave the screen claiming somebody is on duty.
+const refuseOffline = () => {
+  if (isOffline()) throw new Error('offline');
+};
+
 export const clockIn = async ({ userId, gps, isManual = false }) => {
+  refuseOffline();
   const db = firestore();
   const entry = doc(collection(db, 'timeclock'));
   const stamp = stationTimestamp();
@@ -73,6 +89,7 @@ export const clockIn = async ({ userId, gps, isManual = false }) => {
 };
 
 export const clockOut = async ({ userId, entryId }) => {
+  refuseOffline();
   const db = firestore();
 
   await runTransaction(db, async (transaction) => {
@@ -143,33 +160,17 @@ export const saveScheduleBoard = async ({ entries = [], deleteIds = [] }) => {
   return result.data;
 };
 
-// The one thing about the move that a station has to DECIDE: whether an officer's straightforward saves are audited.
-//
-// On the sheet they were, because the server did the work and wrote the row. Firestore has no audit log, and a client
-// cannot write one - an audit row a browser can forge is not an audit row - so the choice is between no record and a
-// callable that writes one before it writes the document.
-//
-// DEFAULT OFF, which is the owner's decision: the rules record who MAY write, and that is enough for a station that
-// trusts its officers. An officer turns it on by adding the setting `audit_client_writes` = TRUE in the System
-// Settings tab's table, which is public because the CLIENT has to read it to know which way to write.
-//
-// Read per save rather than cached: it is one small document read, and a station that has just switched this on
-// should not have to wait for a cache to expire to believe it.
-export const clientWritesAreAudited = async () => {
-  try {
-    const settings = await getDoc(doc(firestore(), 'settings', 'public'));
-    const value = (settings.data() || {}).audit_client_writes;
-    return value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';
-  } catch {
-    return false;
-  }
-};
-
 // A save that is ONE DOCUMENT, which is what most of the admin tabs are. The action's own fields become the document:
 // the sheet's columns were already the document's field names, so there is nothing to translate, and `action` /
 // `token` / `row_version` are the envelope and the sheet's conflict check rather than data. Firestore has no
 // equivalent of row_version - a set replaces what the last writer wrote, and the app's rule is that the last writer
 // wins.
+//
+// THE AUDIT TOGGLE IS GONE, and with it this branch. An officer's straightforward saves used to be routeable through a
+// callable that wrote an audit row first, off by default; that row was a Firestore document per save, read back to
+// render one tab. The app's audits are Cloud Logging lines now (`audit` in functions/index.js), so there is nothing to
+// write here for - the callable, `saveDocumentWithAudit`, remains in the functions for a station that wants its
+// administrative saves to go through the server, and its audit lines go to the same place as everything else's.
 const withoutEnvelope = (body = {}) => {
   const { action, token, row_version, ...fields } = body;
   void action;
@@ -183,13 +184,6 @@ export const saveDocument = async ({ collection, id, body, extra = {} }) => {
   // column used to. It has to be this way round: the caller awaits the reply and puts the new id in its table.
   const target = String(id || '').trim() || doc(collection(firestore(), collection)).id;
   const document = { ...withoutEnvelope(body), ...extra };
-
-  // One decision, in one place, covering every straightforward save in the app: straight to the document, or through
-  // the callable that writes an audit row first. See clientWritesAreAudited above.
-  if (await clientWritesAreAudited()) {
-    const result = await httpsCallable(firebaseFunctions(), 'saveDocumentWithAudit')({ collection, id: target, document });
-    return { id: result.data?.id || target };
-  }
 
   await setDoc(doc(firestore(), collection, target), document, { merge: true });
   return { id: target };
@@ -738,10 +732,6 @@ export const deleteTimeclockEntry = async ({ id }) => {
 
 export const deleteDocument = async ({ collection, id }) => {
   const target = String(id || '');
-  if (await clientWritesAreAudited()) {
-    await httpsCallable(firebaseFunctions(), 'saveDocumentWithAudit')({ collection, id: target, remove: true });
-    return { id: target };
-  }
   await deleteDoc(doc(firestore(), collection, target));
   return { id: target };
 };

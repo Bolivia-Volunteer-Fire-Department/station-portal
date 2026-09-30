@@ -64,3 +64,28 @@ export const compareCrewOrder = (a, b) => {
 
 // Non-mutating convenience wrapper, so callers never sort a shared array.
 export const sortCrewOrder = (pills) => (Array.isArray(pills) ? pills.slice().sort(compareCrewOrder) : []);
+
+// A SLOT is a shift the board offers rather than a shift somebody holds, so it has no member and no open/filled state.
+// Its order is therefore compareCrewOrder's first and third keys with nothing in between: START TIME, then the
+// assignment's required rank (highest first), then a name to keep the order deterministic.
+//
+// This is the order the Schedule Management board draws a day in, and the order the templates themselves travel in
+// (`sortScheduleTemplates` in firestorePayload.js sorts by the same two keys), so a picker and the board cannot disagree
+// about which shift comes first. Same inputs as a pill - `startMin` and `requiredRankOrder` - because a caller that can
+// order pills can order slots.
+export const compareSlotOrder = (a, b) => {
+  const byStart = startMinuteOf(a) - startMinuteOf(b);
+  if (byStart !== 0) return byStart;
+
+  const aRank = requiredRankOf(a);
+  const bRank = requiredRankOf(b);
+  if (aRank !== bRank) {
+    if (aRank === null) return 1; // no requirement known -> after the ranked ones
+    if (bRank === null) return -1;
+    return bRank - aRank; // highest required rank first
+  }
+
+  return String(a?.name ?? '').localeCompare(String(b?.name ?? ''));
+};
+
+export const sortSlotOrder = (slots) => (Array.isArray(slots) ? slots.slice().sort(compareSlotOrder) : []);

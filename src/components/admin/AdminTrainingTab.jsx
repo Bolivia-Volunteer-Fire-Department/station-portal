@@ -147,7 +147,7 @@ export default function AdminTrainingTab({
       if (!result?.success) throw new Error(result?.message || 'Failed to save the training.');
       setEditing(null);
       setEditorOpen(false);
-      void onDataChanged?.(token);
+      void onDataChanged?.('trainings');
       setMessage({ type: 'success', text: 'Training saved.' });
     } catch (err) {
       setMessage({ type: 'error', text: err?.message || 'Failed to save the training.' });
@@ -170,7 +170,7 @@ export default function AdminTrainingTab({
       const result = await adminBulkSaveTraining({ trainings: [], deleteIds: [training.id] }, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete the training.');
       if (String(editing?.id || '') === String(training.id)) setEditing(null);
-      void onDataChanged?.(token);
+      void onDataChanged?.('trainings');
       setMessage({ type: 'success', text: 'Training deleted.' });
     } catch (err) {
       setMessage({ type: 'error', text: err?.message || 'Failed to delete the training.' });
@@ -187,7 +187,7 @@ export default function AdminTrainingTab({
     try {
       const result = await adminRemoveTrainingSignature(signature.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to remove the signature.');
-      void onDataChanged?.(token);
+      void onDataChanged?.('trainings');
       setMessage({ type: 'success', text: `Signature removed for ${memberName(result.user_id || signature.user_id)}.` });
     } catch (err) {
       setMessage({ type: 'error', text: err?.message || 'Failed to remove the signature.' });

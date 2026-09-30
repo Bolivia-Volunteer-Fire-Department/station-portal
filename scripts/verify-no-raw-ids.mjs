@@ -135,7 +135,6 @@ console.log('\n--- the checks themselves ---');
 const noneOf = (rule) => (source) => !sourceLines(source).some((line) => rule(line));
 
 const usersTab = readFileSync('src/components/admin/AdminUsersTab.jsx', 'utf8');
-const logTab = readFileSync('src/components/admin/AdminSystemLogTab.jsx', 'utf8');
 const calendar = readFileSync('src/components/ScheduleCalendar.jsx', 'utf8');
 const clockRow = readFileSync('src/components/clock/ClockTableRow.jsx', 'utf8');
 
@@ -145,16 +144,6 @@ const MUTATIONS = [
     source: usersTab,
     passes: noneOf(hasIdHash),
     breakIt: (s) => s.replace("recordHeading('User'", "`#${formData.id}` || recordHeading('User'"),
-  },
-  {
-    label: 'an ID column',
-    source: logTab,
-    passes: noneOf(hasIdColumn),
-    breakIt: (s) =>
-      s.replace(
-        '<th className="px-4 py-3 whitespace-nowrap">Timestamp</th>',
-        '<th className="px-4 py-3 w-16">ID</th>\n                <th className="px-4 py-3 whitespace-nowrap">Timestamp</th>'
-      ),
   },
   {
     label: 'an id rendered as text',
@@ -167,12 +156,6 @@ const MUTATIONS = [
     source: clockRow,
     passes: noneOf(idFallback),
     breakIt: (s) => s.replace("log.user_name || unnamedLabel('member')", 'log.user_name || log.user_id'),
-  },
-  {
-    label: 'an id in a tooltip',
-    source: logTab,
-    passes: noneOf(idTooltip),
-    breakIt: (s) => s.replace('title={name || undefined}', 'title={row.user_id}'),
   },
 ];
 

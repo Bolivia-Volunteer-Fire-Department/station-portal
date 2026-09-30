@@ -105,7 +105,7 @@ export default function AdminAssignmentsTab({
       if (!result?.success) throw new Error(result?.message || 'Failed to save assignment.');
       // Straight onto the table; the refresh wave lands on its own time.
       onRowSaved?.('assignments', formData);
-      void onDataChanged();
+      void onDataChanged('assignments');
       resetForm();
     } catch (err) {
       setError(err.message || 'Failed to save assignment.');
@@ -127,7 +127,7 @@ export default function AdminAssignmentsTab({
     try {
       const result = await adminDeleteAssignment(assignment.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete assignment.');
-      void onDataChanged();
+      void onDataChanged('assignments');
       if (String(formData.id) === String(assignment.id)) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete assignment.');

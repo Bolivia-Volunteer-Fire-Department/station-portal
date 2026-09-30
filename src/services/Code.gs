@@ -45,7 +45,6 @@ var READ_ONLY_ACTIONS = {
   ADMIN_GET_SCHEDULE_TEMPLATES: true,
   ADMIN_GET_SCHEDULE_OFFERS: true,
   GET_SCHEDULE: true,
-  GET_ROSTER: true,
   GET_ON_DUTY: true,
   GET_TRAINING: true,
   MY_ANNOUNCEMENTS: true,
@@ -1732,22 +1731,11 @@ function doPost(e) {
         break;
       }
 
-      case "GET_ROSTER": {
-        const authRoster = getAuthContext(ss, data);
-        if (!authRoster) {
-          responseData = { success: false, code: "UNAUTHORIZED", message: "Session expired. Please sign in again." };
-          break;
-        }
-
-        // Minimal, non-sensitive roster available to every signed-in member
-        // (no passwords/usernames/roles/status). The schedule sheet only stores
-        // user ids, so members need this to label other people's shifts - the
-        // same projection already exposed through GET_ON_DUTY.
-        //
-        // Shared with the sign-in payload (rosterRowsFor), so the two cannot disagree about what a roster is.
-        responseData = { roster: rosterRowsFor(ss) };
-        break;
-      }
+      // GET_ROSTER used to be answered here, and is deliberately gone from both backends at once: nothing asked for it.
+      // The roster a screen draws - the calendar labelling other people's shifts - comes from the sign-in payload, where it
+      // is the same `rosterRowsFor` projection below, computed from a `users` read the payload was making anyway. The
+      // helper stays because the payload still uses it; only the action went. See firestoreRouting.js, where the route used
+      // to be listed, for the other half of the same note.
 
       case "GET_RUNNER_LEADERBOARD": {
         const authRunner = getAuthContext(ss, data);

@@ -210,11 +210,62 @@ From there the first administrator creates everyone else through the app's Users
 
 - **Budget alerts**: Cloud console → Billing → Budgets & alerts. A $5 monthly budget with email alerts catches a
   mistake, and at station scale it will never fire.
-- **App Check**: Firebase → App Check → register the web app with reCAPTCHA v3, then turn on enforcement for
-  Firestore and Cloud Functions. This is what stops somebody scripting the API from a laptop. The code side - the
-  site key and `initializeAppCheck` - is a small change on our side that has **not** been made yet.
+- **App Check**: see the section below. The code side is DONE (the site key is a build value and `initializeAppCheck` runs
+  when it is present); what remains is the console work, which has an order that matters.
 - **Project ownership**: add two or three people from the department as **Owner** in Google Cloud → IAM. The app
   currently depends on one person's account, and that is the largest single risk in the whole arrangement.
+
+### App Check, in the order that does not lock the station out
+
+App Check is what stops somebody scripting your API from a laptop, and it is worth having. Enforcement switched on before
+the client that carries tokens is deployed locks out everybody, yourself included — so the *order* below matters more than
+the individual clicks.
+
+**What an "Enterprise site key" is, since that is what the console asks for.** App Check still works with reCAPTCHA, and
+reCAPTCHA now has two generations: **Classic** (the v3 keys from `google.com/recaptcha/admin`) and **reCAPTCHA Enterprise**,
+which lives in the **Google Cloud** console. Google is retiring Classic — existing accounts are being migrated
+automatically — so the Firebase console offers the Enterprise provider, and the "site key" it wants is simply the public
+identifier of a **score-based reCAPTCHA Enterprise key**. Two things that are not obvious:
+
+- It belongs **in the same Google Cloud project as the Firebase project** (`fire-clock-76723`). The App Check page links
+  you into that project's Cloud console, which is the easiest way to end up in the right place.
+- It is **score-based with no challenge**. App Check never shows a puzzle; it wants a score, and a score of 0 is still a
+  score.
+
+The clicks: Cloud console (in `fire-clock-76723`) → **Security → reCAPTCHA** → **Create key** → name it (e.g.
+`station-portal`) → **score-based (no challenge)** → **Website** → add your domains → **Create**. Then Firebase →
+App Check → **Apps** → your web app → **reCAPTCHA Enterprise** → paste the key → **Save**. Finally put the same key in
+`.env` as `VITE_FIREBASE_APPCHECK_SITE_KEY` (and as a repository secret of that name for the Pages build) and deploy.
+
+**The domain list decides whether it works.** A reCAPTCHA key is bound to the sites you name when you create it: your
+GitHub Pages host (and any custom domain) plus `localhost` for development. A missing domain is the usual reason App Check
+"fails" with nothing in the app's console, because the refusal happens at Google's end.
+
+**The cost of switching it on, which is worth reading before you do.** Every App Check token refresh creates one reCAPTCHA
+Enterprise assessment. Its no-cost quota is **10,000 assessments a month**, and past that `CreateAssessment` **fails
+closed** — requests are refused rather than metered. The web SDK refreshes a token **twice an hour** by default, so a single
+tab left open on a wall display would cost 2 × 24 × 30 ≈ **1,440 assessments a month by itself**: seven such tabs would
+exhaust the quota. Two things follow:
+
+1. **Extend the App Check token TTL** (App Check → your app; the console shows the allowed range) to a day or more. The
+   same wall-display tab then costs ~60 a month instead of 1,440, and a token's lifetime has no bearing on what it protects.
+2. **Turn on billing with a budget alert** before enforcement, so exceeding the quota is a line on a bill rather than an
+   outage. An unbilled project that passes 10,000 assessments stops serving, and that is the failure mode to avoid — the
+   budget alert from the bullet above is the tripwire.
+
+**The order.** (1) Deploy the client with the key set: tokens start being sent, and unverified requests still work, so
+nothing breaks. (2) Watch **App Check → APIs →** *Firestore / Authentication / Cloud Functions* for a few days; the metric
+you want is unverified requests falling to zero as browsers pick up the new build. (3) Then turn on enforcement, product by
+product, in the App Check console — Firestore and Authentication are console toggles. (4) **Cloud Functions are not:**
+enforcement for a *callable* is set in the function's own options (`enforceAppCheck: true` in `functions/index.js`), which
+is a small change plus `firebase deploy --only functions`. That one is deliberately not made yet; say when the metrics look
+clean and it is a five-minute change.
+
+**Local development, and one trap.** `localhost` is not a valid site to attest, so development uses App Check's debug
+provider: Firebase → App Check → Apps → your app → ⋮ → **Manage debug tokens** → create one, then put it in your **local**
+`.env` as `VITE_FIREBASE_APPCHECK_DEBUG_TOKEN`. That token is a credential for your project — it lets a request skip
+attestation — so it must never be a repository secret for the Pages build: Vite inlines every `VITE_*` variable into the
+built bundle, which would publish it in the page source. Delete it from the console if it ever leaks.
 
 ## 8. Later, not now
 

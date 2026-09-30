@@ -21,6 +21,7 @@ import Sidebar from '../src/components/Sidebar.jsx';
 import AdminRolesTab from '../src/components/admin/AdminRolesTab.jsx';
 import AdminScheduleTemplatesTab from '../src/components/admin/AdminScheduleTemplatesTab.jsx';
 import AdminAssignmentsTab from '../src/components/admin/AdminAssignmentsTab.jsx';
+import AdminSystemLogTab from '../src/components/admin/AdminSystemLogTab.jsx';
 import MyAvailability from '../src/components/MyAvailability.jsx';
 import AvailabilityCalendar from '../src/components/AvailabilityCalendar.jsx';
 import AdminAvailabilityTab from '../src/components/admin/AdminAvailabilityTab.jsx';
@@ -33,7 +34,6 @@ import AdminAvailabilityRoster from '../src/components/admin/AdminAvailabilityRo
 import AdminUsersTab from '../src/components/admin/AdminUsersTab.jsx';
 import AdminPendingApprovalsTab from '../src/components/admin/AdminPendingApprovalsTab.jsx';
 import AdminTrainingTab from '../src/components/admin/AdminTrainingTab.jsx';
-import AdminSystemLogTab from '../src/components/admin/AdminSystemLogTab.jsx';
 import { ADMIN_PERMISSIONS, roleAllowsTab } from '../src/utils/permissions.js';
 import TrainingModule from '../src/components/TrainingModule.jsx';
 import ClockBlockedModal from '../src/components/ClockBlockedModal.jsx';
@@ -878,7 +878,7 @@ check(
 );
 const helpAboutHelpView = (() => {
   try {
-    return renderToString(React.createElement(HelpGuides, { scope: 'admin', initialSlug: '19-help' }));
+    return renderToString(React.createElement(HelpGuides, { scope: 'admin', initialSlug: '18-help' }));
   } catch (error) {
     return { error };
   }
@@ -1741,109 +1741,105 @@ check(
 );
 check('and the location filter lists the locations present', String(adminReportWithFilters).includes('>Station 1<'));
 
-// --- the System Log tab ------------------------------------------------------------------------
+// --- the schedule board owns ONE month, which is what stops a save deleting the station's history ------------------
 //
-// Two things to pin: the tab is wired to its own permission and reaches the panel, and it is NOT part
-// of the shared refresh wave - the log is the largest table in the app, so loading it on sign-in for
-// everyone would undo the point of the feature.
-const systemLogSource = readFileSync('src/components/admin/AdminSystemLogTab.jsx', 'utf8');
-check('the System Log tab exists', systemLogSource.length > 2000, true);
-check('it fetches its own page', /adminFetchSystemLog\(query, token\)/.test(systemLogSource), true);
+// computeChanges deletes every row the board can see and no longer has in `working`, so the base it diffs against decides
+// what a save is able to delete. Scoped to the visible month that means "what changed on this month's board"; scoped to
+// the whole collection - or to the whole window the payload carried - it means the rest of history. This is a source
+// check because the alternative is a test that deletes fixtures to prove it did not delete fixtures.
+const boardSource = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
 check(
-  'and builds the query from the shared helper',
-  /logQueryParams\(\{ page, sort, filters \}\)/.test(systemLogSource),
+  'the board scopes its rows to the visible month',
+  /const monthRows = useMemo\([\s\S]{0,500}?return from <= monthEndKey && to >= monthStartKey;/.test(boardSource),
   true
 );
 check(
-  'it shows a spinner while loading',
-  /animate-spin/.test(systemLogSource) && /Loading the system log/.test(systemLogSource),
+  'and seeds both of its copies from that month, not from the whole schedule',
+  /setWorking\(monthRows\);[\s\S]{0,80}?setBase\(monthRows\);/.test(boardSource),
   true
 );
-check('with a pager', /Previous/.test(systemLogSource) && /Next/.test(systemLogSource), true);
-check('and a page indicator', /Page \{meta\.page\} of \{pages\}/.test(systemLogSource), true);
+check(
+  'with nothing left seeding state from the whole array',
+  !/useState\(\(\) => normalizeRows\(schedule\)\)/.test(boardSource),
+  true
+);
+check(
+  'and it asks for a month the window does not cover',
+  /windowCoversMonth\(scheduleWindow, monthKey\)/.test(boardSource) &&
+    /void onNeedSchedule\(monthStartKey, monthEndKey\)/.test(boardSource),
+  true
+);
 
-const panelLogSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
-check('the panel has the tab', /<AdminSystemLogTab/.test(panelLogSource), true);
-check('under the System heading', /id: 'system-log', label: 'System Log'/.test(panelLogSource), true);
+//
+// Two things to pin: the tab is wired to its own permission and reaches the panel, and it is NOT part of the shared
+// refresh wave - the log is the largest table in the app, so loading it on sign-in for everyone would undo the point.
+// It is read ON DEMAND FROM CLOUD LOGGING, which is what replaced the collection: the filter, sorts and row mapping
+// are tested for real in verify-audit-log, and what is left for source checks is the wiring.
+const auditTabSource = readFileSync('src/components/admin/AdminSystemLogTab.jsx', 'utf8');
+check('the Audit Log tab exists', auditTabSource.length > 2000, true);
+check('it fetches its own page when it mounts', /adminFetchSystemLog\(query, token\)/.test(auditTabSource), true);
+check('building the query from the shared helper', /logQueryParams\(\{ sort, filters, pageToken \}\)/.test(auditTabSource), true);
+check(
+  'and it pages FORWARD, because the Logging API has no total to page by',
+  /next_page_token/.test(auditTabSource) && /has_more/.test(auditTabSource) && !/total_pages/.test(auditTabSource),
+  true
+);
+check('with a way back to the newest page', /setPageToken\(''\)/.test(auditTabSource), true);
+check('and it offers only the sorts the API can do server-side', /AUDIT_SORT_OPTIONS\.map/.test(auditTabSource), true);
+
+const auditPanelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
+check('the panel has the tab', /<AdminSystemLogTab/.test(auditPanelSource), true);
+check('under the System heading, labeled as the audit log', /id: 'system-log', label: 'Audit Log'/.test(auditPanelSource), true);
 // Lazy loading depends on this: the component is mounted only while its tab is open.
-check('rendered only while its tab is active', /activeSubTab === 'system-log' &&/.test(panelLogSource), true);
+check('rendered only while its tab is active', /activeSubTab === 'system-log' &&/.test(auditPanelSource), true);
 
-// The guard that keeps it lazy: nothing in the refresh wave may ask for the log.
-const appLogSource = readFileSync('src/App.jsx', 'utf8');
-const refreshSource = (() => {
-  const source = readFileSync('src/App.jsx', 'utf8');
-  const start = source.indexOf('const refreshAdminData = async');
+// The guard that keeps it lazy: nothing in App's admin refresh may ask for the log.
+const appAuditSource = readFileSync('src/App.jsx', 'utf8');
+const refreshBody = (() => {
+  const start = appAuditSource.indexOf('const refreshAdminData = async');
   if (start === -1) return '';
-  const end = source.indexOf('const handleLogin', start);
-  return source.slice(start, end === -1 ? source.length : end);
+  const end = appAuditSource.indexOf('const handleLogin', start);
+  return appAuditSource.slice(start, end === -1 ? appAuditSource.length : end);
 })();
-check('the refresh wave was found', refreshSource.length > 300, true);
-check('and it does NOT fetch the log', !/SystemLog|system_log|systemLog/.test(refreshSource));
-check('nor does any other App-level fetch', !/adminFetchSystemLog/.test(readFileSync('src/App.jsx', 'utf8')));
+check('the refresh wave was found', refreshBody.length > 300, true);
+check('and it does NOT fetch the log', !/SystemLog|system_log|systemLog/.test(refreshBody));
+check('nor does any other App-level fetch', !/adminFetchSystemLog/.test(appAuditSource));
 
-// The permission drives the tab, and the action is gated on both the session and that permission.
-const logPermission = ADMIN_PERMISSIONS.find((permission) => permission.key === 'can_view_system_log');
-check('the permission is declared', Boolean(logPermission), true);
-check('pointing at the tab', logPermission && logPermission.tab, 'system-log');
-const logCode = readFileSync('src/services/Code.gs', 'utf8');
+// The permission drives the tab, and the callable is gated on it - server-side, where the rules cannot be talked around.
+const auditPermission = ADMIN_PERMISSIONS.find((permission) => permission.key === 'can_view_system_log');
+check('the permission is declared', Boolean(auditPermission), true);
+check('pointing at the tab', auditPermission && auditPermission.tab, 'system-log');
+const auditCallable = readFileSync('functions/index.js', 'utf8');
 check(
-  'the action is session-gated',
-  /case "ADMIN_GET_SYSTEM_LOG"[\s\S]{0,400}?getAuthContext\(ss, data\)/.test(logCode),
+  'and the callable refuses anybody without it',
+  /exports\.readSystemLog[\s\S]{0,400}?can_view_system_log/.test(auditCallable),
   true
 );
 check(
-  'and permission-gated',
-  /can_view_system_log/.test(logCode.slice(logCode.indexOf('case "ADMIN_GET_SYSTEM_LOG"'))),
+  'and folds a refused filter into an error rather than a query',
+  /if \(problem\) throw new HttpsError\('invalid-argument'/.test(auditCallable),
   true
 );
 
-// A real render, because source assertions cannot catch a typo in the JSX. Effects do not run under
-// renderToString, so what this proves is the FIRST paint: the controls exist, and the loading state
-// is what a visitor sees before the request resolves.
-const logTabView = (() => {
+// A real render, because source assertions cannot catch a typo in the JSX. Effects do not run under renderToString, so
+// what this proves is the FIRST paint: the controls exist, and the loading state is what a visitor sees before the
+// request resolves.
+const auditTabView = (() => {
   try {
-    return renderToString(
-      React.createElement(AdminSystemLogTab, {
-        token: 't',
-        users: [{ id: 'u1', name: 'Member 1' }],
-        timeFormat: '12',
-      })
-    );
+    return renderToString(React.createElement(AdminSystemLogTab, { token: 't', users: [{ id: 'u1', name: 'Member 1' }], timeFormat: '12' }));
   } catch (error) {
     return { error };
   }
 })();
-check('the log tab renders', typeof logTabView === 'string', logTabView.error && logTabView.error.message);
-check('showing the loader first', String(logTabView).includes('Loading the system log'), true);
+check('the tab renders', typeof auditTabView === 'string', auditTabView.error && auditTabView.error.message);
+check('showing the loader first', String(auditTabView).includes('Loading the system log'), true);
 check(
-  'with the filter controls',
-  String(logTabView).includes('All actions') && String(logTabView).includes('All members'),
+  'with the filter dropdowns',
+  String(auditTabView).includes('All actions') && String(auditTabView).includes('All members'),
   true
 );
-check(
-  'every sort option',
-  ['Timestamp (newest first)', 'Timestamp (oldest first)', 'Action (A–Z)', 'Member (A–Z)'].every(
-    (label) => String(logTabView).includes(label)
-  ),
-  true
-);
-check(
-  'the four columns',
-  ['Timestamp', 'Member', 'Action', 'Details'].every((heading) =>
-    String(logTabView).includes(`>${heading}<`)
-  ),
-  true
-);
-// The log used to show the row's own id as its first column. It is gone: a UUID is longer than the column it sat
-// in, says nothing about the entry, and is not how anybody refers to a log line. The timestamp and the order of the
-// rows are what locates an entry.
-check('and not the row id', !/aria-label="ID"|>ID</.test(String(logTabView)), true);
-// visibleText strips the SSR comment markers React inserts between text and an interpolation, so
-// "Page 1 of 1" matches rather than "Page <!-- -->1<!-- --> of ...".
-check('and a pager that is idle with no data', visibleText(logTabView).includes('Page 1 of 1'), true);
+check('and not the row id', !/aria-label="ID"|>ID</.test(String(auditTabView)), true);
 
-
-// --- Session idle timeout ---------------------------------------------------------------------
 //
 // Two halves again: the client timer signs the user out, and the server expires the session. The
 // card has three states worth asserting (unset, configured, unusable), and App has to actually arm

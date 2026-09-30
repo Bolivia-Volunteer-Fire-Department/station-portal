@@ -17,6 +17,12 @@ import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { mergeDayItems } from '../../utils/dayOrder';
+// Whether the window the schedule arrived in covers the month on screen: what tells a board it must ask for a month
+// rather than draw an empty one.
+import { windowCoversMonth } from '../../utils/scheduleWindow';
+// A day's SLOTS in the order that day reads: start time, then the assignment's required rank. The board tracks time
+// itself (mergeDayItems, which is stable), so this is what decides the order of two shifts that start together.
+import { sortSlotOrder } from '../../utils/crewOrder';
 import { isAvailableForSlot } from '../../utils/availability';
 import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
 // The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
@@ -117,6 +123,10 @@ const rowTimeRangeOf = (r) => {
 export default function AdminScheduleManagementTab({
   token,
   schedule = [],
+  // The window `schedule` holds (last month, this month, next) and the way to ask for more of it. A board edits the month
+  // it is showing, so it needs the whole of that month and nothing else - see the monthRows note below.
+  scheduleWindow = { from: '', to: '' },
+  onNeedSchedule,
   scheduleTemplates = [],
   assignments = [],
   ranks = [],
@@ -134,8 +144,30 @@ export default function AdminScheduleManagementTab({
 }) {
   const now = new Date();
   const [viewDate, setViewDate] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
-  const [working, setWorking] = useState(() => normalizeRows(schedule));
-  const [base, setBase] = useState(() => normalizeRows(schedule));
+  // The visible month's bounds, computed before the row state below because that state is scoped BY them.
+  const monthStartKey = toDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
+  const monthEndKey = toDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
+  const monthKey = monthStartKey.slice(0, 7);
+
+  // THE ROWS THIS BOARD OWNS: the month on screen, and only that month.
+  //
+  // THIS IS THE DIFFERENCE BETWEEN A SAVE THAT EDITS A BOARD AND ONE THAT DELETES THE STATION'S HISTORY. A save deletes
+  // every row the board can see and no longer has in `working` (see computeChanges), so a base holding the whole WINDOW
+  // would delete the rest of the window the moment it saved, and a base holding the whole collection would delete
+  // everything outside the month the officer was looking at. Scoped to the month, the diff means exactly what an officer
+  // means by it: what changed on this month's board.
+  const monthRows = useMemo(
+    () =>
+      normalizeRows(schedule).filter((row) => {
+        const from = row.date_from || '';
+        const to = row.date_to || from;
+        // A multi-day row belongs to the month it OVERLAPS, not only to the month it starts in.
+        return from <= monthEndKey && to >= monthStartKey;
+      }),
+    [schedule, monthStartKey, monthEndKey]
+  );
+  const [working, setWorking] = useState(() => monthRows);
+  const [base, setBase] = useState(() => monthRows);
   const [dirty, setDirty] = useState(false);
   // Mirror of `dirty` for use inside effects without adding it to their deps:
   // a background data refresh must never clobber an in-flight draft.
@@ -177,8 +209,15 @@ export default function AdminScheduleManagementTab({
   const todayKey = toDateKey(now);
   // Events are visible by default. Not persisted: a temporary view choice, like "Show everyone".
   const [showEvents, setShowEvents] = useState(true);
-  const monthStartKey = toDateKey(new Date(year, month, 1));
-  const monthEndKey = toDateKey(new Date(year, month + 1, 0));
+
+  // The month on screen is not always in the window the sign-in carried (last/this/next), and a board can be walked back
+  // years. Asking for it is what keeps the arrows working without reading the whole schedule - and it is why the window
+  // travels with the rows instead of being worked out again here.
+  useEffect(() => {
+    if (!onNeedSchedule) return;
+    if (windowCoversMonth(scheduleWindow, monthKey)) return;
+    void onNeedSchedule(monthStartKey, monthEndKey);
+  }, [onNeedSchedule, scheduleWindow, monthKey, monthStartKey, monthEndKey]);
 
   // Re-sync the working copy whenever fresh server data arrives - unless the
   // admin has unsaved changes, which take precedence over any refresh.
@@ -188,12 +227,14 @@ export default function AdminScheduleManagementTab({
 
   useEffect(() => {
     if (dirtyRef.current) return;
-    const rows = normalizeRows(schedule);
-    setWorking(rows);
-    setBase(rows);
+    // The MONTH's rows, not the whole array: this is what keeps `base` - and therefore what a save deletes - inside the
+    // month on screen. It re-seeds when the month changes too, which is what makes switching months safe rather than
+    // merely tidy.
+    setWorking(monthRows);
+    setBase(monthRows);
     setDirty(false);
     setSelectedKey(null);
-  }, [schedule]);
+  }, [monthRows]);
 
   // Restore an unsaved draft (survives tab switches / refreshes).
   useEffect(() => {
@@ -318,6 +359,11 @@ export default function AdminScheduleManagementTab({
           dateKey,
           template: t,
           startMin: timeToMinutes(t.start_time) ?? 0,
+          // The two keys the day's order is decided by, attached here so the slot carries its own ordering rather than
+          // depending on where it sat in the payload: the shift's required rank (from its ASSIGNMENT, not from whoever
+          // fills it) and a name to break a tie that the rank could not.
+          requiredRankOrder: parseRankOrder(assignmentById(t.assignment_id)?.rank_order_required),
+          name: `${assignmentById(t.assignment_id)?.description || unnamedLabel('assignment')} ${t.nickname || ''}`.trim(),
         });
       }
     }
@@ -327,6 +373,11 @@ export default function AdminScheduleManagementTab({
   const slotsByDay = useMemo(() => {
     const map = {};
     for (const s of visibleSlots) (map[s.dateKey] = map[s.dateKey] || []).push(s);
+    // Each day in the order the day reads: by start time, then by the assignment's required rank (utils/crewOrder's
+    // compareSlotOrder). The rows arrive in the payload's order, which applies the same rule to the TEMPLATES - but a
+    // slot's rank comes from its assignment, and pinning the order here keeps the board from depending on how the payload
+    // was assembled. mergeDayItems is stable, so this is also what decides two shifts that start at the same minute.
+    for (const dateKey of Object.keys(map)) map[dateKey] = sortSlotOrder(map[dateKey]);
     return map;
   }, [visibleSlots]);
 

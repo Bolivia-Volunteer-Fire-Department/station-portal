@@ -100,8 +100,6 @@ const main = async () => {
     created_at: '2026-01-01 08:00:00',
   });
   await read('reads the private half of an assignment', false, doc(db, 'assignment_private', 'a1'));
-  await read('reads the audit trail', false, doc(db, 'system_log', 'l1'));
-  await write('writes an audit row', false, doc(db, 'system_log', 'l2'), { user_id: 'u2', action: 'FORGED' });
   await write('edits the roster', false, doc(db, 'users', 'u2'), { name: 'Bo Jones', rank_id: 'k2', role_id: 'r2' });
   await write('edits its own role', false, doc(db, 'roles', 'r2'), { description: 'Firefighter', is_admin: true });
   await read('reads a collection whose rules are not written yet', false, doc(db, 'certifications', 'x1'));
@@ -142,7 +140,6 @@ const main = async () => {
   await signInAs('u1');
   await read('reads another member account record', true, doc(db, 'users_private', 'u2'));
   await read('and the private settings', true, doc(db, 'settings', 'private'));
-  await read('and the audit trail', true, doc(db, 'system_log', 'l1'));
   await write('edits a member name, rank and role', true, doc(db, 'users', 'u2'), {
     name: 'Bo Jones',
     rank_id: 'k1',
@@ -169,12 +166,6 @@ const main = async () => {
     end_time: '18:00',
     is_open: false,
   });
-  await write('and still cannot write an audit row', false, doc(db, 'system_log', 'l3'), {
-    user_id: 'u1',
-    action: 'FORGED',
-    created_at: '2026-03-03 08:00:00',
-  });
-
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
   console.log('\n--- the harness itself ---');
   // --- the rules the officer tabs needed, and the ones they must not open ------------------------------------------

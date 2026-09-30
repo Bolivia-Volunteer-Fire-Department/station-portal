@@ -5,53 +5,56 @@ import {
 import { adminFetchSystemLog } from '../../services/api';
 import { unnamedLabel } from '../../utils/displayLabel';
 import {
+  AUDIT_SORT_OPTIONS,
   DEFAULT_LOG_SORT,
   LOG_ACTION_TONE_CLASSES,
   LOG_PAGE_SIZE,
-  LOG_SORT_OPTIONS,
   SYSTEM_LOG_API_VERSION,
-  clampLogPage,
   emptyLogFilters,
   formatLogTimestamp,
   logActionTone,
-  logPageRangeLabel,
   logQueryParams,
   normalizeLogRows,
-  totalLogPages,
 } from '../../utils/systemLog';
 
-// The System Log.
+// The audit log.
 //
-// Lazy by construction: this component is only mounted while the tab is open, so the log is fetched
-// the first time somebody looks at it and never as part of the sign-in or admin refresh waves. The
-// log is the largest table in the app, so nothing here may load on a screen nobody asked for.
+// READ ON DEMAND FROM CLOUD LOGGING, and lazy by construction: this component is only mounted while the tab is open, so
+// the page is fetched the first time somebody looks at it and never as part of the sign-in or admin refresh waves.
 //
-// Every filter, sort or page change is ONE request, because the filtering and paging happen on the
-// server - there is no full copy here to page through. That is why each change shows the spinner
-// rather than appearing instant.
+// The log used to be a Firestore collection: a document per action, and a whole-collection scan to render this screen.
+// The lines are written for nothing now (`audit` in functions/index.js) and this asks the Logging API for one page when
+// somebody asks to see one. Every filter, sort or page change is ONE request, and each change shows the spinner rather
+// than appearing instant.
+//
+// The name still says "system log" in the files that predate the change - the util, this component, the permission and
+// the action - because renaming them all would churn a route, a permission and two harnesses for no behaviour. What
+// changed is where the rows come from.
 export default function AdminSystemLogTab({ token, users = [], timeFormat = '12' }) {
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({
-    page: 1,
     page_size: LOG_PAGE_SIZE,
-    total: 0,
-    total_pages: 1,
     sort: DEFAULT_LOG_SORT,
+    has_more: false,
   });
   const [facets, setFacets] = useState({ actions: [], members: [] });
-  const [page, setPage] = useState(1);
+  // FORWARD-ONLY PAGING. The Logging API hands back a token for the next page and no total, so the pager walks the log
+  // forward and offers a way back to the newest page. It is a smaller pager than the sheet's "page 3 of 12" and an honest
+  // one: knowing how many pages there were needed the whole log in hand, which is the cost this tab no longer pays.
+  const [pageToken, setPageToken] = useState('');
+  const [nextToken, setNextToken] = useState('');
   const [sort, setSort] = useState(DEFAULT_LOG_SORT);
   const [filters, setFilters] = useState(emptyLogFilters);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
-  // Set when the deployed script answers with a different contract version. Kept separate from
+  // Set when the deployed function answers with a different contract version. Kept separate from
   // `error`: the page may still be usable, it is the deployment that is behind.
   const [staleBackend, setStaleBackend] = useState(false);
   // Bumped by Refresh so an identical query can still be re-requested.
   const [reloadCount, setReloadCount] = useState(0);
 
-  const query = useMemo(() => logQueryParams({ page, sort, filters }), [page, sort, filters]);
+  const query = useMemo(() => logQueryParams({ sort, filters, pageToken }), [sort, filters, pageToken]);
 
   useEffect(() => {
     let canceled = false;
@@ -69,19 +72,17 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
 
         setRows(normalizeLogRows(result.rows));
         setMeta({
-          page: Number(result.page) || 1,
           page_size: Number(result.page_size) || LOG_PAGE_SIZE,
-          total: Number(result.total) || 0,
-          total_pages: Number(result.total_pages) || 1,
           sort: result.sort || DEFAULT_LOG_SORT,
+          has_more: result.has_more === true,
         });
         setFacets({
           actions: Array.isArray(result.actions) ? result.actions : [],
           members: Array.isArray(result.members) ? result.members : [],
         });
-        // The server clamps the page, so trust its answer over what was asked for - otherwise the
-        // pager could show a page number the table is not displaying.
-        setPage(Number(result.page) || 1);
+        // The token for the NEXT page, which "Older" follows. Nothing is guessed about how many pages there are: the API
+        // says whether there is another, and that is what the button is enabled by.
+        setNextToken(String(result.next_page_token || ''));
         setLoadedOnce(true);
       })
       .catch((err) => {
@@ -102,14 +103,19 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
   const memberLabel = (userId) => memberName(userId) || userId;
 
   const isFiltered = Boolean(filters.from || filters.to || filters.action || filters.member);
-  const pages = totalLogPages(meta.total, meta.page_size);
-  const rangeLabel = logPageRangeLabel(meta.total, meta.page, meta.page_size);
+  // "The newest page" is the empty token: it is not a token that was handed out, it is the beginning of the log.
+  const onNewestPage = pageToken === '';
+  // What the header says about what is on screen. There is no total to state - the Logging API offers none - so this
+  // describes the WINDOW instead of pretending to count the log, which is the honest version of what the sheet's
+  // "1-20 of 431" used to say.
+  const rangeLabel = isFiltered
+    ? `Matching entries, ${onNewestPage ? 'newest first' : 'older'}`
+    : `${onNewestPage ? 'The newest' : 'Older'} ${meta.page_size} entries`;
 
-  const goToPage = (next) => setPage(clampLogPage(next, meta.total, meta.page_size));
   const setFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
-    // A filter change resets to page one: page 8 of the old result may not exist in the new one.
-    setPage(1);
+    // A filter change starts again at the newest page: a token from the old result means nothing to a new filter.
+    setPageToken('');
   };
 
   return (
@@ -117,7 +123,7 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <ScrollText className="w-4 h-4 text-red-500 shrink-0" />
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">System Log</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Audit Log</h3>
           <span className="text-xs text-slate-500 dark:text-slate-400">
             {rangeLabel}
             {isFiltered ? ' (filtered)' : ''}
@@ -190,10 +196,10 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
             <select
               id="log-sort"
               value={sort}
-              onChange={(e) => { setSort(e.target.value); setPage(1); }}
+              onChange={(e) => { setSort(e.target.value); setPageToken(''); }}
               className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500/40"
             >
-              {LOG_SORT_OPTIONS.map((option) => (
+              {AUDIT_SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -204,11 +210,11 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
           <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              Filters applied — the count above is of matching entries, not the whole log.
+              Filters applied — these are the matching entries from the newest end of the log.
             </span>
             <button
               type="button"
-              onClick={() => { setFilters(emptyLogFilters()); setPage(1); }}
+              onClick={() => { setFilters(emptyLogFilters()); setPageToken(''); }}
               className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -306,25 +312,25 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
 
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            Page {meta.page} of {pages}
+            {onNewestPage ? `The newest ${meta.page_size} entries` : 'Older entries'}
           </span>
           <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              onClick={() => goToPage(meta.page - 1)}
-              disabled={loading || meta.page <= 1}
+              onClick={() => setPageToken('')}
+              disabled={loading || onNewestPage}
               className="inline-flex items-center gap-1 rounded-xl border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-slate-300 dark:hover:bg-slate-700/60"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
-              Previous
+              Newest
             </button>
             <button
               type="button"
-              onClick={() => goToPage(meta.page + 1)}
-              disabled={loading || meta.page >= pages}
+              onClick={() => setPageToken(nextToken)}
+              disabled={loading || !meta.has_more}
               className="inline-flex items-center gap-1 rounded-xl border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-slate-300 dark:hover:bg-slate-700/60"
             >
-              Next
+              Older
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>

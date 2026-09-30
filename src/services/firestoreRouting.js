@@ -25,6 +25,9 @@
 // So every blocked route is now said out loud, feature-off included, and the message names the route and says what to
 // do about it - silence here is what let "the admin wave is missing" arrive with no line explaining why.
 import { firebaseConfigured } from './firebase.js';
+// The offline sentences, and the device's own answer to "is there a network". A write that fails while offline is not the
+// same event as a write that fails while online, and it is the one the member can actually do something about.
+import { OFFLINE_CLOCK_MESSAGE, OFFLINE_WRITE_MESSAGE, isOffline } from '../utils/connectivity.js';
 
 // `import.meta.env` is Vite's and `process.env` is Node's, so a harness can exercise this module as well as Vite
 // building it. Same pattern as firebase.js, which needs it for the emulator host.
@@ -143,7 +146,11 @@ export const ROUTED_FEATURES = {
     writes: [],
     reads: [
       'GET_ON_DUTY',
-      'GET_ROSTER',
+      // GET_ROSTER IS NOT HERE ANY MORE, and the reason is what makes it safe to drop: nothing asked for it. The roster a
+      // screen draws comes from the sign-in payload (`fetchMemberPayload`), where it is a projection of the `users` read the
+      // payload was making anyway - so this action was reachable code with no caller, a read that would only ever have been
+      // issued by a client built before the payload carried a roster. It is gone from both backends together (see the
+      // Code.gs action list), which is what keeps the routing harness's two-direction check balanced.
       'GET_TIMECLOCK_LOGS',
       'GET_SCHEDULE',
       'GET_AVAILABILITY',
@@ -305,6 +312,9 @@ const FAILURE_MESSAGES = {
   'no-entry': 'That shift is no longer open.',
   'not-your-entry': 'That shift belongs to somebody else.',
   'already-clocked-out': 'That shift is already closed.',
+  // Thrown by the clock writers when the device has no connection (see utils/connectivity.js): clocking in and out is the
+  // one pair of writes that must NOT queue, because the record itself asserts when somebody was at the station.
+  offline: OFFLINE_CLOCK_MESSAGE,
 };
 
 // The one entry point api.js uses for a read. null means "not routed", which is the signal to fetch it the way the
@@ -367,6 +377,12 @@ export const failureFor = (error) => {
   if (code === 'functions/unauthenticated' || code === 'unauthenticated') {
     return fail('Your session has expired. Please sign in again.', 'UNAUTHORIZED');
   }
+  // THE OFFLINE CASE, translated where EVERY routed write passes - including the callables (an approved offer, the
+  // schedule board), which cannot run at all without a connection and whose failure would otherwise arrive as a
+  // `functions/unavailable` with a message about a transport. The DEVICE's answer is used rather than the error's, because
+  // an unreachable backend while the device HAS a connection is a different problem with a different thing to try, and
+  // saying "you are offline" to somebody who is not would send them to fix the wrong thing.
+  if (isOffline()) return fail(OFFLINE_WRITE_MESSAGE, 'OFFLINE');
   return fail(name || 'The change could not be saved.', 'FIRESTORE_ERROR');
 };
 

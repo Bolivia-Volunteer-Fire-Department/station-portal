@@ -85,7 +85,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
     try {
       const result = await adminSaveShift(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save shift.');
-      void onDataChanged();
+      void onDataChanged('shifts');
       resetForm();
     } catch (err) {
       setError(err.message || 'Failed to save shift.');
@@ -107,7 +107,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
     try {
       const result = await adminDeleteShift(shift.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete shift.');
-      void onDataChanged();
+      void onDataChanged('shifts');
       if (String(formData.id) === String(shift.id)) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete shift.');

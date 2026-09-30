@@ -30,3 +30,19 @@ export const mergeSavedRow = (rows, fields, options = {}) => {
     String(row?.id ?? '') === id ? { ...row, ...patch } : row
   );
 };
+
+// Two sets of rows as one, by id: a row that arrives replaces the one already held, and a row only the existing list has
+// is KEPT. Used when a window of the schedule lands after the one the sign-in carried - the calendar draws whatever it
+// holds, and the board diffs a month of it, so replacing the array would drop shifts nobody meant to drop.
+export const mergeRowsById = (rows, arriving) => {
+  const byId = new Map();
+  const add = (list) =>
+    (Array.isArray(list) ? list : []).forEach((row) => {
+      const id = row && row.id !== undefined && row.id !== null ? String(row.id) : '';
+      if (id) byId.set(id, row);
+    });
+  add(rows);
+  add(arriving);
+  return [...byId.values()];
+};
+

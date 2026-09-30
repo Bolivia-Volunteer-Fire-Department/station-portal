@@ -55,7 +55,6 @@ const PERMISSION_FLAGS = [
   'can_view_documents',
   'can_view_full_schedule',
   'can_view_my_schedule',
-  'can_view_system_log',
 ];
 
 // A role row: the description, the master switch, and every flag explicitly granted or not.
@@ -177,45 +176,15 @@ export const seed = async () => {
   await put('settings/public', { department_name: 'Bolivia Volunteer Fire Department' });
   await put('settings/private', { clock_location_radius_m: 250 });
 
-  // The system log's fixtures, straight through the REST API because the rules make the log unwritable by any client -
-  // which is also why reading it is a callable: no client may write a row, and the reader has to answer with counts and
-  // facets for the whole log rather than for one page.
-  //
-  // Between them they cover what the reader has to get right: two rows share a date and differ in time, one carries an
-  // ISO `created_at` and NO `timestamp` (the shape the audit writer produced before it wrote both), and one has a
-  // lowercase action, which is what the case-insensitive action filter exists for.
-  await put('system_log/log1', {
-    user_id: 'u1',
-    action: 'USER_LOGIN',
-    details: 'signed in',
-    created_at: '2026-03-04T14:05:00.000Z',
-    timestamp: '2026-03-04 09:05:00',
-  });
-  await put('system_log/log2', {
-    user_id: 'u2',
-    action: 'CLOCK_IN',
-    details: 'engine bay',
-    created_at: '2026-03-04T19:00:00.000Z',
-    timestamp: '2026-03-04 14:00:00',
-  });
-  await put('system_log/log3', {
-    user_id: 'u1',
-    action: 'user_login',
-    details: 'older row, ISO only',
-    created_at: '2026-03-02T12:00:00.000Z',
-  });
-  await put('system_log/log4', {
-    user_id: 'u2',
-    action: 'SIGN_IN_FAILED',
-    details: 'wrong password',
-    created_at: '2026-03-06T10:00:00.000Z',
-    timestamp: '2026-03-06 05:00:00',
-  });
 
   // --- reference data for the schedule, with the private halves the member must never see ---
   await put('shifts/d1', { description: 'Day', start_time: '08:00', end_time: '18:00' });
   await put('apparatus/a1', { description: 'Engine 1' });
   await put('assignments/a1', { description: 'Engine 1', color: '#ef4444', icon: 'flame', rank_order_required: 1 });
+  // A SECOND assignment with a HIGHER required rank, and a template for it at the same time as t1: two shifts that start
+  // together must read in rank order (Officer above Firefighter - the same rule utils/crewOrder documents for a day's
+  // pills), so the pair is what makes the ORDER assertion mean something rather than merely match the collection.
+  await put('assignments/a2', { description: 'Command', color: '#3b82f6', icon: 'shield', rank_order_required: 3 });
   await put('assignment_private/a1', { admin_note: 'checked monthly' });
   await put('schedule_templates/t1', {
     day_of_week: 'monday',
@@ -225,6 +194,32 @@ export const seed = async () => {
     nickname: 'Day Shift',
   });
   await put('schedule_template_private/t1', { admin_note: 'temporary cover' });
+  // Two more, whose ids are deliberately NOT in the order the week reads in: the payload sorts templates by day and then
+  // by start time, so 't0' has to come SECOND and 't2' last. A fixture set whose ids happened to match the sorted order
+  // would pass whatever the reader did - which is the whole reason these two exist.
+  await put('schedule_templates/t0', {
+    day_of_week: 'monday',
+    start_time: '20:00',
+    end_time: '22:00',
+    assignment_id: 'a1',
+    nickname: 'Night Shift',
+  });
+  await put('schedule_templates/t2', {
+    day_of_week: 'wednesday',
+    start_time: '06:00',
+    end_time: '12:00',
+    assignment_id: 'a1',
+    nickname: 'Early Wednesday',
+  });
+  // The same day and the same start time as t1, but a higher required rank: whichever order the payload puts these two in
+  // is the rank rule showing, or its absence.
+  await put('schedule_templates/t3', {
+    day_of_week: 'monday',
+    start_time: '08:00',
+    end_time: '18:00',
+    assignment_id: 'a2',
+    nickname: 'Command Shift',
+  });
 
   // --- one filled shift for u1, and one OPEN shift: the case the calendar asks its second question about ---
   await put('schedule/s1', {
@@ -317,6 +312,9 @@ export const seed = async () => {
   // wording having changed under a signature, not about how long ago somebody signed.
   await put('documents/doc1', {
     title: 'Annual SOG Acknowledgement',
+    // The body lives ON the row - `ADMIN_SAVE_DOCUMENT` merges the whole document into `documents/{id}` - so this is
+    // what opening the document renders, and the assertion on it can tell a read body from an empty one.
+    content: '# Annual SOG\n\nRead it, then sign it.',
     audience_keys: ['*'],
     content_revision: 2,
     is_published: true,
@@ -376,7 +374,10 @@ export const seed = async () => {
     audience_keys: ['*'],
     content_revision: 1,
     is_published: true,
-    date_from: '2027-01-01',
+    // `effective_date`, NOT `date_from`: these are the document columns the app's own editor writes (see
+    // utils/effectiveDates), and the first version of the reader asked for a field nothing has ever written - so every
+    // window read as open and this fixture proved nothing.
+    effective_date: '2027-01-01',
   });
   await put('documents/doc4', {
     title: 'Unpublished Draft',
@@ -429,17 +430,12 @@ export const seed = async () => {
     badges: [{ id: 'c1', name: 'EMT', icon: 'heart-pulse' }],
   });
 
-  // --- one audit row, so the rules can show an officer reading it and a member unable to ---
-  await put('system_log/l1', {
-    user_id: 'u1',
-    action: 'SEED',
-    details: 'the demo station was seeded',
-    created_at: '2026-03-02 08:00:00',
-  });
-};
 
 // Run directly (node scripts/seed-emulator.mjs). The rules harness seeds through this same function, so the
 // fixture cannot drift between what the tests set up and what a developer sees.
+};
+
+
 if (process.argv[1] && process.argv[1].endsWith('seed-emulator.mjs')) {
   seed()
     .then(() => console.log(`seeded the demo station into ${PROJECT}`))
