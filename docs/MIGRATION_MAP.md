@@ -182,29 +182,35 @@ ISO rows that predate it. An ISO instant rendered as station time is four or fiv
 a real time rather than like a bug, which is the worst kind.
 
 What is left on the sheet is three actions **nothing in the app calls** - `ADMIN_GET_USERS`,
-`ADMIN_GET_CERTIFICATIONS`, `ADMIN_GET_SCHEDULE_TEMPLATES`, all named in `switchReads` - and the bootstrap payloads,
-which are routed and keep the sheet only as the fallback for a failed read. Deleting Apps Script from `api.js` is the
-next step, and after it the sheet is a fallback that never fires.
+`ADMIN_GET_CERTIFICATIONS`, `ADMIN_GET_SCHEDULE_TEMPLATES`, all named in `switchReads`. **Apps Script is out of
+`api.js`**: the one gate every data call passes through dispatches to the reader or the writer and to nothing else, and
+an action neither answers THROWS rather than being swallowed or asked of somewhere else. There is no second backend to
+fall back to, and a screen that quietly receives nothing is the failure that module exists to prevent - so the sheet is
+now the station's *data* and the specification the Firestore implementation was built from, and it answers nothing.
 
-## Two things the login work found, and what each needs
+## Two things the login work found, and what each became
 
-**An officer's password reset has no route of its own.** `resetMemberPassword` exists as a callable - it takes a
-temporary password, sets the must-change flag, records who reset whose password on the member's own record and writes
-an audit row - but **nothing in the app calls it**. The reset rides on `adminSaveUser`, which is a composite: profile
-fields, a username, a password and a status in one save. Half-routing that would split one save across two systems
-with two different outcomes, so it moves as a whole with the admin writes, and its password part goes to the callable
-when it does. A username *change* has nothing to route to at all: `users_private` is writable by nobody, and no
-callable updates a username after creation.
+**An officer's password reset had no route of its own.** `resetMemberPassword` existed as a callable - it takes a
+temporary password, sets the must-change flag, records who reset whose password on the member's own record and writes an
+audit row - while the reset itself rode on `adminSaveUser`, a composite of profile fields, a username, a password and a
+status in one save. Half-routing that would have split one save across two systems with two different outcomes, so it
+moved as a whole: `adminSaveUser` writes the roster fields the rules allow directly, and hands the parts only a server
+may do to the callables that already existed for them - status to `setMemberStatus`, the password to
+`resetMemberPassword`, and the username and the change-on-next-login flag to `updateMemberAccount`. A username *change*
+had nothing to route to at all, because `users_private` is writable by nobody and still is from the browser;
+`updateMemberAccount` is what moves it now, along with the Auth address that goes with it.
 
-**"Whose device is this browser?" cannot be answered by a member.** The device card asks exactly that - it has to, or
+**"Whose device is this browser?" could not be answered by a member.** The device card asks exactly that - it has to, or
 a member on a shared computer is told their alerts are set up when they are set up for the person before them - and
-`push_devices` lets a member read only their *own* row. A token belonging to somebody else therefore reads as
-nothing, and `device_owner` would come back null: the wrong answer rather than no answer. This needs either a callable
-(a server may read it) or a rule that allows reading a device row by its token, which is a different shape from "your
-own rows" and wants deciding rather than doing.
+`push_devices` lets a member read only their *own* row, so somebody else's token reads as nothing and `device_owner`
+would come back null: the wrong answer rather than no answer. It is answered by the `pushDeviceOwner` callable, which is
+the "a server may read it" option of the two: the rule stays "your own rows", and the function returns only the two
+things the card draws, because a token is credential-shaped and the row it points at is nobody else's business. `null`
+is a real answer there rather than a failure - it means this browser's alerts are set up to go to nobody.
 
-**Neither blocks the station.** A member's Auth account already holds the migration's temporary password, so the
-passwords in `secrets/temp-passwords.txt` can be handed out today, and the login already prefers Firebase.
+**Neither was blocking the station, and neither is open now.** A member's Auth account holds the migration's temporary
+password, so the passwords in `secrets/temp-passwords.txt` could be handed out at any point, and the login prefers
+Firebase.
 
 **One thing the move has silently changed, and it needs deciding.** The audit log. On the sheet, the server wrote an
 audit row for what an officer did, because the server was the one doing it. Now the straightforward admin saves -
@@ -275,3 +281,56 @@ twenty-three entries to none over this migration. The last three were:
 
 What is left on the sheet is the station's **data** rather than its code, and that is the migration script's job - the
 steps above. Nothing the app does is answered by Apps Script any more.
+
+## The event times the migration lost, and how they come back
+
+`typedValue` coerces every cell to text, and for the columns the app QUERIES it also normalizes the date - because
+`where('date_from', '>=', '2026-09-01')` is a string range and `'3/6/2026'` sorts after `'2026-09-30'`. The day parser
+it used is unanchored, so `'11/10/2026 18:00'` parsed happily to `'2026-11-10'` **and the hour was gone**. On an event
+that is the whole story: `date_from`/`date_to` are date columns, but on an event they carry a time as well, and on a
+RECURRING event they carry *only* times. Every migrated event therefore drew as "00:00 - 00:01".
+
+The map is fixed - a value carrying a time keeps it verbatim while its date half is still normalized - so a fresh
+migration is correct. **The rows already written are not, and no repair that reads only Firestore can fix them**: the
+hour is not there to be reformatted. `npm run dates:normalize` rewrites a value through that same parser, and a
+day-only value parses to itself, so it correctly reports nothing to do. The hour survives in exactly one place, the
+spreadsheet, which is why the cure reads it.
+
+Read from production when this was written: **11 events, every one of them day-only** - 10 timed and 1 all-day. And it
+is worse than a display bug. `eventValidation` requires a timed event's end to be after its start, and both ends are
+midnight, so **an officer who opens one of those events to change the title cannot save it at all**. That is asserted
+rather than described, in the harness below.
+
+The cure is `npm run events:restore-times` (`scripts/restore-event-times.mjs`), report-only by default and `--apply` to
+write. What it guarantees, and `npm run verify:event-times` asserts every one:
+
+- **It never touches an all-day event.** Day-only is the shape `AdminEventsTab` writes for one and the app reads its
+  dates inclusively, so it is correct as it stands. Giving it an hour would invent a time nobody chose.
+- **It can add an hour; it cannot move an event to another day.** If the sheet's day differs from the stored day then
+  either the sheet was edited after the migration or the document was edited in the app since cutover, and which one
+  wins is a human decision - so that row is named and left alone.
+- **It writes only `date_from` and `date_to`, with `update()` and never `set()`**, so a title, colour or audience an
+  officer has changed since cutover is not rolled back to the sheet's stale copy. This is also why a blanket re-run of
+  `npm run migration:write` is the wrong cure: it would overwrite post-cutover edits with the sheet's older version.
+- **It refuses a pair the form would reject**, because writing one would leave the event unsaveable - the very failure
+  being repaired.
+- **Everything it declines is counted and named**, never guessed at: a row whose time the sheet lost too is a row for
+  an officer to re-enter, and saying so is the useful answer.
+
+Restoring the hour is not quite enough on its own, and the sheet shows why. Two of the eleven cells hold a
+single-digit hour - `2026-09-26 8:00` and `2026-10-31 8:00` - and nothing in the app *objects* to that: `eventMinutesOf`
+reads it as 480 and `eventValidation` passes the pair. But `AdminEventsTab` hands those fields straight to an
+`<input type="datetime-local">` (`date_from.replace(' ', 'T')`) or an `<input type="time">`
+(`date_from.slice(11, 16)`), and both run the value sanitization algorithm, which **sets the value to empty unless the
+hour is two digits**. So restoring `8:00` verbatim would have fixed the calendar and left the officer staring at a blank
+"Starts" field in the very form they would use to correct it. `typedValue` therefore zero-pads the hour, which is also
+simply the shape the app writes - its `toInputValue` pads, and a time input's change event always yields `HH:MM`. A
+meridiem is deliberately **not** converted: `8:00 PM` to `20:00` is a conversion rather than a normalization, no cell in
+the sheet carries one, and guessing at data nobody has is worse than naming the row.
+
+The harness is built through Vite like `verify-events.mjs`, because the repair cannot import `src/utils/events.js`
+(its imports are extensionless, which is Vite's resolution and not node's) and so it copies two small rules. The
+harness holds both the copies and the originals and asserts they agree, and it checks every pair the repair can
+produce against the app's own `eventValidation` - which is what makes "the repair cannot write something the form
+rejects" a proved property rather than an intention.
+

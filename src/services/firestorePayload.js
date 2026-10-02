@@ -1,6 +1,6 @@
 // The member's sign-in payload, read from Firestore.
 //
-// It returns the SAME shape as memberBootstrapPayload in Code.gs, field for field, because the app consumes that
+// It keeps the shape the sheet backend's sign-in payload returned, field for field, because the app was built against that
 // today and api.js is the seam between them. That is the whole point: when the data moves, the components do not.
 // Where the shape could not stay identical, the difference is named in a comment rather than hidden.
 //
@@ -18,8 +18,11 @@ import { firestore } from './firebase.js';
 import { toTimeInputValue } from '../utils/timeInputValue.js';
 // Date keys, for the "what is in force" bound on announcements (activeAudienceRows below), and the availability helpers
 // the month documents are read and flattened with.
-import { toDateKey } from '../utils/scheduleDate.js';
-import { availabilityMonthId, claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js';
+import { toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
+// The certification decoration - state, days, and the type join - shared with the refresh reader, so a sign-in
+// and a refresh cannot hand the modules rows that disagree about what "expiring" means.
+import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
+import { availabilityMonthId, claimRowsFromMonths } from '../utils/availability.js';
 // The window a load carries for `schedule`. Pure and dependency-free, so this module stays loadable by the Node
 // harnesses - see the note in that file.
 import { scheduleWindowFor } from '../utils/scheduleWindow.js';
@@ -30,20 +33,26 @@ import { scheduleWindowFor } from '../utils/scheduleWindow.js';
 // save body carries the form's `id` - empty when the form is creating - so a stored copy of that field would shadow the
 // real key. That is not hypothetical: a freshly created row came back with an EMPTY id, so pressing Edit saved a second
 // copy of it and Delete did nothing at all. Nothing else about the row is special-cased.
-export const rowsOf = async (target) => (await getDocs(target)).docs.map((entry) => ({ ...entry.data(), id: entry.id }));
+export const rowsOf = async (target, options = {}) =>
+  (await getDocs(target, options)).docs.map((entry) => ({ ...entry.data(), id: entry.id }));
 
 export const rowsFor = (name, field, value) => rowsOf(query(collection(firestore(), name), where(field, '==', value)));
 
 // Rows whose date field falls inside a window, inclusive at both ends. `date_from` is stored as a 'YYYY-MM-DD' key, which
 // sorts chronologically as text - so two range filters on the SAME field are all this needs: no composite index, and no
 // parsing on either side. An end that is not given is left open rather than narrowed to an epoch.
-export const rowsInRange = (name, field, from, to) =>
+//
+// `options` carries through to getDocs, so a caller can ask for the SERVER truth rather than the cache - which matters
+// for the schedule's re-read after a save, because an offline cache would otherwise hand back the pre-save rows and a
+// freshly written shift would be drawn where it came from.
+export const rowsInRange = (name, field, from, to, options = {}) =>
   rowsOf(
     query(
       collection(firestore(), name),
       where(field, '>=', String(from || '0000-01-01')),
       where(field, '<=', String(to || '9999-12-31'))
-    )
+    ),
+    options
   );
 
 // The four keys an audience query carries: everyone, this member, their role, their rank. The rules answer the same
@@ -153,6 +162,27 @@ export const activeAudienceRows = async (name, keys, { liveUntilField = '' } = {
     );
     return audienceRows(name, keys);
   }
+};
+
+// NAMES FOR A HANDFUL OF MEMBERS, BY ID - the dashboard's on-duty card, and nothing else.
+//
+// The whole-directory read (readUsersOnce) is what a screen that LISTS people needs: the Users tab, the crew names on a
+// month of the calendar, the availability roster. The dashboard needs none of that - it needs to know whether the person
+// clocking in is already on duty, and the names of whoever else is on shift RIGHT NOW - so it reads one document per person
+// on duty and stops. At station scale that is the difference between a sign-in that scans thirty members and one that reads
+// two, and it is why this exists rather than reusing the shared read: the shared read is right for the screens it serves and
+// wrong for the only member-facing screen that never lists anybody.
+//
+// A missing document falls back to an empty object rather than dropping the row: somebody on duty whose `users` document
+// cannot be read should still appear, unnamed, rather than vanish from the list of who is at the station.
+export const usersByIds = async (ids) => {
+  const wanted = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!wanted.length) return [];
+  const snapshots = await Promise.all(wanted.map((id) => getDoc(doc(firestore(), 'users', id))));
+  return snapshots.map((snapshot, index) => ({
+    ...((snapshot.exists() && snapshot.data()) || {}),
+    id: wanted[index],
+  }));
 };
 
 // ONE `users` READ PER WAVE, NOT ONE PER READER.
@@ -275,19 +305,39 @@ const sortScheduleTemplates = (rows, assignments) =>
 // `schedule` IS READ AS A WINDOW - last month, this month, next month - and it is the only one here that is: it grows
 // without limit, while every other collection is bounded by the station's size. The window travels back with the rows so
 // the client can tell what it holds and ask for the month it is missing.
-const readStationRows = async (db, scheduleWindow = scheduleWindowFor()) => {
-  const [roles, ranks, shifts, users, assignments, templates, schedule] = await Promise.all([
+// THE SCHEDULE'S REFERENCE DATA, in one read: the templates a shift is drawn from, the assignments that colour and order them,
+// and the shift definitions the clock history labels an entry with.
+//
+// It is read when a screen that has a schedule - or a clock entry - is opened (GET_SCHEDULE_SETUP, through
+// App#loadScheduleSetup) rather than at sign-in, which is the last of the station-wide data to leave the payload. The officer's
+// copies are the same rows plus the private notes: those arrive with the administration wave, which merges them from their own
+// collections, and this read deliberately does not carry them.
+export const scheduleSetupFor = async () => {
+  const [assignments, templates, shifts] = await Promise.all([
+    rowsOf(collection(firestore(), 'assignments')),
+    rowsOf(collection(firestore(), 'schedule_templates')),
+    rowsOf(collection(firestore(), 'shifts')),
+  ]);
+  // Sorted, not as it arrived: the sheet's own row order is the order the week reads in, and a collection has none. The
+  // assignments come along because the tiebreak between two shifts that start together is the assignment's rank.
+  return { assignments, scheduleTemplates: sortScheduleTemplates(templates, assignments), shifts };
+};
+
+// THE SHARED WAVE: the station-wide rows both payloads project from, read ONCE per sign-in.
+//
+// NEITHER THE SCHEDULE NOR THE USER DIRECTORY IS IN IT, and that is the shape of this pass. `schedule` is the one collection
+// that grows without limit - every shift the station has ever scheduled - and a member who signs in to clock in and leave
+// never draws one, so a calendar or the board fetches the month in front of it (GET_SCHEDULE, through
+// App#loadScheduleWindow). `users` is one document per member, which a dashboard does not need either: the only member-facing
+// screen that names anybody is the on-duty card, and that reads the people ON DUTY (usersByIds) - two documents rather than
+// thirty at station scale. The directory is read by the screens that LIST people, when they are opened (GET_ROSTER, and the
+// Users tab's own section).
+const readStationRows = async (db) => {
+  const [roles, ranks] = await Promise.all([
     rowsOf(collection(db, 'roles')),
     rowsOf(collection(db, 'ranks')),
-    rowsOf(collection(db, 'shifts')),
-    // The SHARED `users` read: the roster projection, the on-duty join and the users directory all project off this same
-    // array rather than reading the collection again - see readUsersOnce.
-    readUsersOnce(),
-    rowsOf(collection(db, 'assignments')),
-    rowsOf(collection(db, 'schedule_templates')),
-    rowsInRange('schedule', 'date_from', scheduleWindow.from, scheduleWindow.to),
   ]);
-  return { roles, ranks, shifts, users, assignments, templates, schedule, window: scheduleWindow };
+  return { roles, ranks };
 };
 
 // ONE ADMIN SECTION AT A TIME, by the name the payload uses for it.
@@ -303,7 +353,9 @@ const readStationRows = async (db, scheduleWindow = scheduleWindowFor()) => {
 const ADMIN_SECTIONS = {
   users: async (db, station) => {
     const [users, privateRows] = await Promise.all([
-      station ? station.users : readUsersOnce(),
+      // The station wave no longer carries the directory (a sign-in does not read it), so this falls back to the shared read
+      // - which is what the Users tab wants anyway: the WHOLE list, with the private half joined on.
+      station && station.users ? station.users : readUsersOnce(),
       rowsOf(collection(db, 'users_private')),
     ]);
     const privateById = Object.fromEntries(privateRows.map((row) => [row.id, row]));
@@ -320,8 +372,11 @@ const ADMIN_SECTIONS = {
   },
 
   assignments: async (db, station) => {
+    // `(station && station.assignments)` RATHER THAN `station ? ...`: the station wave no longer carries the reference data - a
+    // sign-in reads none of it - so the station object is TRUTHY with the field ABSENT. A ternary reads that as "the caller brought
+    // them" and hands back undefined, which is a crash on the next line. (The directory had the same shape.)
     const [assignments, notes] = await Promise.all([
-      station ? station.assignments : rowsOf(collection(db, 'assignments')),
+      (station && station.assignments) || rowsOf(collection(db, 'assignments')),
       rowsOf(collection(db, 'assignment_private')),
     ]);
     const noteById = Object.fromEntries(notes.map((row) => [row.id, row.admin_note || '']));
@@ -332,9 +387,9 @@ const ADMIN_SECTIONS = {
     // The assignments come along even when the caller did not bring them: the order this payload is famous for (time,
     // then the assignment's rank) needs their rank orders, and a scoped refresh must produce the same order as a sign-in.
     const [templates, notes, assignments] = await Promise.all([
-      station ? station.templates : rowsOf(collection(db, 'schedule_templates')),
+      (station && station.templates) || rowsOf(collection(db, 'schedule_templates')),
       rowsOf(collection(db, 'schedule_template_private')),
-      station ? station.assignments : rowsOf(collection(db, 'assignments')),
+      (station && station.assignments) || rowsOf(collection(db, 'assignments')),
     ]);
     const noteById = Object.fromEntries(notes.map((row) => [row.id, row.admin_note || '']));
     return {
@@ -345,7 +400,16 @@ const ADMIN_SECTIONS = {
     };
   },
 
-  certificationRecords: async (db) => ({ certificationRecords: await rowsOf(collection(db, 'certifications')) }),
+  // The administration table draws `state` and `days_until_end` beside every record, and filters and sorts on
+  // them - so this section decorates exactly as the member's read does. The setup rows are the join; the badge
+  // index writer refreshes separately after a save (see firestoreWrites).
+  certificationRecords: async (db) => {
+    const [records, setup] = await Promise.all([
+      rowsOf(collection(db, 'certifications')),
+      rowsOf(collection(db, 'certification_setup')),
+    ]);
+    return { certificationRecords: decorateCertifications(records, setup, stationTodayKey()) };
+  },
 
   certificationSetup: async (db) => ({ certificationSetup: await rowsOf(collection(db, 'certification_setup')) }),
 
@@ -367,7 +431,7 @@ const ADMIN_SECTIONS = {
   // `schedule` is the one section read as a WINDOW, exactly as the payload's own read is: a scoped refresh must not read
   // what the payload deliberately stopped reading. It comes back with its window, so a screen that replaced its rows from
   // this still knows what it holds.
-  schedule: async (db) => {
+  schedule: async (_db) => {
     const window = scheduleWindowFor();
     return {
       schedule: await rowsInRange('schedule', 'date_from', window.from, window.to),
@@ -393,7 +457,7 @@ export const readAdminSections = async (names) => {
   return Object.assign({}, ...parts);
 };
 
-export const fetchMemberPayload = async (account, stationRows = null, scheduleWindow = scheduleWindowFor()) => {
+export const fetchMemberPayload = async (account, stationRows = null) => {
   const db = firestore();
 
   // Where the caller's own keys come from MATTERS. The role and rank are read from the member's own document, not
@@ -416,101 +480,102 @@ export const fetchMemberPayload = async (account, stationRows = null, scheduleWi
   // in is what stops an administrator's load reading `users`, `assignments` and `schedule_templates` a second time; the
   // parameter is internal and defaults to reading them, so every other caller is unaffected. The window is only used when
   // this call is the one doing the reading.
-  const station = stationRows || (await readStationRows(db, scheduleWindow));
-  const { roles, ranks, shifts, users, assignments, templates, schedule } = station;
+  const station = stationRows || (await readStationRows(db));
+  const { roles, ranks } = station;
 
-  // CLAIMS COME IN MONTHS, and the range is narrow on purpose: a member's grid shows one month at a time and asks for
-  // another if they navigate to it (the Load <month> button in the calendar), so carrying a quarter here costs three
-  // reads instead of one per month of history. See memberAvailabilityFor.
-  const availabilityScope = {
-    from: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)),
-    to: toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0)),
-  };
-
+  // THE MEMBER'S CLAIMS AND THE WINDOWS ARE NOT READ HERE. Both belong to the availability module, and this payload lands in
+  // front of somebody who is most likely clocking in: the grid asks for the months it draws (GET_AVAILABILITY, a quarter at a
+  // time, through App#refreshAvailability) and for the options list they are claimed against (GET_AVAILABILITY_WINDOWS) when
+  // that screen is opened. A member who never opens it reads neither.
+  //
   // The member's own rows, plus the two audience-filtered collections.
   const [
     settings,
     mySettings,
-    availability,
-    availabilityWindows,
     onDutyRows,
-    offers,
-    signatures,
     certifications,
     setup,
-    trainings,
-    badges,
     announcements,
-    events,
   ] = await Promise.all([
     getDoc(doc(db, 'settings', 'public')),
     getDoc(doc(db, 'user_settings', account.userId)),
-    // The member's own claims, for the months this sign-in carries, and the WINDOWS they are made against. The
-    // windows are the options list - short, officer-maintained, and read whole (retired ones included, because a claim
-    // points at one and the history should read) - which is what replaced templates, assignments and ranks here.
-    memberAvailabilityFor(account.userId, monthKeysBetween(availabilityScope.from, availabilityScope.to)),
-    rowsOf(collection(firestore(), 'availability_windows')),
     // NO CLOCK HISTORY HERE, deliberately. It is the one per-member table that grows without limit (a five-year member has
     // thousands of entries), and it used to be read at every sign-in so that the DASHBOARD could answer "am I clocked in" -
     // a question the `on_duty` row below answers for free, because the clock transaction writes the entry and that row
     // together. The history is read when the History screen is opened, over a range: see GET_TIMECLOCK_LOGS.
     rowsOf(collection(db, 'on_duty')),
-    // The member's own offers, narrowed to the two statuses a calendar draws from - not the request log. See offersForMember.
-    offersForMember(account.userId),
-    rowsFor('training_signatures', 'user_id', account.userId),
+    // THE MEMBER'S OWN OFFERS, TRAINING SIGNATURES AND THE TRAINING LIST ARE NOT READ HERE either. Offers belong to the
+    // calendar that draws their pills (GET_SHIFT_OFFERS, through App#refreshOffers), and trainings and signatures belong to the
+    // Training module (GET_TRAINING, through App#refreshTraining) - which is also where an officer's training tab gets them. A
+    // member who signs in to clock in opens neither.
+    // The member's certifications, though, stay: the dashboard's certification notice is drawn from them, and it is the one
+    // thing on that screen which is personal and time-critical. They are DECORATED below (state, days_until_end, the
+    // type's name and icon) - the setup read is in this same wave, so the join costs nothing extra.
     rowsFor('certifications', 'user_id', account.userId),
     rowsOf(collection(db, 'certification_setup')),
-    rowsOf(collection(db, 'trainings')),
-    rowsOf(collection(db, 'certification_badges')),
-    // ANNOUNCEMENTS ARE NARROWED TO THE ONES IN FORCE, not merely to the ones aimed at this member: see
-    // activeAudienceRows. Events carry no such bound, and the note on AUDIENCE_SAVES (firestoreRouting) says why - a
-    // recurring event is anchored on the date of its FIRST occurrence, so any range over `date_from` would drop the weekly
-    // meeting that is happening this week.
+    // ANNOUNCEMENTS ARE NARROWED TO THE ONES IN FORCE, not merely to the ones aimed at this member: see activeAudienceRows.
+    //
+    // EVENTS ARE NOT READ HERE AT ALL, and the reason is the same one that shapes this whole pass: they are drawn by the three
+    // screens that have a calendar on them - the member's own, the availability grid and the officer's board - and by nothing on
+    // the dashboard. They arrive with the screen (GET_EVENTS), followed by their listener; the note on AUDIENCE_SAVES
+    // (firestoreRouting) still says why no date bound could narrow them, which is a separate point and still true.
     activeAudienceRows('announcements', keys, { liveUntilField: 'live_until' }),
-    audienceRows('events', keys),
   ]);
 
-  const memberById = (userId) => users.find((user) => user.id === String(userId)) || {};
+  // WHO IS ON DUTY, WITH NAMES - and this is the ONLY directory read a sign-in costs: one document per person currently on
+  // shift, rather than the whole crew. The rows come from `on_duty` (the same transaction that opens and closes a clock entry
+  // writes them), so the ids are not known until that read lands - hence a second, tiny wave rather than a field in the first.
+  const onDutyMembers = await usersByIds(onDutyRows.map((row) => row.user_id));
+  const memberById = (userId) => onDutyMembers.find((user) => user.id === String(userId)) || {};
+
+  // The certifications' state and days are derived at read time (they would go stale if stored), with the type
+  // join the modules draw from. See utils/certifications.js - the same decoration the refresh reader applies.
+  const decoratedCertifications = decorateCertifications(certifications, setup, stationTodayKey());
 
   return {
     success: true,
     roles,
     ranks,
-    shifts,
-    // The roster is the projection the sheet server computed: a name and a rank, and deliberately NOT the role,
-    // which is nobody else's business and which the client does not need to label a shift.
-    roster: users.map((user) => ({ id: user.id, name: user.name, rank_id: user.rank_id })),
-    // Who is on duty, in the same three columns - which is what the dashboard draws.
+    // THE SCHEDULE'S REFERENCE DATA IS NOT HERE EITHER - the templates, the assignments and the shift definitions. They exist to
+    // draw a schedule (and, for `shifts`, to label a clock entry with the shift it belonged to), so they arrive with those
+    // screens: GET_SCHEDULE_SETUP, fetched once per session by App#loadScheduleSetup. This is the last of the station-wide data
+    // to leave the sign-in, and with it the payload carries nothing but what the dashboard and the menu draw.
+    // THE ROSTER IS NOT HERE ANY MORE. It is a directory - one document per member - and this payload is landing in front of
+    // somebody who is most likely here to clock in and leave. The screens that LIST people ask for it when they are opened
+    // (GET_ROSTER: the crew names on a month of the calendar, the availability roster, the Users tab), and App fetches it once
+    // for whichever of them is on screen. See readStationRows.
+    // Who is on duty, in the same three columns - which is what the dashboard draws, and the only names a sign-in needs.
     onDuty: onDutyRows.map((row) => {
       const member = memberById(row.user_id);
       return { id: String(row.user_id), name: member.name, rank_id: member.rank_id };
     }),
-    schedule,
-    // WHAT THE WINDOW IS, alongside the rows it produced: a screen that navigates outside it needs to know that it must
-    // ask, rather than showing an empty month and calling it a schedule. See utils/scheduleWindow and GET_SCHEDULE.
-    schedule_window: station.window,
-    assignments,
-    // Sorted, not as it arrived: the sheet's own row order is the order the week reads in, and a collection has none. The
-    // assignments come along because the tiebreak between two shifts that start together is the assignment's rank.
-    scheduleTemplates: sortScheduleTemplates(templates, assignments),
-    availability,
-    // `logs` is NOT here any more - the History screen reads its own, over a range. A payload field that no screen needs at
-    // sign-in is the same trap as a read that no screen needs: it looks free because it is spelled elsewhere.
-    offers,
-    trainings,
-    signatures,
-    certifications,
+    // THE SCHEDULE IS NOT HERE, deliberately: it is the collection that grows without limit, and no screen in front of a
+    // member at sign-in draws one. `App#loadScheduleWindow` fetches the month a calendar or the board is looking at, and
+    // `GET_SCHEDULE` answers with the window it read - so a screen that navigates outside it knows to ask rather than
+    // showing an empty month and calling it a schedule. See utils/scheduleWindow and firestorePayload#readStationRows.
+    // `assignments` and `scheduleTemplates` are NOT here either: they are the reference data the two comments above describe,
+    // and GET_SCHEDULE_SETUP is what a screen with a schedule reads. What is left in this payload is the dashboard's own data and
+    // the menu's - which is the whole point of the pass.
+    // THE MEMBER'S CLAIMS AND WINDOWS ARE NOT HERE ANY MORE: they belong to the Availability screen, which reads the months it
+    // draws and the options list when it is opened (GET_AVAILABILITY, GET_AVAILABILITY_WINDOWS). See memberAvailabilityFor.
+    // THE MEMBER'S OFFERS, TRAININGS AND SIGNATURES ARE NOT HERE ANY MORE. Offers draw pills on the calendar that asks for
+    // them (GET_SHIFT_OFFERS), and trainings and signatures belong to the Training module (GET_TRAINING) - read when either is
+    // opened, by the member or by an officer. `logs` is NOT here any more either - the History screen reads its own, over a
+    // range. A payload field that no screen needs at sign-in is the same trap as a read that no screen needs: it looks free
+    // because it is spelled elsewhere.
+    // Decorated ONCE: the module's list and the sign-in notice draw the same rows, so both come from one
+    // decoration rather than two - see utils/certifications.js for what the decoration adds.
+    certifications: decoratedCertifications,
+    certificationAlerts: certificationAlertsFor(decoratedCertifications),
     certificationSetup: setup,
-    // The badge index, as the app's setCertificationBadges expects it: member id -> the icons to draw beside their
-    // name. Materialized because it is derived from every member's records, which a member may not read.
-    certificationBadges: Object.fromEntries(badges.map((row) => [String(row.user_id), row.badges || []])),
+    // The badge index is NOT here: it is one document per member (the icons to draw beside their name), and it is read with the
+    // roster - the screens that draw a NAME are exactly the screens that draw the badges. See GET_ROSTER.
     announcements,
-    events,
-    // The availability windows, and what this member has claimed against them. `availability` is the claims; the
-    // windows are the options list every member's grid draws from. `availability_window` is the scope the claims were
-    // read over, so a grid showing a month outside it can ask rather than guess.
-    availabilityWindows,
-    availability_window: availabilityScope,
+    // `events` is NOT here either: they belong to the calendars, which read them (and watch them) when one is opened. See the
+    // read block above and App.jsx's events effect.
+    // THE WINDOWS AND THE CLAIMS ARE NOT HERE EITHER, for the same reason and with the same caller: the grid reads the options
+    // list and the months it draws when it is opened. `availability_window` used to say what range the claims covered, which is
+    // now the answer the read itself returns (GET_AVAILABILITY's `availability_window`).
     systemSettings: settingRows(settings),
     // A LIST of one, because that is the shape the app reads today: the sheet payload carried every member's
     // settings and the client picked its own out of them.
@@ -537,7 +602,7 @@ export const diagnoseMemberPayload = async (uid) => {
     ['schedule', () => rowsInRange('schedule', 'date_from', scheduleWindowFor().from, scheduleWindowFor().to)],
     ['settings/public', () => getDoc(doc(db, 'settings', 'public'))],
     ['user_settings', () => getDoc(doc(db, 'user_settings', uid))],
-    ['availability', () => rowsFor('availability', 'user_id', uid)],
+    ['availability_months', () => rowsFor('availability_months', 'user_id', uid)],
     ['timeclock', () => rowsFor('timeclock', 'user_id', uid)],
     ['on_duty', () => rowsOf(collection(db, 'on_duty'))],
     ['schedule_offers', () => rowsOf(collection(db, 'schedule_offers'))],
@@ -570,7 +635,7 @@ export const diagnoseMemberPayload = async (uid) => {
 // of the payload working, a read the rules refuse THROWS - so an ungated section would take the whole payload down
 // for the role that cannot see it. The viewer's role document is read first, and every extra section sits behind the
 // same flag the action it replaces was gated on.
-export const fetchAdminPayload = async (account, scheduleWindow = scheduleWindowFor()) => {
+export const fetchAdminPayload = async (account) => {
   const db = firestore();
 
   // EVERYTHING SHARED IS READ ONCE: one wave for the station-wide rows (handed to the member payload rather than read
@@ -582,7 +647,7 @@ export const fetchAdminPayload = async (account, scheduleWindow = scheduleWindow
   // does: a claim can be an hour stale after somebody's role changes, and these flags decide which sections an officer
   // gets. It also means either payload can be called with nothing but a uid, which is what a router has.
   const [station, meSnapshot] = await Promise.all([
-    readStationRows(db, scheduleWindow),
+    readStationRows(db),
     account.roleId && account.rankId ? null : getDoc(doc(db, 'users', account.userId)),
   ]);
   const me = meSnapshot && meSnapshot.exists() ? meSnapshot.data() || {} : {};
@@ -590,37 +655,26 @@ export const fetchAdminPayload = async (account, scheduleWindow = scheduleWindow
   const rankId = String(account.rankId || me.rank_id || '');
   const payload = await fetchMemberPayload({ ...account, roleId, rankId }, station);
 
-  const role = station.roles.find((row) => String(row.id) === roleId) || {};
-  const may = (flag) => role.is_admin === true || role[flag] === true;
+  // THE OFFICER-ONLY SECTIONS USED TO BE ASSEMBLED HERE, each behind a `may(permission)` gate. They are not read here at all any
+  // more: every one of them belongs to a TAB, and each tab is itself gated by the permission that opens it - so the gate did not
+  // disappear, it moved to where the data is asked for (App.jsx's admin section effect). Nothing in the app repeats a rule the
+  // RULES already enforce on the wire, which is the same reason the write dispatchers do not re-check what they write to.
 
-  if (may('can_edit_users')) {
-    // The directory the Users tab shows: the roster row joined to the private half, because a username and an account
-    // status are the officer's business and deliberately absent from the roster document. The projection itself lives in
-    // the section reader, so a sign-in and a save's own refresh cannot drift apart on it.
-    Object.assign(payload, await readAdminSection('users', station));
-  }
+  // AND NEITHER ARE THE FOUR THAT USED TO BE ASSEMBLED HERE: the assignment and template FULL rows (with their private notes
+  // merged back), the offers still waiting, and the shift definitions. Each belongs to one or two sub-tabs - the board draws a
+  // schedule and flags its waiting slots, the clock table labels entries with a shift, and two tabs exist for one section each -
+  // so each is read when that tab is opened (App.jsx's admin section effect, over the same section readers a save's refresh uses).
+  //
+  // The notes still matter: an officer's pickers and notes read the whole record, so the section merges them - and the member
+  // calendar's own copies are the public rows, which GET_SCHEDULE_SETUP serves without them.
 
-  if (may('can_edit_schedule_templates') || may('can_edit_assignments') || may('can_edit_schedule')) {
-    // The FULL rows, with their private halves merged back: an officer's pickers and notes read the whole record, and
-    // the member projection must never replace it. The public halves come from `station`, so only the private notes and
-    // the apparatus list are new reads here.
-    const [assignments, templates] = await Promise.all([
-      readAdminSection('assignments', station),
-      readAdminSection('scheduleTemplates', station),
-    ]);
-    Object.assign(payload, assignments, templates);
-  }
+  // ...and the certification RECORDS are not read here either, for the reason above: the one tab that shows what is expiring next
+  // reads them when it is opened. (The STATE is not stored and not added by that read either - it is a function of the two dates
+  // and today, so it would go stale with nobody writing anything.)
 
-  if (may('can_approve_shifts') || may('can_edit_schedule')) {
-    // The whole offers table, so Schedule Management can flag the slots waiting on approval.
-    Object.assign(payload, await readAdminSection('scheduleOffers'));
-  }
-
-  if (may('can_manage_certifications')) {
-    // Every record, for the table that shows what is expiring next. The STATE is not stored and not added here: it
-    // is a function of the two dates and today, so it would go stale with nobody writing anything.
-    Object.assign(payload, await readAdminSection('certificationRecords'));
-  }
+  // ...and the shift DEFINITIONS are not read here either: the clock-management table is the one place that labels an entry with
+  // the shift it belonged to, and it reads them when it is opened. (The member's own history reads the same rows through
+  // GET_SCHEDULE_SETUP.)
 
   return payload;
 };

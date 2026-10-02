@@ -181,15 +181,6 @@ check('it shows the window in the list', /assignmentDateLabel\(assignment\)/.tes
 check('marks a retired assignment', /· Retired/.test(assignmentsTab), true);
 check('warns about the templates a new end date affects', /templatesAffectedByEndDate\(formData\.id, scheduleTemplates\)/.test(assignmentsTab), true);
 
-console.log('\n--- the backend keeps up ---');
-const code = readFileSync('src/services/Code.gs', 'utf8');
-check('the save action accepts the effective date', /assignmentFields\.effective_date = toDateKeyValue\(rawEffective\)/.test(code), true);
-check('and the end date', /assignmentFields\.end_date = toDateKeyValue\(rawEnd\)/.test(code), true);
-check('and refuses an inverted window', /end date must not be before the effective date/i.test(code), true);
-check('the member projection includes the effective date', /effective_date: toDateKeyValue\(row\.effective_date\)/.test(code), true);
-check('and the end date', /end_date: toDateKeyValue\(row\.end_date\)/.test(code), true);
-check('it still has exactly one date parser helper', (code.match(/function toDateKeyValue/g) || []).length, 1);
-
 const apiSource = readFileSync('src/services/api.js', 'utf8');
 check('the API sends the effective date', /effective_date: assignmentData\.effective_date/.test(apiSource), true);
 check('and the end date', /end_date: assignmentData\.end_date/.test(apiSource), true);

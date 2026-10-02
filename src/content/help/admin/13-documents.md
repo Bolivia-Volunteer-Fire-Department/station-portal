@@ -131,7 +131,6 @@ New documents are **visible to members straight away**, so untick *Visible to me
 
 > [!CAUTION]
 > A document that has been signed **cannot be deleted** — the app refuses and tells you how many signatures it has. Unpublish it instead. A signature is a record that somebody read a procedure, and deleting the procedure would leave that record pointing at nothing.
->
 > **Deleting is for mistakes; an end date is for superseding.** If a procedure is simply being replaced, give it an **End Date** rather than deleting or unpublishing it: the new one takes over the list, and the old one stays here with the record of who signed it and when.
 
 ## Signatures
@@ -175,7 +174,6 @@ Add each line with **Add item**, and use **edit** on a row to change it.
 
 > [!IMPORTANT]
 > Editing an item **keeps its signatures attached to it** — a signature points at the item's identity, not at its wording, so fixing a typo does not throw away somebody's work. Changing any item does mark signatures taken earlier as **before the last edit**, exactly as editing a document's text does.
->
 > An item that has been signed **cannot be removed**. The app refuses and tells you how many signatures it has. That is deliberate: a signature must never outlive the thing it was about.
 
 Members tick the items they have done and save them in one go, so a forty-line checklist is still one press. Signing the document itself is separate from signing its items — a checklist that needs both shows both.
@@ -224,4 +222,3 @@ The **Signatures** panel on the document is also the place to see verification *
 ## Who can read a checklist
 
 Checklists follow the same rules as any other document: *Visible to members*, a minimum rank, the two dates, and *Members must sign this*. The signatures are always a member's own — nobody can read another member's checklist in the Documents module. The signature report and the verification panels are the only places where one person's records are visible to another, and both are behind a permission.
-

@@ -15,7 +15,6 @@ import {
   permissionBlockedByDependency,
   permissionGranted,
   permissionLockedByAdmin,
-  roleFieldsFromForm,
 } from '../../utils/permissions';
 
 // A new role starts as an ordinary member: they can see their own schedule and use

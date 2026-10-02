@@ -84,4 +84,3 @@ It is a reader, not a way to act as somebody else:
 - The card says **Viewing Jane Doe's records — read only** at the top of the document, in amber, so the mode is never a guess. Choose **Myself** to go back.
 
 If a line is **edited after you signed it**, the line says so. It means your signature covers the earlier wording — read it again, and tick it once more if you are happy with the change.
-

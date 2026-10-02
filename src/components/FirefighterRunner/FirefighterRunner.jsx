@@ -16,7 +16,6 @@ import "./FirefighterRunner.css";
 const DEFAULT_WIDTH = 800;
 const DEFAULT_HEIGHT = 280;
 
-const SPRITE_SOURCE_CELL_SIZE = 128;
 const SPRITE_DISPLAY_SIZE = 64;
 const GROUND_HEIGHT = 42;
 
@@ -431,7 +430,7 @@ export default function FirefighterRunner({
     // Fire-and-forget: submitScore reports its own failures in the leaderboard panel, so the
     // game never waits on the network to show the game-over screen.
     submitScore(finalScore);
-  }, [gameState, onGameOver, rememberBest, submitScore]);
+  }, [gameState, onGameOver, playSound, rememberBest, submitScore]);
 
   useEffect(() => {
     if (gameState !== "playing") return undefined;

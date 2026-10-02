@@ -203,23 +203,6 @@ check(
   true
 );
 
-console.log('\n--- the backend keeps up ---');
-const code = readFileSync('src/services/Code.gs', 'utf8');
-check('the save action accepts the effective date', /effective_date: toDateKeyValue\(/.test(code), true);
-check('and the end date', /end_date: toDateKeyValue\(/.test(code), true);
-check('and refuses an inverted range', /end date must not be before the effective date/i.test(code), true);
-// Reusing the existing helper rather than adding a second date parser is the anti-drift point.
-check('it reuses toDateKeyValue rather than a new parser', (code.match(/function toDateKeyValue/g) || []).length === 1, true);
-check('the member projection includes the effective date', /effective_date: toDateKeyValue\(row\.effective_date\)/.test(code), true);
-check('and the end date', /end_date: toDateKeyValue\(row\.end_date\)/.test(code), true);
-// Members must receive the dates, or their calendar would keep drawing slots for a template that was
-// retired for administrators only - letting a member offer on a shift nobody is running.
-check(
-  'and that projection is what members receive',
-  /memberScheduleTemplateRows\(ss\)/.test(code) && (code.match(/memberScheduleTemplateRows\(ss\)/g) || []).length >= 2,
-  true
-);
-
 console.log('\n--- the form and the API layer ---');
 const apiSource = readFileSync('src/services/api.js', 'utf8');
 check('the API sends the effective date', /effective_date: templateData\.effective_date/.test(apiSource), true);
@@ -243,7 +226,7 @@ const templateFormHtml = renderToString(
     onDataChanged: () => {},
   })
 );
-const templateFormText = visibleText(templateFormHtml);
+const _templateFormText = visibleText(templateFormHtml);
 // The form is inside the editor modal now, and a modal renders through createPortal - which server-side rendering
 // skips entirely - so the form's own markup is asserted at the source. What the render can prove is that the form
 // is NOT on the page until somebody asks for it, which is the change.

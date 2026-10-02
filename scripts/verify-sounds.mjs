@@ -82,23 +82,6 @@ const listFiles = (dir) => {
 const allSources = listFiles('src').filter((file) => /\.jsx?$/.test(file));
 const readSource = (file) => readFileSync(file, 'utf8');
 
-// Pulls one top-level function out of Code.gs by name, brace-matched so nested blocks come with it. Used to run
-// the real thing rather than a description of it.
-const extractFunction = (name) => {
-  const source = readSource('src/services/Code.gs');
-  const start = source.indexOf(`function ${name}(`);
-  if (start === -1) throw new Error(`Code.gs has no function ${name}`);
-  let depth = 0;
-  for (let i = source.indexOf('{', start); i < source.length; i++) {
-    if (source[i] === '{') depth++;
-    else if (source[i] === '}') {
-      depth--;
-      if (depth === 0) return source.slice(start, i + 1);
-    }
-  }
-  throw new Error(`unbalanced braces in ${name}`);
-};
-
 // ---------------------------------------------------------------------------
 // 1. The setting: member, then station, then on
 // ---------------------------------------------------------------------------
@@ -742,132 +725,17 @@ checkIs(
 );
 checkIs('and removes every one of them again', /removeEventListener\(event, handler, true\)/.test(soundSource));
 
-// The backend: a key missing from the whitelist is silently rejected, which reads to a member as a save that did
-// not work. The same trap the notification preferences document.
-const codeSource = readSource('src/services/Code.gs');
-checkIs('the backend accepts the key', /settingsValues\.is_sounds_active =/.test(codeSource));
-checkIs(
-  'and normalizes it to TRUE/FALSE rather than storing whatever arrives',
-  /String\(payload\.is_sounds_active\)\.trim\(\)\.toUpperCase\(\) === "FALSE" \? "FALSE" : "TRUE"/.test(codeSource)
-);
-checkIs(
-  'user_settings grows the column by itself, so no manual sheet work is needed',
-  /function upsertUserSettingsColumns/.test(codeSource) &&
-    /Grow the header row for anything this save needs/.test(codeSource)
-);
+// The save payload: the settings sender derives its fields from the switch catalog (utils/notificationPrefs
+// enumerates the user_settings keys), and UserSettings names the key directly. A key missing from the sender
+// (the trap the notification preferences hit) fails the notification-prefs harness rather than shipping. Here
+// we pin the two halves that make the switch work end to end: App carries the key in its optimistic merge list
+// (checked above), and the settings screen sends it by name - checked beside the screen below.
 
-// ...and that claim is proven rather than read. "The column adds itself" is the difference between the member's
-// switch working and the member's switch failing to save, and it is the sort of thing a comment can be right
-// about while the code is not - so the REAL function is lifted out of Code.gs and run against a stand-in sheet.
-console.log('\n--- and the column really does add itself ---');
-class FakeSheet {
-  constructor(rows = []) {
-    this.rows = rows.map((row) => row.slice());
-  }
-  ensureRow(index) {
-    while (this.rows.length <= index) this.rows.push([]);
-  }
-  getDataRange() {
-    return { getValues: () => this.rows.map((row) => row.slice()) };
-  }
-  // The arguments beyond row/column (a range's height and width) are not needed: setValues below grows the row it
-  // writes into, which is precisely how the real header row gets longer.
-  getRange(row, column) {
-    const sheet = this;
-    return {
-      setValue(value) {
-        sheet.ensureRow(row - 1);
-        sheet.rows[row - 1][column - 1] = value;
-        return this;
-      },
-      getValue() {
-        return sheet.cell(row, column);
-      },
-      // A real sheet widens rather than truncating, which is what lets the header row grow.
-      setValues(matrix) {
-        matrix.forEach((values, r) => {
-          values.forEach((value, c) => {
-            const targetRow = row - 1 + r;
-            const targetCol = column - 1 + c;
-            sheet.ensureRow(targetRow);
-            const line = sheet.rows[targetRow];
-            while (line.length < targetCol + 1) line.push('');
-            line[targetCol] = value;
-          });
-        });
-        return this;
-      },
-    };
-  }
-  appendRow(values) {
-    this.rows.push(values.slice());
-  }
-  cell(row, column) {
-    return (this.rows[row - 1] || [])[column - 1] ?? '';
-  }
-  headers() {
-    return (this.rows[0] || []).map(String);
-  }
-}
-
-const upsertRunner = (rows) => {
-  const sheet = new FakeSheet(rows);
-  const ss = { getSheetByName: (name) => (name === 'user_settings' ? sheet : null), insertSheet: () => sheet };
-  const run = (values, userId = 'u1') =>
-    new Function(
-      'ss',
-      'userId',
-      'values',
-      `${extractFunction('upsertUserSettingsColumns')}\nreturn upsertUserSettingsColumns(ss, userId, values);`
-    )(ss, userId, values);
-  return { sheet, run };
-};
-
-const SETTINGS_HEADERS = ['user_id', 'time_format', 'is_dark_mode'];
-{
-  // The ordinary case: a station that has never saved this preference. This is the exact situation the user was
-  // told needs no spreadsheet work.
-  const { sheet, run } = upsertRunner([SETTINGS_HEADERS, ['u1', '12', 'TRUE']]);
-  check('the save succeeds', run({ is_sounds_active: 'FALSE' }), true);
-  check('the column is added to the header row', sheet.headers().includes('is_sounds_active'), true);
-  check('appended, so no existing column moves position', sheet.headers().indexOf('is_sounds_active'), 3);
-  check('and the value lands on the member row', sheet.cell(2, 4), 'FALSE');
-  check('leaving the columns it was not sent alone', [sheet.cell(2, 2), sheet.cell(2, 3)], ['12', 'TRUE']);
-
-  // Saved again: no duplicate column, and the newer value wins.
-  run({ is_sounds_active: 'TRUE' });
-  check(
-    'a second save does not duplicate the column',
-    sheet.headers().filter((header) => header === 'is_sounds_active').length,
-    1
-  );
-  check('and the newer value replaces the old', sheet.cell(2, 4), 'TRUE');
-}
-{
-  // A member who has no row yet - the switch is their first saved preference.
-  const { sheet, run } = upsertRunner([SETTINGS_HEADERS, ['u9', '24', 'TRUE']]);
-  check('a member with no row is saved anyway', run({ is_sounds_active: 'FALSE' }, 'u1'), true);
-  check('in a new row', sheet.rows.length, 3);
-  check('identified by their user id', sheet.cell(3, 1), 'u1');
-  check('with the value in the grown column', sheet.cell(3, 4), 'FALSE');
-  check('and the other member untouched', sheet.cell(2, 1), 'u9');
-}
-{
-  // The failure path the action turns into "Could not locate your user_settings row": a sheet with no identity
-  // column at all must refuse rather than append an unnamed row.
-  const { sheet, run } = upsertRunner([['time_format', 'is_dark_mode'], ['12', 'TRUE']]);
-  check('a sheet with no identity column is refused', run({ is_sounds_active: 'FALSE' }), false);
-  check('and nothing is appended', sheet.rows.length, 2);
-}
-{
-  const { sheet, run } = upsertRunner([SETTINGS_HEADERS, ['u1', '12', 'TRUE']]);
-  check('an empty user id is refused', run({ is_sounds_active: 'FALSE' }, ''), false);
-  check('writing nothing', sheet.headers().length, 3);
-}
 
 // The member's switch, and the station default behind it.
 const userSettingsSource = readSource('src/components/UserSettings.jsx');
 checkIs('User Settings offers the switch', /label="Sound Effects"/.test(userSettingsSource));
+checkIs('and the switch is sent by the settings screen', /is_sounds_active: String\(formData\.is_sounds_active\)/.test(userSettingsSource));
 // ToggleSwitch.jsx is the definition (it reads the prop); a *usage* is what this is about, so it is excluded.
 const onOffUsers = allSources.filter(
   (file) => !file.endsWith('ToggleSwitch.jsx') && /feedbackSound=/.test(readSource(file))
@@ -1004,12 +872,6 @@ const mutated = (file, remove) => readSource(file).split(remove).join('/* remove
     file: 'src/App.jsx',
     remove: 'notificationToast(message.title ||',
     assertion: (source) => /notificationToast\(/.test(source),
-  },
-  {
-    label: 'the backend accepting the key',
-    file: 'src/services/Code.gs',
-    remove: 'settingsValues.is_sounds_active =',
-    assertion: (source) => /settingsValues\.is_sounds_active =/.test(source),
   },
   {
     label: 'the runner opting out',

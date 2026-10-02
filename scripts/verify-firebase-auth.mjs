@@ -8,7 +8,7 @@
  *
  *   - the address the CLIENT derives is the address the FUNCTION created (EMAIL_DOMAIN lives in two files, and if
  *     they ever disagree nobody can sign in - so the harness imports the client's rule and uses it);
- *   - the four callables refuse a member who tries to use them, which is the check that used to be in Code.gs;
+ *   - the four callables refuse a member who tries to use them;
  *   - an officer-driven reset really takes effect: the temporary password works, the flag is set, the member's own
  *     change clears it, and the old password stops working;
  *   - suspending a member disables the Auth account, so a suspension is not merely what the app chooses to show;
@@ -276,6 +276,24 @@ const main = async () => {
   checkIs('the debug token is a separate, opt-in variable', /const appCheckDebugToken = String\(env\.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN/.test(firebaseSource));
   checkIs('documented as a build value', /^VITE_FIREBASE_APPCHECK_SITE_KEY=$/m.test(envExample));
   checkIs('and documented as development only', /VITE_FIREBASE_APPCHECK_DEBUG_TOKEN=[\s\S]*$/.test(envExample) && /NEVER A REPOSITORY SECRET/.test(envExample));
+  // The loopback guard, which is the difference between a usable console and an unusable one. Google will not
+  // attest a loopback origin, and the SDK has NO BACKOFF for a reCAPTCHA-level failure: the provider's throttle
+  // engages only on a bad status from Firebase's own exchange endpoint, which a reCAPTCHA failure never reaches
+  // (firebase/firebase-js-sdk#10385, on the version pinned here). So initialising App Check on localhost without
+  // a debug token is not a neutral choice - Auth warns on every request it makes and the refresher retries
+  // forever. If this assertion fails, somebody re-enabled a console flood.
+  checkIs(
+    'and not on a loopback origin, where attestation cannot happen and a failure never backs off',
+    /if \(!appCheckDebugToken && loopbackOrigin\(\)\)/.test(firebaseSource)
+  );
+  checkIs(
+    'a loopback origin being localhost, 127.0.0.1 or ::1',
+    /host === 'localhost' \|\| host === '127\.0\.0\.1' \|\| host === '\[::1\]' \|\| host === '::1'/.test(firebaseSource)
+  );
+  checkIs(
+    'with the reason said out loud, so the skip is never a mystery',
+    /loopback origin with no VITE_FIREBASE_APPCHECK_DEBUG_TOKEN/.test(firebaseSource)
+  );
 
   const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
   checkIs(

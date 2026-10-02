@@ -11,11 +11,13 @@
 // through these, so the shapes are checked rather than hoped for.
 import { collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFor, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, settingRows } from './firestorePayload.js';
+import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFor, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, scheduleSetupFor, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
 // A window's date key, and the id-merge that makes two bounded queries answer as one list. Both are the app's own helpers
 // rather than service-local copies: the admin list merges the same way a screen does when it loads an older window.
-import { toDateKey } from '../utils/scheduleDate.js';
+import { toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
+// The certification decoration, shared with the payload so a sign-in and a refresh agree.
+import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
 import { mergeRowsById } from '../utils/savedRow.js';
 import { claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js';
 
@@ -27,7 +29,7 @@ import { claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js'
 // icon. The reader used to leave `rank_id` out, so the same member appeared with a rank after a sign-in and with a generic
 // icon after a refresh; the payload's row has always carried it (see services/liveReads.js, which builds the same three
 // fields).
-const onDutyRows = async (uid) => {
+const onDutyRows = async (_uid) => {
   const [duty, users] = await Promise.all([rowsOf(collection(firestore(), 'on_duty')), readUsersOnce()]);
   const byId = Object.fromEntries(users.map((user) => [user.id, user]));
   const rankFor = (id) => {
@@ -49,18 +51,7 @@ const keysFor = async (uid) => {
   return audienceKeysFor({ userId: uid, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
 };
 
-// The station's date, in the same 'YYYY-MM-DD' shape the app stores date keys in. A document's date window is compared
-// against this rather than against UTC, so a document that expires "today" expires on the station's today.
-const stationDateKey = (date = new Date()) => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const at = (type) => parts.find((part) => part.type === type).value;
-  return `${at('year')}-${at('month')}-${at('day')}`;
-};
+;
 
 // Whether a document is on the list at all: published, and inside its own date window. Both are separate from the
 // AUDIENCE, which is materialized on the document and answered by `audienceRows` - a document can be aimed at exactly
@@ -81,7 +72,7 @@ const documentIsLive = (document, today) => {
 
 // One document's checklist items, in the order a reader works through them.
 //
-// Mirrors documentItemRows in Code.gs, including its two refusals: a row with no id or no label is not an item, and the
+// Same shape as the sheet's documentItemRows, including its two refusals: a row with no id or no label is not an item, and the
 // order is the checklist's own - sort_order, then the label - rather than whatever the database hands back. THE ITEMS
 // TRAVEL WITH THE DOCUMENT because the member's screen draws them from there (checklistSections(openDocument.items)), so
 // a document opened without them reads as a checklist with nothing in it - which is exactly what it did, while the items
@@ -228,7 +219,10 @@ export const visibleDocumentFor = async (uid, id) => {
   let document = null;
   try {
     const snapshot = await getDoc(doc(firestore(), 'documents', wanted));
-    if (snapshot.exists()) document = { id: snapshot.id, ...snapshot.data() };
+    // The document id goes LAST, for the reason rowsOf gives: a migrated row still carries the sheet's own `id` column, and
+    // spreading it over the real key hands every caller a dead id - which for a document means verifying or saving against
+    // something that is not the document.
+    if (snapshot.exists()) document = { ...snapshot.data(), id: snapshot.id };
   } catch {
     return null;
   }
@@ -237,7 +231,7 @@ export const visibleDocumentFor = async (uid, id) => {
   const mine = await keysFor(uid);
   const audience = Array.isArray(document.audience_keys) ? document.audience_keys : [];
   if (!audience.some((key) => mine.includes(String(key)))) return null;
-  if (!documentIsLive(document, stationDateKey())) return null;
+  if (!documentIsLive(document, stationTodayKey())) return null;
   return document;
 };
 
@@ -273,6 +267,36 @@ export const READERS = {
     // The window comes back with the rows, so a caller can tell what it holds - the same arrangement GET_SCHEDULE uses.
     return { logs, logs_window: { from, to } };
   },
+  // THE CREW DIRECTORY, for the screens that LIST people: the names on a month of calendar pills, the availability roster, and
+  // the Users tab (which joins the private half on in its own section). A SIGN-IN DOES NOT READ IT ANY MORE - the dashboard
+  // names nobody except whoever is on duty, and that is read by id (firestorePayload#usersByIds) - so this is what a screen
+  // asks for when it opens. See App#loadRoster.
+  //
+  // The projection is the sheet's own: a name and a rank, and deliberately NOT the role, which is nobody else's business and
+  // which the client does not need in order to label a shift.
+  GET_ROSTER: async () => {
+    // THE BADGE INDEX RIDES WITH THE ROSTER, because they answer one question - "who is this on screen" - so a screen that draws
+    // names needs both and a screen that draws none needs neither. It is one document per member (the icons to draw beside their
+    // name), derived on the way in from records a member may not read, which is why it cannot be queried per person instead.
+    //
+    // Both used to arrive with every sign-in: the directory for a dashboard that names only whoever is on duty, and the badges for
+    // a dashboard that draws none. See firestorePayload#readStationRows.
+    const [rosterRows, badgeRows] = await Promise.all([
+      readUsersOnce(),
+      rowsOf(collection(firestore(), 'certification_badges')),
+    ]);
+    return {
+      roster: rosterRows.map((user) => ({ id: user.id, name: user.name, rank_id: user.rank_id })),
+      certificationBadges: Object.fromEntries(badgeRows.map((row) => [String(row.user_id), row.badges || []])),
+    };
+  },
+  // THE SCHEDULE'S REFERENCE DATA - the templates a shift is drawn from, the assignments that colour and order them, and the shift
+  // definitions a clock entry is labeled with. Read when a screen that has a schedule (or a clock table) is opened, rather than at
+  // sign-in: see firestorePayload#scheduleSetupFor and App#loadScheduleSetup.
+  //
+  // The OFFICER'S copies of the same rows arrive with the administration wave, which merges the private notes this read
+  // deliberately does not carry - so an officer's pickers and notes are unaffected by this being public.
+  GET_SCHEDULE_SETUP: async () => scheduleSetupFor(),
   // The station's schedule, optionally WINDOWED - and a window is what the app always asks for, because `schedule` is the
   // one collection that grows without limit. A caller that names no window is asking for every shift the station has ever
   // scheduled: that is what the harnesses do, and what a screen that has not been scoped yet would do. Slow rather than
@@ -280,13 +304,27 @@ export const READERS = {
   GET_SCHEDULE: async (uid, body) => {
     const from = String((body && body.from) || '').trim();
     const to = String((body && body.to) || '').trim();
+    // THE SERVER, NOT THE CACHE. This read follows a save more often than not (the board re-reads the month it just
+    // wrote, and a calendar re-reads the month it is on), and a cache-first read can hand back the PRE-SAVE rows -
+    // which is how a freshly dragged shift was drawn back on the day it came from, without a single error anywhere.
+    // `source: 'server'` costs the same one read, and is never allowed to answer with a stale day for a screen that
+    // just changed it.
     const schedule =
       from || to
-        ? await rowsInRange('schedule', 'date_from', from, to)
-        : await rowsOf(collection(firestore(), 'schedule'));
+        ? await rowsInRange('schedule', 'date_from', from, to, { source: 'server' })
+        : await rowsOf(collection(firestore(), 'schedule'), { source: 'server' });
     // The window comes back with the rows, so a caller can tell what it holds rather than assuming it holds everything.
     return { schedule, schedule_window: { from, to } };
   },
+  // THE OPTIONS LIST, for the member's own grid. It is the same collection ADMIN_GET_AVAILABILITY_WINDOWS serves the officer's
+  // windows tab from, and it is a separate action because that one is routed with the administration feature: a member's session
+  // cannot reach it, and the grid cannot draw a thing without this list.
+  //
+  // One whole-collection read of short, officer-maintained reference data, made when the screen is opened - retired windows
+  // included, deliberately, because a claim points at one and the history has to keep reading.
+  GET_AVAILABILITY_WINDOWS: async () => ({
+    availabilityWindows: await rowsOf(collection(firestore(), 'availability_windows')),
+  }),
   // The member's own claims, over a range of dates: turned into the MONTHS that range covers (utils/availability.js) and
   // read as one document per month. A caller that names no range reads every month the member has touched, which is what
   // the harnesses ask for.
@@ -318,9 +356,26 @@ export const READERS = {
   },
   // The member's own offers, over the two statuses a calendar draws from. See OFFER_STATUSES_ON_A_CALENDAR.
   GET_SHIFT_OFFERS: (uid) => offersForMember(uid).then((offers) => ({ offers })),
-  GET_TRAINING: () => rowsOf(collection(firestore(), 'trainings')).then((trainings) => ({ trainings })),
-  GET_CERTIFICATIONS: (uid) =>
-    rowsFor('certifications', 'user_id', uid).then((certifications) => ({ certifications })),
+  // THE TRAINING CATALOGUE AND THE CALLER'S OWN SIGNATURES - what the Training module draws from: the list of what can be
+  // signed, and what this member has already signed. Both used to ride with every sign-in, for a dashboard that shows neither;
+  // they are read when that module is opened, by a member who can sign or by an officer whose tab lists who has signed what.
+  //
+  // The signatures are part of THIS read rather than a second action because the module always wants both together, and the
+  // client's refresher already expects them in one answer (App#refreshTraining sets them side by side).
+  GET_TRAINING: async (uid) => ({
+    trainings: await rowsOf(collection(firestore(), 'trainings')),
+    signatures: await rowsFor('training_signatures', 'user_id', uid),
+  }),
+  // DECORATED, exactly as the sign-in payload decorates them: the state and the day count are derived at read
+  // time (they would go stale if stored), and the modules filter and sort on them. The setup read is the join.
+  GET_CERTIFICATIONS: async (uid) => {
+    const [certifications, setup] = await Promise.all([
+      rowsFor('certifications', 'user_id', uid),
+      rowsOf(collection(firestore(), 'certification_setup')),
+    ]);
+    const decorated = decorateCertifications(certifications, setup, stationTodayKey());
+    return { certifications: decorated, certificationAlerts: certificationAlertsFor(decorated) };
+  },
   // The member's own announcements, narrowed to the ones in force - the same read the sign-in payload makes, so a refresh
   // cannot put back what the payload left out (an expired notice).
   MY_ANNOUNCEMENTS: async (uid) => ({
@@ -401,7 +456,7 @@ export const READERS = {
       rowsFor('document_signatures', 'user_id', uid),
       documentItemSummaries(uid),
     ]);
-    const today = stationDateKey();
+    const today = stationTodayKey();
     const live = visible.filter((document) => documentIsLive(document, today));
     // Counts attached and the order decided here, because the client draws the list as it arrives: a checklist's row
     // needs `item_count`/`items_signed` to say "3 of 12" at all, and without the sort the library comes back in whatever
@@ -436,7 +491,7 @@ export const READERS = {
     if (!wanted) return { success: false, message: 'Which document?' };
     const snapshot = await getDoc(doc(firestore(), 'documents', wanted));
     if (!snapshot.exists()) return { success: false, message: 'That document is not available.' };
-    return { success: true, document: await documentFullRow({ id: snapshot.id, ...snapshot.data() }) };
+    return { success: true, document: await documentFullRow({ ...snapshot.data(), id: snapshot.id }) };
   },
 
   // A verifier's view of ONE member's paperwork: the documents that MEMBER can see, and their signatures. The same
@@ -466,7 +521,7 @@ export const READERS = {
       rowsFor('document_signatures', 'user_id', memberId),
       documentItemSummaries(memberId),
     ]);
-    const today = stationDateKey();
+    const today = stationTodayKey();
     // The counts are THAT MEMBER's progress, not the verifier's: the verifier is looking at what this person has done,
     // which is the whole point of the screen.
     const live = visible.filter((document) => documentIsLive(document, today));

@@ -100,7 +100,9 @@ export default function AdminDocumentsTab({
   // already reloads the list it changed (`refresh()` / `loadSignatures`), and DOCUMENTS ARE NOT IN THE SIGN-IN PAYLOAD AT
   // ALL - so asking for it re-read eighteen collections, including every shift ever scheduled, to update a screen that
   // reads none of them. See verify-read-budget.
-  onDataChanged,
+  // _onDataChanged: the Documents tab reloads its own lists and needs no refresh wave (see
+  // verify-read-budget), so the prop is accepted but deliberately unused.
+  onDataChanged: _onDataChanged,
 }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

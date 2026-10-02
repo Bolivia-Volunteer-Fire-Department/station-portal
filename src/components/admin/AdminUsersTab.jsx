@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
@@ -72,7 +72,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       // for the save. It is tracked instead, so the tab can say it is happening rather than
       // leaving the list silently stale.
       setRefreshing(true);
-      Promise.resolve(onDataChanged?.()).finally(() => setRefreshing(false));
+      Promise.resolve(onDataChanged?.('users')).finally(() => setRefreshing(false));
     } catch (err) {
       setError(err.message || 'Failed to save user.');
     } finally {
@@ -133,7 +133,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
           {refreshing && (
             <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-              Saved. Reloading the full list in the background…
+              Saved. Reloading the list in the background…
             </p>
           )}
 

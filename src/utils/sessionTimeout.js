@@ -7,7 +7,7 @@
 //
 //   * **Client** - a timer that watches for real interaction (pointer, key, scroll, touch) and for
 //     navigation between modules, and signs the user out visibly at the threshold.
-//   * **Server** - the session's sliding expiry uses the same value (see sessionTtlMs in Code.gs),
+//   * **Session** - Firebase's own token lifetime is independent of this; the value here governs
 //     so a client that ignores the timer still cannot act afterwards. The client timer is the
 //     courtesy; the server expiry is the rule.
 //

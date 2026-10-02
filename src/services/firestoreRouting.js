@@ -61,8 +61,9 @@ const featureIsOn = (name) => {
 // this gets got wrong.
 //
 // `clock` is a feature like any other, and its fence is a DECISION rather than an oversight: the station boundary is
-// checked in the browser (src/utils/clockLocation.js) and in Code.gs today, and the owner has chosen to keep it in
-// the browser only. Rules cannot do the arithmetic and a callable would be the robust answer - but the risk here is
+// checked in the browser (src/utils/clockLocation.js) and NOWHERE ELSE. The sheet backend checked it a second time,
+// it is retired and nothing runs it, so the owner has chosen to keep the check in the browser only. Rules cannot do
+// the arithmetic and a callable would be the robust answer - but the risk here is
 // a member lying about their own location on their own timesheet, and that is not a risk this station judges worth a
 // server round trip on every clock press. What is NOT lost: the entry and the on_duty row are still written in one
 // transaction, so nobody can be on duty without an entry or have two open at once.
@@ -159,14 +160,16 @@ export const ROUTED_FEATURES = {
     writes: [],
     reads: [
       'GET_ON_DUTY',
-      // GET_ROSTER IS NOT HERE ANY MORE, and the reason is what makes it safe to drop: nothing asked for it. The roster a
-      // screen draws comes from the sign-in payload (`fetchMemberPayload`), where it is a projection of the `users` read the
-      // payload was making anyway - so this action was reachable code with no caller, a read that would only ever have been
-      // issued by a client built before the payload carried a roster. It is gone from both backends together (see the
-      // Code.gs action list), which is what keeps the routing harness's two-direction check balanced.
+      // GET_ROSTER IS BACK, and the reason it was ever gone is the reason it is worth having: while the roster rode along in
+      // the sign-in payload, nothing asked for it - reachable code with no caller. This pass takes it out of the payload, so
+      // the screens that list people ask for it when they open (App#loadRoster), and a caller is the only thing that makes a
+      // route worth keeping.
+      'GET_ROSTER',
       'GET_TIMECLOCK_LOGS',
       'GET_SCHEDULE',
+      'GET_SCHEDULE_SETUP',
       'GET_AVAILABILITY',
+      'GET_AVAILABILITY_WINDOWS',
       'GET_SHIFT_OFFERS',
       'GET_TRAINING',
       'GET_CERTIFICATIONS',
@@ -637,7 +640,7 @@ const DISPATCH = {
   ADMIN_RESOLVE_SHIFT_OFFER: async (body) => {
     // BOTH DECISIONS ARE ROUTED, and the vocabulary is worth spelling out because getting it wrong is how this route
     // spent its whole life doing nothing. The client sends the SHEET'S words - 'APPROVE' or 'DECLINE', built from the
-    // button the officer pressed (api.js) and uppercased by Code.gs - while this entry compared against the lowercase
+    // button the officer pressed (api.js), uppercased like every stored status - while this entry compared against the lowercase
     // 'approved'. So neither decision matched, every resolution fell through as "not routed", and the fallback it was
     // meant to reach was Apps Script, which no longer exists: an officer could not approve or decline anything, and the
     // failure looked like a transport error rather than a wiring mistake. Both spellings are accepted now.
@@ -659,7 +662,7 @@ const DISPATCH = {
 
   SUBMIT_SHIFT_OFFER: async (body, uid) => {
     const { makeOffer } = await writes();
-    // `slot_key` is derived server-side by slotKeyOfOffer in Code.gs ('row-<schedule id>', or
+    // `slot_key` is derived by slotKeyOfOffer when the offer is written ('row-<schedule id>', or
     // 'slot-<date>-<template id>'), and the calendar matches its open pills against it - so a routed offer has to
     // carry the same value or it will not find its slot. This belongs in makeOffer, as a field materialized by the
     // writer that owns it (see option D in docs/FIRESTORE_MODEL.md); it is written here for now because the

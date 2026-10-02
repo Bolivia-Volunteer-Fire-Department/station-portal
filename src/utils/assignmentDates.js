@@ -71,7 +71,7 @@ export const choosableAssignments = (assignments, dateKey, keepId = null) => {
 // How many templates would stop producing shifts if an assignment ended on a date, for the warning shown in
 // the assignments form. Counted over templates that currently overlap the window, so an already-retired
 // template is not blamed on the new date.
-export const templatesAffectedByEndDate = (assignmentId, templates, dateKey) => {
+export const templatesAffectedByEndDate = (assignmentId, templates) => {
   const id = String(assignmentId ?? '').trim();
   if (!id) return 0;
   return (Array.isArray(templates) ? templates : []).filter(

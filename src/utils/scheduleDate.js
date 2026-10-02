@@ -7,6 +7,20 @@ const pad = (n) => String(n).padStart(2, '0');
 
 export const toDateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 
+// The STATION's today, as a 'yyyy-MM-dd' key. Every "is this in force today?" comparison in the app is made
+// against this rather than against the device's local date, so a document that expires "today" expires on the
+// station's today for every member, whatever timezone they are standing in.
+export const stationTodayKey = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const at = (type) => parts.find((part) => part.type === type).value;
+  return `${at('year')}-${at('month')}-${at('day')}`;
+};
+
 export function parseSheetDateKey(value) {
   if (value === undefined || value === null) return null;
 

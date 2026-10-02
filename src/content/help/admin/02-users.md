@@ -44,7 +44,6 @@ The flag clears itself the moment they set their own password, so nothing has to
 > [!NOTE]
 > **The tick and the password belong together.** Unticking the box does not change anybody's password; it only says the current one may be kept. If you set a password, type it, and leave the box unticked, the member keeps that password for as long as they like.
 
-
 ## Deactivating rather than deleting
 
 Setting **Status** to *Inactive* is usually better than deleting. An inactive member cannot sign in, but their clock history, past shifts and availability stay intact, and reactivating them later restores everything. Deleting removes the row, and their records are left pointing at a member who no longer exists, which can cause errors.

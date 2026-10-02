@@ -4,6 +4,8 @@
 
 > Editing this tab requires the **Manage availability windows** role permission. It is separate from *Manage member availability*, which governs the roster of members' own choices — shaping the station's week and correcting one member's claims are different jobs.
 
+The window list is read when you open this tab, so a brief **Loading …** line the first time is normal. A list still arriving shows that line; a list with nothing in it shows none.
+
 A window is a recurring weekly block of time with a name:
 
 - **Nickname** — what a member sees on the pill in their own calendar. Keep it short: it has to fit in a day cell.

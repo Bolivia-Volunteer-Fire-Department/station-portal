@@ -10,7 +10,7 @@ The tab opens on **All Members**, because the overview is the point of the scree
 It lists, for each day of the month, the availability windows that fall on it, with:
 
 - the window's nickname and its hours, and
-- the names of the members who claimed it — each carrying their rank's colour and icon.
+- the names of the members who claimed it — each carrying their rank's color and icon.
 
 Windows come from *Scheduling → Availability Windows*, so the list is short and the same for everybody. An empty window is worth spotting: it is a gap to fill or a window nobody wants.
 

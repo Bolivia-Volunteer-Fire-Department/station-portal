@@ -74,6 +74,15 @@ let app = null;
 const appCheckSiteKey = String(env.VITE_FIREBASE_APPCHECK_SITE_KEY || '').trim();
 const appCheckDebugToken = String(env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN || '').trim();
 
+// Whether this origin is one Google could possibly attest. reCAPTCHA will not score a loopback origin
+// unless `localhost` is listed by name on the key's supported domains, and App Check's own answer for
+// development is the debug token, which skips attestation altogether. Anything else - the Pages host, a
+// custom domain - is a real site and is left to prove itself.
+const loopbackOrigin = () => {
+  const host = typeof window === 'undefined' ? '' : String(window.location.hostname || '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+};
+
 export const firebaseApp = () => {
   // Reuse an app that already exists rather than initialising a second one: a Node harness imports this module after
   // creating its own, and two apps cannot both be named '[DEFAULT]'. Whoever gets there first wins, and everybody
@@ -84,16 +93,45 @@ export const firebaseApp = () => {
     // this function first. Skipped in a harness (there is no browser to attest with, and the emulator does not verify App
     // Check at all) and skipped when no key is configured, so a build without one behaves exactly as it did before.
     if (appCheckSiteKey && !usingEmulator && typeof window !== 'undefined') {
-      try {
-        if (appCheckDebugToken) window.FIREBASE_APPCHECK_DEBUG_TOKEN = appCheckDebugToken;
-        initializeAppCheck(app, {
-          provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
-          isTokenAutoRefreshEnabled: true,
-        });
-      } catch (error) {
-        // A misconfigured App Check must not stop the station from working: it is a guard against abuse, not a dependency.
-        // The App Check console reports unverified requests, so a failure here is visible without this throwing.
-        console.warn('[appcheck] could not initialise App Check:', error && error.message);
+      // ...AND THE REASON IT IS GUARDED rather than simply attempted. A site key with no debug token on a
+      // loopback origin is App Check that cannot succeed: the reCAPTCHA script refuses to attest the origin,
+      // `execute()` rejects, and every token request throws `appCheck/recaptcha-error`, with a 400 on
+      // google.com/recaptcha/enterprise/clr beside it. Failing open is fine - App Check is a guard against
+      // abuse, not a dependency, and the catch below already says so. What is NOT fine is that nothing backs
+      // off: the provider's throttle only engages when Firebase's own exchange endpoint answers with a bad
+      // status, and a reCAPTCHA failure never reaches that endpoint (firebase/firebase-js-sdk#10385, on the
+      // 12.19.0 pinned here). Auth then warns on every request it makes and the refresher keeps retrying, so
+      // the same two lines fill the console until the tab is closed.
+      //
+      // Skipping is therefore the honest state rather than a workaround: with no debug token there is no
+      // attestation to be had on a loopback origin, and pretending otherwise only buys noise. Production is
+      // untouched - it is not a loopback origin - and neither is a local run that does have the debug token,
+      // which is the supported way to develop against App Check (docs/FIREBASE_SETUP.md, step 7).
+      if (!appCheckDebugToken && loopbackOrigin()) {
+        // SAID ONCE, and it can only be said once, because this whole block sits inside the `if (!app)` above.
+        // Announced rather than silent for the reason `firebaseConfigured()` announces itself: a decision the
+        // app makes about itself that nobody states is one the next person rediscovers from a console with
+        // nothing in it.
+        console.info(
+          '[appcheck] not enabled here: this is a loopback origin with no VITE_FIREBASE_APPCHECK_DEBUG_TOKEN, so ' +
+            'reCAPTCHA has nothing to attest and every request would fail with appCheck/recaptcha-error - which the ' +
+            'SDK never backs off from, so it floods. Either put a debug token in .env (Firebase console > App Check ' +
+            '> your app > Manage debug tokens), or add "localhost" to the site key\'s supported domains in the Google ' +
+            'Cloud console. Requests go unverified meanwhile, which is what development wants; the App Check console ' +
+            'still reports them.'
+        );
+      } else {
+        try {
+          if (appCheckDebugToken) window.FIREBASE_APPCHECK_DEBUG_TOKEN = appCheckDebugToken;
+          initializeAppCheck(app, {
+            provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+            isTokenAutoRefreshEnabled: true,
+          });
+        } catch (error) {
+          // A misconfigured App Check must not stop the station from working: it is a guard against abuse, not a dependency.
+          // The App Check console reports unverified requests, so a failure here is visible without this throwing.
+          console.warn('[appcheck] could not initialise App Check:', error && error.message);
+        }
       }
     }
   }

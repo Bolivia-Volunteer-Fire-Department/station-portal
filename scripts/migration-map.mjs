@@ -6,6 +6,9 @@
 // who can see what.
 
 import { PUBLIC_SETTING_KEYS } from '../src/utils/systemSettings.js';
+// The app's own date parser, for the same reason the settings keys above are imported: a key written here and a key read there
+// must not be able to disagree about what a date means.
+import { parseSheetDateKey } from '../src/utils/scheduleDate.js';
 
 // A header the sheet carries that must never reach Firestore. `timeclock` really does have Column 1..Column 14.
 const JUNK_HEADER = /^Column \d+$/;
@@ -43,6 +46,30 @@ const NUMERIC_COLUMNS = new Set([
   'calc_hours',
 ]);
 
+// DATES THE APP COMPARES AND QUERIES, and the reason this list exists is a bug it is the cure for.
+//
+// `typedValue` below coerces every cell to TEXT, which is right for almost everything: the sheet held a date as a CELL that its
+// display formatted, so a reader gets `3/6/2026` back. But the app does not merely display these values - it COMPARES them and it
+// QUERIES them. `where('date_from', '>=', '2026-09-01')` is a STRING range: `'3/6/2026'` sorts after `'2026-09-30'`, so a row
+// dated that way is excluded from every month a screen asks for, SILENTLY - the screen shows an empty month, and nothing
+// anywhere says why.
+//
+// This is the same failure as `runner_score` a few lines up, from the same cause: a value a query filters on has to be the type
+// (here, the FORMAT) the query expects. A database migrated before this list existed can still hold those cells, and
+// `scripts/normalize-date-columns.mjs` is the cure - it rewrites them through this same function, so the repair and a fresh
+// migration cannot disagree.
+//
+// Only the date-ONLY columns are here. A datetime (`timeclock`'s `time_in`) must NOT be run through a parser that returns just
+// the day: losing the time to fix a sort order would be a worse bug than the one being fixed, so those are left as they are and
+// the repair script reports them instead.
+const DATE_COLUMNS = new Set([
+  'date_from',
+  'date_to',
+  'effective_date',
+  'end_date',
+  'recurring_start',
+]);
+
 export const typedValue = (header, value) => {
   const text = String(value ?? '').trim();
   if (BOOLEAN_COLUMN.test(header)) {
@@ -54,8 +81,46 @@ export const typedValue = (header, value) => {
     const number = Number(text);
     return text !== '' && Number.isFinite(number) ? number : text;
   }
+  if (DATE_COLUMNS.has(header)) {
+    // A VALUE THAT CARRIES A TIME IS A DATETIME, IN THE APP'S OWN SHAPE, and it must survive this untouched in its
+    // hours. `parseSheetDateKey` is a DAY parser: its date regex is unanchored, so `'2026-11-10 18:00'` parses happily
+    // to `'2026-11-10'` and the time is gone. That is exactly how every migrated event lost its times and drew as
+    // "00:00 - 00:01" - a `date_from` column is not day-only just because the schedule's use of it is.
+    //
+    // So the date half is still normalised (a display date carrying a time - '11/10/2026 18:00' - has the same bug one
+    // field along) and the time half is KEPT.
+    //
+    // Kept, but ZERO-PADDED, because the app's own inputs demand it. `<input type="datetime-local">` and
+    // `<input type="time">` both run the value sanitization algorithm, which sets the value to EMPTY unless the hour is
+    // two digits - and `AdminEventsTab` hands these fields straight to those inputs (`date_from.replace(' ', 'T')` for
+    // a single event, `date_from.slice(11, 16)` for a recurring one). A sheet cell holding `8:00` - two of them do -
+    // would therefore draw as a blank "Starts" field in the very form an officer would use to fix it. Padding is also
+    // simply what the app writes: its `toInputValue` pads, and a time input's own change event always yields `HH:MM`.
+    //
+    // A meridiem is left exactly as it arrived. Turning `8:00 PM` into `20:00` is a CONVERSION rather than a
+    // normalization, and no cell in the sheet carries one - so building that path here would be inventing an answer for
+    // data nobody has. `scripts/restore-event-times.mjs` names such a row instead of writing it.
+    const timePart = /(\d{1,2}):(\d{2})(:\d{2})?(\s*[AaPp]\.?[Mm]\.?)?\s*$/.exec(text);
+    if (timePart) {
+      const day = parseSheetDateKey(text);
+      if (!day) return text;
+      const meridiem = String(timePart[4] || '').trim();
+      const seconds = timePart[3] || '';
+      const clock = meridiem
+        ? `${timePart[1]}:${timePart[2]}${seconds} ${meridiem}`
+        : `${String(Number(timePart[1])).padStart(2, '0')}:${timePart[2]}${seconds}`;
+      return `${day} ${clock}`;
+    }
+    // The app's own parser, so a key written here and a key read there cannot disagree. A value it cannot read is left EXACTLY as
+    // it arrived rather than blanked - turning an unreadable date into an empty one would hide the row instead of the problem -
+    // and the repair script names those so somebody can look at them.
+    return parseSheetDateKey(text) || text;
+  }
   return text;
 };
+
+// The date columns, for the repair script: it rewrites through the same function above rather than repeating the rule.
+export const dateColumns = () => [...DATE_COLUMNS];
 
 // --- derived fields -----------------------------------------------------------------------------------------------
 

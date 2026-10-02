@@ -568,5 +568,34 @@ if (!builtCss) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// 10. Every harness actually runs
+// ---------------------------------------------------------------------------
+//
+// A harness that exists but is missing from verify:all passes forever without ever being run - which is indistinguishable
+// from a harness that runs and passes. Writing a test and forgetting to wire it in is easy to do and impossible to notice,
+// so the wiring is checked here rather than left to whoever adds the next one.
+console.log('\n--- every harness runs ---');
+// The migration harnesses belong to a one-time migration and are run by hand, so they are outside verify:all ON PURPOSE.
+// Named here rather than discovered, so leaving the list behind is itself a failure.
+const NOT_IN_VERIFY_ALL = ['verify:migration-recon', 'verify:migration-write'];
+const harnessNames = Object.keys(packageJson.scripts).filter(
+  (name) => name.startsWith('verify:') && name !== 'verify:all'
+);
+const verifyAll = packageJson.scripts['verify:all'];
+const neverRun = harnessNames.filter(
+  (name) => !verifyAll.includes(`npm run ${name}`) && !NOT_IN_VERIFY_ALL.includes(name)
+);
+checkIs(
+  `${harnessNames.length - NOT_IN_VERIFY_ALL.length} harnesses are each run by verify:all`,
+  neverRun.length === 0,
+  `never run: ${neverRun.join(', ')}`
+);
+checkIs(
+  'and every harness exempted from it still exists',
+  NOT_IN_VERIFY_ALL.every((name) => harnessNames.includes(name)),
+  'an exemption is left behind for a harness that is gone'
+);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

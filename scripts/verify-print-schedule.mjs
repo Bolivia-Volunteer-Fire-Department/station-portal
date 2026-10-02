@@ -268,8 +268,15 @@ const board = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx'
 check('the board offers a print button', /onClick=\{\(\) => setPrintOpen\(true\)\}/.test(board), true);
 check('and mounts the sheet in admin mode', /mode="admin"/.test(board), true);
 // The printed sheet must be the SAVED schedule, not the in-memory draft, or a printout could claim to be
-// the record while differing from it.
-check('printing the SAVED schedule rather than the draft', /mode="admin"[\s\S]{0,400}schedule=\{schedule\}/.test(board), true);
+// the record while differing from it. `base` is this board's saved copy of the month on screen (the same rows a save
+// diffs against) and `working` is the draft - and it is `base` rather than the shared schedule array because the board
+// reads its own month now (see the onNeedSchedule note there): the array is whatever the last payload left behind, which
+// may hold no rows for the month being printed at all.
+check(
+  'printing the SAVED month rather than the draft',
+  /mode="admin"[\s\S]{0,400}schedule=\{base\}/.test(board) && !/schedule=\{working\}/.test(board),
+  true
+);
 check('and saying so when there are unsaved changes', /Unsaved changes are not included/.test(board), true);
 
 console.log('\n--- the station logo is reachable from a subdirectory ---');

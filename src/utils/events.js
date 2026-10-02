@@ -293,7 +293,7 @@ export const eventValidation = (values = {}) => {
 // The date an event is "about", which is what a list should be ordered by.
 //
 // For a repeating event that is `recurring_start`, not `date_from`: the repeating event's date_from holds the
-// anchor with the right TIMES but its date is only there to carry them (see eventFieldsFrom in Code.gs), so
+// anchor with the right TIMES but its date is only there to carry them, so
 // sorting by it would file "every Tuesday" under whichever day the form happened to be open.
 export const eventAnchorKey = (event) => {
   if (!event) return '';

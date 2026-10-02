@@ -12,7 +12,7 @@ Usage:
     python3 scripts/check-secrets.py --tree      # every file on disk, tracked or not (advisory)
 
 The content rules are deliberately narrow. This codebase legitimately *mentions* credentials: the FCM
-form prints `-----BEGIN PRIVATE KEY-----` as placeholder text, `Code.gs` lists settings keys like
+form prints `-----BEGIN PRIVATE KEY-----` as placeholder text, the design docs list settings keys like
 `fcm_service_account_private_key`, and the setup guide explains `client_email` in prose. A bare keyword
 search would fail on a clean tree, so every rule requires a VALUE rather than a name.
 

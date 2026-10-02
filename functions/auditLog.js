@@ -39,6 +39,17 @@ const AUDIT_PAGE_SIZE_MAX = 100;
 // would need a scan, and a scan is the thing this design exists to avoid.
 const FACET_SAMPLE_SIZE = 200;
 
+// THE CONTRACT VERSION THIS FUNCTION ANSWERS, and the number the client compares its own against.
+//
+// The tab reads `api` from the reply and warns when it is not the version the build was written for, because the two
+// halves are deployed SEPARATELY: a browser can be running a build whose log shape the deployed function does not speak,
+// and the symptom is a table that quietly drops a filter. The sheet answered `api: 2`. Version 3 is the Cloud Logging
+// shape - a `next_page_token` and no total - which is what this function returns, so 3 is what it says.
+//
+// It lives HERE rather than in index.js so the harness can hold it against the client's own constant: two numbers in two
+// deployments that have to agree is a fact worth asserting rather than assuming. See scripts/verify-audit-log.mjs.
+const SYSTEM_LOG_API_VERSION = 3;
+
 // A refusal, or null when the caller's value is acceptable. `field` names what was wrong, in the words the tab shows.
 const refusalFor = (value, shape, field) => {
   const text = String(value === undefined || value === null ? '' : value).trim();
@@ -117,6 +128,34 @@ const facetsFrom = (rows) => {
   return { actions: [...actions].sort(), members: [...members].sort() };
 };
 
+// THE REPLY, ASSEMBLED IN ONE TESTED PLACE, because its shape is a contract with the tab - and the tab and this function
+// are deployed SEPARATELY, so the shape is exactly the kind of thing that drifts without either half failing.
+//
+// Every field the tab reads is named here and nowhere else. `api` is the version the tab compares its own against, and
+// leaving it out is not a small omission: the tab does `Number(result.api) !== SYSTEM_LOG_API_VERSION`, a missing field
+// is NaN, NaN is not equal to anything, and the "your deployment is stale" warning fires on every single load. That is
+// what happened when this reply was assembled inline in the callable and the version was simply forgotten.
+//
+// Forward-only paging, because that is what the Logging API offers: a token for the next page, and no total. Asking for
+// a page number was the sheet's shape, and this does not pretend to have it.
+const logReplyFrom = ({ entries, nextQuery, sampleEntries, data, pageSize, stationTimestamp }) => {
+  const rowsOf = (list) => (Array.isArray(list) ? list : []).map((entry) => auditRowFrom(entry, stationTimestamp));
+  // The facets describe the SAMPLE, so the dropdowns offer what the log has held recently rather than everything it has
+  // ever held. A value missing from the list can still be typed into the URL of a future request; what the list must not
+  // do is pretend to be exhaustive.
+  const facets = facetsFrom(rowsOf(sampleEntries));
+  return {
+    api: SYSTEM_LOG_API_VERSION,
+    rows: rowsOf(entries),
+    sort: String((data && data.sort) || '') || AUDIT_SORT_DEFAULT,
+    page_size: pageSize,
+    next_page_token: (nextQuery && nextQuery.pageToken) || '',
+    has_more: Boolean(nextQuery && nextQuery.pageToken),
+    actions: facets.actions,
+    members: facets.members,
+  };
+};
+
 module.exports = {
   AUDIT_PATH,
   AUDIT_SORTS,
@@ -124,9 +163,11 @@ module.exports = {
   AUDIT_PAGE_SIZE_DEFAULT,
   AUDIT_PAGE_SIZE_MAX,
   FACET_SAMPLE_SIZE,
+  SYSTEM_LOG_API_VERSION,
   buildAuditFilter,
   orderByFor,
   pageSizeFor,
   auditRowFrom,
   facetsFrom,
+  logReplyFrom,
 };

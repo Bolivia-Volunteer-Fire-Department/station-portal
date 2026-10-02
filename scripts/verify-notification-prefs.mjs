@@ -67,48 +67,12 @@ visibleNotificationTypes(false);
 check('catalog still has four entries', NOTIFICATION_TYPES.length, 4);
 
 // Every switch must be savable. This is the drift guard for a bug that shipped: the Announcements
-// switch was added to the catalog and to the push gate, but NOT to the backend's
-// UPDATE_USER_SETTINGS whitelist, so flipping it produced an empty settings payload, the backend
-// answered "No settings were supplied.", and the member saw "Failed to save notification
-// preference." Two hand-maintained lists that cannot share code, so they are compared here.
-//
-// readFileSync with a cwd-relative path, not import.meta.url: these scripts are bundled under
-// tmp-test-out/ by vite, so import.meta.url points at the build output rather than the repo.
-console.log('\n--- every switch is savable, client and server agree ---');
-const codeSource = readFileSync('src/services/Code.gs', 'utf8');
-const appSource = readFileSync('src/App.jsx', 'utf8');
-
-// The whitelist array literal inside UPDATE_USER_SETTINGS.
-const whitelistMatch = /\["notify_new_offer"[^\]]*\]/.exec(codeSource);
-check('the backend notification whitelist was found', !!whitelistMatch, true);
-const backendKeys = whitelistMatch ? [...whitelistMatch[0].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
-
-// The optimistic-merge list in handleSaveUserSettings, which decides whether the toggle visibly
-// flips before the background refresh lands.
-const mergeBlock = /'notify_new_offer',([\s\S]*?)\]\.forEach/.exec(appSource);
-check('the client optimistic-merge list was found', !!mergeBlock, true);
-const clientKeys = mergeBlock ? [...mergeBlock[0].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
-
-const catalogKeys = keys(NOTIFICATION_TYPES);
-
-catalogKeys.forEach((key) => {
-  check(`the backend accepts ${key}`, backendKeys.includes(key), true);
-  check(`the client merges ${key} into state`, clientKeys.includes(key), true);
-});
-
-// And nothing extra, so a removed switch cannot leave a column being written for nothing.
-backendKeys.forEach((key) => {
-  check(`the backend whitelist has no stale key ${key}`, catalogKeys.includes(key), true);
-});
-clientKeys.forEach((key) => {
-  check(`the client merge list has no stale key ${key}`, catalogKeys.includes(key), true);
-});
-
+// switch was added to the catalog but not to the sender, so flipping it produced an empty
+// settings payload and the member saw "Failed to save notification preference." The sender
+// must enumerate the catalog, which the sections below assert.
 // The SENDER — api.js's saveUserSettings payload. This is the list that actually caused the
-// reported bug: the catalog and the backend whitelist were both fixed while this third copy was
-// still missing the key, so nothing was sent and the backend answered "No settings were
-// supplied." A guard covering only two of the three lists would have kept passing, which is exactly
-// what happened - so the sender is checked here too.
+// reported bug: the catalog was fixed while this copy was still missing the key, so nothing was
+// sent and the member saw "No settings were supplied." The sender is checked here too.
 console.log('\n--- the sender enumerates the catalog (no third hand-written list) ---');
 const apiSource = readFileSync('src/services/api.js', 'utf8');
 check('api.js imports the switch catalog', /import\s*\{[^}]*NOTIFICATION_TYPES[^}]*\}\s*from\s*'\.\.\/utils\/notificationPrefs'/.test(apiSource), true);
@@ -123,7 +87,7 @@ check('the payload builder hard-codes no notification key', literalKeys, []);
 // And the derived fields really do carry every key, exercised by calling the builder the way
 // saveUserSettings does.
 const derived = notificationPrefFields({ notify_new_offer: 'TRUE', notify_announcements: '' });
-catalogKeys.forEach((key) => {
+keys(NOTIFICATION_TYPES).forEach((key) => {
   check(`the derived payload carries ${key}`, Object.prototype.hasOwnProperty.call(derived, key), true);
 });
 check('an unsent key stays undefined so the backend ignores it', derived.notify_offer_approved, undefined);

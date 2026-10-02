@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, AlertCircle, CheckCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle } from 'lucide-react';
 import { stationLogoUrl } from '../utils/assets';
 
 // THE LOGIN SCREEN CARRIES NO ANNOUNCEMENTS, and that is deliberate rather than an omission: it is read before anybody
@@ -71,7 +71,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
           >
             Sign In
           </button>
-          <span className="text-xs text-slate-500 dark:text-slate-400">v1.1</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">v1.12</span>
         </form>
       </div>
     </div>

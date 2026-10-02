@@ -1,5 +1,7 @@
 The **Training** module is the department's training record that replaces paper records. Each row is a training activity the department held, and you sign the ones you attended. Administrators can then see who has signed each one.
 
+The record is read when you open this screen, so a brief **Loading …** line the first time is normal. A list that is still arriving shows that line; a list with nothing in it shows none.
+
 > [!NOTE]
 > An administrator must activate this module for your role in order for you to use it.
 

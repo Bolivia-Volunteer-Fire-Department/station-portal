@@ -11,7 +11,7 @@
  */
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, seed } from './seed-emulator.mjs';
-import { fetchAdminPayload, fetchMemberPayload, readUsersOnce } from '../src/services/firestorePayload.js';
+import { fetchAdminPayload, fetchMemberPayload, readAdminSections, readUsersOnce } from '../src/services/firestorePayload.js';
 // The live reads, driven for real against the emulator: a listener has to be proven to FIRE, not inspected in the source.
 import { subscribeLive } from '../src/services/liveReads.js';
 // The decision the score-repair script makes, tested here against a real text score in the emulator rather than in isolation.
@@ -19,9 +19,6 @@ import { scoreToStore } from './normalize-runner-scores.mjs';
 import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { firebaseAuth, firebaseConfigured, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
-// The window the payload's `schedule` read is built from: pure and dependency-free, so the harness can assert that the
-// default really is the same computation the screens use.
-import { scheduleWindowFor } from '../src/utils/scheduleWindow.js';
 
 let failures = 0;
 let cases = 0;
@@ -67,9 +64,9 @@ const accountFor = (uid) => {
   return { userId: uid, roleId: entry.role, rankId: entry.rank };
 };
 
-// The fixtures are dated in 2026 while the payload reads `schedule` as a WINDOW - last month, this month and next - so
-// the harness NAMES the window it wants instead of depending on the calendar. See utils/scheduleWindow.
-const FIXTURE_WINDOW = { from: '2026-01-01', to: '2026-12-31' };
+// WHAT THE FIXTURES ARE DATED IN. Nothing takes a window any more - the payload carries no schedule at all (the screen in
+// front of the member reads the month it is showing), so the fixtures simply use 2026 and the harness asserts that month
+// through GET_SCHEDULE in the window section below.
 
 const main = async () => {
   console.log('--- the demo station ---');
@@ -79,15 +76,28 @@ const main = async () => {
   // --- the officer's own payload: an administrator is a member too ---
   console.log('\n--- an officer signs in and reads the payload ---');
   await signIn('jane');
-  const asOfficer = await fetchMemberPayload(accountFor('u1'), null, FIXTURE_WINDOW);
+  const asOfficer = await fetchMemberPayload(accountFor('u1'));
   check('the payload reports success', asOfficer.success, true);
-  // The roster is the projection, not the row: three fields, and no role for anybody.
-  check('the roster is the three columns the client draws', Object.keys(asOfficer.roster[0]).sort(), ['id', 'name', 'rank_id']);
-  checkIs('and no role leaked into it', !JSON.stringify(asOfficer.roster).includes('role_id'), 'a role is in the roster');
+  // THE ROSTER IS NOT IN THE PAYLOAD ANY MORE - it is a directory, one document per member, and a member clocking in does not
+  // need it. What a sign-in DOES carry is the on-duty list, joined to names by id (asserted below): two documents rather than
+  // thirty at station scale. The screens that list people ask GET_ROSTER when they open, which is asserted in its own section.
+  checkIs(
+    'and the crew directory is not carried at sign-in',
+    asOfficer.roster === undefined,
+    JSON.stringify(asOfficer.roster && asOfficer.roster.length)
+  );
   // The private halves of the split collections do not travel with the public ones.
-  checkIs('assignments arrive without the officer-only note', !('admin_note' in (asOfficer.assignments[0] || {})));
-  checkIs('and templates likewise', !('admin_note' in (asOfficer.scheduleTemplates[0] || {})));
-  check('everybody sees the whole schedule', asOfficer.schedule.length, 2);
+  // THE SCHEDULE'S REFERENCE DATA IS NOT CARRIED FOR A MEMBER EITHER - the templates, the assignments and the shift definitions
+  // (asserted where the readers are driven, below). The projection that keeps an officer's private note off a member's screen is
+  // asserted THERE now, against GET_SCHEDULE_SETUP, because that is where those rows come from.
+  // THE SCHEDULE IS DELIBERATELY NOT IN THE PAYLOAD any more: it is the one collection that grows without limit and no
+  // screen in front of a member at sign-in draws one, so a calendar or the board asks GET_SCHEDULE for the month it is
+  // showing (windowed - asserted in the section further down). This is the assertion that keeps it out of the sign-in.
+  checkIs(
+    'and nobody pays for the schedule at sign-in',
+    asOfficer.schedule === undefined,
+    JSON.stringify(Object.keys(asOfficer).filter((key) => key.includes('schedule')))
+  );
   // The audience, which used to be filtered in a server function: an officer (role r1) sees the everyone-announcement
   // and the one for their role, but not the one addressed to a single member.
   check('an officer sees the announcements for everyone and for their role', asOfficer.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'Officers only', 'Starts next year']);
@@ -104,14 +114,17 @@ const main = async () => {
     'while a future-dated one is fetched and left to the screen to withhold',
     asOfficer.announcements.some((row) => row.title === 'Starts next year')
   );
-  check('and the events for everyone and for their rank', asOfficer.events.map((row) => row.title).sort(), ['Everyone', 'Officer and firefighter']);
+  // EVENTS ARE NOT CARRIED EITHER. They are drawn by the three screens that have a calendar on them - the member's own, the
+  // availability grid and the officer's board - so they arrive with the screen, read and watched (GET_EVENTS, and the listener
+  // that follows that screen: see App.jsx's events effect). Nothing on the dashboard draws one.
+  checkIs('and the calendar entries, which belong to those screens', asOfficer.events === undefined, JSON.stringify(asOfficer.events));
   checkIs('the settings arrive as key/value rows, the shape the app reads', Array.isArray(asOfficer.systemSettings) && asOfficer.systemSettings.every((row) => 'key' in row && 'value' in row));
 
   // --- the member's payload ---
   await signOut(auth);
   console.log('\n--- a member signs in ---');
   await signIn('bo');
-  const asMember = await fetchMemberPayload(accountFor('u2'), null, FIXTURE_WINDOW);
+  const asMember = await fetchMemberPayload(accountFor('u2'));
   // The mirror image of the officer's audience: the personal announcement and the everyone one, not the role one - and,
   // once more, not the expired one.
   check('the audience flips for a plain member', asMember.announcements.map((row) => row.title).sort(), ['Everyone sees this', 'For Bo', 'Starts next year']);
@@ -126,12 +139,13 @@ const main = async () => {
   // The row id is `window|day` (utils/availability.js), because the store is a month per member: a row is derived, not
   // stored, so it has no database id to carry. `aw1|2024-06-03` is not here, and that is the other half of the same
   // point: it lives in the member's 2024-06 month document, and the payload carries a NARROW band of months around today
-  // (a quarter, not two years - see availabilityScope in services/firestorePayload.js) - so the row is absent because of
-  // its MONTH, not because of who owns it.
-  check(
-    'their own availability and nobody else, over the months the payload reads',
-    asMember.availability.map((row) => row.id).sort(),
-    ['aw1|2026-09-01']
+  // ...AND THE CLAIMS ARE NOT CARRIED EITHER: they belong to the Availability screen, which reads the months it draws when it
+  // is opened (GET_AVAILABILITY). What used to be asserted here - the member's own rows for a quarter, and nobody else's - is
+  // now asserted against that reader, in the availability section below.
+  checkIs(
+    'their own claims are read when the grid opens, not at sign-in',
+    asMember.availability === undefined,
+    JSON.stringify(asMember.availability)
   );
   // THE CLOCK HISTORY IS DELIBERATELY NOT IN THE PAYLOAD, and this is the assertion that keeps it out. It is the one
   // per-member table that grows without limit - a five-year member has thousands of entries - and it was only read at sign-in
@@ -139,62 +153,168 @@ const main = async () => {
   // that shows it, over a range.
   check('the clock history is not part of the sign-in payload', asMember.logs, undefined);
   checkIs('while the on-duty list it was standing in for is', Array.isArray(asMember.onDuty));
-  // THE MEMBER'S OFFERS ARE NARROWED TO WHAT A CALENDAR DRAWS FROM: pending and declined. `of2` was approved - approving
-  // fills the shift, so the slot is closed and there is no pill to colour - and it must NOT be here. `of3` was declined and
-  // must be, because the calendar shows a declined pill so the member knows the shift is closed to them rather than open.
-  check('their own offers, over the statuses a calendar draws from', asMember.offers.map((row) => row.id).sort(), ['of1', 'of3']);
-  checkIs(
-    'and an approved offer is not carried: the shift it filled has no open pill',
-    !asMember.offers.some((row) => row.status === 'approved'),
-    JSON.stringify(asMember.offers.map((row) => row.status))
-  );
-  check('their own signatures', asMember.signatures.map((row) => row.id), ['ts1']);
+  // THE MEMBER'S OFFERS, SIGNATURES AND TRAINING LIST ARE NOT CARRIED EITHER, and each belongs to the screen that draws it:
+  // offers to the calendar (GET_SHIFT_OFFERS, whose narrowing is asserted in its own section below), trainings and signatures to
+  // the Training module (GET_TRAINING, the same section). A member who signs in to clock in opens neither.
+  checkIs('their own offers are read by the calendar, not at sign-in', asMember.offers === undefined, JSON.stringify(asMember.offers));
+  checkIs('and their training signatures by that module', asMember.signatures === undefined, JSON.stringify(asMember.signatures));
+  checkIs('with the catalogue they are signed against', asMember.trainings === undefined, JSON.stringify(asMember.trainings));
+  // CERTIFICATIONS, THOUGH, STAY: the dashboard's notice is drawn from them, and it is the one personal, time-critical thing on
+  // a screen a member sees every day. Read on, with the catalogue they are named from.
   check('their own certifications', asMember.certifications.map((row) => row.id), ['cr1']);
   check('the certification catalogue they are named from', asMember.certificationSetup.map((row) => row.name), ['EMT']);
-  // Both courses, and deliberately not an order: the sheet had none of its own for trainings (it sent row order, which a
-  // collection cannot inherit), so this asserts the CONTENT rather than inventing a sequence the station never chose.
-  check('and the training list', asMember.trainings.map((row) => row.title).sort(), ['Hazmat Awareness', 'SCBA Fit Test']);
   // On duty is materialized by the clock transaction, joined to the roster here, and still three columns.
   check('who is on duty, with the name resolved', asMember.onDuty.map((row) => row.name), ['Jane Smith']);
-  check('in the same three columns as the roster', Object.keys(asMember.onDuty[0]).sort(), ['id', 'name', 'rank_id']);
+  // THE NAMES ON THE ON-DUTY CARD ARE READ BY ID, not taken from a roster the sign-in used to carry: one document per person
+  // on shift, which is the only directory read a dashboard costs. The columns are the same three a roster row has, and that is
+  // the assertion that matters - the card, the name and the rank icon all draw from them.
+  check('in the same three columns the roster projects', Object.keys(asMember.onDuty[0]).sort(), ['id', 'name', 'rank_id']);
   check('their own preference travels, which is what a 12-hour clock was losing', asMember.userSettings.map((row) => row.time_format), ['24']);
   check(
     'and the department name is in the settings rows',
     asMember.systemSettings.find((row) => row.key === 'department_name').value,
     'Bolivia Volunteer Fire Department'
   );
-  check('the schedule arrives whole, because a member is meant to see the crew', asMember.schedule.length, 2);
-  checkIs('with the open shift flagged, which is how the calendar finds it', asMember.schedule.some((row) => row.is_open === true));
+  checkIs(
+    'and the schedule is not carried either, because no screen here draws one',
+    asMember.schedule === undefined,
+    JSON.stringify(asMember.schedule && asMember.schedule.length)
+  );
 
   // --- the administrator payload: the member payload plus the sections an officer's tabs read ---
   await signOut(auth);
   console.log('\n--- an administrator reads the full payload ---');
   await signIn('jane');
-  const asAdmin = await fetchAdminPayload(accountFor('u1'), FIXTURE_WINDOW);
+  const asAdmin = await fetchAdminPayload(accountFor('u1'));
   checkIs(
     'the member half is still all there',
-    asAdmin.schedule.length === 2 && asAdmin.roster.length === 2,
-    JSON.stringify({ schedule: asAdmin.schedule.length, roster: asAdmin.roster.length })
+    Array.isArray(asAdmin.onDuty) && asAdmin.roles.length === 2,
+    JSON.stringify({ onDuty: (asAdmin.onDuty || []).length, roles: (asAdmin.roles || []).length })
+  );
+  // THE SCHEDULE IS ASKED FOR RATHER THAN CARRIED, on both payloads - driven for real in the window section below, which is
+  // where the month a screen would be showing gets read.
+  checkIs(
+    'and the schedule is asked for rather than carried',
+    asAdmin.schedule === undefined,
+    JSON.stringify(asAdmin.schedule && asAdmin.schedule.length)
   );
   // The directory joins the private half back on, which is exactly what the Users tab shows - under the SHEET'S field
   // name. The tab reads `user.user_name`; the first version of this payload called it `username`, so the column was blank
   // while the data it came from looked perfectly correct, which is how it was reported. This assertion follows the
   // COMPONENT rather than the payload, because a harness that agrees with the bug proves nothing.
-  check('the user directory carries names, usernames and status', asAdmin.users.map((user) => [user.name, user.user_name, user.status]), [
+  // THE DIRECTORY IS NOT IN THE PAYLOAD ANY MORE - one document per member, twice over, and only one tab draws it - so it is
+  // read the way that tab reads it: a single section, on demand, over the same reader a save's refresh uses. That makes this the
+  // assertion that the SECTION still projects correctly, which is what the tab actually receives.
+  checkIs('and the user directory is not carried: its own tab reads it', asAdmin.users === undefined, JSON.stringify(asAdmin.users));
+  const directory = await readAdminSections(['users']);
+  check('the directory that tab reads carries names, usernames and status', directory.users.map((user) => [user.name, user.user_name, user.status]), [
     ['Jane Smith', 'jane', 'active'],
     ['Bo Jones', 'bo', 'active'],
   ]);
-  checkIs('and no password, because there is none to leak', !JSON.stringify(asAdmin.users).toLowerCase().includes('password'));
-  // The private halves come back merged for an officer's pickers and notes.
-  check('the full assignment rows, note and all', asAdmin.assignments[0].admin_note, 'checked monthly');
-  // ...by ID rather than by index: the payload's order is now a rule (time, then the assignment's rank) instead of the
-  // collection's, so a row's position is not a stable way to name it - which is exactly how this assertion broke.
-  check('and the full template rows', asAdmin.scheduleTemplates.find((row) => row.id === 't1').admin_note, 'temporary cover');
+  checkIs('and no password, because there is none to leak', !JSON.stringify(directory.users).toLowerCase().includes('password'));
+  // THE BOARD'S SECTIONS ARE NOT CARRIED EITHER - the assignments and templates with their private notes, the offers still waiting,
+  // the shift definitions - because each of them belongs to a sub-tab that reads it when opened. They are read here the way those
+  // tabs read them, one section at a time, which is also the assertion that the NOTE merge still happens: an officer's pickers and
+  // notes read the whole record, while the member calendar's copies come from GET_SCHEDULE_SETUP without the notes.
+  checkIs(
+    'and no assignment or template rows at sign-in',
+    asAdmin.assignments === undefined && asAdmin.scheduleTemplates === undefined,
+    JSON.stringify(Object.keys(asAdmin).slice(0, 12))
+  );
+  const boardSections = await readAdminSections(['assignments', 'scheduleTemplates', 'scheduleOffers']);
+  check('the assignment section merges the officer note back', boardSections.assignments[0].admin_note, 'checked monthly');
+  // ...by ID rather than by index: the order is a rule (time, then the assignment's rank) instead of the collection's, so a row's
+  // position is not a stable way to name it - which is exactly how this assertion broke once.
+  check('and the template section likewise', boardSections.scheduleTemplates.find((row) => row.id === 't1').admin_note, 'temporary cover');
+  // --- WHAT A SIGN-IN ACTUALLY READS, in the numbers a bill is made of -----------------------------------------------
+  //
+  // "READS" AND "FETCHES" ARE NOT THE SAME THING, and a browser console is the wrong instrument for judging this. The
+  // Firestore transport keeps a WebChannel open, so its own POSTs appear there by the dozen while costing no document read
+  // at all - and a getDoc is served through that same channel (the SDK's stack calls it readDocumentViaSnapshotListener),
+  // which is why a handful of ordinary reads can look like a burst of traffic. Billing is per DOCUMENT: a getDocs bills one
+  // per row it returns, and a getDoc one. So this counts documents.
+  //
+  // The counts come from the payload the app is handed, which is the honest source: it needs no instrumentation and it is
+  // exactly what the read returned. The one-shot documents that are not rows in it are NAMED below rather than folded in -
+  // inventing a number for them would be worse than saying where they are.
+  console.log('\n--- the documents one sign-in reads ---');
+  // THE COUNTER COUNTS DOCUMENTS OF BOTH SHAPES. An array is one document per row - that is how a getDocs bills - and a MAP OF
+  // LISTS is one document per key, because that is what builds it: the certification badge index is `member id -> the icons to
+  // draw`, read as one document per member. Counting only arrays hid it completely, which is worth saying out loud: the
+  // instrument that measures this pass had a blind spot exactly where one of its wins was.
+  const readCounts = (payload) =>
+    Object.entries(payload || {})
+      .map(([key, value]) => {
+        if (Array.isArray(value)) return [key, value.length];
+        const mapOfLists = value && typeof value === 'object' && Object.values(value).every(Array.isArray);
+        if (mapOfLists) return [key, Object.keys(value).length];
+        return [key, 0];
+      })
+      .filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1]);
+  const reportReads = (label, payload) => {
+    const rows = readCounts(payload);
+    console.log(`  ${label}: ${rows.reduce((sum, [, count]) => sum + count, 0)} documents`);
+    rows.forEach(([key, count]) => console.log(`    ${String(count).padStart(4)}  ${key}`));
+  };
+  reportReads('member sign-in (u2)', asMember);
+  reportReads('officer sign-in (u1, and the administration wave with it)', asAdmin);
+
+  // --- WHAT THE DASHBOARD AND THE MENU STRICTLY NEED, which is the number that matters more than the total -----------
+  //
+  // A member signing in to clock in and leave sees the clock card, the on-duty list, the announcements, the certification
+  // notice and the sidebar. Nothing on that screen draws a schedule, a template, an assignment, a shift, an offer, a
+  // training, a document or the crew's claims - and the sidebar needs only the caller's own profile, their permissions and
+  // their announcements. So every OTHER key below is a MODULE's data, and the goal is that it is read when that module is
+  // opened rather than at sign-in.
+  //
+  // THE ESSENTIALS ARE CHECKED and the gap is PRINTED. A dashboard that cannot draw is a broken app rather than a slow one,
+  // so that half must never regress; the distance to the whole payload is the work itself, and printing it is the point -
+  // at fixture scale it is a dozen documents, and at station scale the three-month schedule alone is hundreds of rows for a
+  // member who may only ever clock in.
+  const SIGN_IN_ESSENTIALS = [
+    'announcements',
+    'certificationSetup',
+    'certifications',
+    'certificationRecords',
+    'onDuty',
+    'ranks',
+    'roles',
+    'systemSettings',
+    'userSettings',
+  ];
+  const readSplit = (payload) => {
+    const rows = readCounts(payload);
+    const sum = (list) => list.reduce((total, [, count]) => total + count, 0);
+    const essential = rows.filter(([key]) => SIGN_IN_ESSENTIALS.includes(key));
+    const moduleData = rows.filter(([key]) => !SIGN_IN_ESSENTIALS.includes(key));
+    return { essential: sum(essential), total: sum(essential) + sum(moduleData), moduleData };
+  };
+  const reportSplit = (label, payload) => {
+    const split = readSplit(payload);
+    console.log(`  ${label}: ${split.essential} of ${split.total} documents are what the dashboard and the menu draw`);
+    console.log(
+      `    carried at sign-in that no screen in front of the member reads: ${
+        split.moduleData.map(([key, count]) => `${key} ${count}`).join(', ') || 'nothing'
+      }`
+    );
+  };
+  checkIs(
+    'the dashboard’s own data is in the sign-in payload',
+    SIGN_IN_ESSENTIALS.filter((key) => Array.isArray(asMember?.[key])).length >= 6,
+    JSON.stringify(Object.keys(asMember || {}).sort())
+  );
+  reportSplit('member sign-in (u2)', asMember);
+  reportSplit('officer sign-in (u1)', asAdmin);
+  console.log('  single documents rather than rows: settings/public (before signing in), the caller’s users/{uid},');
+  console.log('  users_private/{uid} on the sign-in path, and roles/{roleId} for the permission set - four at most.');
+  console.log('  The live listeners bill per CHANGE, and the clock history is read only when its own screen opens.');
+
   // ...in the order the week reads in, not the order the collection hands them over: the sheet sent its own ROW order and
   // a collection has none, so every picker fed by this payload was shuffled. The seed's ids are deliberately NOT in this
   // order, and t3 and t1 START AT THE SAME TIME on the same day with different required ranks (a2 is the senior one), so
   // this asserts both keys: time first, then the assignment's rank.
-  check('and in the week order: time first, then the assignment rank', asAdmin.scheduleTemplates.map((row) => row.id), [
+  check('and in the week order: time first, then the assignment rank', boardSections.scheduleTemplates.map((row) => row.id), [
     't3',
     't1',
     't0',
@@ -207,21 +327,26 @@ const main = async () => {
   // Not "the whole offers table" any more: the officer's read is narrowed to the offers STILL WAITING, which is what the
   // board's slot flags are built from. The declined one is not an officer's business either - the member has been told, and
   // the slot is open again - so `of3` is absent here as well as `of2`.
-  check('and the offers still waiting, not the whole table', asAdmin.scheduleOffers.map((row) => row.id).sort(), ['of1']);
-  check('and every certification record, not only their own', asAdmin.certificationRecords.map((row) => row.id), ['cr1']);
+  check('and the offers still waiting, not the whole table', boardSections.scheduleOffers.map((row) => row.id).sort(), ['of1']);
+  // ...and the certification RECORDS are not carried either, for the same reason as the directory: every member's records, read by
+  // the one tab that shows what is expiring next. Asserted through that section, which is what the tab receives.
+  checkIs('and no certification records: their own tab reads them', asAdmin.certificationRecords === undefined, JSON.stringify(asAdmin.certificationRecords));
+  const records = await readAdminSections(['certificationRecords']);
+  check('the records that tab reads are every member’s, not only their own', records.certificationRecords.map((row) => row.id), ['cr1']);
 
   // --- and a member's payload does not carry any of them ---
   await signOut(auth);
   await signIn('bo');
-  const asMemberAgain = await fetchMemberPayload(accountFor('u2'), null, FIXTURE_WINDOW);
+  const asMemberAgain = await fetchMemberPayload(accountFor('u2'));
   ['users', 'apparatus', 'scheduleOffers', 'certificationRecords'].forEach((section) => {
     checkIs(`a member payload has no ${section} section`, !(section in asMemberAgain), 'an officer-only section travelled');
   });
-  // The badge index is public-safe by design, so both viewers get the same one.
-  check('the badge index names who has a badge', asMemberAgain.certificationBadges.u2.map((badge) => badge.name), ['EMT']);
+  // THE BADGE INDEX IS NOT CARRIED EITHER - it is one document per member, and it left with the roster: the screens that draw a
+  // name draw the icons beside it, and both come from GET_ROSTER now (asserted in that reader's own section below).
   checkIs(
-    'and an officer sees exactly the same index',
-    JSON.stringify(asAdmin.certificationBadges) === JSON.stringify(asMemberAgain.certificationBadges)
+    'and the badge index is not carried at sign-in',
+    asMemberAgain.certificationBadges === undefined,
+    JSON.stringify(asMemberAgain.certificationBadges)
   );
 
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
@@ -238,27 +363,21 @@ const main = async () => {
   const { routeRead } = await import('../src/services/firestoreRouting.js');
 
   await signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(DEMO_ACCOUNTS[0].username), DEMO_PASSWORD);
-  // --- the schedule WINDOW: the one collection the payload does not read whole ----------------------------------
+  // --- the schedule WINDOW: the collection a screen READS, rather than one the sign-in carries ------------------------
   //
-  // `schedule` grows without limit - every shift the station has ever scheduled - so a load carries a window instead of
-  // the collection, and the window travels back WITH the rows. That is what lets a screen tell "this month is empty"
-  // from "I have not asked for this month", which is the difference between an empty calendar and a broken one.
+  // `schedule` grows without limit - every shift the station has ever scheduled - and no screen at sign-in draws one, so the
+  // payload does not carry it at all (asserted three times above). A calendar or the board asks GET_SCHEDULE for the month in
+  // front of it, and the window travels back WITH the rows: that is what lets a screen tell "this month is empty" from "I
+  // have not asked for this month", which is the difference between an empty calendar and a broken one.
   console.log('\n--- the schedule window ---');
-  const narrow = await fetchMemberPayload(accountFor('u2'), null, { from: '2026-03-09', to: '2026-03-09' });
+  const narrow = await routeRead('GET_SCHEDULE', { from: '2026-03-09', to: '2026-03-09' });
   check('a one-day window brings back only that day', narrow.schedule.map((row) => row.id), ['s2']);
   check('and says which window it applied', narrow.schedule_window, { from: '2026-03-09', to: '2026-03-09' });
-
-  // The window the APP passes when it does not name one: last month, this month and next, which must be the same
-  // computation the screens use rather than a second copy of it.
-  const defaultWindow = await fetchMemberPayload(accountFor('u2'));
-  check('the default window is the three months around today', defaultWindow.schedule_window, scheduleWindowFor());
-  checkIs(
-    'and nothing outside it is returned, however full the collection is',
-    defaultWindow.schedule.every(
-      (row) => row.date_from >= defaultWindow.schedule_window.from && row.date_from <= defaultWindow.schedule_window.to
-    ),
-    JSON.stringify(defaultWindow.schedule.map((row) => row.date_from))
-  );
+  // NAMING NO WINDOW ASKS FOR THE WHOLE COLLECTION, which is what a harness wants and what no screen does: slow rather than
+  // wrong, so a screen that has not been scoped yet shows too much instead of silently showing nothing.
+  const whole = await routeRead('GET_SCHEDULE');
+  check('and with no window at all it is the whole collection', whole.schedule.length, 2);
+  checkIs('with the open shift flagged, which is how the calendar finds it', whole.schedule.some((row) => row.is_open === true));
 
   // And the reader's own window, which is what a screen navigated outside the payload's months asks for. The session is
   // left exactly as it was found: everything after this point is signed in as jane, and a section that quietly changed
@@ -347,6 +466,29 @@ const main = async () => {
   check('the reader and the listener agree on who is on duty', readBack.onDuty.map((row) => row.id).sort(), live.onDuty.at(-1).map((row) => row.id).sort());
   checkIs('and both carry the rank the card draws', readBack.onDuty.every((row) => 'rank_id' in row));
   check('with the same rank for the same member', readBack.onDuty.find((row) => row.id === 'u1').rank_id, arrived.rank_id);
+
+  // AND THE SAME FOR ANNOUNCEMENTS, which is where this one actually bit. The payload read and the listener have to produce
+  // the SAME ROW, down to its id - and the seed's `an2` is deliberately a MIGRATED row, carrying a stale `sheet-1043` in its
+  // own `id` column, because spreading that column over the document key is how a listener silently re-keys a row. That is
+  // what happened in production: the dashboard drew the announcements correctly from the payload, the listener then REPLACED
+  // them with rows keyed by a dead sheet id, and the screen changed shape the moment a change arrived. Both halves are asked
+  // here so the two shapes cannot drift apart again.
+  // The payload is asked directly rather than through the router, because this section's point is the SHAPE both halves
+  // produce - not which feature flags are pinned on at the moment, which an earlier section controls on purpose.
+  const readAnnouncements = await fetchMemberPayload(accountFor('u1'));
+  const readAnnouncementIds = (readAnnouncements.announcements || []).map((row) => row.id).sort();
+  const liveAnnouncementRows = live.announcements.at(-1) || [];
+  check('the reader and the listener agree on the announcements', readAnnouncementIds, liveAnnouncementRows.map((row) => row.id).sort());
+  checkIs(
+    'and the migrated row is keyed by its document id, never the sheet id it still carries',
+    readAnnouncementIds.includes('an2') && !readAnnouncementIds.includes('sheet-1043'),
+    JSON.stringify(readAnnouncementIds)
+  );
+  check(
+    'with the same fields on both sides',
+    Object.keys(liveAnnouncementRows[0] || {}).sort(),
+    Object.keys((readAnnouncements.announcements || [])[0] || {}).sort()
+  );
 
   // WHAT A ONE-SHOT READ OF A WATCHED QUERY DOES, measured rather than assumed. The design note says a listener can make a
   // get() of the same query cache-served - and every collection watched here is also read by the sign-in payload, so that is
@@ -488,10 +630,73 @@ const main = async () => {
   check('and in the shape the caller decides on', routed.success, true);
   checkIs(
     'carrying the payload the screens read',
-    Array.isArray(routed.schedule) && Array.isArray(routed.roster),
+    // `schedule` is deliberately NOT among them any more - it is read per month by the screen that draws it - so the keys
+    // asserted here are the ones a sign-in genuinely lands with.
+    Array.isArray(routed.onDuty) && routed.scheduleTemplates === undefined && routed.schedule === undefined,
     JSON.stringify(Object.keys(routed || {}).slice(0, 8))
   );
-  checkIs('and the member availability rows with it', Array.isArray(routed.availability), 'no availability');
+
+  // --- the member's own claims and the options list: read by the screen that draws them -------------------------------
+  //
+  // Neither is in the sign-in payload any more (asserted above), because a member who signs in to clock in never opens the
+  // Availability screen. The grid asks for the options list and for the months it draws, and the scope comes back with the
+  // claims so a month outside it can be asked for rather than guessed at - the same arrangement GET_SCHEDULE uses.
+  console.log('\n--- the availability grid reads its own data ---');
+  const claims = await routeRead('GET_AVAILABILITY', { from: '2026-09-01', to: '2026-09-30' });
+  check('the claims come back for the months the range covers', (claims.availability || []).map((row) => row.id).sort(), ['aw1|2026-09-01']);
+  check('with the scope they were read over', claims.availability_window, { from: '2026-09-01', to: '2026-09-30' });
+  const windowsForGrid = await routeRead('GET_AVAILABILITY_WINDOWS');
+  check(
+    'and the options list the grid draws from, retired windows and all',
+    (windowsForGrid.availabilityWindows || []).map((row) => row.nickname).sort(),
+    ['Next year pattern', 'Old weekday pattern', 'Saturday day', 'Tuesday night']
+  );
+
+  // --- the calendar's offers and the Training module's two lists, read by the screens that draw them -------------------
+  //
+  // Read as the MEMBER, deliberately: these are their own offers and their own signatures, and signing in as anybody else would
+  // make the assertions below pass on an empty list - which is exactly how a scoped read fails quietly.
+  await signOut(auth);
+  await signIn('bo');
+  //
+  // THE OFFERS ARE STILL NARROWED, and this is where that is asserted now: pending and declined only. `of2` was approved -
+  // approving fills the shift, so the slot is closed and there is no pill to colour - and it must NOT come back. `of3` was
+  // declined and must, because the calendar shows a declined pill so the member knows the shift is closed to them rather than
+  // open to anyone.
+  console.log('\n--- offers and training, read where they are drawn ---');
+  const myOffers = await routeRead('GET_SHIFT_OFFERS');
+  check('the member’s own offers, over the statuses a calendar draws from', myOffers.offers.map((row) => row.id).sort(), ['of1', 'of3']);
+  checkIs(
+    'and no approved offer among them: the shift it filled has no open pill',
+    !myOffers.offers.some((row) => row.status === 'approved'),
+    JSON.stringify(myOffers.offers.map((row) => row.status))
+  );
+  // Both courses, and deliberately not an order: the sheet had none of its own for trainings (it sent row order, which a
+  // collection cannot inherit), so this asserts the CONTENT rather than inventing a sequence the station never chose.
+  const trainingNow = await routeRead('GET_TRAINING');
+  check('the training list, both courses', trainingNow.trainings.map((row) => row.title).sort(), ['Hazmat Awareness', 'SCBA Fit Test']);
+  check(
+    'and this member’s own signatures with it, so one read answers signed and outstanding',
+    (trainingNow.signatures || []).map((row) => row.id),
+    ['ts1']
+  );
+  // The calendar entries, which the three calendar screens read - and whose listener follows that screen rather than the
+  // session. Asserted as a member (this section signed in as one), because that is the audience the seed's events are aimed at.
+  const calendarEvents = await routeRead('GET_EVENTS');
+  checkIs('and the calendar entries come back for the member', Array.isArray(calendarEvents.events) && calendarEvents.events.length > 0, JSON.stringify(calendarEvents.events));
+  checkIs('including the one aimed at everybody', calendarEvents.events.some((row) => row.title === 'Everyone'), JSON.stringify(calendarEvents.events.map((row) => row.title)));
+  // ...and THE SCHEDULE'S REFERENCE DATA, which the calendar and the clock table read. The projection assertion that used to sit
+  // on the member payload lives here now, and here it means more: these are the PUBLIC rows, and an officer's private note travels
+  // in its own collection for the administration wave to merge. Both halves of that are checked - the note is absent from what the
+  // member reads, and present in what the officer does (asserted further up, against the admin payload).
+  const setup = await routeRead('GET_SCHEDULE_SETUP');
+  check('the templates a shift is drawn from, in the week order', setup.scheduleTemplates.map((row) => row.id), ['t3', 't1', 't0', 't2']);
+  checkIs('with no officer note anywhere in them', !('admin_note' in (setup.scheduleTemplates[0] || {})), JSON.stringify(setup.scheduleTemplates[0]));
+  checkIs('and none in the assignments either', !('admin_note' in (setup.assignments[0] || {})), JSON.stringify(setup.assignments[0]));
+  check('and the shift definitions a clock entry is labeled with', Array.isArray(setup.shifts) && setup.shifts.length > 0, true);
+  // Back where this section found the session, so every assertion after it still means what it says.
+  await signOut(auth);
+  await signIn('jane');
 
   // The officer's payload through the same route. It is the member payload PLUS the tab sections, each gated in the
   // reader on the permission its tab needs, so this is also a check that the gating did not take the whole thing down.
@@ -499,9 +704,17 @@ const main = async () => {
   checkIs('the officer payload routes too', adminRouted !== null, 'nothing was routed');
   check('and in the same shape', adminRouted.success, true);
   checkIs(
-    'carrying the officer-only sections',
-    Array.isArray(adminRouted.users) && Array.isArray(adminRouted.certificationRecords),
-    JSON.stringify(Object.keys(adminRouted || {}).slice(0, 10))
+    'and adding NOTHING to it: every officer-only section now belongs to a sub-tab',
+    // THIS IS THE END OF THE PASS, STATED AS ONE LINE: an officer's sign-in is the member payload and no more. The board's
+    // templates and assignments, the offers queue, the shift definitions, the directory and the certification records are each read
+    // by the tab that draws them (App.jsx's admin section effect), and the private notes travel in their own collections for that
+    // read to merge.
+    adminRouted.users === undefined &&
+      adminRouted.assignments === undefined &&
+      adminRouted.scheduleTemplates === undefined &&
+      adminRouted.scheduleOffers === undefined &&
+      adminRouted.certificationRecords === undefined,
+    JSON.stringify(Object.keys(adminRouted || {}).slice(0, 12))
   );
 
   // The refresh reads, through the same route. Their shapes have to be the PAYLOAD's shapes - data.onDuty, data.logs,
@@ -513,11 +726,21 @@ const main = async () => {
     [onDuty.success, Array.isArray(onDuty.onDuty)],
     [true, true]
   );
-  // The roster is not a read of its own any more: it comes from the sign-in payload (asserted above, where its three columns
-  // are pinned). Retiring the action means an old client asking for it gets nothing rather than a second way to read the same
-  // projection - and the calendar already falls back to member ids when a roster is missing, which is the behaviour this used
-  // to degrade to anyway.
-  check('the retired roster read answers nothing', await routeRead('GET_ROSTER'), null);
+  // THE ROSTER IS A READ OF ITS OWN AGAIN, and the reason is exactly this pass: it used to ride along in the sign-in payload, so
+  // nothing asked for it - and now the screens that LIST people do (App#loadRoster), which is what makes it worth routing. Its
+  // three columns are asserted here because this is now the only place they are produced.
+  const roster = await routeRead('GET_ROSTER');
+  check('the roster read answers the crew directory', Object.keys(roster.roster[0]).sort(), ['id', 'name', 'rank_id']);
+  checkIs('with no role in it, for anybody', !JSON.stringify(roster.roster).includes('role_id'), 'a role is in the roster');
+  // ...AND THE BADGE INDEX RIDES WITH IT, because the screens that draw a NAME draw the icons beside it. It is public-safe by
+  // design - derived from records a member may not read, but holding only what is safe to show - which is why it is not an
+  // officer-only section, and why both viewers get exactly the same one.
+  check('and the badge index that goes with the names', roster.certificationBadges.u2.map((badge) => badge.name), ['EMT']);
+  checkIs(
+    'shaped as the member id -> icons map the badges component reads',
+    Array.isArray(roster.certificationBadges.u2),
+    JSON.stringify(roster.certificationBadges)
+  );
   const training = await routeRead('GET_TRAINING');
   checkIs('and training its list', Array.isArray(training.trainings), 'no trainings');
   const logs = await routeRead('GET_TIMECLOCK_LOGS');

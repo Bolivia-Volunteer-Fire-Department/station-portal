@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, CalendarRange } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, CalendarRange } from 'lucide-react';
 import { adminSaveScheduleTemplate, adminDeleteScheduleTemplate } from '../../services/api';
 import { toTimeInputValue } from '../../utils/timeInputValue';
 import { toDateKey } from '../../utils/scheduleDate';

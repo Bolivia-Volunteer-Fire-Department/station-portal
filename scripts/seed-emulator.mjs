@@ -356,6 +356,11 @@ export const seed = async () => {
     audience_keys: ['role:r1'],
     created_at: '2026-02-02 08:00:00',
     live_until: '9999-12-31',
+    // A MIGRATED ROW, deliberately, which means it carries the sheet's own `id` column - and a DIFFERENT value from the
+    // document id, which is the only way that column can do any harm. The app must key this row by `an2` (the document id)
+    // and never by the stale `sheet-1043`: that is what the live listeners and the readers have to agree on, and the
+    // fixture that proves it did not exist until a production announcement list went blank because of it.
+    id: 'sheet-1043',
   });
   await put('announcements/an3', {
     title: 'For Bo',

@@ -59,9 +59,10 @@ checkIs('the member payload was found', memberBody.length > 0);
 checkIs('the admin payload was found', adminBody.length > 0);
 checkIs('the shared station wave was found', stationBody.length > 0);
 
-// 1. The member payload reads none of the SHARED collections itself. It does read a few of its own - `on_duty`,
-// `certification_setup`, `trainings` and `certification_badges` are member-payload business and are all bounded by the
-// station's size rather than by history - so the rule is about the shared ones, which is where the duplication was.
+// 1. The member payload reads none of the SHARED collections itself. What it does read is its OWN: `on_duty` (who is at the
+// station now), the member's own certifications and the catalogue they are named from (the dashboard's notice), and the station
+// settings. Everything else - the directory, the badge index, the schedule, the templates, the assignments, the claims, the
+// offers, training - is read by the screen that draws it, which is the pass this list exists to keep.
 check(
   'the member payload re-reads no shared collection',
   wholeCollectionReads(memberBody).filter((name) => wholeCollectionReads(stationBody).includes(name)),
@@ -69,7 +70,7 @@ check(
 );
 checkIs(
   'it takes what the caller already read instead',
-  /stationRows \|\| \(await readStationRows\(db, scheduleWindow\)\)/.test(memberBody)
+  /stationRows \|\| \(await readStationRows\(db\)\)/.test(memberBody)
 );
 // THE CLOCK HISTORY IS NOT READ HERE AT ALL, which is the whole point of moving it to its own screen: it is the one
 // per-member table with no ceiling, and it was only here so the dashboard could answer "am I clocked in".
@@ -98,25 +99,37 @@ check(
   [...new Set(readerKeys.filter((key, index) => readerKeys.indexOf(key) !== index))],
   []
 );
-// The window is the whole point of that parameter: `schedule` is the only collection here that grows without limit, so it
-// is the only one read as a range - and a future edit that quietly turns it back into a whole-collection read would
-// otherwise be invisible until somebody's bill arrived.
+// THE ONE UNBOUNDED COLLECTION IS NOT IN THE SIGN-IN WAVE AT ALL. `schedule` holds every shift the station has ever
+// scheduled, so it is read per MONTH by the screen that draws it (GET_SCHEDULE, through App#loadScheduleWindow) and never as
+// part of a sign-in. Shifting the check to the reader is the point: the wave no longer has a window to get wrong, and the
+// window is asserted where it now lives.
+checkIs('the sign-in wave does not read the schedule at all', !/'schedule'/.test(stationBody));
 checkIs(
-  'and the one unbounded collection is read as a window',
-  /rowsInRange\('schedule', 'date_from', scheduleWindow\.from, scheduleWindow\.to\)/.test(stationBody)
+  'and the windowed reader that does is a range query',
+  /rowsInRange\('schedule', 'date_from', window\.from, window\.to\)/.test(readFileSync('src/services/firestorePayload.js', 'utf8'))
 );
-check(
-  'with every other collection still read whole',
-  wholeCollectionReads(stationBody).sort(),
-  ['assignments', 'ranks', 'roles', 'schedule_templates', 'shifts']
-);
-// `users` is now the one collection read through a SHARED in-flight read rather than directly, and the projection is the
-// point: four readers read this collection - the station wave, the on-duty join, the notifications tab and the
-// users directory - and Firestore bills per DOCUMENT, so each of them reading it whole was
-// forty members read six times over.
+// THE SIGN-IN WAVE IS DOWN TO THE MENU'S OWN DATA. `roles` is the permission set every screen is gated on, and `ranks` labels
+// people; everything else that used to ride here - the schedule, the directory, the templates, the assignments, the shift
+// definitions, the claims, the offers, the training lists - is read by the screen that draws it. That makes this list the shape
+// to DEFEND: a collection appearing here again means something has crept back into the sign-in.
+check('with the wave reading nothing else whole', wholeCollectionReads(stationBody).sort(), ['ranks', 'roles']);
+// THE SIGN-IN WAVE NO LONGER READS THE DIRECTORY AT ALL, and this is the invariant the whole pass rests on: a member who signs
+// in to clock in needed their own name and the names of whoever was on duty, and it used to cost one document per member of the
+// station to get them. The on-duty names are read BY ID (usersByIds - one document per person actually on shift), and the
+// screens that LIST people read the directory through the shared in-flight read when they open (GET_ROSTER).
+checkIs('the sign-in wave does not read the user directory at all', !/readUsersOnce\(\)/.test(stationBody) && !wholeCollectionReads(stationBody).includes('users'));
+const readsSourceForRoster = readFileSync('src/services/firestoreReads.js', 'utf8');
 checkIs(
-  'and `users` is read through the shared read instead',
-  /readUsersOnce\(\)/.test(stationBody) && !wholeCollectionReads(stationBody).includes('users')
+  'while the screens that list people do, through the shared read - and the badge index with them',
+  /GET_ROSTER: async \(\) => \{[\s\S]*?certification_badges/.test(readsSourceForRoster) &&
+    /readUsersOnce\(\)/.test(readsSourceForRoster)
+);
+checkIs('and the on-duty names are read one document at a time', /usersByIds\(onDutyRows/.test(memberBody) && /getDoc\(doc\(firestore\(\), 'users', id\)\)/.test(source));
+// The App-side half - that OPENING a screen is what fetches the directory, and that a member who only clocks in never does - is
+// asserted with the other App.jsx checks below, where that file has been read.
+checkIs(
+  'and the four readers that want it share ONE read when they do',
+  /readUsersOnce\(\)/.test(readFileSync('src/services/firestorePayload.js', 'utf8')) && /usersInFlight/.test(source)
 );
 
 // ...and the same invariant across the refresh readers, which is where most of those four live.
@@ -139,10 +152,15 @@ check(
   [...`${source}\n${readsSource}`.matchAll(/rowsOf\(collection\((?:db|firestore\(\)), 'users'\)/g)].length,
   1
 );
-check('which the payload projects off in three places', [...source.matchAll(/readUsersOnce\(\)/g)].length, 3);
-// Two, down from three: the roster projection used to be one of them, and retired with its `GET_ROSTER` action (nothing asked
-// for it - the payload projects the roster off its own `users` read). The runner leaderboard left the same way, for a query.
-check('and the refresh readers in two', [...readsSource.matchAll(/readUsersOnce\(\)/g)].length, 2);
+check('which the payload projects off in exactly two places', [...source.matchAll(/readUsersOnce\(\)/g)].length, 2);
+// DOWN FROM THREE, and the one that left is the point of this pass: the sign-in wave used to read the directory so it could
+// project a roster, and now it reads no directory at all - the dashboard names only whoever is on duty, one document per
+// person, by id (usersByIds). What is left is the admin Users section and the shared read itself.
+//
+// AND THE REFRESH READERS IN THREE, UP FROM TWO, because the roster is a read of its own again: the screens that LIST people
+// ask for it when they open (GET_ROSTER), so the action has the caller it never had. The runner leaderboard went the other way,
+// to a bounded query.
+check('and the refresh readers in three', [...readsSource.matchAll(/readUsersOnce\(\)/g)].length, 3);
 // THE RULE THAT MAKES SHARING SAFE, asserted because it is one character away from being wrong: the entry is dropped
 // whether the read SUCCEEDS or FAILS. Releasing only on success would keep a failed read in place, and every later
 // caller in that window would be handed the same failure.
@@ -240,6 +258,45 @@ checkIs('the section readers were found', sectionNames.length >= 8, `only found 
 
 const appSource = readFileSync('src/App.jsx', 'utf8');
 
+// THE ADMINISTRATION WAVE IS NOT READ AT SIGN-IN. It used to be: six shared reads - the roster, the user directory, every
+// assignment, every schedule template, the offers, the certifications - spent on every administrator sign-in, including the
+// ones that only clock in, which is most of them. The trigger is a React effect, so what has to be true is that the SIGN-IN
+// PATH cannot reach it and only the module's opening can, which is what these two patterns together assert.
+check(
+  'the administration wave waits for the module to be opened',
+  /!authToken \|\| !adminModuleOpened\) return;/.test(appSource) &&
+    /if \(activeTab === 'admin' && canAdminister\) setAdminModuleOpened\(true\)/.test(appSource),
+  true
+);
+// ...and the module has to SAY it is loading rather than drawing from props that are still empty, or the first moment of
+// every visit reports a station with no users, no shifts and no assignments.
+check(
+  'and the module draws a loading state instead of its empty lists',
+  /if \(loading\) \{/.test(readFileSync('src/components/admin/AdminPanel.jsx', 'utf8')),
+  true
+);
+// ...AND THE CREW DIRECTORY IS NOT READ AT SIGN-IN EITHER, which is the second half of the same pass: it is a document per
+// member, and it is fetched the first time a screen that LISTS people is opened - the calendar's pill names, or anything in the
+// Administration module that names somebody. A member who only clocks in triggers neither.
+checkIs(
+  'the crew directory waits for a screen that lists people',
+  /if \(activeTab !== 'schedule' && activeTab !== 'admin'\) return;/.test(appSource) && /fetchRoster\(authToken\)/.test(appSource)
+);
+// ...AND THE EVENTS LISTENER FOLLOWS THE SCREEN RATHER THAN THE SESSION, which is the one live read that does. The sign-in
+// subscription names exactly three handlers - on-duty, announcements and settings - and something on the dashboard draws every
+// one of them. Events are watched by an effect that only runs while a calendar screen is open, which is the same "a module's
+// resources when the module is accessed" rule applied to a STREAM: a listener nobody reads is the same waste as a read nobody
+// reads, and it is the one that is invisible in a document count.
+checkIs(
+  'the sign-in listener watches three collections, and events is not one of them',
+  /onDuty: setOnDutyUsers,\s*\n\s*announcements: setAnnouncements,\s*\n\s*systemSettings: setSystemSettings,/.test(appSource)
+);
+checkIs(
+  'while the calendar screens attach the events one themselves',
+  /handlers: \{ events: \(rows\) => setEvents\(normalizeEventList\(rows\)\) \}/.test(appSource) &&
+    /const wantsEvents = activeTab === 'schedule' \|\|/.test(appSource)
+);
+
 // THE DETAIL THAT DECIDES WHETHER THE LIVE READS COST ANYTHING: the effect is keyed on the member's ID, not on the auth
 // token. A token refreshes hourly, and re-attaching on each one would pay a fresh initial snapshot - a read of every document
 // the listener matches - for no new data at all. Firestore re-authenticates its own streams when the token changes, so the
@@ -249,11 +306,28 @@ checkIs(
   /useEffect\(\(\) => \{[\s\S]{0,1400}?subscribeLive\(\{[\s\S]{0,1400}?\}, \[currentUser\?\.id\]\)/.test(appSource)
 );
 checkIs('and re-attaches on the member, never on the token', !/\], \[currentUser\?\.id, authToken\]\)/.test(appSource));
-const setterBlock = /const ADMIN_SECTION_SETTERS = \{([\s\S]*?)\};/.exec(appSource);
+const setterBlock = /const ADMIN_SECTION_SETTERS = \{([\s\S]*?)\n  \};/.exec(appSource);
 checkIs('App has a setter block for them', Boolean(setterBlock));
-const setters = setterBlock ? [...setterBlock[1].matchAll(/\n    ([a-zA-Z]+): set/g)].map((match) => match[1]) : [];
+// A SETTER IS EITHER A BARE `setFoo` OR A FUNCTION THAT UNWRAPS. `schedule` is the second kind: its section answers
+// with the rows AND the window they came in, so a bare setter would put the envelope into the array.
+const setters = setterBlock
+  ? [...setterBlock[1].matchAll(/\n    ([a-zA-Z]+): (?:set|\(payload\) =>)/g)].map((match) => match[1])
+  : [];
 check('every section the payload can read has somewhere to land', sectionNames.filter((name) => !setters.includes(name)), []);
 check('and App does not hold a section the payload cannot refresh', setters.filter((name) => !sectionNames.includes(name)), []);
+
+// THE BOARD'S TAB HAS TO READ THE SCHEDULE ITSELF, and forgetting to is invisible: the tab also reads the templates, so
+// the month still drew - as a month of EMPTY SLOTS that looked exactly like nobody being rostered. It was missing from
+// this list, which is why the names were lost. The schedule also has to unwrap its envelope, or the array holds an
+// object instead of a month.
+const tabSections = /const sectionsForTab = \{([\s\S]*?)\n    \};/.exec(appSource);
+checkIs('App has a per-tab section map', Boolean(tabSections));
+const scheduleTabList = tabSections ? /schedule: \[([^\]]*)\]/.exec(tabSections[1]) : null;
+checkIs('and the schedule board reads the schedule rows, not just its templates', Boolean(scheduleTabList) && scheduleTabList[1].includes("'schedule'"));
+checkIs(
+  'and its section setter unwraps the rows from the window they came in',
+  /schedule: \(payload\) => \{[\s\S]{0,400}?payload\?\.schedule/.test(appSource)
+);
 
 const scopedCalls = [...appSource.matchAll(/ADMIN_SECTION_SETTERS\[(\w+)\]/g)].length;
 checkIs('the scoped path is wired to those setters', scopedCalls >= 2, `found ${scopedCalls}`);
@@ -283,12 +357,15 @@ console.log('  user_settings, settings/public, users/{uid}');
 console.log('  read when its own screen opens (NOT at sign-in): the clock history, over a range - it is the one per-member');
 console.log('  table with no ceiling (a five-year member has thousands of entries), and the dashboard question it used to');
 console.log('  answer at sign-in ("am I clocked in") is answered by the on-duty row, which the clock transaction writes.');
-console.log('\n  cost = the documents those collections hold. `schedule` is the one that grows without limit - it holds every');
-console.log('  shift the station has ever scheduled - so it is the read worth watching, and it is WINDOWED to three months');
-console.log('  (utils/scheduleWindow). `users` is next: four readers want it, and they share ONE in-flight read (readUsersOnce),');
+console.log('\n  cost = the documents those collections hold. `schedule` is the one that grows without limit - every shift the');
+console.log('  station has ever scheduled - and it is NOT read at sign-in at all: a calendar or the board asks for the month it');
+console.log('  is showing (GET_SCHEDULE, windowed by App#loadScheduleWindow), so a sign-in costs the same at three months old as');
+console.log('  at thirty. `users` is next: four readers want it, and they share ONE in-flight read (readUsersOnce),');
 console.log('  so a wave costs one collection read rather than one per reader. Nothing else is read whole on a repeat any more: the');
 console.log('  runner leaderboard - the most repeated screen in the app - used to scan `users` on every play and is a bounded query');
-console.log('  now (25 rows plus one count), the four watched collections bill per CHANGE, and `schedule` is a three-month window.');
+console.log('  now (25 rows plus one count), the watched collections bill per CHANGE rather than per visit - and `events` is not');
+console.log('  watched at sign-in at all: its read and its listener follow the calendar screens that draw it. `schedule` is read a');
+console.log('  month at a time, and the clock history only when its own screen opens.');
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

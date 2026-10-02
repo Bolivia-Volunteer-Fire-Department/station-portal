@@ -323,7 +323,7 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
 }
 
 // Idle session timeout. A member who neither interacts nor navigates for this many minutes is
-// signed out - see utils/sessionTimeout.js for the client half and sessionTtlMs in Code.gs for the
+// signed out - see utils/sessionTimeout.js for the client half and the idle-timer note there for the
 // server half, which is what actually stops the token being used afterwards.
 function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
   const [minutes, setMinutes] = useState(getSettingValue(systemSettings, 'session_timeout', ''));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Printer, Users } from 'lucide-react';
+import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Loader2, Printer, Users } from 'lucide-react';
 import { toDateKey, parseSheetDateKey } from '../utils/scheduleDate';
 import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
@@ -8,7 +8,7 @@ import { rowTimeText, templateTimeText, timeToMinutes, prettyRange, shiftTimeLab
 import { WEEKDAYS, MONTHS, DAY_ORDER } from '../utils/calendarConstants';
 import { isShiftDay } from '../utils/shiftPlacement';
 import EventPill from './EventPill';
-import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from '../utils/events';
+import { eventSegmentsByDay, normalizeEventList } from '../utils/events';
 import { templateIsActiveOn } from '../utils/scheduleTemplates';
 import { assignmentIsActiveOn } from '../utils/assignmentDates';
 import { parseRankOrder, memberCanFillAssignment } from '../utils/rankEligibility';
@@ -90,14 +90,20 @@ export default function ScheduleCalendar({
   const monthStartKey = toDateKey(new Date(year, month, 1));
   const monthEndKey = toDateKey(new Date(year, month + 1, 0));
 
-  // THE MONTH ON SCREEN IS NOT ALWAYS IN THE WINDOW: the sign-in carries last month, this month and next, and these
-  // arrows walk years. Asking for the month is what keeps them working without reading the whole schedule - and it is why
-  // the window travels with the rows rather than being worked out again here.
+  // THE MONTH ON SCREEN IS NOT IN THE WINDOW THE APP HOLDS at first, and that is by design: sign-in carries NO schedule at
+  // all - it is the one collection that grows without limit, and this screen may never be opened - so the month in front of
+  // the member is always asked for, as is any month the arrows walk to. Asking is what keeps the arrows working without
+  // reading every shift the station has ever scheduled, and it is why the window travels with the rows rather than being
+  // worked out again here.
   useEffect(() => {
     if (!onNeedSchedule) return;
     if (windowCoversMonth(scheduleWindow, monthStartKey.slice(0, 7))) return;
     void onNeedSchedule(monthStartKey, monthEndKey);
   }, [onNeedSchedule, scheduleWindow, monthStartKey, monthEndKey]);
+
+  // ...and while that read is in flight the screen SAYS SO. Without a word, opening Schedule shows an empty grid for a
+  // moment, which is indistinguishable from a station with nothing scheduled - the failure the window exists to prevent.
+  const monthPending = Boolean(onNeedSchedule) && !windowCoversMonth(scheduleWindow, monthStartKey.slice(0, 7));
 
   // Friendly label for a member: the signed-in user always resolves from the
   // session, everyone else comes from the name directory (the admin directory
@@ -416,6 +422,14 @@ export default function ScheduleCalendar({
 
   return (
     <div className="space-y-6">
+      {/* The month the member is looking at is read when they look at it (no schedule travels with the sign-in), so this is
+          the honest thing to show while that read is in flight - rather than a month that looks empty. */}
+      {monthPending && (
+        <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading {monthLabel}…
+        </div>
+      )}
       {/* Month-at-a-time calendar */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">

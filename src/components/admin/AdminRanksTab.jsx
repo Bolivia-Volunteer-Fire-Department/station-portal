@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, Loader2, Pencil, Shield, Trash2, Plus, AlertCircle } from 'lucide-react';
+import { Loader2, Pencil, Shield, Trash2, Plus, AlertCircle } from 'lucide-react';
 import { adminSaveRank, adminDeleteRank } from '../../services/api';
 import RankIcon from '../RankIcon';
 import IconPicker from '../IconPicker';

@@ -11,8 +11,7 @@ const {
   buildAuditFilter,
   orderByFor,
   pageSizeFor,
-  auditRowFrom,
-  facetsFrom,
+  logReplyFrom,
   FACET_SAMPLE_SIZE,
 } = require('./auditLog');
 // The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
@@ -1107,23 +1106,10 @@ exports.readSystemLog = onCall(async (request) => {
   }
 
   const [entries, nextQuery] = page;
-  const rows = entries.map((entry) => auditRowFrom(entry, stationTimestamp));
-  // The facets describe the SAMPLE, so the dropdowns offer what the log has held recently rather than everything it has
-  // ever held. A value missing from the list can still be typed into the URL of a future request; what the list must not
-  // do is pretend to be exhaustive.
-  const facets = facetsFrom(sample[0].map((entry) => auditRowFrom(entry, stationTimestamp)));
-
-  return {
-    rows,
-    sort: String(data.sort || '') || 'timestamp_desc',
-    page_size: pageSize,
-    // Forward-only paging, because that is what the Logging API offers: a token for the next page, and no total. Asking
-    // for a page number was the sheet's shape, and this does not pretend to have it.
-    next_page_token: (nextQuery && nextQuery.pageToken) || '',
-    has_more: Boolean(nextQuery && nextQuery.pageToken),
-    actions: facets.actions,
-    members: facets.members,
-  };
+  // The reply is assembled in ./auditLog.js rather than inline here, because its SHAPE is a contract with the tab and the
+  // two halves are deployed separately - so the shape belongs in the pure module the harness already holds. See
+  // logReplyFrom, and the note there on what a missing `api` costs.
+  return logReplyFrom({ entries, nextQuery, sampleEntries: sample[0], data, pageSize, stationTimestamp });
 });
 
 // Identity Platform's own guard on account creation. The app creates members with the Admin SDK from an officer's

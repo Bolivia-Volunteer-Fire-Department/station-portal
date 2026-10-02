@@ -35,7 +35,7 @@ check('the day it runs into is NOT a shift day', isShiftDay(overnightFrom, overn
 
 console.log('\n--- a multi-day shift also appears on its start day only ---');
 const multiFrom = '2026-03-14';
-const multiTo = '2026-03-16';
+const _multiTo = '2026-03-16';
 const span = ['2026-03-13', '2026-03-14', '2026-03-15', '2026-03-16', '2026-03-17'];
 check('exactly one day in the span matches', span.filter((d) => isShiftDay(multiFrom, d)), [multiFrom]);
 

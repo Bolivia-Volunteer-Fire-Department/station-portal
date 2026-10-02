@@ -37,7 +37,8 @@ done in the Firebase and Google Cloud consoles to stand that up is
 - React 19 + Vite (Oxc-powered)
 - Tailwind CSS 4
 - lucide-react icons
-- Backend: Google Apps Script + Google Sheets (`src/services/Code.gs`, deployed separately)
+- Backend: Firebase — Firestore for data, Firebase Auth for sign-in, Cloud Functions for the
+  work a browser must not be trusted with (see `docs/FIRESTORE_MODEL.md` and `docs/FIREBASE_SETUP.md`)
 
 ## Local Development
 
@@ -47,7 +48,7 @@ done in the Firebase and Google Cloud consoles to stand that up is
    npm install
    ```
 
-2. Create your local env file and set the Apps Script URL:
+2. Create your local env file with the Firebase web config:
 
    ```bash
    cp .env.example .env
@@ -56,7 +57,10 @@ done in the Firebase and Google Cloud consoles to stand that up is
    Then edit `.env`:
 
    ```
-   VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
+   VITE_FIREBASE_API_KEY=...
+   VITE_FIREBASE_AUTH_DOMAIN=...
+   VITE_FIREBASE_PROJECT_ID=...
+   VITE_FIREBASE_APP_ID=...
    ```
 
 3. Start the dev server:
@@ -302,18 +306,35 @@ in the publish checklist below.
 (administrator, single-tab, member-only, nothing granted). `npm run verify:all` runs
 every verifier in the project.
 
-## The Apps Script backend: retired, kept as the record
+Every one of those verifiers **server-renders**, which runs component bodies and hook
+*calls* but never an effect — effects only run after a commit, and a server render never
+commits. That gap let a run of bugs through the administration schedule board, each one
+found by an officer looking at a board that would not load: a read effect that depended on
+a callback `App` re-creates every render, so it re-ran after every read it started; then a
+fix for that which cancelled and de-duplicated reads, which under `StrictMode`'s
+mount-unmount-mount left the board with no read at all; then a failed read that spun
+forever, because "pending" meant "no rows loaded yet" and a failed read never loads any.
+`npm run verify:admin-schedule-runtime` closes that gap: it mounts the real board in a
+jsdom DOM (`scripts/dom-env.mjs`) with `@testing-library/react`, so effects run, and
+asserts what the officer sees — the month is drawn, the spinner stops, the reader is asked
+a bounded number of times, a month left behind cannot overwrite the one on screen. It found
+the failed-read spinner on its first run. `verify:app-shell` also checks that every
+`verify:*` script is actually listed in `verify:all`, because a harness that exists but
+never runs passes forever and looks identical to one that runs and passes.
 
-**Nothing here needs deploying.** `src/services/Code.gs` is no longer a backend for anything: there is no
-`VITE_APPS_SCRIPT_URL`, every read and write goes to Firestore, and the login is Firebase's. The script stays in the
-repository for one reason — it is the specification the Firestore implementation was built from, and two harnesses hold the
-two of them together (`verify:refresh-wiring` checks that every routed action has a branch there, `verify:bootstrap` runs the
-sheet's payload builders against a fake spreadsheet and compares them with the Firestore ones). That is also why the
-instructions that used to be here are gone: pasting it into the Apps Script editor and redeploying it would change nothing
-about the running app.
+## The Apps Script backend: removed
 
-What replaced that deployment is two commands — `firebase deploy --only firestore:rules,firestore:indexes` and
-`firebase deploy --only functions` — plus the client build. See `docs/FIREBASE_SETUP.md`.
+The Google Apps Script + Sheets backend that served the app's first version has been deleted —
+`src/services/Code.gs` and the harnesses that read it are gone. Every read and write goes to
+Firestore, the login is Firebase's, and the enforcement lives in `firestore.rules` plus the
+Cloud Functions in `functions/`. Deploying the backend is two commands —
+`firebase deploy --only firestore:rules,firestore:indexes` and `firebase deploy --only functions` —
+plus the client build. See `docs/FIREBASE_SETUP.md`.
+
+The *why* behind several client decisions still refers to the sheet era (the single batched
+sign-in request, the refusal to show an empty station, the retry policy); those notes say so
+where they matter.
+
 
 The rest of this section is kept as the record of what the app used to do, because the *why* behind several decisions still
 refers to it (the single batched sign-in request, the refusal to show an empty station, the retry policy):
@@ -352,7 +373,7 @@ brew install openjdk@21     # keg-only, so it leaves any older Java alone
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 ```
 
-`firestore.rules` is the enforcement now, so read it before changing it: every check that lived in `Code.gs`
+`firestore.rules` is the enforcement now, so read it before changing it: every check the sheet backend made
 reappears there, and each refused case in the harness is paired with an allowed one — because a rule that *errors*
 and a rule that *denies* are the same `permission-denied` to a client, so only the pair tells them apart.
 
@@ -386,20 +407,11 @@ their request is approved or declined.
   they get cannot disagree. The visibility rule for that switch lives in
   `src/utils/notificationPrefs.js` so it can be verified directly
   (`npm run verify:notification-prefs`).
-- **Sending:** `notifyShiftOffer()` in `src/services/Code.gs` is the single seam
-  where every shift-offer change becomes a message, so the backend has to be
-  redeployed (`SAVE_FCM_TOKEN`-style writes go through the existing
-  `UPDATE_USER_SETTINGS` action; `ADMIN_GET_PUSH_STATUS` and
-  `ADMIN_SEND_TEST_PUSH` back the admin screen).
-- **Authorizing (one time):** the FCM backend calls `UrlFetchApp`, which needs
-  the `script.external_request` scope. If the script was authorized before that
-  code existed, admin tests fail with *"You do not have permission to call
-  UrlFetchApp.fetch"* — this is **not** a trigger problem. Run the
-  `diagnoseFcmSetup` function once from the Apps Script editor and follow its
-  output. If no consent prompt appears, either revoke the project's access at
-  `myaccount.google.com/permissions` and re-run, or pin `oauthScopes` to
-  `spreadsheets` + `script.external_request` in `appsscript.json` (the complete
-  list for this script), then deploy a new version.
+- **Sending:** a Firestore trigger on an offer write is the single seam where
+  every shift-offer change becomes a message — nobody has to remember to send,
+  because the trigger fires for whoever wrote the document. See
+  `functions/index.js` and `functions/pushAudience.js`
+  (`npm run verify:push-audience`).
 - **Service worker:** `public/sw.js` handles `push`/`notificationclick` and is
   built to `/sw.js`; it is registered from `src/main.jsx` at the deployed base
   path, and only ever asks for permission after a member clicks **Enable**.
@@ -565,13 +577,11 @@ Implemented in **two halves on purpose**:
 | Half | Where | What it does |
 |---|---|---|
 | Client | `src/utils/sessionTimeout.js` + an effect in `App.jsx` | A one-second tick that signs the user out visibly at the threshold, with a warning in the final minute |
-| Server | `sessionTtlMs` / `parseSessionRecord` in `Code.gs` | The session's **sliding expiry** uses the same value, so an idle token stops working |
 
-**The client timer is the courtesy; the server expiry is the rule.** A browser-only timeout is not a
-timeout — it is a button that claims the session ended. The server half is what stops a token being
-used afterwards, and `scripts/verify-session-timeout.mjs` asserts it by lifting the real
-`parseSessionTimeoutMinutes`, `sessionTtlMs`, `parseSessionRecord`, `retuneSessions`,
-`systemSettingsMap` and `getSheetData` out of `Code.gs` and running them against a stub sheet.
+The client timer is the whole mechanism now: Firebase's own token lifetime is independent of it, and
+there is no server session left to expire. The idle value is configurable in system settings, and
+`scripts/verify-session-timeout.mjs` exercises the state machine (the threshold, the warning window
+and the wording) directly.
 
 ### The performance design: the request path does no settings I/O
 
@@ -694,23 +704,17 @@ per-request traffic this design removes — so it is left open on purpose.
   admin directory and schedule data, and the effect also fetched the offers table that
   `refreshAdminScheduleData` already fetches internally. For an admin that was 13 backend
   executions per sign-in; it is 9 now, with the redundant offers call removed.
-- **No admin save waits on the refresh wave.** A save is one backend write; the refresh behind it is
-  nine requests (`refreshAdminData`), and Apps Script serializes them behind a script lock in `doPost`,
-  so awaiting the wave held the Save button spinning over a sheet that had already been written — the
-  reason a save "takes a long time from the front end but lands on the sheet almost immediately". Every
+- **No admin save waits on the refresh wave.** A save is one write; the refresh behind it used to be
+  nine requests, and awaiting the wave held the Save button spinning over data that had already been
+  written. Every
   admin tab now starts the wave and stops waiting for it, and merges the row it just saved into app state
   itself (`utils/savedRow.js`, one applier for users, roles, ranks, assignments and templates) so the
   table is correct the moment the write returns. A tab whose `onDataChanged` is a *single* request
   (Clock Management, Member Availability) still awaits it, because one round trip is what removes the row
   the administrator just acted on. `verify:refresh-wiring` fails if any tab awaits the fan-out.
-- **The script lock is taken for WRITES only.** `doPost` used to acquire a script lock before it even knew
-  which action was asked for, and Apps Script runs a script's executions concurrently — so every request
-  queued behind every other. With a ten-request refresh wave behind each save, that was the difference
-  between a save settling in ~2s and in ~30s. Read-only actions now skip the lock, so a wave runs
-  concurrently and finishes in about the time of its slowest request. The safety of that rests on one rule:
-  an action listed in `READ_ONLY_ACTIONS` must contain **no write call at all**. `verify:refresh-wiring`
-  reads each listed action's own body out of `Code.gs` and fails if it does, with a negative control against
-  `LOGIN` (a known writer) so the detector itself can't rot.
+- **The sheet era's script-lock rules went with the sheet.** The lock, and the read-only action list
+  that made skipping it safe, existed because Apps Script serialized executions; Firestore needs
+  neither. The corresponding section of `verify:refresh-wiring` was removed with it.
 - **Background reads announce themselves, without blocking anything.** A wave reports through a sonner toast
   keyed by an id that is never reused, so two waves running at once **stack** rather than replacing each
   other: `Refreshing views — 3 of 9 done…` counts up, then becomes `Refreshing views — up to date` (or
@@ -730,10 +734,12 @@ This repo includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) th
 builds the app and publishes it to GitHub Pages automatically.
 
 1. **Create a repository** on GitHub and push this code to it.
-2. **Add the Apps Script URL as a repository secret:**
-   Settings → Secrets and variables → Actions → **New repository secret**
-   - Name: `VITE_APPS_SCRIPT_URL`
-   - Value: your Apps Script URL (the same one used locally in `.env`)
+2. **Add the Firebase web config as repository secrets:**
+   Settings → Secrets and variables → Actions → **New repository secret** for
+   each `VITE_FIREBASE_*` name in `.env.example` (`VITE_FIREBASE_API_KEY`,
+   `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`,
+   `VITE_FIREBASE_APP_ID`, and `VITE_FIREBASE_MESSAGING_SENDER_ID` plus
+   `VITE_FIREBASE_VAPID_KEY` if push is enabled).
 3. **Enable GitHub Pages with the Actions source:**
    Settings → Pages → **Source: GitHub Actions**
 4. **Push to `main`** (or run the workflow manually under the Actions tab).
@@ -749,40 +755,27 @@ asset URLs resolve correctly no matter what you name the repo.
 
 ### Before you publish: the checklist
 
-The front end and the backend deploy separately, so **the app can be published while the backend is behind it**. Work through this once; it is the difference between a working deployment and a screen full of "Invalid action type".
+The backend is Firebase, so "deploying the backend" is
+`firebase deploy --only firestore:rules,firestore:indexes` and
+`firebase deploy --only functions` (see `docs/FIREBASE_SETUP.md`). Work through
+this once before the first real sign-in:
 
-**1. Redeploy the Apps Script backend.** Paste the current `src/services/Code.gs` into the editor, Save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. A deployment is pinned to a version, so editing the file is not enough. Everything added recently is server-side: events, announcements, training, documents and their checklist items and signatures, the session timeout, the System Log, the clock geofence, the write-only script lock, and the batched sign-in (`GET_BOOTSTRAP` / `ADMIN_GET_BOOTSTRAP` — see the warning above about deploying before the client). A deployment that predates the checklist work answers the new actions with "not available" and the app shows that message rather than failing silently.
+**1. Seed the Firestore data the app expects.** The collections and document
+shapes are listed in `docs/MIGRATION_MAP.md` and enforced by `firestore.rules`;
+`npm run emulators:seed` writes a demo station that exercises all of them.
 
-**2. Create the sheets and columns the app expects.** A missing *column* is usually silent, not an error — the write path drops values it cannot map — so check the names rather than assuming:
 
-| Sheet | What it needs |
-|---|---|
-| `events` | `id, date_from, date_to, title, author_user_id, color, role_id, rank_id, user_id, is_recurring, recurring_start, recurring_end, recurring_amount, recurring_frequency, is_sunday…is_saturday, date_of_month, is_all_day` |
-| `announcements` | `id, effective_date, end_date, is_visible_on_login, is_visible_on_dashboard, is_visible_on_sidebar, role_id, rank_id, user_id, title, message, icon, context_variant, author_user_id, is_send_push_notification, is_dismissable` |
-| `training` / `training_signatures` | the training columns listed in *Administration → System → Help → Training*, and `id, training_id, user_id` |
-| `users` | `runner_sound_profile` and `is_change_password_on_login` (administrator-managed attributes, so they live here rather than in `user_settings`) |
-| `schedule_templates` | `nickname`, `effective_date`, `end_date` |
-| `assignments` | `color`, `icon`, `effective_date`, `end_date` |
-| `roles` | one column per permission in [Role Permissions](#role-permissions) — `can_view_documents`, `can_manage_documents`, `can_verify_documents`, `can_create_events`, `can_make_announcements`, `can_view_system_log`, `can_access_debug`, the three training permissions, and the rest |
-| `documents` | nothing — the sheet **creates itself** with its headers on the first save, and grows its header row for any column the code adds later. `id, title, folder, doc_type, sort_order, content, is_published, rank_id, is_sign_required, content_revision, author_user_id, updated_at` |
-| `document_signatures` | nothing either — same self-creating sheet. `id, document_id, checklist_item_id, user_id, signed_by_user_id, signature_role, signed_at, content_revision`. The server stamps `signed_at`; `checklist_item_id` is blank for a whole-document signature and set for a checklist line. `signature_role` is `member` for the member's own signature and `verifier` for somebody else's confirmation of it |
-| `document_checklist_items` | nothing either — same self-creating sheet. `id, document_id, sort_order, section, label`. The item ids are what signatures point at, so **editing an item keeps its signatures and deleting a signed one is refused** |
-| `system_settings` | `session_timeout`, `is_sounds_active`, `required_clock_latitude`, `required_clock_longitude`, `gps_margin_of_error`, and the FCM keys |
+**2. Seed the station's data.** The collection shapes are in `docs/MIGRATION_MAP.md`, and
+`npm run emulators:seed` writes a demo station that exercises all of them. For the real
+station, the migration scripts (`npm run migration:*`) read the original spreadsheet and
+write Firestore documents directly.
 
-`user_settings` is the exception: it **grows its own header row**, so `notify_announcements` and the other preference columns appear by themselves. All it needs is the identity column (`user_id`).
+**3. Point the deployed build at your Firebase project.** The `VITE_FIREBASE_*`
+values in the repository secrets are what the published bundle uses; a build without
+them cannot reach its data.
 
-`push_devices` needs nothing from you either — it is created on first use, because a device registering into a sheet that does not exist would fail silently, which is the failure mode that feature has already produced once.
 
-**3. Run the id migration, once.** Deploying the version of `Code.gs` that allocates UUIDs leaves the *existing* rows on their old sequential ids, so run the migration once from the Apps Script editor. The editor's **Run** button cannot pass arguments, so it is two functions — pick each in the toolbar's function dropdown and press Run:
-
-```
-checkIdMigration      step 1 - reports what it WOULD change, writes nothing
-applyIdMigration      step 2 - applies it
-```
-
-It needs a free script lock, so ask everyone to close the portal first. It rewrites every record id **and every reference to one** (`user_id`, `role_id`, `schedule_id`, `approved_by`, …), resolves a legacy *username* in a user reference to that member, records the old→new mapping in an `id_migration` sheet so it can be checked or resumed, and signs everybody out at the end — their sessions carried the ids that just changed. Menus, timers and settings keys are unaffected. Read the report before applying: a **duplicate id** or a row **with no id** stops it, by design; a reference that names *nothing* (a deleted member, `Unknown`, a hand-typed value) is listed as left exactly as it is and does not stop anything. Background: [`docs/WRITE_SAFETY.md`](docs/WRITE_SAFETY.md).
-
-**4. Tick the permissions** on the roles that should have them — *Administration → System → Help → Roles* explains what each one unlocks. A permission column that reads blank is treated as false, so an unticked box hides the tab.
+**4. Tick the permissions** on the roles that should have them — *Administration → System → Help → Roles* explains what each one unlocks. A permission that reads false hides the tab.
 
 **5. Add the repository secret and enable Pages** (steps 2 and 3 above).
 
@@ -828,22 +821,20 @@ It needs a free script lock, so ask everyone to close the portal first. It rewri
 
 ### Security notes for a public deployment
 
-- **The site is public; the API is not.** Only two backend actions are
-  unauthenticated (`GET_INITIAL_DATA`, `LOGIN`); all 38 other actions require a
-  session token, and admin actions additionally check `isAdminUser`. The
-  deployment URL is embedded in the public bundle, so treat it as known to
-  anyone.
+- **The site is public; the API is not.** The data is protected by
+  `firestore.rules`, which deny everything not explicitly granted, and by App
+  Check where configured. The web config is embedded in the public bundle by
+  design, so treat it as known to anyone; the rules are what stop it being
+  useful to a stranger.
 - **Secrets are stripped from the public payload.** `GET_INITIAL_DATA` runs
   `publicSystemSettings` / `publicUserSettings`, which remove the FCM
   service-account credentials and replace each member's `fcm_token` with an
   `fcm_registered` boolean. Don't add credential keys to any new unauthenticated
   response.
-- **The service-account private key is write-only.** It is never returned to a
-  browser, not even to an authenticated admin; the admin screen only reports
-  whether one is stored. For stronger handling, keep it in Apps Script Script
-  Properties as `FCM_SERVICE_ACCOUNT_PRIVATE_KEY`
-  (`FCM_SERVICE_ACCOUNT_EMAIL` alongside it) — the backend prefers that store
-  over the sheet.
+- **The service-account private key is write-only.** It lives in the Cloud
+  Functions runtime (set once with `firebase functions:secrets:set`), is never
+  returned to a browser, not even to an authenticated admin; the admin screen
+  only reports whether one is stored.
 - **Restrict the Firebase web API key** (Google Cloud Console → APIs & Services →
   Credentials) to HTTP referrers for your Pages domain — the key ships in the
   client by design, but restricting it stops anyone reusing it elsewhere. **Use the

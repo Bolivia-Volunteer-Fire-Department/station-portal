@@ -1,5 +1,5 @@
 import React, { Suspense, useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Clock, Shield, Loader2, Menu, X } from 'lucide-react';
+import { Clock, Loader2, Menu, X } from 'lucide-react';
 // Toasts come from our own wrapper, not from sonner: it plays the sound mapped to each toast kind and then
 // delegates, so every toast in the app is audible without its call site knowing about sounds. The Toaster host
 // itself is still sonner's.
@@ -20,6 +20,10 @@ import {
   fetchBootstrap,
   adminFetchBootstrap,
   fetchAdminSections,
+  fetchAvailabilityWindows,
+  fetchEvents,
+  fetchRoster,
+  fetchScheduleSetup,
   fetchScheduleWindow,
   fetchTimeclockLogs,
   fetchTraining,
@@ -79,7 +83,7 @@ import DigitalClock from './components/DigitalClock';
 import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
 import { mergeSavedUser } from './utils/userRow';
-import { mergeSavedRow, mergeRowsById } from './utils/savedRow';
+import { mergeSavedRow, mergeRowsById, replaceRowsInRange } from './utils/savedRow';
 // Date keys, for the windows this screen asks for (the clock history, and the schedule before it).
 import { toDateKey } from './utils/scheduleDate';
 // The trustworthy-clock rule, for the clock card: it must not offer a button it cannot honour, and it must say why.
@@ -136,6 +140,9 @@ export default function App() {
   // navigates outside it asks for the month it needs, which is why this travels with the rows rather than being worked
   // out again: without it a screen cannot tell "this month is empty" from "I have not asked for this month".
   const [scheduleWindow, setScheduleWindow] = useState({ from: '', to: '' });
+  // Why a read of that window failed, if it did. Shown by the screens that draw a schedule, because an empty month and
+  // a month that never arrived look identical otherwise.
+  const [scheduleWindowError, setScheduleWindowError] = useState('');
   const [availability, setAvailability] = useState([]);
   // The availability windows (station reference data, in the sign-in payload) and the scope the claims were read over -
   // the grid needs to know what it holds before it can trust "nothing is marked" for a month.
@@ -169,6 +176,11 @@ export default function App() {
   // directory via refreshAdminUsers; members only get this projection, and it's
   // what lets the schedule calendar name other people's shifts.
   const [roster, setRoster] = useState([]);
+  // WHETHER IT HAS BEEN ASKED FOR YET. The roster is a DIRECTORY - one document per member - and it is not in the sign-in
+  // payload any more: the dashboard names nobody except whoever is on duty (which the payload carries by id), and most
+  // sign-ins are clock-ins. The effect below fetches it the first time a screen that LISTS people is opened, and once for the
+  // rest of the session after that.
+  const [rosterLoaded, setRosterLoaded] = useState(false);
   // Shift offers: the signed-in member's own requests, plus (admins only) the
   // full table the Schedule Management calendar flags pending approvals from.
   const [offers, setOffers] = useState([]);
@@ -303,7 +315,6 @@ export default function App() {
   // server refuses every documents action, which is where the rule actually lives. The other two documents
   // permissions both require this one (see utils/permissions).
   const canViewDocuments = can('can_view_documents');
-  const canManageDocuments = can('can_manage_documents');
 
   // Modules that render a seven-column calendar get the wider container.
   //
@@ -413,7 +424,10 @@ export default function App() {
   const nameDirectory = users.length > 0 ? users : roster;
 
   useEffect(() => {
+    // Mount-only data load. loadAppData is recreated every render, so naming it here would
+    // re-run the load on every render rather than once - the empty list is the intent.
     loadAppData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load and update loading messages from systemSettings
@@ -522,7 +536,7 @@ const getLoadingMessage = () => {
       // Only public/config data is fetched pre-login. Member data (logs, on-duty
       // roster, admin directory) is fetched after authentication succeeds.
       await refreshAdminData();
-    } catch (err) {
+    } catch {
       setStatusMessage({ type: 'error', text: 'Failed to connect to backend server.' });
     } finally {
       setInitialLoading(false);
@@ -599,7 +613,7 @@ const getLoadingMessage = () => {
     // a screen that keeps showing yesterday's data.
     //
     // ADMIN_GET_BOOTSTRAP answers all of it, built from the same helpers the individual actions use (see
-    // adminBootstrapPayload in Code.gs). Without a token - the pre-login load, which is all the login screen
+    // admin payload). Without a token - the pre-login load, which is all the login screen
     // needs - the public payload is still its own request, unauthenticated by design.
     const tasks = token
       ? [
@@ -611,7 +625,6 @@ const getLoadingMessage = () => {
                 sessionExpired(token);
                 return REFRESH_EXPIRED;
               }
-              if (warnIfBackendPredatesBootstrap(data)) return REFRESH_FAILED;
               if (!data || !data.success) return REFRESH_FAILED;
               applyAdminBootstrap(data);
               return REFRESH_OK;
@@ -677,7 +690,17 @@ const getLoadingMessage = () => {
     roles: setRoles,
     ranks: setRanks,
     shifts: setShifts,
-    schedule: setSchedule,
+    // THE SCHEDULE SECTION ANSWERS WITH ITS ROWS *AND* THE WINDOW THEY CAME IN - one shape for the server, which has
+    // to say what it read rather than let a screen assume it holds everything. Every other section is a plain list, so
+    // this one is a function that unwraps, and it records the window too. Registering a bare `setSchedule` here would
+    // put the ENVELOPE into the array: `{schedule: [...], schedule_window: {...}}`, which is not a month of shifts and
+    // would break every screen that filters it.
+    schedule: (payload) => {
+      const rows = Array.isArray(payload) ? payload : payload?.schedule;
+      if (Array.isArray(rows)) setSchedule(rows);
+      const window = payload?.schedule_window;
+      if (window && (window.from || window.to)) setScheduleWindow(window);
+    },
     scheduleTemplates: setScheduleTemplates,
     assignments: setAssignments,
     scheduleOffers: setAdminOffers,
@@ -696,6 +719,12 @@ const getLoadingMessage = () => {
   // NO NAMES MEANS THE WHOLE PAYLOAD, which is what makes this safe to adopt one tab at a time: a save that has not been
   // scoped yet is slow rather than wrong. A scoped refresh that FAILS falls back to the payload for the same reason -
   // being wrong is worse than being expensive.
+  //
+  // AND ONE THING THE FALLBACK CANNOT DO, which is the trap that had to be fixed once already: the payload carries only
+  // the collections bounded by the station's size. `schedule`, `users`, `assignments` and `schedule_templates` left it
+  // when the app began loading lazily (see firestorePayload), so a save that writes one of those MUST name it. An
+  // unnamed refresh of a schedule write is not merely stale - it returns successfully, having refreshed everything
+  // except the thing that changed, so the board looks saved until the month changes and then loses the row.
   const refreshAdminCollections = async (names, token = authToken) => {
     const wanted = (Array.isArray(names) ? names : [names])
       .filter(Boolean)
@@ -705,10 +734,9 @@ const getLoadingMessage = () => {
     try {
       const data = await fetchAdminSections(wanted);
       wanted.forEach((name) => ADMIN_SECTION_SETTERS[name](data[name]));
-      // A scoped refresh REPLACES the schedule array, so the window has to be recorded with it: the array no longer holds
-      // the months a navigation fetched, and saying otherwise would leave a screen showing an empty month it believes it
-      // has. The board asks again for any month it needs.
-      if (data && data.schedule_window) setScheduleWindow(data.schedule_window);
+      // The `schedule` section carries its own window and its setter records it (see ADMIN_SECTION_SETTERS above), so
+      // there is nothing to do here. This used to look for a top-level `schedule_window`, which the section reader has
+      // never returned - the window rides INSIDE the section, beside the rows it describes.
       return REFRESH_OK;
     } catch (err) {
       console.error(`[refresh] could not re-read ${wanted.join(', ')}, so the whole payload is being read instead`, err);
@@ -719,20 +747,40 @@ const getLoadingMessage = () => {
   // A WINDOW of the schedule the sign-in did not carry, for a screen that navigated to it: a month further back or
   // further forward than last/this/next, which is all the payload reads (see utils/scheduleWindow).
   //
-  // MERGED, never replaced: the window that arrived at sign-in is still valid, and a range that lands later must not drop
-  // rows an earlier one brought - the calendar draws whatever it holds, and the board diffs a month of it.
+  // THE FETCH IS AUTHORITATIVE FOR THE RANGE IT WAS ASKED ABOUT, so the rows inside that range are replaced by what
+  // came back and the months outside it are left alone. Merging alone is not enough: a merge can only ADD, so a shift
+  // DELETED from a month stayed in the array and the board drew it straight back on. The window only ever grows, which
+  // is what stops a month being asked for twice - and that makes `refreshAdminCollections` the only thing that can
+  // refresh one, which is why every save that writes a schedule row has to name that section.
+  //
+  // A FAILED READ IS REMEMBERED, NOT SWALLOWED, and this is not defensive padding. The call used to let its error
+  // escape into a `void` at every call site, so a refused or offline read produced a full month of empty slots that
+  // looked exactly like a month with nobody rostered - the board drew its template skeleton and said nothing. The
+  // window is NOT recorded on failure either, so the next look asks again rather than believing it already has a
+  // month it never received.
   const loadScheduleWindow = async (from, to) => {
-    const data = await fetchScheduleWindow(from, to, authToken);
-    const rows = data && Array.isArray(data.schedule) ? data.schedule : [];
-    if (rows.length) setSchedule((prev) => mergeRowsById(prev, rows));
-    // The window grows to cover what was just read, so the same month is never asked for twice.
-    if (data && data.schedule_window) {
-      setScheduleWindow((prev) => ({
-        from: prev.from && prev.from < data.schedule_window.from ? prev.from : data.schedule_window.from,
-        to: prev.to && prev.to > data.schedule_window.to ? prev.to : data.schedule_window.to,
-      }));
+    try {
+      const data = await fetchScheduleWindow(from, to, authToken);
+      const rows = data && Array.isArray(data.schedule) ? data.schedule : [];
+      setSchedule((prev) => replaceRowsInRange(prev, rows, from, to));
+      // The window grows to cover what was just read, so the same month is never asked for twice.
+      if (data && data.schedule_window) {
+        setScheduleWindow((prev) => ({
+          from: prev.from && prev.from < data.schedule_window.from ? prev.from : data.schedule_window.from,
+          to: prev.to && prev.to > data.schedule_window.to ? prev.to : data.schedule_window.to,
+        }));
+      }
+      setScheduleWindowError('');
+      return rows;
+    } catch (err) {
+      console.error(`[schedule] could not read ${from || 'the first month'} to ${to || 'the last'}`, err);
+      setScheduleWindowError(
+        (err && err.message) || 'Could not load the schedule for that month.'
+      );
+      // null, not []: an empty month is a real answer, and the board seeds from it - a failed read must not look like a
+      // month with nobody rostered, so the caller can tell the two apart.
+      return null;
     }
-    return rows;
   };
 
   // LIVE READS (services/liveReads.js): the four small collections where a listener is cheaper than re-reading - a listener
@@ -752,7 +800,6 @@ const getLoadingMessage = () => {
       handlers: {
         onDuty: setOnDutyUsers,
         announcements: setAnnouncements,
-        events: (rows) => setEvents(normalizeEventList(rows)),
         systemSettings: setSystemSettings,
       },
       // A listener that fails must not throw into a render: it is logged, the last data stays on screen, and the next
@@ -762,12 +809,147 @@ const getLoadingMessage = () => {
     return stop;
   }, [currentUser?.id]);
 
-  // When auth token changes, refresh all admin-scoped data if we're an admin
+  // EVENTS, AND THEIR LISTENER, FOLLOW THE SCREEN RATHER THAN THE SESSION.
+  //
+  // They are drawn by the member's own calendar, the availability grid and the officer's board - and by nothing on the dashboard,
+  // which is the screen most sign-ins are here for. So both halves arrive when one of those opens: the READ first (a listener
+  // alone would show nothing until somebody else changed an event), then the listener to keep it fresh.
+  //
+  // `subscribeLive` takes a SUBSET of handlers by design - "a handler that is not given is not subscribed to at all" - so this is
+  // the same call as the sign-in one with a single handler in it, and it returns its own teardown. The dependency is the BOOLEAN,
+  // not the tab, so walking between those screens does not re-subscribe; leaving them all does tear the stream down.
+  //
+  // The board counts because it is the only OFFICER screen with a calendar on it: opening Administration for the Users tab should
+  // no more attach this listener than it should read the schedule.
+  const onScheduleBoard = activeTab === 'admin' && adminSubTab === 'schedule';
+  const wantsEvents = activeTab === 'schedule' || activeTab === 'availability' || onScheduleBoard;
   useEffect(() => {
-    if (!isAdmin || !authToken) return;
-    
-    void refreshAdminData(authToken);
-  }, [authToken, isAdmin]);
+    if (!authToken || !currentUser?.id || !wantsEvents) return;
+    let cancelled = false;
+    fetchEvents(authToken)
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.events)) return;
+        setEvents(normalizeEventList(data.events));
+      })
+      .catch((error) => console.error('[events] could not read the calendar entries', error));
+    const stop = subscribeLive({
+      userId: currentUser.id,
+      handlers: { events: (rows) => setEvents(normalizeEventList(rows)) },
+      onError: (error) => console.warn('[live] the events read could not be kept open:', error && error.message),
+    });
+    return () => {
+      cancelled = true;
+      stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, currentUser?.id, wantsEvents]);
+
+  // THE SCHEDULE'S REFERENCE DATA - the templates, the assignments and the shift definitions - read once when a screen that draws
+  // a schedule (or labels a clock entry) is opened.
+  //
+  // It is the last of the station-wide data to leave the sign-in payload. The member calendar needs the templates and assignments
+  // to draw a month, the clock history needs the shift definitions to label each entry with the shift it belonged to, and the
+  // officer's module needs all three. Nothing on the dashboard draws any of them - which is why this waited.
+  const [scheduleSetupLoaded, setScheduleSetupLoaded] = useState(false);
+  // The TWO screens of a member's own that draw a shift or label an entry with one. An OFFICER's copies come from the sections
+  // below, tab by tab, because they belong to tabs that are opened one at a time - which is the point of that map.
+  const wantsScheduleSetup = activeTab === 'schedule' || activeTab === 'clock-history';
+  useEffect(() => {
+    if (!authToken || scheduleSetupLoaded || !wantsScheduleSetup) return;
+    let cancelled = false;
+    fetchScheduleSetup(authToken)
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data.scheduleTemplates)) setScheduleTemplates(data.scheduleTemplates);
+        if (Array.isArray(data.assignments)) setAssignments(data.assignments);
+        if (Array.isArray(data.shifts)) setShifts(data.shifts);
+        setScheduleSetupLoaded(true);
+      })
+      .catch((error) => console.error('[schedule] could not read the templates and the assignments', error));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, wantsScheduleSetup, scheduleSetupLoaded]);
+
+  // THE ADMINISTRATION MODULE'S TWO LARGE READS ARRIVE WITH THEIR OWN TABS, not with the module.
+  //
+  // `users` is the directory joined to its private half - one document per member, twice over - and `certificationRecords` is
+  // every member's records. Both grow with the station, and an officer who opens Administration for the schedule board sees
+  // neither. The client already reads ONE section at a time for a save's own refresh (fetchAdminSections, over
+  // readAdminSections), so this is that same read, asked for by the tab that draws it - and the permission that gates the tab is
+  // what gates it, because a section is only reachable from a tab the role holds.
+  const [adminSectionLoaded, setAdminSectionLoaded] = useState({});
+  useEffect(() => {
+    if (!authToken || activeTab !== 'admin') return;
+    // WHICH SECTIONS A TAB DRAWS, which is the whole of this arrangement: the board draws a schedule, so it needs the templates
+    // the pills are built from, the assignments that colour and order them, and the offers still waiting (its slot flags read
+    // those); two tabs exist for one of those rows each, and each also wants the assignments a template is filtered by; the
+    // approvals queue is the offers table; the clock table labels each entry with the shift it belonged to.
+    //
+    // A TAB WITH NO ENTRY READS NOTHING, which is what makes this worthwhile rather than a different arrangement of the same
+    // reads: the module's shell - its home, the system log, the documents tab - costs nothing beyond the member payload.
+    const sectionsForTab = {
+      // THE BOARD READS THE SCHEDULE, and this line is the bug that lost the member names: the tab read its templates,
+      // its assignments and its offers - which is enough to draw a month of EMPTY SLOTS - and never read the rows that
+      // fill them. The board looked like a month nobody was rostered on. The `schedule` section answers with the rows
+      // and the window they came in, which its setter above unwraps.
+      schedule: ['schedule', 'scheduleTemplates', 'assignments', 'scheduleOffers'],
+      templates: ['scheduleTemplates', 'assignments'],
+      assignments: ['assignments', 'scheduleTemplates'],
+      approvals: ['scheduleOffers'],
+      clock: ['shifts'],
+      users: ['users'],
+      certifications: ['certificationRecords'],
+    };
+    const wanted = (sectionsForTab[adminSubTab] || []).filter((section) => !adminSectionLoaded[section]);
+    if (!wanted.length) return;
+    let cancelled = false;
+    fetchAdminSections(wanted)
+      .then((data) => {
+        if (cancelled || !data) return;
+        const loaded = {};
+        wanted.forEach((section) => {
+          if (data[section] === undefined) return;
+          ADMIN_SECTION_SETTERS[section]?.(data[section]);
+          loaded[section] = true;
+        });
+        if (Object.keys(loaded).length) setAdminSectionLoaded((previous) => ({ ...previous, ...loaded }));
+      })
+      .catch((error) => console.error(`[admin] could not read the ${wanted.join(', ')} section(s)`, error));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, adminSubTab, adminSectionLoaded]);
+
+  // THE ADMINISTRATION WAVE WAITS FOR THE MODULE TO BE OPENED.
+  //
+  // An administrator signing in to clock in used to pay for the whole wave: the roster, the user directory, every assignment,
+  // every schedule template, the offers and the certifications - reads made for a screen they may never open. Most sign-ins
+  // are clock-ins, and this is the same laziness the clock history and the schedule get: a module's data is read when the
+  // module is.
+  //
+  // It fires on the FIRST opening and thereafter behaves exactly as before, including re-reading on a token change. The menu
+  // is unaffected: permissions come from `roles/{roleId}`, which is in the shared wave beside the caller's own profile, so
+  // the sidebar knows what this officer may do before anything is opened.
+  const [adminModuleOpened, setAdminModuleOpened] = useState(false);
+  // Whether that first read has come back - so the module draws a spinner rather than a panel full of "No users yet".
+  const [adminWaveSettled, setAdminWaveSettled] = useState(false);
+  useEffect(() => {
+    if (activeTab === 'admin' && canAdminister) setAdminModuleOpened(true);
+  }, [activeTab, canAdminister]);
+
+  // Refresh all admin-scoped data for an administrator - ONCE THE MODULE HAS BEEN OPENED, not at sign-in (see above).
+  useEffect(() => {
+    if (!isAdmin || !authToken || !adminModuleOpened) return;
+
+    void refreshAdminData(authToken).finally(() => setAdminWaveSettled(true));
+    // The effect is keyed on WHEN the module opened, not on the refresher's identity:
+    // refreshAdminData is recreated every render, and naming it would refire the wave
+    // on every render after the module opens. The saves call their own scoped refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, isAdmin, adminModuleOpened]);
 
   // Opens the reauthentication modal instead of logging the user out. An
   // Applying a sign-in payload.
@@ -813,21 +995,6 @@ const getLoadingMessage = () => {
     if (data.ranks) setRanks(data.ranks);
     if (data.shifts) setShifts(data.shifts);
     if (data.systemSettings) setSystemSettings(data.systemSettings);
-  };
-
-  // A backend that predates the batched actions answers "Invalid action" for them. That is worth saying out loud,
-  // because the symptom is otherwise indistinguishable from a slow backend: a signed-in app with no shifts on it.
-  // A deployment has to be ahead of (or level with) the client for the batched sign-in - see the deployment
-  // checklist in the README.
-  const warnIfBackendPredatesBootstrap = (data) => {
-    if (data && !data.success && /invalid action/i.test(String(data.message || ''))) {
-      console.error(
-        '[refresh] this Apps Script deployment does not know GET_BOOTSTRAP. Deploy the current Code.gs: the ' +
-          'sign-in payload is one request now, and an older deployment answers it with "Invalid action".'
-      );
-      return true;
-    }
-    return false;
   };
 
   const applyAdminBootstrap = (data) => {
@@ -902,7 +1069,7 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, adminSubTab, authToken, logsScope]);
 
-  const refreshLogs = async (token) => {
+  const refreshLogs = async (token = authToken) => {
     // Only when the history is loaded. A clock action needs the ON-DUTY list refreshed (refreshOnDuty does that); fetching a
     // member's entire clock history to show a card that does not use it is exactly the read this pass removed.
     if (!logsScope) return REFRESH_OK;
@@ -912,7 +1079,13 @@ const getLoadingMessage = () => {
         sessionExpired(token);
         return REFRESH_EXPIRED;
       }
-      if (data && data.logs) setLogs((prev) => mergeRowsById(prev, data.logs));
+      // REPLACED WITHIN ITS OWN RANGE, not merged. This read is authoritative for exactly the window `logsScope`
+      // names, so a clock entry DELETED from that window has to leave the array - a merge could only ever add, which
+      // left the deleted row on screen until the page was reloaded. The range applies to `time_in`, which is the only
+      // date a clock entry has ("yyyy-MM-dd HH:mm:ss"); see utils/savedRow#replaceRowsInRange.
+      if (data && data.logs) {
+        setLogs((prev) => replaceRowsInRange(prev, data.logs, logsScope.from, logsScope.to, 'time_in'));
+      }
       return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update logs', err);
@@ -988,22 +1161,119 @@ const getLoadingMessage = () => {
   };
 
   // THE OFFICER'S ROSTER DATA, loaded when one of the screens that reads it is open - the Member Availability tab and
+  // THE AVAILABILITY OPTIONS LIST AND THE MEMBER'S OWN CLAIMS, read when that screen is opened - neither is in the sign-in
+  // payload any more, because a member who signs in to clock in never opens it.
+  //
+  // The windows are reference data, read once for the session. The claims come in MONTHS, so a quarter around today is what the
+  // grid starts with, and the Load <month> button inside it asks for anything outside that (App#loadAvailabilityMonth).
+  const [windowsLoaded, setWindowsLoaded] = useState(false);
+  useEffect(() => {
+    if (!authToken) return;
+    if (activeTab !== 'availability') return;
+    if (!windowsLoaded) {
+      fetchAvailabilityWindows(authToken)
+        .then((data) => {
+          if (!data || !Array.isArray(data.availabilityWindows)) return;
+          setAvailabilityWindows(data.availabilityWindows);
+          setWindowsLoaded(true);
+        })
+        .catch((error) => console.error('[availability] could not read the windows', error));
+    }
+    // The claims for this quarter are already in hand once a scope has been set; the button in the grid covers the rest.
+    if (availabilityScope.from) return;
+    const from = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1));
+    const to = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0));
+    void refreshAvailability(authToken, { from, to });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, windowsLoaded, availabilityScope.from]);
+
+  // THE MEMBER'S OWN OFFERS, read once when the calendar that draws their pills is opened - and refreshed from there by the
+  // screen itself when an offer is raised or withdrawn (see onOfferSubmitted). They used to ride with every sign-in, on a
+  // dashboard that draws none of them.
+  const [offersLoaded, setOffersLoaded] = useState(false);
+  useEffect(() => {
+    if (!authToken || offersLoaded) return;
+    if (activeTab !== 'schedule') return;
+    let cancelled = false;
+    void refreshOffers(authToken).finally(() => {
+      if (!cancelled) setOffersLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, offersLoaded]);
+
+  // THE TRAINING CATALOGUE AND THIS MEMBER'S SIGNATURES, read once when that module is opened - by a member who signs, or by an
+  // officer whose tab lists who has signed what - and refreshed from there when something is signed (onChanged={refreshTraining}).
+  // Both used to ride with every sign-in.
+  const [trainingLoaded, setTrainingLoaded] = useState(false);
+  useEffect(() => {
+    if (!authToken || trainingLoaded) return;
+    // THE MEMBER'S Training screen, or the ADMINISTRATION one - and for the officer it waits for that TAB rather than the whole
+    // module, because the catalogue is one tab's data and an officer opening the system log should not read it.
+    const wantsTraining = activeTab === 'training' || (activeTab === 'admin' && adminSubTab === 'training');
+    if (!wantsTraining) return;
+    let cancelled = false;
+    void refreshTraining(authToken).finally(() => {
+      if (!cancelled) setTrainingLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, adminSubTab, trainingLoaded]);
+
+  // THE CREW DIRECTORY, read when a screen that LISTS people is opened - the calendar's pill names, and everything in the
+  // Administration module that names somebody - and once per session after that.
+  //
+  // THIS IS THE POINT OF THE WHOLE PASS. It used to arrive with every sign-in as one document per member, for a dashboard that
+  // names nobody except whoever is on duty: a station of thirty paid thirty reads so that somebody clocking in could see
+  // themselves. Nothing on the dashboard reads this, so nothing triggers it - see readStationRows.
+  useEffect(() => {
+    if (!authToken || rosterLoaded) return;
+    if (activeTab !== 'schedule' && activeTab !== 'admin') return;
+    let cancelled = false;
+    fetchRoster(authToken)
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.roster)) return;
+        setRoster(data.roster);
+        // The badge index comes with it: the screens that draw a name draw the icons beside it (components/CertificationBadges),
+        // and until this load there is nothing to draw - which is why it reads from the same place.
+        if (data.certificationBadges) setCertificationBadges(data.certificationBadges);
+        setRosterLoaded(true);
+      })
+      .catch((error) => {
+        console.error('[roster] could not read the crew directory', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, activeTab, rosterLoaded]);
+
   // the windows tab beside it - and scoped to the months around today, which is what those screens show. It is not in
   // the payload: a member's session would be paying for the whole crew's claims.
   //
   // Before this existed those screens were handed the OFFICER'S OWN claims, which is why the roster listed them against
   // the crew and the board warned about availability it could not actually see.
   useEffect(() => {
+    // THE SCREENS THAT DRAW THE WHOLE CREW. The schedule board is deliberately NOT here: it needs ONE month - the one on
+    // screen - to judge a shift against, and it asks for exactly that (`onRosterMonth`, from the board), rather than
+    // pulling seven months of every member's claims to warn about one.
     const wantsRoster =
       activeTab === 'admin' && (adminSubTab === 'availability' || adminSubTab === 'availability-windows');
-    if (!wantsRoster || !authToken || rosterScope.from) return;
+    if (!wantsRoster || !authToken) return;
     const from = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 3, 1));
     const to = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 4, 0));
+    // SKIPPED ONLY WHEN THIS RANGE IS ALREADY HELD - which is not the same as "a read has happened". A bare
+    // `rosterScope.from` check treated one month the board asked for as the whole range, and these screens then drew a
+    // month they did not hold.
+    if (rosterScope.from && rosterScope.from <= from && rosterScope.to >= to) return;
     void loadRosterAvailability(from, to).catch((error) => {
       console.error('[availability] could not load the crew availability', error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, adminSubTab, authToken, rosterScope.from]);
+  }, [activeTab, adminSubTab, authToken, rosterScope.from, rosterScope.to]);
 
   // Loading another month for a screen that navigated outside the scope it holds.
   const loadRosterMonth = async (year, month) => {
@@ -1044,7 +1314,7 @@ const getLoadingMessage = () => {
   // tail of that pile was what ran out of the 60-second patience this app enforces, and a call that gives up is
   // data the screen never gets: no shifts on the calendar, a 12-hour clock for a member who chose 24.
   //
-  // GET_BOOTSTRAP answers all nine (see memberBootstrapPayload in Code.gs). The individual refreshers all remain:
+  // The sign-in payload answers everything at once. The individual refreshers all remain:
   // a tab that reloads its own list still asks for its own list, and the panel's callbacks use them.
   //
   // The wave retries a failure once, one at a time, so a slow backend degrades into "a few seconds later" rather
@@ -1059,7 +1329,6 @@ const getLoadingMessage = () => {
             sessionExpired(token);
             return REFRESH_EXPIRED;
           }
-          if (warnIfBackendPredatesBootstrap(data)) return REFRESH_FAILED;
           if (!data || !data.success) return REFRESH_FAILED;
           applyBootstrap(data);
           return REFRESH_OK;
@@ -1101,7 +1370,7 @@ const getLoadingMessage = () => {
           text: result.message || 'Invalid username or password.'
         });
       }
-    } catch (err) {
+    } catch {
       setStatusMessage({
         type: 'error',
         text: 'Unable to connect to authentication server.'
@@ -1294,7 +1563,7 @@ const getLoadingMessage = () => {
       }
 
       return { success: true };
-    } catch (err) {
+    } catch {
       return { success: false, message: 'Unable to connect to authentication server.' };
     }
   };
@@ -1327,7 +1596,7 @@ const getLoadingMessage = () => {
         setStatusMessage({ type: 'error', text: result.message || 'Action failed.' });
         toast.error(result.message || 'Action failed.');
       }
-    } catch (err) {
+    } catch {
       setStatusMessage({ type: 'error', text: 'Network error submitting shift update.' });
     } finally {
       setGlobalLoading({ active: false, message: '' });
@@ -1370,7 +1639,7 @@ const getLoadingMessage = () => {
       }
 
       await performClockAction(actionType, coords, authToken);
-    } catch (err) {
+    } catch {
       setStatusMessage({ type: 'error', text: 'Network error submitting shift update.' });
       setGlobalLoading({ active: false, message: '' });
     }
@@ -1490,7 +1759,7 @@ const getLoadingMessage = () => {
         setCurrentUser((prev) => ({ ...prev, [MUST_CHANGE_PASSWORD_COLUMN]: 'FALSE' }));
       }
       return result;
-    } catch (err) {
+    } catch {
       return { success: false, message: 'Network error updating password.' };
     } finally {
       setGlobalLoading({ active: false, message: '' });
@@ -1780,6 +2049,7 @@ const getLoadingMessage = () => {
                 currentUser={currentUser}
                 schedule={schedule}
                 scheduleWindow={scheduleWindow}
+                scheduleWindowError={scheduleWindowError}
                 onNeedSchedule={loadScheduleWindow}
                 assignments={assignments}
                 scheduleTemplates={scheduleTemplates}
@@ -1870,6 +2140,10 @@ const getLoadingMessage = () => {
 
             {activeTab === 'admin' && canAdminister && (
               <AdminPanel
+                // THE MODULE'S DATA IS READ WHEN IT IS OPENED (see the adminModuleOpened effect), so the panel can be
+                // holding its props before the read has landed - and every tab below renders "No users yet" from an empty
+                // list, which reads as a broken station rather than a read in flight.
+                loading={!adminWaveSettled}
                 // Used only on the printed schedule sheet's header.
                 departmentName={departmentName}
                 // Lets the app bar name the open Administration tab ("Admin: Schedule Mgt").
@@ -1886,7 +2160,10 @@ const getLoadingMessage = () => {
                 ranks={ranks}
                 shifts={shifts}
                 schedule={schedule}
-                scheduleWindow={scheduleWindow}
+                // THE BOARD READS THE MONTH IT IS SHOWING, so it is handed the reader and the reason the last read
+                // failed. `scheduleWindow` is deliberately NOT passed any more: the board no longer decides from a window
+                // whether to ask - it asks for the month on screen, every time (see AdminScheduleManagementTab).
+                scheduleWindowError={scheduleWindowError}
                 onNeedSchedule={loadScheduleWindow}
                 scheduleTemplates={scheduleTemplates}
                 assignments={assignments}

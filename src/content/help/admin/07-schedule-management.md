@@ -5,6 +5,8 @@
 
 ## Reading the board
 
+Each month is read when you open it or move to it, so a brief **Loading …** line is normal while you move around the calendar. When it is gone, what you see is the month in full.
+
 Each day shows its shifts, ordered by start time. A shift is one of:
 
 | Appearance | Meaning |

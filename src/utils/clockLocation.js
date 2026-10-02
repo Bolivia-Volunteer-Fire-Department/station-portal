@@ -171,7 +171,7 @@ export const evaluateClockLocation = (coords, config) => {
   return { allowed: true, code: 'ok', distanceFeet, message: '' };
 };
 
-// The code the backend uses when IT refuses a clock action on location. Must match Code.gs - the
+// The code a refused clock action on location carries. It is raised by the client pre-flight, so the
 // client routes that code to the same modal as its own check, because the fence can be enabled while
 // a page is already open, in which case only the server refuses.
 export const OUT_OF_RANGE_CODE = 'OUT_OF_RANGE';

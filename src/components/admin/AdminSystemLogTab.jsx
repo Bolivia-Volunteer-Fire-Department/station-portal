@@ -66,8 +66,13 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
         if (canceled) return;
         if (!result?.success) throw new Error(result?.message || 'Failed to load the system log.');
 
-        // A different contract version means the deployed script predates this build. Reported rather
-        // than thrown: the rows that did arrive are still worth showing.
+        // A different contract version means the DEPLOYED FUNCTION predates this build. The two are deployed
+        // separately, so a browser can be running ahead of the function answering it. Reported rather than
+        // thrown: the rows that did arrive are still worth showing.
+        //
+        // `Number()` of a MISSING field is NaN, and NaN is not equal to anything - so a reply that carries no
+        // version reads as stale rather than as current. That is the safe direction, and it is not a hypothetical:
+        // the first Cloud Logging deployment returned no `api` at all, and this tab warned on every single load.
         setStaleBackend(Number(result.api) !== SYSTEM_LOG_API_VERSION);
 
         setRows(normalizeLogRows(result.rows));
@@ -231,14 +236,18 @@ export default function AdminSystemLogTab({ token, users = [], timeFormat = '12'
         )}
 
         {/* Named explicitly, because the symptom of a stale deployment is an empty table - which looks
-            like an empty log rather than something to fix. */}
+            like an empty log rather than something to fix. It names the FUNCTION rather than the app, because
+            the function is the half that can be behind: this build and it are deployed separately, and the fix
+            is a redeploy of one of them. This used to say "deploy the current Code.gs", which was true while the
+            sheet answered the log and misleading after it stopped - an officer was being sent to redeploy a
+            backend that nothing calls. */}
         {staleBackend && (
           <div className="m-4 p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800/80">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              The deployed Apps Script is older than this version of the app, so the filters cannot be
-              applied and the table may be incomplete. Deploy the current <code className="font-mono text-[11px]">Code.gs</code> as
-              a new version, then reload.
+              The deployed <code className="font-mono text-[11px]">readSystemLog</code> function is older than this
+              version of the app, so the filters may not be applied and the table may be incomplete. Redeploy the
+              functions (<code className="font-mono text-[11px]">firebase deploy --only functions</code>), then reload.
             </span>
           </div>
         )}

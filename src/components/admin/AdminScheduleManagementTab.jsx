@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { renderInViewport } from '../../utils/viewportLayer';
 import {
   AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight,
-    Loader2, Plus, RotateCcw, Save, Trash2, UserPlus, UserMinus, X, CheckCircle2, XCircle, Printer, Eye
+    Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2, UserPlus, UserMinus, X, CheckCircle2, XCircle, Printer, Eye
 } from 'lucide-react';
 import { adminBulkSaveSchedule, adminResolveShiftOffer } from '../../services/api';
 import { toDateKey, parseSheetDateKey } from '../../utils/scheduleDate';
@@ -17,9 +17,7 @@ import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { mergeDayItems } from '../../utils/dayOrder';
-// Whether the window the schedule arrived in covers the month on screen: what tells a board it must ask for a month
-// rather than draw an empty one.
-import { windowCoversMonth } from '../../utils/scheduleWindow';
+
 // A day's SLOTS in the order that day reads: start time, then the assignment's required rank. The board tracks time
 // itself (mergeDayItems, which is stable), so this is what decides the order of two shifts that start together.
 import { sortSlotOrder } from '../../utils/crewOrder';
@@ -122,16 +120,33 @@ const rowTimeRangeOf = (r) => {
 
 export default function AdminScheduleManagementTab({
   token,
-  schedule = [],
-  // The window `schedule` holds (last month, this month, next) and the way to ask for more of it. A board edits the month
-  // it is showing, so it needs the whole of that month and nothing else - see the monthRows note below.
-  scheduleWindow = { from: '', to: '' },
+  // NO `schedule` PROP, deliberately: the board reads the month on screen itself (see the onNeedSchedule note below) and
+  // draws nothing else. It used to be handed App's shared array and draw from it, which is what let a month round-trip
+  // re-seed the board from a cache a save had not refreshed - the fault this tab is now shaped to make impossible.
+  // Why the last attempt to read a month failed, if it did - a failed read and a month nobody is rostered on look
+  // identical without it, and the board used to draw the second while the first was true.
+  scheduleWindowError = '',
+  // THE MONTH ON SCREEN IS READ FROM THE SERVER (see the scopeToMonth note below), and this is how: the month's first and
+  // last day, handed to the same reader the member calendar uses.
+  //
+  // IT IS REQUIRED FOR THE BOARD TO DRAW ANYTHING AT ALL, which is worth saying out loud because it was passed by App.jsx
+  // and then silently dropped by AdminPanel for a whole release: every month this board asked for went nowhere, so it
+  // drew whatever the sign-in payload had left in the shared array and a month outside that window could never be
+  // fetched. The forwarding is asserted in scripts/verify-admin-render.mjs now, because a prop that arrives nowhere
+  // produces no error - only a board that quietly shows the wrong month.
   onNeedSchedule,
   scheduleTemplates = [],
   assignments = [],
   ranks = [],
   users = [],
   rosterAvailability = [],
+  // WHAT THOSE CLAIMS COVER. An unread month and a month in which nobody claimed anything produce the same empty list,
+  // and only the second is a statement about a member - see the availability note below.
+  rosterClaimsFrom = '',
+  rosterClaimsTo = '',
+  // Asks for the CREW'S CLAIMS over one month, when this app does not already hold them. The board warns an officer
+  // about a member by name, so it fetches what it needs to say that - one month of claims, not seven.
+  onRosterMonth,
   offers = [],
   onOffersChanged,
   onAdminDataChanged,
@@ -149,31 +164,43 @@ export default function AdminScheduleManagementTab({
   const monthEndKey = toDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
   const monthKey = monthStartKey.slice(0, 7);
 
-  // THE ROWS THIS BOARD OWNS: the month on screen, and only that month.
+  // THE MONTH THIS BOARD OWNS, read from the server when it is looked at - not derived from a shared cache. The schedule
+  // is the one collection that grows without limit, and only one officer edits it, so there is no shared array to
+  // reconcile: the board reads the month it is showing, edits a local copy, and re-reads on every month change. That is
+  // what keeps a saved shift on the day it was dragged to after a month round-trip - the round-trip reads the server,
+  // never an in-memory copy that a save's re-read may have failed to refresh.
   //
-  // THIS IS THE DIFFERENCE BETWEEN A SAVE THAT EDITS A BOARD AND ONE THAT DELETES THE STATION'S HISTORY. A save deletes
-  // every row the board can see and no longer has in `working` (see computeChanges), so a base holding the whole WINDOW
-  // would delete the rest of the window the moment it saved, and a base holding the whole collection would delete
-  // everything outside the month the officer was looking at. Scoped to the month, the diff means exactly what an officer
-  // means by it: what changed on this month's board.
-  const monthRows = useMemo(
-    () =>
-      normalizeRows(schedule).filter((row) => {
-        const from = row.date_from || '';
-        const to = row.date_to || from;
-        // A multi-day row belongs to the month it OVERLAPS, not only to the month it starts in.
-        return from <= monthEndKey && to >= monthStartKey;
-      }),
-    [schedule, monthStartKey, monthEndKey]
-  );
-  const [working, setWorking] = useState(() => monthRows);
-  const [base, setBase] = useState(() => monthRows);
+  // THE DIFFERENCE BETWEEN A SAVE THAT EDITS A BOARD AND ONE THAT DELETES THE STATION'S HISTORY, unchanged: a save
+  // deletes every row the board can see and no longer has in `working` (see computeChanges), so `base` must hold exactly
+  // the month on screen - a whole window would delete its neighbours, a whole collection would delete everything outside
+  // the month the officer was looking at. Scoped to the month, the diff means exactly what an officer means by it.
+  const scopeToMonth = (rows) =>
+    normalizeRows(Array.isArray(rows) ? rows : []).filter((row) => {
+      const from = row.date_from || '';
+      const to = row.date_to || from;
+      // A multi-day row belongs to the month it OVERLAPS, not only to the month it starts in.
+      return from <= monthEndKey && to >= monthStartKey;
+    });
+  // The month's rows for the month on screen, and which month they were fetched for - so a seed never fires with one
+  // month's rows while another month is being drawn.
+  const [monthRows, setMonthRows] = useState([]);
+  const loadedMonthRef = useRef('');
+  const [working, setWorking] = useState([]);
+  const [base, setBase] = useState([]);
   const [dirty, setDirty] = useState(false);
   // Mirror of `dirty` for use inside effects without adding it to their deps:
   // a background data refresh must never clobber an in-flight draft.
   const dirtyRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // THE READ IN FLIGHT, and the board's only spinner. It starts TRUE whenever there is a reader at all, because the first
+  // paint happens before the effect that reads the month has run - and that one frame of empty grid, with no word about
+  // why, looks exactly like a station with nothing scheduled. With no reader it starts false, and the effect that would
+  // set it never runs, so a board that cannot read does not claim to be reading.
+  const [refreshingMonth, setRefreshingMonth] = useState(() => Boolean(onNeedSchedule));
+  // A window error the officer has dismissed. Keyed to the message rather than a boolean, so a SECOND failure shows
+  // again instead of arriving pre-dismissed.
+  const [dismissedWindowError, setDismissedWindowError] = useState('');
   // While a print is being prepared the sheet is mounted (see PrintableSchedule).
   const [printOpen, setPrintOpen] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -210,14 +237,73 @@ export default function AdminScheduleManagementTab({
   // Events are visible by default. Not persisted: a temporary view choice, like "Show everyone".
   const [showEvents, setShowEvents] = useState(true);
 
-  // The month on screen is not always in the window the sign-in carried (last/this/next), and a board can be walked back
-  // years. Asking for it is what keeps the arrows working without reading the whole schedule - and it is why the window
-  // travels with the rows instead of being worked out again here.
+  // THE READER IS HELD IN A REF, NOT A DEPENDENCY, and this is the difference between one read and an unbounded loop.
+  // `loadScheduleWindow` is a plain function in App's body, so App re-creates it on EVERY render - and an effect that
+  // depended on it re-ran after every read it had just started: read, setState, new identity, read again, forever. The
+  // fetch effect therefore watches the MONTH and nothing else, and reaches the current reader through this ref.
+  const needScheduleRef = useRef(onNeedSchedule);
   useEffect(() => {
-    if (!onNeedSchedule) return;
-    if (windowCoversMonth(scheduleWindow, monthKey)) return;
-    void onNeedSchedule(monthStartKey, monthEndKey);
-  }, [onNeedSchedule, scheduleWindow, monthKey, monthStartKey, monthEndKey]);
+    needScheduleRef.current = onNeedSchedule;
+  }, [onNeedSchedule]);
+  // READS ARE NUMBERED, NOT CANCELLED, AND THIS IS WHAT MAKES THE BOARD WORK UNDER StrictMode. `main.jsx` wraps the app in
+  // StrictMode, which mounts every component, unmounts it, and mounts it again - so this effect runs twice on first load.
+  // A cleanup flag plus an "already reading this month" guard turns that into a board that never loads: the first run
+  // starts a read and is then cancelled, the second run sees the month already in flight and starts nothing, and the
+  // first read's answer is thrown away because it was cancelled. Nothing is ever applied and the spinner never stops. So
+  // each read takes a number instead, and a read that lands is ignored only if a NEWER one has since been started - the
+  // newest answer always wins, and no run can be left without one.
+  const readSeq = useRef(0);
+
+  // The month on screen is read WHEN IT IS LOOKED AT, not carried by the sign-in: the schedule is the one collection that
+  // grows without limit, and a board may be walked back years - so the month in front of the officer is asked for, and so is
+  // any month the arrows reach. Asking is what keeps the arrows working without reading every shift the station has ever
+  // scheduled. The board owns its month (see above), so this is where the copy that gets seeded is fetched from - and it
+  // re-reads on EVERY month change, never trusting a window that a save may have left stale.
+  useEffect(() => {
+    const read = needScheduleRef.current;
+    if (!read) return;
+    // A month change empties the board's copies until the new month arrives, so the month left behind is not drawn
+    // beside the new month's slots while the read is in flight.
+    if (loadedMonthRef.current !== monthKey) {
+      setWorking([]);
+      setBase([]);
+      setDirty(false);
+    }
+    const thisRead = ++readSeq.current;
+    setRefreshingMonth(true);
+    void read(monthStartKey, monthEndKey)
+      .then((rows) => {
+        // Superseded by a newer read - a month change, or StrictMode's second mount. The newest answer wins.
+        if (readSeq.current !== thisRead) return;
+        // `loadScheduleWindow` returns null on a failed read, so an empty month (a real answer) still seeds while a
+        // failed one leaves the rows already on screen in place.
+        if (Array.isArray(rows)) {
+          loadedMonthRef.current = monthKey;
+          setMonthRows(scopeToMonth(rows));
+        }
+        setRefreshingMonth(false);
+      })
+      .catch(() => {
+        if (readSeq.current === thisRead) setRefreshingMonth(false);
+      });
+    // There is deliberately NO cleanup: see the note on readSeq above. Cancelling here is what stranded the board.
+    // ONLY THE MONTH is watched. See the note on needScheduleRef: the reader's identity changes on every render of App,
+    // and depending on it here turned this effect into an unbounded loop of requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthStartKey, monthEndKey, monthKey]);
+
+  // ...and the board says so while that read is in flight: an empty month with no word about it looks like a station with
+  // nothing scheduled, which is the failure every part of this arrangement exists to avoid.
+  // PENDING MEANS "A READ IS IN FLIGHT", AND NOTHING MORE. It used to also mean "no rows have been loaded for this month
+  // yet", read from loadedMonthRef - and that is what made a FAILED read spin forever. A failed read never sets
+  // loadedMonthRef, so the board said "Loading {month}..." for as long as it stayed open, with the reason for the empty
+  // grid sitting in a banner underneath a spinner that could not stop. Pressing Refresh did not help either: it cleared
+  // its own flag and then the same clause put the spinner straight back. Reads do fail - a permission, a dropped channel,
+  // a month nobody has published - and a failed read is a FINISHED read. The spinner stops when the read settles either
+  // way, and the banner below says which of the two it was.
+  const monthPending = refreshingMonth;
+  // Whether to show the failed-read banner: a window error the officer has not already dismissed.
+  const showWindowError = Boolean(scheduleWindowError) && dismissedWindowError !== scheduleWindowError;
 
   // Re-sync the working copy whenever fresh server data arrives - unless the
   // admin has unsaved changes, which take precedence over any refresh.
@@ -225,49 +311,75 @@ export default function AdminScheduleManagementTab({
     dirtyRef.current = dirty;
   }, [dirty]);
 
+  // THE MONTH ON SCREEN IS NOT THE MONTH A DRAFT BELONGS TO, so a month change ALWAYS re-seeds - once the fetch for the
+  // month on screen has actually landed (loadedMonthRef), never with the month left behind.
+  //
+  // `working` and `base` are this board's rows for THIS month, and what a save deletes is exactly the difference
+  // between them (see computeChanges). Deferring to an unsaved draft across a month change left the PREVIOUS month's
+  // rows in `working` while the board drew the new one, and - the part that made it look like data loss - the guard
+  // also skipped the re-seed caused by fresh server rows, so Refresh could not fix it either. A saved shift was in the
+  // database, absent from the board, and no button on the screen would bring it back.
+  //
+  // A same-month refresh still defers to a draft: that is the case the guard is for.
+  const seededMonth = useRef(monthKey);
   useEffect(() => {
-    if (dirtyRef.current) return;
+    if (loadedMonthRef.current !== monthKey) return;
+    const monthChanged = seededMonth.current !== monthKey;
+    if (!monthChanged && dirtyRef.current) return;
+    seededMonth.current = monthKey;
     // The MONTH's rows, not the whole array: this is what keeps `base` - and therefore what a save deletes - inside the
-    // month on screen. It re-seeds when the month changes too, which is what makes switching months safe rather than
-    // merely tidy.
+    // month on screen.
     setWorking(monthRows);
     setBase(monthRows);
     setDirty(false);
     setSelectedKey(null);
-  }, [monthRows]);
+  }, [monthRows, monthKey]);
 
   // Restore an unsaved draft (survives tab switches / refreshes).
+  //
+  // KEYED TO ITS MONTH, because a single key meant a draft from one month came back while another was on screen - and a
+  // restored draft sets `dirty`, which blocks the re-seed above for a board the officer is not editing at all. A draft
+  // that does not belong to the month being opened is discarded rather than restored.
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const rows = JSON.parse(raw);
-        if (Array.isArray(rows) && rows.length) {
-          setWorking(rows);
-          setDirty(true);
-        }
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
+      const savedMonth = Array.isArray(parsed) ? '' : String(parsed?.month || '');
+      if (!Array.isArray(rows) || !rows.length) return;
+      if (savedMonth && savedMonth !== monthKey) {
+        sessionStorage.removeItem(DRAFT_KEY);
+        return;
       }
+      setWorking(rows);
+      setDirty(true);
     } catch {
       /* corrupted draft - ignore */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist the draft while there are unsaved changes.
+  // Persist the draft while there are unsaved changes, with the month it belongs to.
   useEffect(() => {
     try {
-      if (dirty) sessionStorage.setItem(DRAFT_KEY, JSON.stringify(working));
+      if (dirty) sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ month: monthKey, rows: working }));
       else sessionStorage.removeItem(DRAFT_KEY);
     } catch {
       /* storage unavailable - ignore */
     }
-  }, [working, dirty]);
+  }, [working, dirty, monthKey]);
 
   const userById = (id) => users.find((u) => String(u.id) === String(id));
   // A member who cannot be resolved is named rather than numbered: an id here told an administrator nothing and
   // made the pill the width of a UUID.
   const userName = (id) => userById(id)?.name || unnamedLabel('member');
-  const assignmentById = (id) => assignments.find((a) => String(a.id) === String(id));
+  // Stable identity, so the memoized month slots recompute when the assignments change
+  // (their labels come from here) and not on every render.
+  const assignmentById = useCallback(
+    (id) => assignments.find((a) => String(a.id) === String(id)),
+    [assignments]
+  );
 
   // What a pill calls the shift. A VACANCY (a row with no member) is labeled with the
   // ASSIGNMENT rather than the word "Open": the vacancy styling already shows that nobody
@@ -317,12 +429,27 @@ export default function AdminScheduleManagementTab({
   // at a time (utils/availability.js). A window does not name a schedule template, so a board that schedules shifts cannot
   // test "did they claim THIS shift" - only "did they claim anything that day". Asking the finer question would mean
   // inventing a mapping the data does not have; asking this one costs no extra read, because the crew's claims are already
-  // in hand for the roster (`rosterAvailability`, read once by App.jsx).
+  // in hand once an officer screen has read them (App.jsx#loadRosterAvailability).
+  //
+  // AND ONLY A DAY THAT WAS ACTUALLY READ CAN BE JUDGED AGAINST. Those claims arrive for a RANGE, and the board warns
+  // about a month - so a month outside the range is not a month in which nobody claimed anything, it is a month this
+  // board holds no claims for. Reading the two as the same thing drew a list naming every filled shift on the board,
+  // counted as members who "marked no availability", from data that had never been fetched: an accusation made of an
+  // empty array. `dayCovered` is the boundary - a claim is only counted where its day was read - and the banner says
+  // which month's claims are missing instead of listing names.
+  const dayCovered = (dateKey) =>
+    Boolean(dateKey) &&
+    (!rosterClaimsFrom || dateKey >= rosterClaimsFrom) &&
+    (!rosterClaimsTo || dateKey <= rosterClaimsTo);
+  const claimsMonthLoaded =
+    (!rosterClaimsFrom || monthStartKey >= rosterClaimsFrom) && (!rosterClaimsTo || monthEndKey <= rosterClaimsTo);
   const claimedDays = useMemo(() => memberDayKeys(rosterAvailability), [rosterAvailability]);
 
   const entryIsAvailable = (entry) => {
     const user = userById(entry.user_id);
     if (!user || !entry._from) return true;
+    // Unknown is not "unavailable": see the range note above.
+    if (!dayCovered(entry._from)) return true;
     return claimedDays.has(`${String(user.id).trim()}|${String(entry._from).trim()}`);
   };
 
@@ -331,13 +458,38 @@ export default function AdminScheduleManagementTab({
   const unavailableEntries = working.filter(
     (e) =>
       !isOccurred(e) &&
-      e._from &&
+      dayCovered(e._from) &&
       e._to &&
       e._from <= monthEndKey &&
       e._to >= monthStartKey &&
       !entryIsAvailable(e)
   );
   const visibleUnavailable = unavailableEntries.filter((e) => !warnedKeys.has(e._key));
+
+  // THE CLAIMS FOR THE MONTH ON SCREEN ARE ASKED FOR, not assumed. That warning names members, and it is only honest
+  // about days that were actually read - so when this app holds no claims for the month being looked at, the board asks
+  // for exactly that month. One month, not the seven the roster screens hold: this tab needs the claims to judge one
+  // month's shifts, and nothing else on this screen reads them.
+  //
+  // The ask is remembered per month, so walking back and forth does not re-ask; Refresh clears it, which makes a failed
+  // claims read retryable by hand.
+  const claimsAskedFor = useRef('');
+  // Held in a ref for the same reason as the schedule reader above: `loadRosterMonth` is a function in App's body, so a
+  // dependency on it would re-run this effect on every render.
+  const rosterMonthRef = useRef(onRosterMonth);
+  useEffect(() => {
+    rosterMonthRef.current = onRosterMonth;
+  }, [onRosterMonth]);
+  useEffect(() => {
+    const ask = rosterMonthRef.current;
+    if (!ask || claimsMonthLoaded || claimsAskedFor.current === monthKey) return;
+    claimsAskedFor.current = monthKey;
+    void Promise.resolve(ask(year, month)).catch(() => {
+      // Deliberately silent: a failed read leaves the month unread, and the note under the grid already says the shifts
+      // were not checked. Accusing members from an empty list is the fault this arrangement replaced.
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimsMonthLoaded, monthKey, year, month]);
 
   // Template slots for the visible month: every date crossed with every
   // template whose day_of_week matches that date's weekday.
@@ -367,7 +519,7 @@ export default function AdminScheduleManagementTab({
       }
     }
     return slots;
-  }, [year, month, scheduleTemplates]);
+  }, [year, month, scheduleTemplates, assignmentById]);
 
   const slotsByDay = useMemo(() => {
     const map = {};
@@ -433,6 +585,20 @@ export default function AdminScheduleManagementTab({
         String(r.schedule_template_id ?? '') === String(slot.template.id) &&
         coversDate(r, slot.dateKey)
     );
+
+  // WHAT THIS MONTH ACTUALLY HOLDS, SAID OUT LOUD.
+  //
+  // Three states draw the same empty calendar and only the first is innocent: the shifts were never loaded, the shifts
+  // ARE loaded but none matches a slot, or the month genuinely has nobody on it. The board used to show a bare grid of
+  // empty slots for all three, which is how a real roster problem read as "nobody is rostered" for hours. The counts
+  // are deliberate: an officer can say which state they are looking at without opening a developer console.
+  //
+  // The UNMATCHED count is the one that matters when a shift is on the board but not in its slot: the grid draws such a
+  // row as an extra pill (see extraPills below), so it appears BESIDE the empty slot it belongs to - which reads as "my
+  // shift did not save" when the row is in the database and in this very array.
+  const matchedKeys = new Set(visibleSlots.map((slot) => slotOccupant(slot)?._key).filter(Boolean));
+  const unmatchedRows = working.filter((entry) => !matchedKeys.has(entry._key));
+  const monthHoldsNothing = working.length === 0;
 
   // Pending shift offers keyed by slot, so the calendar can flag the slots
   // waiting on admin approval. Backend offer `slot_key` values are either
@@ -1038,9 +1204,12 @@ export default function AdminScheduleManagementTab({
       }
       setNotice(`Offer ${decision.toLowerCase()}.`);
       await onOffersChanged?.();
-      // Also trigger a schedule refresh so approved/declined offers reflect immediately
-      // in both the Schedule Management calendar and My Schedule pills.
-      void onAdminDataChanged?.(token);
+      // Approved offers write a schedule row (the backend fills the empty slot), so the schedule section is refreshed
+      // too - named explicitly, because the payload fallback cannot carry it. Declining writes only the offer.
+      void onAdminDataChanged?.(
+        decision === 'APPROVE' ? ['schedule', 'scheduleOffers'] : ['scheduleOffers'],
+        token
+      );
     } catch (err) {
       setError(err.message || 'Failed to resolve offer.');
     } finally {
@@ -1139,6 +1308,30 @@ export default function AdminScheduleManagementTab({
     return { upserts, upsertKeys, deleteIds };
   };
 
+  // THE REFRESH CONTROL. It re-reads the month on screen, unconditionally - `onNeedSchedule` is the same read the
+  // effect above makes - and re-seeds the board's own copy from what came back, so the Refresh button fixes a stale
+  // board the same way a month change does. A colleague's edit, or a read that failed earlier, both land here.
+  const refreshMonth = async () => {
+    if (!onNeedSchedule) return;
+    setRefreshingMonth(true);
+    try {
+      // The claims are re-asked too, so a Refresh retries a failed availability read as well as a failed schedule read.
+      claimsAskedFor.current = '';
+      const rows = await onNeedSchedule(monthStartKey, monthEndKey);
+      if (Array.isArray(rows) && !dirtyRef.current) {
+        const scoped = scopeToMonth(rows);
+        loadedMonthRef.current = monthKey;
+        setMonthRows(scoped);
+        setWorking(scoped);
+        setBase(scoped);
+        setDirty(false);
+        setSelectedKey(null);
+      }
+    } finally {
+      setRefreshingMonth(false);
+    }
+  };
+
   const handleSave = async () => {
     const { upserts, upsertKeys, deleteIds } = computeChanges();
     if (!upserts.length && !deleteIds.length) {
@@ -1171,9 +1364,13 @@ export default function AdminScheduleManagementTab({
       setWarnedKeys(new Set());
       setNotice(`Saved ${result.saved ?? upserts.length} shift(s), removed ${result.deleted ?? deleteIds.length}.`);
 
-      // Refresh the server copy in the background; the local state is already
-      // authoritative for everything that was just saved. Also trigger admin data refresh.
-      onAdminDataChanged?.(token);
+      setNotice(`Saved ${result.saved ?? upserts.length} shift(s), removed ${result.deleted ?? deleteIds.length}.`);
+
+      // Re-read the month this board is looking at, so the App's shared array holds what was just written. A section
+      // refresh would also do this, but it answers with the whole last/this/next window and can be skipped or fall back
+      // to the payload (which no longer carries `schedule`). This is the precise read of the month that changed, and it
+      // is what stops a drag-move from being drawn back where it came from after a month round-trip.
+      if (onNeedSchedule) void onNeedSchedule(monthStartKey, monthEndKey);
     } catch (err) {
       setError(err.message || 'Failed to save schedule.');
     } finally {
@@ -1199,25 +1396,6 @@ export default function AdminScheduleManagementTab({
 
   // ---- Quick Add ----
     const quickAddUser = quickAddUserId ? userById(quickAddUserId) || null : null;
-
-  // How many shifts the Quick-Add member already has scheduled in the visible
-  // month (shows next to their name so you can keep the month balanced).
-  const quickAddShiftCount = useMemo(
-    () => (
-      quickAddUser
-        ? working.filter(
-            (e) =>
-              String(e.user_id) === String(quickAddUser.id) &&
-              e._from &&
-              e._to &&
-              e._from <= monthEndKey &&
-              e._to >= monthStartKey
-          ).length
-        : 0
-    ),
-    [quickAddUser, working, monthStartKey, monthEndKey]
-  );
-
 
   // Active + schedulable members grouped by rank (highest rank_order first),
   // then alphabetically within each group. Members with no rank land in a
@@ -1260,6 +1438,14 @@ export default function AdminScheduleManagementTab({
 
   return (
     <div className="space-y-6">
+      {/* The month on screen is read when it is looked at - no schedule travels with the sign-in - so this says so while
+          that read is in flight, rather than showing an empty board. */}
+      {monthPending && (
+        <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading {monthLabel}…
+        </div>
+      )}
       {/* Toolbar */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -1273,6 +1459,20 @@ export default function AdminScheduleManagementTab({
             </button>
             <button type="button" onClick={goToday} className="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600">
               Today
+            </button>
+
+            {/* RE-READS THE MONTH ON SCREEN, whatever the window already covers. It is also the retry after a failed
+                read, and the only way to pick up a colleague's edit while this board is already open - `schedule` has
+                no live listener by design (see utils/scheduleWindow and liveReads). */}
+            <button
+              type="button"
+              onClick={refreshMonth}
+              disabled={refreshingMonth || saving}
+              title="Re-read this month from the database. Use it to pick up somebody else's change, or to retry after a failed load."
+              className="ml-1 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40"
+            >
+              <RefreshCw className={refreshingMonth ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} />
+              {refreshingMonth ? 'Refreshing…' : 'Refresh'}
             </button>
 
             {/* Prints the month on screen, so what is printed is exactly what is being managed. */}
@@ -1423,19 +1623,69 @@ export default function AdminScheduleManagementTab({
             </button>
           </div>
         </div>
-{(error || notice) && (
+{(error || notice || showWindowError) && (
           <div
             className={`p-3 rounded-xl flex items-center gap-2 text-sm font-medium ${
-              error
+              error || showWindowError
                 ? 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
                 : 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800/80'
             }`}
           >
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span className="flex-1">{error || notice}</span>
-            <button type="button" onClick={() => (error ? setError(null) : setNotice(null))} className="opacity-60 hover:opacity-100">
+            <span className="flex-1">{error || notice || scheduleWindowError}</span>
+            <button
+              type="button"
+              onClick={() =>
+                error
+                  ? setError(null)
+                  : notice
+                    ? setNotice(null)
+                    : setDismissedWindowError(scheduleWindowError)
+              }
+              className="opacity-60 hover:opacity-100"
+            >
               <X className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {/* WHICH STATE THIS MONTH IS IN, when it looks empty. Three different things draw the same grid of empty slots,
+            and the board could not tell them apart: nothing loaded for the month, loaded but matched to nothing, or
+            genuinely nobody rostered. Saying which one it is turns "the schedule is empty" into a question with an
+            answer - and both of the first two are real problems worth reporting, not normal states. */}
+        {!monthPending && !showWindowError && monthHoldsNothing && visibleSlots.length > 0 && (
+          <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">
+              No shifts are loaded for {monthLabel}. Your templates draw {visibleSlots.length} slot
+              {visibleSlots.length === 1 ? '' : 's'} for the month, and not one of them carries a shift yet - press{' '}
+              <strong>Refresh</strong> to read the month again.
+            </span>
+          </div>
+        )}
+        {!monthPending && !showWindowError && monthHoldsNothing && visibleSlots.length === 0 && (
+          <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">
+              No shifts are loaded for {monthLabel}, and no template draws a slot on any of its days - so there is nothing
+              for a shift to sit in. Check the templates&apos; days of the week and their effective and end dates in{' '}
+              <strong>Schedule Templates</strong>.
+            </span>
+          </div>
+        )}
+        {!monthPending && !showWindowError && unmatchedRows.length > 0 && (
+          <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">
+              {unmatchedRows.length} of {working.length} shift{working.length === 1 ? '' : 's'} loaded for {monthLabel}{' '}
+              {unmatchedRows.length === 1 ? 'is' : 'are'} not sitting in a slot:{' '}
+              {unmatchedRows
+                .slice(0, 3)
+                .map((entry) => `${userName(entry.user_id)} \u00b7 ${entry._from || 'no date'}`)
+                .join(', ')}
+              {unmatchedRows.length > 3 ? `, and ${unmatchedRows.length - 3} more` : ''}. They are drawn beside their
+              slots rather than in them, which is what a shift that did not save also looks like.
+            </span>
           </div>
         )}
 
@@ -1467,6 +1717,19 @@ export default function AdminScheduleManagementTab({
             >
               <X className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {/* NO CLAIMS FOR THIS MONTH, so nothing is checked - and saying so is the difference between "checked and clear"
+            and "not checked". Before this line the board answered the second with the first, which is how a month that had
+            never been read produced a list of members who had "marked no availability". Only shown when there is a shift
+            on the board that would otherwise have been judged. */}
+        {!monthPending && !claimsMonthLoaded && working.length > 0 && (
+          <div className="p-3 rounded-xl flex items-start gap-2 text-sm bg-slate-50 text-slate-600 border border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <p className="flex-1">
+              Availability for {monthLabel} is not loaded, so these shifts are not checked against it.
+            </p>
           </div>
         )}
 
@@ -2104,7 +2367,9 @@ export default function AdminScheduleManagementTab({
           departmentName={departmentName}
           year={year}
           month={month}
-          schedule={schedule}
+          // THE SAVED ROWS THIS BOARD HOLDS for the month on screen (`base`), not the shared array: the sheet prints the
+          // month being managed, and the board no longer draws from a cache that may not hold it.
+          schedule={base}
           scheduleTemplates={scheduleTemplates}
           assignments={assignments}
           users={users}

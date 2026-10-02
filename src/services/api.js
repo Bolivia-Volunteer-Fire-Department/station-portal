@@ -19,7 +19,7 @@ import { doc, setDoc } from 'firebase/firestore';
 
 // The row version a save was based on, when the caller has one.
 //
-// The backend refuses a single-record write built on a stale copy (see upsertSheetRowById in Code.gs) and
+// The sheet backend refused a single-record write built on a stale copy (see upsertSheetRowById there) and
 // answers CONFLICT with the row as it now stands. A save that sends nothing is not checked at all, which is
 // what lets a page built before this keep working against a backend that has it.
 const rowVersionField = (record) => (record && record.row_version !== undefined ? record.row_version : undefined);
@@ -127,7 +127,7 @@ export const fetchInitialData = async () =>
 // Nine separate calls became one. Each of them was an Apps Script execution paying a second or three of startup
 // before it read a cell, and the calls at the end of that queue were the ones that ran out of the 60-second
 // patience this module enforces - which showed up as a calendar with no shifts on it and a clock that had gone
-// back to 12-hour. See memberBootstrapPayload in Code.gs.
+// back to 12-hour. See the member payload in firestorePayload.js.
 export const fetchBootstrap = async () => {
   // The whole member sign-in in ONE read: schedule, availability, roster, offers, training, announcements, events,
   // clock history and who is on duty.
@@ -142,7 +142,7 @@ export const fetchBootstrap = async () => {
 
 // Everything an administration sign-in - and every admin save's background reload - needs, in ONE request. The
 // admin-scoped fields are present only for a role that may have them: a section the caller cannot have is omitted
-// rather than refusing the whole response. See adminBootstrapPayload in Code.gs.
+// rather than refusing the whole response. See the admin payload in firestorePayload.js.
 export const adminFetchBootstrap = async () => {
   // The officer's whole sign-in in ONE read, the same arrangement as the member bootstrap and the same refusal to
   // answer with a silent null.
@@ -194,6 +194,15 @@ export const fetchOnDutyUsers = async (token) =>
 export const fetchScheduleWindow = async (from, to, token) =>
   dispatchRequest({ action: 'GET_SCHEDULE', token, from, to });
 
+// THE CREW DIRECTORY, for a screen that lists people - the calendar's pill names, the availability roster, the Users tab. Read
+// when such a screen opens rather than at sign-in: see firestorePayload#readStationRows and App#loadRoster.
+export const fetchRoster = async (token) => dispatchRequest({ action: 'GET_ROSTER', token });
+
+// THE AVAILABILITY OPTIONS LIST, for the member's own grid - read when that screen is opened, not at sign-in: see
+// GET_AVAILABILITY_WINDOWS and firestorePayload#readStationRows.
+export const fetchAvailabilityWindows = async (token) =>
+  dispatchRequest({ action: 'GET_AVAILABILITY_WINDOWS', token });
+
 export const submitClockAction = async (action, userId, coords = {}, token) => {
   const request = {
     action, // 'CLOCK_IN' or 'CLOCK_OUT'
@@ -204,12 +213,16 @@ export const submitClockAction = async (action, userId, coords = {}, token) => {
     token,
   };
   // The station boundary is checked in the browser before this is ever called (utils/clockLocation.js), which is
-  // why the Firestore path never answers OUT_OF_RANGE_CODE: it cannot be reached from a routed clock action. The
-  // server-side half of that check stays on Apps Script with the rest of Code.gs, by decision.
+  // why the Firestore path never answers OUT_OF_RANGE_CODE: it cannot be reached from a routed clock action.
+  //
+  // NOTHING ENFORCES IT SERVER-SIDE, and that is a decision rather than something the migration dropped on the floor.
+  // The sheet backend had a second half of this check; it is retired and nothing runs it, so the browser's answer is the only
+  // one. What is being accepted is a member lying about their own location on their own timesheet - the note on
+  // `clock` in firestoreRouting.js records the same decision and what is NOT lost by it.
   return (await routeWrite(action, request)) || dispatchRequest(request);
 };
 
-// Push devices. Registration is per DEVICE (see the Push devices section of Code.gs): a member's
+// Push devices. Registration is per DEVICE: a member's
 // phone and computer each hold their own row, so enabling one never disturbs the other.
 //
 // A device belongs to ONE member, so registering a token that is already somebody else's is refused
@@ -729,6 +742,13 @@ const eventWeekdayFields = (eventData) => {
   return fields;
 };
 
+// THE SCHEDULE'S REFERENCE DATA - templates, assignments and the shift definitions - for a screen that draws a schedule or labels a
+// clock entry. Read once per session, when such a screen opens: see firestorePayload#scheduleSetupFor and App#loadScheduleSetup.
+export const fetchScheduleSetup = async (token) => dispatchRequest({ action: 'GET_SCHEDULE_SETUP', token });
+
+// THE CALENDAR ENTRIES, for the screens that draw them - the member's own calendar, the availability grid and the officer's
+// board. Read (and watched) when one of those is opened rather than at sign-in: a member who clocks in has no calendar on
+// screen, and the listener for this collection follows the screen instead. See App.jsx's events effect.
 export const fetchEvents = async (token) => dispatchRequest({ action: 'GET_EVENTS', token });
 
 export const adminFetchEvents = async (token) => dispatchRequest({ action: 'ADMIN_GET_EVENTS', token });
@@ -836,7 +856,7 @@ export const adminFetchSystemLog = async (params = {}, token) =>
 // Admin: approve (fills the shift) or decline a single offer, both through the same route - and both of them through a
 // callable, because writing a schedule row or a status is an officer's decision rather than a client write.
 //
-// The decision travels in the button's own vocabulary ('APPROVE' / 'DECLINE'), which is what Code.gs expected and what
+// The decision travels in the button's own vocabulary ('APPROVE' / 'DECLINE'), which the sheet expected and what
 // the router now accepts in either case. Other pending offers for the same shift are NOT closed out here; approving
 // fills the shift, which is what stops them showing, and they stay in the pending list until an officer declines them.
 export const adminResolveShiftOffer = async (offerId, decision, token) => {
@@ -920,8 +940,8 @@ export const adminSaveSystemSetting = async (key, value, token) =>
 export const adminSaveSystemSettings = async (settings, token) =>
   dispatchRequest({ action: 'ADMIN_SAVE_SYSTEM_SETTINGS', token, settings });
 
-// True when the deployment serving us predates an action, which is how a page newer than its backend detects
-// that it has to fall back rather than fail. See the UNKNOWN_ACTION reply in Code.gs.
+// True when the write we sent is not a route in this build - how a page newer than its build detects that
+// it has to fail rather than guess. The sheet backend used to answer UNKNOWN_ACTION to the same effect.
 export const isUnknownAction = (result) => !!result && result.code === 'UNKNOWN_ACTION';
 
 export const adminDeleteSystemSetting = async (key, token) =>

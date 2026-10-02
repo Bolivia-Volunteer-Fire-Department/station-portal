@@ -7,7 +7,7 @@
  * was invisible. The refusal now goes to a modal, and this asserts the wording, the numbers and the
  * codes that reach it.
  *
- * The backend half is covered too: Code.gs must keep returning code "OUT_OF_RANGE" for a refused
+ * The geofence refusal is raised by the client pre-flight (utils/clockLocation.js) and nothing else.
  * clock action, because the client routes that code to the modal. If the two ever disagree, a server
  * refusal goes silently back to the invisible banner.
  *
@@ -106,22 +106,8 @@ const brokenDistance = clockLocationNotice({ allowed: false, code: 'outside', di
 check('a missing distance becomes null, not NaN', brokenDistance.distanceFeet === null);
 check('while the limit is still named', brokenDistance.limitFeet === 1000);
 
-console.log('\n--- the backend agreement the routing depends on ---');
-
-let code = '';
-try {
-  code = readFileSync('src/services/Code.gs', 'utf8');
-} catch {
-  console.log('NOTE src/services/Code.gs not readable - skipping the backend checks');
-}
-
-if (code) {
-  check('the backend still uses OUT_OF_RANGE', code.includes('code: "OUT_OF_RANGE"'));
-  check('for clock-in', /clockInLocationError[\s\S]{0,200}code: "OUT_OF_RANGE"/.test(code));
-  check('and for clock-out', /clockOutLocationError[\s\S]{0,200}code: "OUT_OF_RANGE"/.test(code));
-  check('and the client constant matches it', code.includes(`"${OUT_OF_RANGE_CODE}"`));
-}
-
+// The backend OUT_OF_RANGE checks went with the sheet: the geofence refusal is raised by the client
+// pre-flight (utils/clockLocation.js, OUT_OF_RANGE_CODE) and nothing else answers with a code now.
 console.log('\n--- the app routes both paths to the modal ---');
 
 let app = '';

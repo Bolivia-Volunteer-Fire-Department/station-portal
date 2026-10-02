@@ -37,7 +37,7 @@ export default function AdminAvailabilityTab({
   // Non-shift entries, drawn on the single-member grid so an administrator sees the same month the member does. The All
   // Members list is windows and names, so events have no place in it.
   events = [],
-  eventAudience = {},
+  _eventAudience = {},
   onDataChanged,
 }) {
   // Opens on All Members: the first thing an administrator wants from this tab is the

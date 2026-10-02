@@ -20,6 +20,7 @@ import {
   announcementFlag,
   announcementLocations,
   announcementReachesSomeone,
+  announcementShowsNowhere,
   announcementVariant,
   announcementValidation,
 } from '../../utils/announcements';
@@ -555,6 +556,7 @@ export default function AdminAnnouncementsTab({
               const variant = announcementVariant(announcement.context_variant);
               const live = Boolean(window.from) && window.from <= todayKey && (!window.to || window.to >= todayKey);
               const places = announcementLocations(announcement);
+              const showsNowhere = announcementShowsNowhere(announcement);
               const placeLabels = places
                 .map((key) => (ANNOUNCEMENT_LOCATIONS.find((place) => place.key === key) || {}).label)
                 .filter(Boolean);
@@ -567,11 +569,15 @@ export default function AdminAnnouncementsTab({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-slate-900 dark:text-white">{announcement.title}</span>
                       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                        live
+                        live && !showsNowhere
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300'
-                          : 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400'
+                          : live
+                            ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300'
+                            : 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400'
                       }`}>
-                        {live ? 'Showing now' : 'Not showing'}
+                        {/* "Showing now" and nowhere to show it would be a lie, and the one that matters: the officer reading
+                            this list is here to work out why members cannot see an announcement. */}
+                        {live && showsNowhere ? 'Nowhere to show' : live ? 'Showing now' : 'Not showing'}
                       </span>
                       {announcementFlag(announcement.is_send_push_notification) && (
                         <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">
@@ -583,7 +589,7 @@ export default function AdminAnnouncementsTab({
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                       {announcementAudienceLabel(announcement, { roles, ranks, users })}
                       {' · '}
-                      {placeLabels.length ? placeLabels.join(', ') : 'Nowhere'}
+                      {placeLabels.length ? placeLabels.join(', ') : 'Nowhere to show'}
                       {' · '}
                       {window.from ? dateLabel(window.from) : 'No start'}
                       {window.to ? ` to ${dateLabel(window.to)}` : ' onwards'}

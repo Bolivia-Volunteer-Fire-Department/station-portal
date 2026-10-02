@@ -11,6 +11,8 @@
  */
 import { TAB_MAP, audienceKeysFrom, isOpenFrom, isSecretKey, mappedTabs, skippedTabs, slotKeyFrom, typedValue } from './migration-map.mjs';
 import { planForTab, planForTabs } from './migrate-plan.mjs';
+// The repair's decision, so the cure and the map cannot drift apart: see scripts/normalize-date-columns.mjs.
+import { dateFixesFor } from './normalize-date-columns.mjs';
 
 let failures = 0;
 const checkIs = (label, condition, detail = '') => {
@@ -250,6 +252,50 @@ check('and a blank cell is false, which is what it meant', typedValue('is_renewa
 check('a number the app compares becomes a number', typedValue('rank_order', '3'), 3);
 check('and conflict detection gets one too', typedValue('row_version', '12'), 12);
 check('while a date stays the string the readers expect', typedValue('date_from', '2026-03-04'), '2026-03-04');
+// DATES ARE KEYS THE APP COMPARES AND QUERIES, not the sheet's display text - and this is the bug the DATE_COLUMNS list exists
+// for. `where('date_from', '>=', '2026-09-01')` is a string range and `'3/6/2026'` sorts AFTER `'2026-09-30'`, so a row dated
+// that way is excluded from every month a screen asks for: an empty calendar, and nothing anywhere to explain it.
+check('a display-formatted date becomes a key', typedValue('date_from', '3/6/2026'), '2026-03-06');
+// A DATE COLUMN IS NOT NECESSARILY DAY-ONLY. `parseSheetDateKey` is a day parser with an UNANCHORED date regex, so it
+// takes `'2026-11-10 18:00'` apart and hands back `'2026-11-10'` - the time silently gone. That is how every migrated
+// event lost its hours and drew as "00:00 - 00:01". A value carrying a time keeps it; the date half is still normalised,
+// so a display date WITH a time is fixed rather than passed through.
+check('a datetime keeps its time', typedValue('date_from', '2026-11-10 18:00'), '2026-11-10 18:00');
+check('and a display date with a time has its date half fixed and its time kept', typedValue('date_from', '11/10/2026 18:00'), '2026-11-10 18:00');
+// AND THE HOUR IS ZERO-PADDED, because the app's inputs reject anything else: `<input type="datetime-local">` and
+// `<input type="time">` both sanitize a value to EMPTY unless the hour is two digits, and `AdminEventsTab` feeds these
+// fields straight to them. Two cells in the events tab hold `8:00`, so passing that through verbatim would restore a
+// time the officer's own edit form then draws as a blank field.
+check("and a single-digit hour is padded, because the app's time inputs reject anything else", typedValue('date_from', '2026-09-26 8:00'), '2026-09-26 08:00');
+check('padded in the display form as well', typedValue('date_from', '9/26/2026 8:05'), '2026-09-26 08:05');
+check('and an already-padded hour is unchanged by it', typedValue('date_from', '2026-09-26 08:00'), '2026-09-26 08:00');
+check('while a meridiem is left exactly as it arrived rather than converted', typedValue('date_from', '9/26/2026 8:00 PM'), '2026-09-26 8:00 PM');
+
+check('including seconds, and a meridiem suffix', typedValue('date_from', '11/10/2026 6:30 PM'), '2026-11-10 6:30 PM');
+// The repair walks the same function, so a datetime it has already written survives a second pass untouched - which is
+// what makes running it twice safe.
+check('and a value that is already a key with a time is left alone', typedValue('date_to', '2026-11-10 18:00'), '2026-11-10 18:00');
+check('while a day-only value is still normalised', typedValue('date_to', '11/10/2026'), '2026-11-10');
+check('the sloppy hyphen form becomes one too', typedValue('date_to', '2026-3-6'), '2026-03-06');
+check('an ISO instant becomes the day it falls on AT THE STATION', typedValue('effective_date', '2026-03-06T04:00:00.000Z'), '2026-03-05');
+check('and an unreadable date is left EXACTLY as it was', typedValue('date_from', 'sometime in March'), 'sometime in March');
+checkIs('while a datetime is not in the list at all, so its time survives', typedValue('time_in', '2026-03-06 07:55') === '2026-03-06 07:55');
+// THE REPAIR'S DECISION, driven from the map's own rules: what a document should hold, and an EMPTY answer when nothing needs
+// writing - which is what makes a second run silent, and what lets this be a check as well as a cure.
+check('a document already keyed needs nothing', dateFixesFor({ date_from: '2026-03-06' }), {});
+check('one holding display text gets the keys', dateFixesFor({ date_from: '3/6/2026', date_to: '3/7/2026' }), {
+  date_from: '2026-03-06',
+  date_to: '2026-03-07',
+});
+// An OFFER's `slot_key` is DERIVED from its date, so it was derived from the unreadable value - and a key built from
+// `3/6/2026` matches nothing the calendar computes. The derivation therefore runs against the PATCHED row, not the stored one.
+check(
+  'and a derived column is re-derived from the corrected date',
+  dateFixesFor({ date_from: '3/6/2026', schedule_template_id: 't1', slot_key: 'slot-3/6/2026-t1' }, { slot_key: slotKeyFrom }),
+  { date_from: '2026-03-06', slot_key: 'slot-2026-03-06-t1' }
+);
+check('a value the parser cannot read is left alone rather than blanked', dateFixesFor({ date_from: 'whenever' }), {});
+check('and a column the document does not carry is not invented', dateFixesFor({ title: 'no dates here' }), {});
 check('and so does free text', typedValue('description', 'Engine'), 'Engine');
 const roleRows = [{ id: 'officer', description: 'Officer', is_admin: 'TRUE', can_edit_users: 'TRUE', can_view_my_schedule: 'FALSE' }];
 const rolePlan = planForTab({ tab: 'roles', spec: TAB_MAP.roles, rows: roleRows });

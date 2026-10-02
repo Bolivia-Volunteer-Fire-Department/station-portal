@@ -23,6 +23,7 @@ import {
   announcementFlag,
   announcementIsLiveOn,
   announcementLocations,
+  announcementShowsNowhere,
   announcementMatchesAudience,
   announcementReachesSomeone,
   announcementShowsIn,
@@ -75,6 +76,21 @@ check('locations are the flagged ones', announcementLocations(announcement()), [
 check('a LEGACY login flag is ignored, not honoured', announcementShowsIn(announcement(), 'is_visible_on_login'), false);
 check('a login-flagged row still shows where it is flagged', announcementShowsIn(announcement(), 'is_visible_on_dashboard'), true);
 check('nothing flagged at all is nowhere', announcementLocations(announcement({ is_visible_on_dashboard: '' })), []);
+// NOWHERE TO SHOW IS ITS OWN QUESTION, asked by the administration list rather than by the display: an announcement that is
+// live on its dates but flagged for no surviving place renders nowhere, and the list used to call that "Showing now" - the
+// one label that would send the officer reading it looking in exactly the wrong direction. It is also the state a
+// re-saved legacy row lands in, which is why the row was worth a name.
+check(
+  'a live announcement with no surviving place shows nowhere',
+  announcementShowsNowhere(announcement({ is_visible_on_dashboard: '' })),
+  true
+);
+check('and one flagged for a real place does not', announcementShowsNowhere(announcement()), false);
+check(
+  'a row whose only flag was the retired login screen shows nowhere',
+  announcementShowsNowhere(announcement({ is_visible_on_dashboard: '', is_visible_on_login: 'TRUE' })),
+  true
+);
 check('showsIn reports the dashboard', announcementShowsIn(announcement(), 'is_visible_on_dashboard'), true);
 check('and not the sidebar', announcementShowsIn(announcement(), 'is_visible_on_sidebar'), false);
 // The deletion guard. The login screen was a placement, it is not one now, and this is what says so - so a later edit that

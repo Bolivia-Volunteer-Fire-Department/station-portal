@@ -6,7 +6,7 @@
 // is why nothing else has to be set (and why the Roles tab shows the rest as
 // locked-on while it is ticked).
 //
-// The backend (src/services/Code.gs) does NOT import this file - it looks each
+// Nothing imports this list as code - the security rules and the callables each name their
 // column up by name through hasRolePermission(). That is deliberate: this list is
 // then the only place the keys are enumerated, so adding a permission does not
 // require a matching list on the server.
@@ -122,7 +122,7 @@ export const ADMIN_PERMISSIONS = [
     description: 'Open Documents: write and edit documents, their folders and checklists, set who may read each one, and see or remove signatures. Requires "View documents".',
     // Managing documents you cannot see is not a thing, so seeing them is a prerequisite here as well as on the
     // verifier's permission. The Roles editor locks this box until "View documents" is ticked, and the server
-    // applies the same rule to every action - see hasDocumentPermission in Code.gs.
+    // applies the same rule to every action - see the documents rules in firestore.rules.
     requires: 'can_view_documents',
   },
   {

@@ -74,6 +74,13 @@ export const announcementLocations = (announcement) =>
 export const announcementShowsIn = (announcement, locationKey) =>
   announcementLocations(announcement).indexOf(locationKey) !== -1;
 
+// WHETHER AN ANNOUNCEMENT HAS NOWHERE TO APPEAR - which is a state real rows are in, not a hypothetical. The login screen
+// stopped being a location (see above), so an announcement whose only tick was that one has no place left, and the editor
+// genuinely cannot tell (it no longer knows the column). So this is asked in two places: the editor refuses such a save
+// (announcementValidation) and the administration list says so per row - because telling an officer "Showing now" beside an
+// announcement that renders nowhere is the one thing that would send them looking in the wrong place for a day.
+export const announcementShowsNowhere = (announcement) => announcementLocations(announcement).length === 0;
+
 // The window, with a blank end meaning "indefinitely".
 export const announcementDateWindow = (announcement) => ({
   from: parseSheetDateKey(announcement?.effective_date) || '',

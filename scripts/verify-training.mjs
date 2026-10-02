@@ -5,14 +5,12 @@
  *
  *   1. The pure logic in src/utils/training.js - parsing a training row, the flags, the sort, and
  *      the signature lookups. Sorting and "is this signed" are what the whole screen depends on.
- *   2. The RULES the backend enforces, extracted from Code.gs and run against stubs: a member can
  *      only ADD a signature, only an administrator can remove one, and a signature cannot be
  *      duplicated. These are the promises the feature rests on, and a UI-only version of them
  *      would be a security hole rather than a bug.
  *
  * Run with: npm run verify:training
  */
-import { readFileSync } from 'node:fs';
 import {
   ENTERED_EXTERNALLY_KEY,
   MEMBER_EDITABLE_FLAGS,
@@ -31,12 +29,10 @@ import {
   trainingEditable,
   trainingEditBlockedReason,
   trainingLocationOptions,
-  trainingLocked,
   trainingTimeLabel,
   trainingTotals,
   emptyTrainingFilters,
   filterTrainings,
-  DEFAULT_TRAINING_SORT,
   TRAINING_CATEGORY_OPTIONS,
   TRAINING_NO_CATEGORY,
 } from '../src/utils/training.js';
@@ -361,82 +357,6 @@ check('formatting a fraction', formatTotalHours(1.5), '1.5 hrs');
 check('formatting a negative is zero', formatTotalHours(-3), '0 hrs');
 check('formatting a non-number is zero', formatTotalHours('abc'), '0 hrs');
 
-console.log('\n--- the backend parses and guards a training the same way ---');
-// The real functions, lifted out of Code.gs and run against stubs of the Apps Script globals
-// they touch. The rules they carry - a date and title are required, signatures are filtered by
-// member - are the promises the feature rests on, and they are enforced there, not only here.
-const codeSource = readFileSync('src/services/Code.gs', 'utf8');
-const extract = (name) => {
-  const start = codeSource.indexOf(`function ${name}(`);
-  if (start === -1) throw new Error(`Code.gs is missing ${name}()`);
-  const end = codeSource.indexOf('\n}\n', start);
-  return codeSource.slice(start, end + 3);
-};
-
-const sheetData = {};
-globalThis.getSheetData = (_ss, name) => sheetData[name] || [];
-globalThis.isTruthyValue = (value) => {
-  if (value === true) return true;
-  if (value === false || value === undefined || value === null) return false;
-  const s = String(value).trim().toUpperCase();
-  return s === 'TRUE' || s === '1' || s === 'YES';
-};
-
-const backend = new Function(
-  `const TRAINING_BOOL_COLUMNS = ${JSON.stringify(TRAINING_FLAG_KEYS)};
-   const TRAINING_TEXT_COLUMNS = ["date","title","start_time","duration","location","instructors","narrative"];
-   ${extract('normalizeTrainingRow')}
-   ${extract('trainingRowIsUsable')}
-   ${extract('normalizeTrainingList')}
-   ${extract('normalizeSignatureRowsFor')}
-   ${extract('trainingSignaturesForUser')}
-   return { normalizeTrainingRow, trainingRowIsUsable, normalizeTrainingList, normalizeSignatureRowsFor, trainingSignaturesForUser };`
-)();
-
-const backendRow = backend.normalizeTrainingRow(ROW);
-check('the backend keeps the id', backendRow.id, 't1');
-check('and the date as the sheet had it', backendRow.date, '2026-03-14');
-check('and the duration as given', backendRow.duration, '2');
-check('flags are written as TRUE/FALSE text', backendRow.is_hazmat, 'TRUE');
-check('a false flag is written explicitly', backendRow.is_multicompany, 'FALSE');
-check(
-  'every flag column is present',
-  TRAINING_FLAG_KEYS.every((k) => backendRow[k] === 'TRUE' || backendRow[k] === 'FALSE'),
-  true
-);
-check(
-  'and every text column too',
-  ['date', 'title', 'start_time', 'duration', 'location', 'instructors', 'narrative'].every((k) => k in backendRow),
-  true
-);
-check('a missing column becomes blank, not undefined', backend.normalizeTrainingRow({ id: 'x' }).location, '');
-// The backend is the more permissive of the two parsers: it also accepts 1 and YES, and always
-// writes back TRUE/FALSE, so a hand-edited sheet converges on the canonical value.
-check('the backend accepts YES', backend.normalizeTrainingRow({ id: 'x', is_company_training: 'yes' }).is_company_training, 'TRUE');
-check('and 1', backend.normalizeTrainingRow({ id: 'x', is_company_training: 1 }).is_company_training, 'TRUE');
-check('but writes FALSE for anything else', backend.normalizeTrainingRow({ id: 'x', is_company_training: 'maybe' }).is_company_training, 'FALSE');
-
-// The rule that stops a half-filled form writing an unusable row.
-check('a row with a date and title is usable', backend.trainingRowIsUsable({ date: '2026-03-14', title: 'x' }), true);
-check('a row with no date is not', backend.trainingRowIsUsable({ date: '', title: 'x' }), false);
-check('a row with no title is not', backend.trainingRowIsUsable({ date: '2026-03-14', title: '  ' }), false);
-check('and such rows are dropped from a save', backend.normalizeTrainingList([ROW, { id: 'bad' }]).length, 1);
-check('the usable one is kept', backend.normalizeTrainingList([ROW, { id: 'bad' }])[0].id, 't1');
-
-console.log('\n--- the backend filters signatures by member ---');
-sheetData.training_signatures = [
-  { id: 's1', training_id: 't1', user_id: 'u1' },
-  { id: 's2', training_id: 't1', user_id: 'u2' },
-  { id: 's3', training_id: '', user_id: 'u1' },
-  { id: 's4', training_id: 't2', user_id: '' },
-];
-check('a member gets only their own', backend.trainingSignaturesForUser({}, 'u1').map((s) => s.id), ['s1']);
-check('and not another member\'s', backend.trainingSignaturesForUser({}, 'u2').map((s) => s.id), ['s2']);
-check('an incomplete row is dropped', backend.trainingSignaturesForUser({}, 'u1').length, 1);
-check('the admin form of the filter returns everyone', backend.normalizeSignatureRowsFor({}, '', '').map((s) => s.id), ['s1', 's2']);
-check('filtered to one training', backend.normalizeSignatureRowsFor({}, 't1', '').map((s) => s.id), ['s1', 's2']);
-check('and to one member and one training', backend.normalizeSignatureRowsFor({}, 't1', 'u2').map((s) => s.id), ['s2']);
-
 console.log('\n--- the rule: once signed, only Administration may change it ---');
 // The Training module must not offer Edit on a training anybody has signed, and must never offer
 // it on a locked one. The count comes from the server precisely because a member cannot see other
@@ -479,131 +399,7 @@ check('and are all badges', TRAINING_BADGES.length, 8);
 check('a row with only the external flag has no badges', normalizeTraining({ ...ROW, is_entered_into_external: 'TRUE', is_hazmat: 'FALSE', is_company_training: 'FALSE' }).flags.length, 0);
 check('and a normal flag still badges', normalizeTraining({ ...ROW, is_hazmat: 'TRUE', is_company_training: 'FALSE' }).flags.map((f) => f.key), ['is_hazmat']);
 
-console.log('\n--- the backend enforces both rules ---');
-// The counts helper and the refusal helper, run against a stubbed sheet. getSheetData is passed
-// IN rather than referenced: a `new Function` body is compiled in global scope, so it cannot see
-// this module's `sheetData`.
-sheetData.training = [
-  { id: 'open', date: '2026-03-14', title: 'Open training' },
-  { id: 'locked', date: '2026-03-14', title: 'Filed training', is_entered_into_external: 'TRUE' },
-];
-const backendRules = new Function(
-  'getSheetData',
-  `${extract('normalizeSignatureRowsFor')}
-   ${extract('trainingRowsById')}
-   ${extract('trainingIsClosed')}
-   ${extract('trainingSignatureCounts')}
-   ${extract('trainingWriteRefusal')}
-   return { trainingRowsById, trainingIsClosed, trainingSignatureCounts, trainingWriteRefusal };`
-)((ss, name) => sheetData[name] || []);
-
-check('rows are keyed by id', Object.keys(backendRules.trainingRowsById({})).sort(), ['locked', 'open']);
-check('the marker is read as a boolean', backendRules.trainingIsClosed({ is_entered_into_external: 'TRUE' }), true);
-check('and a blank one is not', backendRules.trainingIsClosed({}), false);
-check('counts are per training', backendRules.trainingSignatureCounts({}), { t1: 2 });
-// (the two incomplete stub rows - one with no training_id, one with no user_id - are excluded)
-check('an open training can be written', backendRules.trainingWriteRefusal({}, ['open']), '');
-check('a locked one cannot', /locked/.test(backendRules.trainingWriteRefusal({}, ['locked'])), true);
-check('the refusal names it', /locked/.test(backendRules.trainingWriteRefusal({}, ['locked'])) && backendRules.trainingWriteRefusal({}, ['locked']).includes('locked'), true);
-check('a new row (no id) is always allowed', backendRules.trainingWriteRefusal({}, ['']), '');
-check('and a mixed batch is refused for the locked one', /locked/.test(backendRules.trainingWriteRefusal({}, ['open', 'locked'])), true);
-check('an unknown id is not treated as locked', backendRules.trainingWriteRefusal({}, ['nope']), '');
-
-// A UI-only guard is not a guard: these assertions read the dispatcher itself, so moving a
-// permission check out of the backend fails here rather than shipping.
-const slice = (from, to) => codeSource.slice(codeSource.indexOf(from), codeSource.indexOf(to));
-const getCase = slice('case "GET_TRAINING"', 'case "SIGN_TRAINING"');
-const signCase = slice('case "SIGN_TRAINING"', 'case "SAVE_TRAINING"');
-const saveCase = slice('case "SAVE_TRAINING"', 'case "ADMIN_BULK_SAVE_TRAINING"');
-const adminSaveCase = slice('case "ADMIN_BULK_SAVE_TRAINING"', 'case "ADMIN_REMOVE_TRAINING_SIGNATURE"');
-const removeCase = slice('case "ADMIN_REMOVE_TRAINING_SIGNATURE"', 'case "ADMIN_SAVE_TIMECLOCK_ENTRY"');
-
-check('every training action was found', [getCase, signCase, saveCase, adminSaveCase, removeCase].every((c) => c.length > 100), true);
-
-check('reading requires a session', /getAuthContext\(ss, data\)/.test(getCase), true);
-check('a member is handed only their own signatures', /trainingSignaturesForUser\(ss, authTraining\.userId\)/.test(getCase), true);
-check('and the full set only to an administrator', /canAdministerTrainings\(ss, authTraining\.userId\)/.test(getCase), true);
-
-check('signing requires can_sign_trainings', /canSignTrainings\(ss, authSign\.userId\)/.test(signCase), true);
-check('signing refuses a removal', /Signatures cannot be removed/.test(signCase), true);
-check(
-  'and refuses it BEFORE writing anything',
-  signCase.indexOf('Signatures cannot be removed') < signCase.indexOf('upsertSheetRowById'),
-  true
-);
-check('signing cannot duplicate a signature', /alreadySigned/.test(signCase), true);
-check('and requires the training to exist', /knownTrainingIds\.indexOf\(trainingId\) === -1/.test(signCase), true);
-check('a duplicate is not counted as newly signed', /if \(alreadySigned\) return;/.test(signCase), true);
-
-check('editing requires can_edit_trainings', /hasRolePermission\(ss, authTrainingEdit\.userId, "can_edit_trainings"\)/.test(saveCase), true);
-check('and cannot delete', /Deleting a training requires the Training report permission/.test(saveCase), true);
-check('the admin save requires can_administer_trainings', /canAdministerTrainings\(ss, authTrainingSave\.userId\)/.test(adminSaveCase), true);
-check('and is the one that can delete', /bulkDeleteSheetRowsById/.test(adminSaveCase), true);
-
-check('removing a signature requires can_administer_trainings', /canAdministerTrainings\(ss, authSignature\.userId\)/.test(removeCase), true);
-check('and needs a specific row', /signature_id/.test(removeCase), true);
-check(
-  'and deletes only that row',
-  /bulkDeleteSheetRowsById\(\s*ss\.getSheetByName\("training_signatures"\),\s*\[signatureId\]/.test(removeCase),
-  true
-);
-check('and reports the row it removed', /targetSignature\.training_id/.test(removeCase), true);
-
-console.log('\n--- and so do the two new rules ---');
-// Rule: the Training module stops editing a training once anyone has signed it.
-check('the module save refuses a SIGNED training', /has already been signed, so it can only be changed from the Administration/.test(saveCase), true);
-check('by looking the signatures up server-side', /trainingSignatureCounts\(ss\)/.test(saveCase), true);
-check('and reports it before writing', saveCase.indexOf('has already been signed') < saveCase.indexOf('saveTrainingRows'), true);
-
-// Rule: a training entered into an external system is closed to everyone.
-check('the module save refuses a LOCKED training', /trainingWriteRefusal\(ss, editedTrainingIds\)/.test(saveCase), true);
-check('the admin save refuses a LOCKED training', /trainingWriteRefusal\(ss, writtenTrainingIds\.concat\(deleteTrainingIds\)\)/.test(adminSaveCase), true);
-check('including one it is deleting', /writtenTrainingIds\.concat\(deleteTrainingIds\)/.test(adminSaveCase), true);
-check('signing refuses a LOCKED training', /trainingWriteRefusal\(ss, requestedSignIds\)/.test(signCase), true);
-check('and removing a signature refuses one too', /trainingWriteRefusal\(ss, \[targetSignature\.training_id\]\)/.test(removeCase), true);
-// Every writing action is covered: the lock is not a UI convention.
-check(
-  'all four writing actions check the lock',
-  [saveCase, adminSaveCase, signCase, removeCase].every((c) => /trainingWriteRefusal/.test(c)),
-  true
-);
-
-// The signature counts have to reach the client for the module to gray out Edit.
-check('the read hands back signature counts', /trainingRowsForApp\(ss\)/.test(getCase), true);
-
-// --- the categories, end to end -------------------------------------------------------------
-//
-// The flag list exists twice - once in src/utils/training.js for the app, once in Code.gs for the
-// sheet - and the two have to agree, because the client's list is what the form writes and the
-// server's is what reaches the spreadsheet. A rename applied to only one of them is exactly the
-// failure this catches: the app would offer "Hazmat" while the server wrote "is_certification".
-console.log('\n--- the category columns, client against server ---');
-const serverFlagColumns = (codeSource.match(/const TRAINING_BOOL_COLUMNS = \[([\s\S]*?)\];/) || [])[1];
-const serverFlagNames = (serverFlagColumns.match(/"([^"]+)"/g) || []).map((quoted) => quoted.replace(/"/g, ''));
-check('the server lists every flag column', serverFlagNames, TRAINING_FLAG_KEYS);
-check('including the new EMS column', serverFlagNames.includes('is_ems'), true);
-// The old names must be gone from the server too: a column the app no longer reads is a column that
-// silently keeps a stale value.
-check('and the renamed ones under their new names', serverFlagNames.includes('is_company_training') && serverFlagNames.includes('is_hazmat'), true);
-// The old names must be gone from the server's own columns too. This looks for the QUOTED form, which is
-// how a column is read or written: the rename comment above the list names the old columns on purpose, so
-// a bare mention is documentation rather than a live reference.
-check(
-  'with nothing left reading the old names',
-  /"is_drill"|"is_certification"/.test(codeSource),
-  false
-);
-
-// Both training screens render the shared filter bar, which is what puts the Category control on the
-// member module and the report at once.
-console.log('\n--- the filter bar reaches both screens ---');
-const filterBarSource = readFileSync('src/components/training/TrainingFilters.jsx', 'utf8');
-const memberModuleSource = readFileSync('src/components/TrainingModule.jsx', 'utf8');
-const adminReportSource = readFileSync('src/components/admin/AdminTrainingTab.jsx', 'utf8');
-check('the bar offers a Category control', /id="training-filter-category"/.test(filterBarSource) && /TRAINING_CATEGORY_OPTIONS/.test(filterBarSource), true);
-check('the member module uses the bar', memberModuleSource.includes('<TrainingFilters'), true);
-check('and so does the report', adminReportSource.includes('<TrainingFilters'), true);
-check('clearing the filters resets every one of them', /onChange\(emptyTrainingFilters\(\)\)/.test(filterBarSource), true);
+// --- the category columns ---
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

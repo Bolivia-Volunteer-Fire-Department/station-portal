@@ -46,3 +46,30 @@ export const mergeRowsById = (rows, arriving) => {
   return [...byId.values()];
 };
 
+// A WINDOW READ REPLACES THE ROWS INSIDE ITS OWN RANGE, and only those.
+//
+// This is the half mergeRowsById cannot do, and the reason the schedule needed it: a merge can only ADD, so a shift
+// DELETED from a month stayed in the array and was drawn straight back onto the board. The fetch is authoritative for
+// the range it was asked about, and says nothing about the months outside it - those are left exactly as they were,
+// which is what lets a navigation to a far month keep its rows.
+//
+// `field` is the column the range applies to, because not every ranged row is a schedule row: a clock entry's date is
+// its `time_in` ("yyyy-MM-dd HH:mm:ss"), and comparing that against a bare 'YYYY-MM-DD' bound would sort the last
+// day's entries past the end of their own window. The value is cut to ten characters, so a datetime compares as the
+// day it falls on - exactly what the range means.
+//
+// Pure, so scripts/verify-refresh-wiring.mjs can exercise it beside mergeRowsById.
+export const replaceRowsInRange = (rows, arriving, from, to, field = 'date_from') => {
+  const start = String(from || '');
+  const end = String(to || '');
+  const kept = (Array.isArray(rows) ? rows : []).filter((row) => {
+    // The date is a 'YYYY-MM-DD' key in the same shape as the bounds, so this is the string comparison the query
+    // itself used. A row whose date cannot be read is KEPT: this read cannot say it was deleted, and dropping it
+    // would lose a row to a typo.
+    const date = String((row && row[field]) ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return true;
+    return date < start || date > end;
+  });
+  return mergeRowsById(kept, arriving);
+};
+

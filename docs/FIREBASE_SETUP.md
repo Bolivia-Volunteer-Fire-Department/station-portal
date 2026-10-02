@@ -261,11 +261,24 @@ enforcement for a *callable* is set in the function's own options (`enforceAppCh
 is a small change plus `firebase deploy --only functions`. That one is deliberately not made yet; say when the metrics look
 clean and it is a five-minute change.
 
-**Local development, and one trap.** `localhost` is not a valid site to attest, so development uses App Check's debug
-provider: Firebase → App Check → Apps → your app → ⋮ → **Manage debug tokens** → create one, then put it in your **local**
-`.env` as `VITE_FIREBASE_APPCHECK_DEBUG_TOKEN`. That token is a credential for your project — it lets a request skip
-attestation — so it must never be a repository secret for the Pages build: Vite inlines every `VITE_*` variable into the
-built bundle, which would publish it in the page source. Delete it from the console if it ever leaks.
+**Local development, and one trap.** `localhost` is not attested by default, so development has two working paths and a
+third that does not work:
+
+1. **A debug token** — Firebase → App Check → Apps → your app → ⋮ → **Manage debug tokens** → create one, then put it in
+   your **local** `.env` as `VITE_FIREBASE_APPCHECK_DEBUG_TOKEN`. That token is a credential for your project — it lets a
+   request skip attestation — so it must never be a repository secret for the Pages build: Vite inlines every `VITE_*`
+   variable into the built bundle, which would publish it in the page source. Delete it from the console if it ever leaks.
+2. **Add `localhost` to the site key's supported domains** in the Google Cloud console, which makes the key attest the
+   loopback origin for real. Use a separate key for development if you do this, so the production key's domain list stays
+   production-only.
+3. **A site key and no debug token** — which cannot work, and used to be the loudest failure in the project: the console
+   filled with `POST .../recaptcha/enterprise/clr … 400` and `AppCheck: ReCAPTCHA error (appCheck/recaptcha-error)` on
+   every request. It is loud rather than one line because **nothing backs off**: the SDK's throttle engages only when
+   Firebase's own exchange endpoint returns a bad status, and a reCAPTCHA failure never reaches that endpoint
+   ([firebase/firebase-js-sdk#10385](https://github.com/firebase/firebase-js-sdk/issues/10385)). `src/services/firebase.js`
+   now declines to initialise App Check on a loopback origin (`localhost`, `127.0.0.1`, `::1`) when no debug token is set,
+   and says why once. The deployed site is not a loopback origin, so production is untouched — which is also why a flood
+   *there* is never this, and is a missing domain on the key's list instead.
 
 ## 8. Later, not now
 

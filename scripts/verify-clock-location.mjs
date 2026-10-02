@@ -1,14 +1,12 @@
 /**
  * Verifies the optional clock-in geofence.
  *
- * The client util and the Code.gs helpers are two independent implementations of the same rule
- * (one for the immediate pre-flight rejection, one so the fence can't be bypassed by calling the
- * API directly), so this checks BOTH against the same expectations. If they ever disagree, one of
- * them is wrong and a member gets a different answer depending on how they clocked in.
+ * The client util is the only implementation of the rule now that the backend is Firestore
+ * and the fence is enforced by the client pre-flight (a refused clock action never leaves
+ * the browser), so this checks it against the geofence's documented expectations.
  *
  * Run with: npm run verify:clock-location
  */
-import { readFileSync } from 'node:fs';
 import {
   CLOCK_LOCATION_KEYS,
   clockLocationConfig,
@@ -164,72 +162,6 @@ check('a missing key is undefined', settingValue([], 'gps_margin_of_error'), und
 check('a key with no matching entry is undefined', settingValue([{ key: 'other', value: 'x' }], 'gps_margin_of_error'), undefined);
 check('numbers pass through', settingValue([{ key: 'gps_margin_of_error', value: 1000 }], 'gps_margin_of_error'), 1000);
 check('null settings are safe', settingValue(null, 'gps_margin_of_error'), undefined);
-
-console.log('\n--- the backend helper agrees with the client ---');
-// Extracted from Code.gs and run against a stub of the sheet access it uses, so the two
-// implementations are compared directly rather than assumed to match. A divergence here would
-// mean a member gets a different answer depending on whether the pre-flight check or the server
-// rejected them.
-// Read from the working directory, not relative to this module: the vite --ssr runner executes a
-// bundled copy under tmp-test-out/, so import.meta.url points at the build output, not the repo.
-const codeSource = readFileSync('src/services/Code.gs', 'utf8');
-const extract = (name) => {
-  const start = codeSource.indexOf(`function ${name}(`);
-  if (start === -1) throw new Error(`Code.gs is missing ${name}()`);
-  const end = codeSource.indexOf('\n}\n', start);
-  return codeSource.slice(start, end + 3);
-};
-
-const sheetRows = [];
-globalThis.getSheetData = () => sheetRows;
-const backend = new Function(
-  `const FEET_PER_METER = 3.280839895;
-   ${extract('clockLocationNumber')}
-   ${extract('requiredClockLocation')}
-   ${extract('distanceInFeet')}
-   ${extract('clockLocationRejection')}
-   return { clockLocationNumber, requiredClockLocation, distanceInFeet, clockLocationRejection };`
-)();
-
-const setRows = (pairs) => {
-  sheetRows.length = 0;
-  pairs.forEach(([key, value]) => sheetRows.push({ key, value }));
-};
-
-setRows([]);
-check('the backend treats an empty sheet as off', backend.requiredClockLocation({}), null);
-check('and rejects nothing', backend.clockLocationRejection({}, '', ''), '');
-
-setRows(FULL);
-check('the backend reads a full configuration', backend.requiredClockLocation({}).marginFeet, 1000);
-check('the backend rejects a missing location', /Allow location access/.test(backend.clockLocationRejection({}, '', '')), true);
-check(
-  'the backend rejects being far away',
-  /outside the 1000 ft limit/.test(
-    backend.clockLocationRejection({}, String(north(5000).latitude), String(CONFIGURED.longitude))
-  ),
-  true
-);
-check('the backend allows being nearby', backend.clockLocationRejection({}, String(CONFIGURED.latitude), String(CONFIGURED.longitude)), '');
-
-// The two distance implementations must agree to within a foot: a larger gap would mean different
-// units or a different Earth radius on one side.
-close(
-  'both distance implementations agree',
-  backend.distanceInFeet(39.277157, -78.23833, north(1000).latitude, north(1000).longitude),
-  distanceInFeet({ latitude: 39.277157, longitude: -78.23833 }, north(1000)),
-  1
-);
-
-// Partial configuration is off on both sides - the property that stops a half-filled setup from
-// locking the station out of its own timeclock.
-setRows(FULL.slice(0, 2));
-check('the backend treats a partial configuration as off', backend.requiredClockLocation({}), null);
-check('and the client agrees', withSettings(FULL.slice(0, 2)).configured, false);
-
-setRows([FULL[0], FULL[1], [CLOCK_LOCATION_KEYS.margin, '0']]);
-check('the backend ignores a zero margin', backend.requiredClockLocation({}), null);
-check('and so does the client', withSettings([FULL[0], FULL[1], [CLOCK_LOCATION_KEYS.margin, '0']]).configured, false);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

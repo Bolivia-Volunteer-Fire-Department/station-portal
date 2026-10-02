@@ -45,7 +45,7 @@ const shiftStatus = ({ isOpen, isMine, offerState }) => {
 //
 // `crewMember` is only set in the "Show everyone" view: in the personal view the reader IS the member, so
 // a row naming them would be noise.
-export const shiftItemDetails = (assignment, { timeFormat = '12', crewMember = false, offerState = '' } = {}) => {
+export const shiftItemDetails = (assignment, { crewMember = false, offerState = '' } = {}) => {
   const a = assignment || {};
   const isOpen = Boolean(a.isOpen);
 

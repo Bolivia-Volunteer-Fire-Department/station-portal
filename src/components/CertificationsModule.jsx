@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BadgeCheck, CalendarDays, AlertTriangle, Loader2 } from 'lucide-react';
+import { BadgeCheck, CalendarDays, AlertTriangle } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CenteredContent from './CenteredContent';
 import { fetchCertifications } from '../services/api';

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2 } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -117,8 +117,18 @@ export default function AdminPanel({
   ranks,
   shifts,
   schedule,
+  // THE BOARD READS THE MONTH IT IS SHOWING, so it is handed what the last read said and the way to ask for another one.
+  // THESE WERE PASSED BY App.jsx AND THEN DROPPED HERE: the board asked for a month, the request arrived nowhere, and it
+  // drew whatever the sign-in payload had left in the shared array - so a month outside that window could never be
+  // fetched at all, and a save could not be re-read into the month it changed. A prop that stops at this line produces no
+  // error anywhere, which is why the forwarding is asserted by scripts/verify-admin-render.mjs.
+  scheduleWindowError = '',
+  onNeedSchedule,
   scheduleTemplates,
   assignments,
+  // THE MODULE IS READ WHEN IT IS OPENED (App.jsx#adminModuleOpened), so this can be true for the first moment: every tab
+  // below draws its empty state from an empty prop, and "No users yet" is indistinguishable from a read in flight.
+  loading = false,
   // Reference data and the crew's claims for the availability screens: the windows every member chooses from, the
   // claims themselves (loaded per range, not in the payload), and the scope they were read over.
   availabilityWindows = [],
@@ -229,6 +239,18 @@ export default function AdminPanel({
     setRequestedSubTab(itemId);
     closeMenus();
   };
+
+  // The module's own read is still in flight. The panel is mounted the moment Administration is opened, so this is the first
+  // moment of every visit - and every tab below would otherwise draw "No users yet" / "Nothing scheduled" from its empty
+  // props, which reads as a station with no data rather than a read that has not come back yet.
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500 dark:text-slate-400">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading Administration…
+      </div>
+    );
+  }
 
   return (
     // `space-y-6` for the stack of cards. The height classes apply only to the Help tab, and only because that
@@ -380,7 +402,12 @@ export default function AdminPanel({
       {activeSubTab === 'schedule' && (
         <AdminScheduleManagementTab
           token={token}
-          schedule={schedule}
+          // NOT the shared schedule array: this board reads the month on screen from Firestore (see the onNeedSchedule
+          // note in AdminScheduleManagementTab), which is why it is handed the reader rather than a list of rows.
+          // The month reader, and why the last read failed. Required: this board draws the month it read (see the
+          // onNeedSchedule note in AdminScheduleManagementTab).
+          scheduleWindowError={scheduleWindowError}
+          onNeedSchedule={onNeedSchedule}
           scheduleTemplates={scheduleTemplates}
           assignments={assignments}
           ranks={ranks}
@@ -388,6 +415,12 @@ export default function AdminPanel({
           // The CREW'S claims, not this officer's own: they are what the "nothing marked that day" warning below the
           // board reads (read once by App.jsx and shared with the roster).
           rosterAvailability={rosterAvailability}
+          // AND THE RANGE THOSE CLAIMS COVER, plus the way to ask for a month that is not in it. An empty list and an
+          // unread month look identical, and only one of them is a member having marked nothing - so the board is told
+          // which days it may judge, and can fetch the month it is looking at.
+          rosterClaimsFrom={rosterScope?.from || ''}
+          rosterClaimsTo={rosterScope?.to || ''}
+          onRosterMonth={onRosterMonth}
           offers={offers}
           onOffersChanged={onOffersChanged}
           // Non-shift entries, so the board shows the month as a whole.

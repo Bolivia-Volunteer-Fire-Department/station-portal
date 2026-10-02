@@ -27,17 +27,23 @@
 //   4. IT IS WORTH KEEPING LIVE. `on_duty` changes when somebody clocks in or out, on the screen every member lands on, so
 //      the connection buys something a member can see. If that stops being true, delete the subscription - a listener
 //      nobody answers is a socket held open for nothing.
-import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from './firebase.js';
 // The same key derivation and the same settings shaping the readers use, so a live row and a read row cannot drift apart.
-import { audienceKeysFor, readUsersOnce, settingRows } from './firestorePayload.js';
+import { audienceKeysFor, settingRows, usersByIds } from './firestorePayload.js';
 // The date key the announcements listener bounds by, from the same helper the reader uses.
 import { toDateKey } from '../utils/scheduleDate.js';
 
 // A collection snapshot as the rows the readers return: the document id plus its data, which is what `rowsOf` builds. The
 // shape matters more than it looks - the app hands both to the same setters, so a different key here is a screen that
 // empties the moment a change arrives.
-const rowsFrom = (snapshot) => snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+//
+// THE DOCUMENT ID GOES LAST, and that is not style: a migrated row still carries the sheet's own `id` column, so spreading
+// the data over the key lets a stale copy win - the same bug `rowsOf` had. It stayed invisible here for a while because the
+// fixtures did not carry that column, so the read rows and the live rows agreed in the emulator and disagreed in
+// production, where every migrated announcement has one: the payload read drew the announcements correctly, the listener
+// then REPLACED them with rows keyed by a dead sheet id, and the screen changed shape the moment a change arrived.
+const rowsFrom = (snapshot) => snapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id }));
 
 // WHO IS ON DUTY, joined to a name and a rank - built EXACTLY as the reader builds it (firestoreReads.js#onDutyRows), for
 // two reasons: the app hands a live row and a read row to the same setter, and `time_in` is a field a screen can reasonably
@@ -46,9 +52,11 @@ const rowsFrom = (snapshot) => snapshot.docs.map((entry) => ({ id: entry.id, ...
 // one for a concurrent caller. The document id IS the member id here (`on_duty/{memberId}`), which is why the id is taken
 // from the document and `user_id` is normalized to match it.
 const onDutyFrom = async (snapshot) => {
-  const users = await readUsersOnce();
-  const byId = Object.fromEntries(users.map((user) => [user.id, user]));
-  return rowsFrom(snapshot).map((row) => {
+  // NAMES FOR THE PEOPLE ON DUTY, not for the whole directory: this fires on every clock-in and clock-out, so asking it for the
+  // crew list would have every member in the station read the roster each time somebody else arrived. See usersByIds.
+  const rows = rowsFrom(snapshot);
+  const byId = Object.fromEntries((await usersByIds(rows.map((row) => row.id))).map((user) => [user.id, user]));
+  return rows.map((row) => {
     const member = byId[row.id] || {};
     return { ...row, name: member.name || '', rank_id: member.rank_id ?? '', user_id: row.id };
   });
@@ -56,9 +64,23 @@ const onDutyFrom = async (snapshot) => {
 
 // One listener, with its failures routed to the caller instead of vanishing. `shape` may be async (the duty join is), and
 // the handler is only ever called with the shape the app expects.
+//
+// THE FALLBACK IS A ONE-SHOT READ, and the reason it exists is a network that kills the stream: a channel that cannot
+// stay open long-polls and dies, and when it does the screen freezes on the last snapshot with no error the user can
+// see. A one-shot `getDocs` still works when streaming does not, so the data is refreshed the same way the screen's
+// own read refreshes it, and the SDK's own reconnect keeps trying for the stream in the background - the next error
+// simply refreshes again. Nothing here is load-bearing, so a failed fallback is just logged.
 const watch = (target, shape, handler, onError) => {
+  const refreshOnce = () => {
+    getDocs(target)
+      .then((snapshot) => Promise.resolve(shape(snapshot)).then(handler))
+      .catch((error) => {
+        if (onError) onError(error);
+      });
+  };
   const fail = (error) => {
     if (onError) onError(error);
+    refreshOnce();
   };
   return onSnapshot(
     target,

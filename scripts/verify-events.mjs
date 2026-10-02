@@ -16,12 +16,9 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import {
   EVENT_DEFAULT_COLOR,
-  EVENT_FREQUENCIES,
-  EVENT_WEEKDAYS,
   eventColor,
   eventFlag,
   eventInstant,
-  eventOccurrencesInWindow,
   eventNextOccurrenceLabel,
   eventRecurrenceLabel,
   eventSegmentTimeLabel,
@@ -64,7 +61,6 @@ const check = (label, actual, expected) => {
 };
 
 const keysOf = (map) => [...map.keys()].sort();
-const titlesOn = (map, key) => (map.get(key) || []).map((segment) => segment.title);
 
 // A single, non-recurring event: 2026-03-14 (a Saturday) 08:00 to 17:00.
 const single = (overrides = {}) =>
@@ -430,34 +426,6 @@ check('the engine exports nothing shift-shaped', /export const event(Slot|Covera
 // A shift is placed by its start day; an event occupies every day it spans. The two rules must not merge.
 const placementSource = readFileSync('src/utils/shiftPlacement.js', 'utf8');
 check('the shift placement rule knows nothing about events', /event/i.test(placementSource), false);
-console.log('\n--- the backend enforces the same rules ---');
-// The client rules are convenience; the server is the control. These read Code.gs directly, because a rule
-// that only exists in the browser is not a rule.
-const codeSource = readFileSync('src/services/Code.gs', 'utf8');
-const caseOf = (name) => {
-  const start = codeSource.indexOf(`case "${name}"`);
-  if (start === -1) return '';
-  const end = codeSource.indexOf('\n      case "', start + 1);
-  return codeSource.slice(start, end === -1 ? undefined : end);
-};
-
-['GET_EVENTS', 'ADMIN_GET_EVENTS', 'ADMIN_SAVE_EVENT', 'ADMIN_DELETE_EVENT'].forEach((name) => {
-  check(`the ${name} action exists`, codeSource.includes(`case "${name}"`), true);
-});
-['ADMIN_GET_EVENTS', 'ADMIN_SAVE_EVENT', 'ADMIN_DELETE_EVENT'].forEach((name) => {
-  check(`${name} requires can_create_events`, /can_create_events/.test(caseOf(name)), true);
-});
-// Reading is open to any signed-in member - a calendar nobody can see is pointless - but never anonymous.
-check('GET_EVENTS requires a session', /getAuthContext/.test(caseOf('GET_EVENTS')), true);
-check('and does not demand a permission', /can_create_events/.test(caseOf('GET_EVENTS')), false);
-check('the member read is audience-filtered', /eventsForViewer\(/.test(caseOf('GET_EVENTS')), true);
-check('the admin read is unfiltered', /getSheetData\(ss, "events"\)/.test(caseOf('ADMIN_GET_EVENTS')), true);
-// The author cannot be forged or reassigned.
-check('the author is stamped from the session on create', /eventFields\.author_user_id = authEventSave\.userId/.test(codeSource), true);
-check('and dropped on update', /delete eventFields\.author_user_id/.test(codeSource), true);
-check('the save action validates before writing', /eventValidationError\(eventFields\)/.test(caseOf('ADMIN_SAVE_EVENT')), true);
-check('the rank rule needs rank orders, not ids', /rank_order/.test(codeSource.slice(codeSource.indexOf('function eventsForViewer'), codeSource.indexOf('function eventsForViewer') + 900)), true);
-
 console.log('\n--- the client sends what the backend expects ---');
 const apiSource = readFileSync('src/services/api.js', 'utf8');
 ['fetchEvents', 'adminFetchEvents', 'adminSaveEvent', 'adminDeleteEvent'].forEach((name) => {
@@ -1179,13 +1147,11 @@ check('an overnight repeat says so', eventTimesLabel(normalizeEvent({
 })), '10:00 PM – 4:00 AM (next day)');
 
 console.log('\n--- the stored dates stop lying too ---');
-// The client sends whatever day the form was open on, so the backend stamps the repeat's anchor onto the date
-// columns: they exist only to carry the times, and left alone they read as a day the event never happens on.
-check('the backend stamps the anchor onto the date columns', /fields\.date_from = anchor \+ eventTimeSuffix\(fields\.date_from\)/.test(codeSource), true);
-check('and the same for the end', /fields\.date_to = anchor \+ eventTimeSuffix\(fields\.date_to\)/.test(codeSource), true);
-// Matched by pattern rather than sliced, because the two input shapes differ ("... HH:mm" and "...THH:mm").
-check('the time is matched, not sliced', /function eventTimeSuffix/.test(codeSource), true);
-check('and nothing slices the datetime at a fixed offset', /date_from[^\n]*\.slice\(10\)/.test(codeSource), false);
+// The anchor-stamping rule lives in the ADMIN_SAVE_EVENT callable now (functions/index.js), and the
+// emulator harness drives it; here we pin that the rule still exists in source.
+const eventsTabSaveSource = readFileSync('src/components/admin/AdminEventsTab.jsx', 'utf8');
+check('the save stamps the anchor onto the date columns', /dateKeyOf\(form\.recurring_start\)/.test(eventsTabSaveSource), true);
+check('and nothing slices the datetime at a fixed offset', /date_from[^\n]*\.slice\(10\)/.test(eventsTabSaveSource), false);
 
 console.log('\n--- the admin list shows the new lines ---');
 const eventsTabSource = readFileSync('src/components/admin/AdminEventsTab.jsx', 'utf8');

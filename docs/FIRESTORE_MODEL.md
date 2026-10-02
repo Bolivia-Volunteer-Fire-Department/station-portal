@@ -1,11 +1,10 @@
 # The Firestore Model
 
-**Status: implemented in phases, and nothing is routed to it yet.** Phases 0-3 are real - `firestore.rules`,
-indexes, the client-side write paths in `src/services/firestoreWrites.js`, the payload readers in
-`src/services/firestorePayload.js`, and eight Cloud Functions - and all of it is verified against the emulators. Two
-things are still true, and they are why the app itself is unchanged: **the sheets' data has not been copied to
-Firestore**, and **the client seam has not been switched over**. The sections written as future tense below are the
-design; the phase sections at the end each say what actually exists.
+**Status: implemented, and the only backend.** `firestore.rules`, the indexes, the client-side write
+paths in `src/services/firestoreWrites.js`, the payload readers in `src/services/firestorePayload.js`,
+and the Cloud Functions in `functions/` are what the app runs on — the sheet backend has been deleted.
+The sections written as future tense below are the design record; the phase sections at the end each
+say what actually exists.
 
 What follows is the thing to argue with before any more code exists: one Firestore collection per thing
 the app stores, who writes each one, what rule replaces each server-side check, and which index
@@ -31,9 +30,9 @@ Decisions already taken, so they are not re-litigated here:
   (clocking in and out) require connectivity; see "Offline" below.
 - **GitHub Pages** keeps serving the app for now; Firebase Hosting is a later, optional switch.
 
-The current backend is 9,257 lines of Apps Script that reads whole sheets, filters rows, strips
-fields, applies audience rules and computes what each viewer may see. Almost all of that work is
-*policy*, and policy is what the new rules have to say instead.
+The sheet backend it replaced was 9,257 lines of Apps Script that read whole sheets, filtered rows, stripped
+fields, applied audience rules and computed what each viewer may see. Almost all of that work is
+*policy*, and policy is what the rules say instead.
 
 ## The short version
 
@@ -137,7 +136,7 @@ never disagree — a split costs no atomicity.
 
 | collection | fields | written by | read by | option | rule, in words |
 |---|---|---|---|---|---|
-| `schedule/{id}` | `schedule_template_id`, `assignment_id`, `user_id` (empty = open), `date_from`, `date_to`, `start_time`, `end_time`, `is_open` | officer with `can_edit_schedule`, in one batch per board save | **any signed-in member** | A + D | A member is meant to see the crew's shifts — that is what "Show everyone" draws and how the calendar labels other people's pills. So no row filtering: the collection is readable, and the *date range* is what the query narrows. |
+| `schedule/{id}` | `schedule_template_id`, `assignment_id`, `user_id` (empty = open), `date_from`, `date_to`, `start_time`, `end_time`, `is_open` | officer with `can_edit_schedule`, in one batch per board save | **any signed-in member** | A + D | A member is meant to see the crew's shifts — that is what "Show everyone" draws and how the calendar labels other people's pills. So no row filtering: the collection is readable, and the *date range* is what the query narrows. **Not read at sign-in at all** — it is the one collection that grows without limit, and no screen in front of a member when they sign in draws a shift, so a calendar or the board asks for the month it is showing (`GET_SCHEDULE`, through `App#loadScheduleWindow`) and the window comes back with the rows. |
 | `availability_windows/{id}` | `nickname`, `start_time`, `end_time`, `is_sunday`…`is_saturday`, `effective_date`, `end_date` | an officer with `can_edit_availability_windows` | any signed-in member | A | Reference data: the recurring weekly patterns a member can claim, and the `is_<weekday>` flag is the day the window STARTS. Short and officer-maintained, so the whole collection is read at sign-in — the retired ones included, because a claim points at one and the history has to keep reading. Its own permission, deliberately: shaping the station's week is a different job from correcting one member's claims. |
 | `availability_months/{userId}_{YYYY-MM}` | `user_id`, `month`, `claims` (a map of window id → the days claimed) | the member's own save — **one document for the whole month** — or an officer with `can_edit_member_availability` | the member (own documents), officers (all) | A | The document IS the month, and that is the whole point: a claim is tiny, so a row-per-claim shape cost ~240 document reads for a month view of a 30-member station, and this costs ~30. The owner is in the document id, which is what the read rule proves, and `month` is what lets an officer ask for one month across the crew in a single query. |
 | `schedule_offers/{id}` | `user_id`, `schedule_id`, `date_from`, `assignment_id`, `status`, `slot_key`, `approved_by` | the member who offers; the officer who approves | the member (own), officers with `can_approve_shifts` (all), and other members' offers only as an approved schedule row | A | `can_make_offers` is what lets a member write; the approval is an officer's write. |
@@ -464,7 +463,8 @@ port verifiable at all: the UI cannot silently change underneath it.
 4. This document agreed, with the open-shift shape decided (two queries, above).
 5. Guardrails: budget alerts, and App Check's console side (the client is wired — FIREBASE_SETUP step 7). A reads-per-screen budget is
    written down here rather than in code: a member's sign-in should read the roster, the settings, the roles, the
-   schedule for its window, its own availability months, its own clock history and the on-duty list.
+   schedule for the month a calendar or the board is showing, its own availability months, its own clock history and the
+   on-duty list.
 
 **One prerequisite, and it is not obvious:** `firebase-tools` now requires a **JDK 21 or above** for the Firestore
 emulator (Java 8 will not do). On this machine that meant `brew install openjdk@21`, which is keg-only and so

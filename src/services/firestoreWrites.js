@@ -448,7 +448,8 @@ export const signDocument = async ({ userId, documentId }) => {
     success: true,
     signed: 1,
     id: created.id,
-    signature: { id: created.id, ...(await getDoc(created)).data() },
+    // Id last, as everywhere else: the row may carry a stale `id` column of its own, and the document key is the truth.
+    signature: { ...(await getDoc(created)).data(), id: created.id },
     signatures: await ownSignatureRows(userId),
   };
 };
@@ -827,7 +828,7 @@ export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
 };
 
 // The badge index: member id -> the [{ id, name, icon }] of the types that asked to be shown beside a name, and only
-// for records that are CURRENT. This mirrors certificationBadgeIndex in Code.gs, including the part that matters
+// for records that are CURRENT. This mirrors the sheet's certificationBadgeIndex, including the part that matters
 // most: a paramedic badge on somebody whose licence lapsed is worse than no badge, because it is the app making a
 // claim the station cannot back.
 //

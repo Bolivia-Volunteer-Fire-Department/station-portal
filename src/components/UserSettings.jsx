@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Save, CheckCircle, AlertCircle, Loader2, User, KeyRound, Bell, Smartphone, ShieldCheck } from 'lucide-react';
+import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
 import { soundsActiveFrom } from '../utils/uiSounds';
 import { visibleNotificationTypes } from '../utils/notificationPrefs';

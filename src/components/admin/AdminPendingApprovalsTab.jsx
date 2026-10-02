@@ -108,8 +108,10 @@ export default function AdminPendingApprovalsTab({ token, offers = [], onOffersC
           onOffersChanged();
         }
         
-        // Also trigger admin data refresh so the Schedule Management calendar sees changes immediately
-        void onAdminDataChanged?.(token);
+        // Also trigger admin data refresh so the Schedule Management calendar sees changes immediately. `schedule` is
+        // named explicitly because approving FILLS AN EMPTY SLOT with a new schedule row, and the payload fallback no
+        // longer carries that collection - an unnamed refresh would leave every calendar showing the slot as open.
+        void onAdminDataChanged?.(['schedule', 'scheduleOffers'], token);
         
         // Refresh the offers list to get updated data - extract offers array from response
         const refreshResult = await adminFetchScheduleOffers(token);
@@ -158,8 +160,9 @@ export default function AdminPendingApprovalsTab({ token, offers = [], onOffersC
           onOffersChanged();
         }
         
-        // Also trigger admin data refresh so the Schedule Management calendar sees changes immediately
-        void onAdminDataChanged?.(token);
+        // Also trigger admin data refresh. ONLY the offers: a decline changes no schedule row - the slot was never
+        // filled - so refreshing the schedule here would be a read of a month for nothing.
+        void onAdminDataChanged?.(['scheduleOffers'], token);
         
         // Refresh the offers list to get updated data - extract offers array from response
         const refreshResult = await adminFetchScheduleOffers(token);

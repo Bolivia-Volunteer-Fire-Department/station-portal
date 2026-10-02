@@ -41,7 +41,6 @@ import ClockBlockedModal from '../src/components/ClockBlockedModal.jsx';
 import ConfirmModal from '../src/components/ConfirmModal.jsx';
 import MyClockHistory from '../src/components/MyClockHistory.jsx';
 import { clockLocationNotice } from '../src/utils/clockLocation.js';
-import TrainingForm from '../src/components/training/TrainingForm.jsx';
 import FirefighterRunner from '../src/components/FirefighterRunner/FirefighterRunner.jsx';
 import ScheduleCalendar from '../src/components/ScheduleCalendar.jsx';
 import UserSettings from '../src/components/UserSettings.jsx';
@@ -490,7 +489,7 @@ const availNow = new Date();
 const availYear = availNow.getFullYear();
 const availMonth = availNow.getMonth();
 const availDay = `${availYear}-${String(availMonth + 1).padStart(2, '0')}-15`;
-const availDow = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][
+const _availDow = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][
   new Date(availYear, availMonth, 15).getDay()
 ];
 // A window that runs every day, and one member's claim against it. The weekday logic is the derivation's job and
@@ -632,6 +631,11 @@ check(
 );
 
 console.log('\n--- the Schedule Management board ---');
+// WHAT THIS RENDER CANNOT SHOW, and why the wiring is asserted at source level beside it: the board reads the month it
+// is showing from Firestore (see its onNeedSchedule note), and EFFECTS DO NOT RUN during a server render - so this pass
+// draws the month's template slots and the events, and the pills that come from rows arrive on the client. That is also
+// why a missing prop here is invisible: a board handed no reader draws an empty month and says nothing.
+//
 // A vacancy in this tab is labeled with its ASSIGNMENT, not the word "Open" (the vacancy
 // styling carries that), so this renders a vacant row for a template slot in the current
 // month and checks what the pill says. The row and the template have to line up: the board
@@ -706,6 +710,54 @@ check(
   'and reads a 7am event, the 8am shift, a 7pm event',
   boardOrder.every((at, i) => at > -1 && (i === 0 || boardOrder[i - 1] < at)),
   `Breakfast, shift, Drill at ${boardOrder.join(', ')}`
+);
+
+// THE BOARD DRAWS THE MONTH IT READ, NOT THE ARRAY IT IS HANDED. This is the other half of the wiring above, and it is
+// provable in a server render: a FILLED row in the `schedule` prop would name its member if the board still seeded from
+// it, and this board is handed no reader at all - so the member's name must be nowhere on the page. That was the shape of
+// the original fault: the board drew the shared array, so a month round-trip re-seeded it from a cache the save had not
+// refreshed, and the shift appeared to move back.
+const boardStaleHtml = (() => {
+  try {
+    return renderToString(
+      React.createElement(AdminScheduleManagementTab, {
+        token: 'test-token',
+        // A row for this month, with a member only these rows could name.
+        schedule: [
+          {
+            id: 's9',
+            schedule_template_id: 't1',
+            assignment_id: 'a1',
+            user_id: 'u9',
+            date_from: boardDay,
+            date_to: boardDay,
+          },
+        ],
+        scheduleTemplates: [
+          { id: 't1', day_of_week: boardDow, start_time: '08:00', end_time: '18:00', assignment_id: 'a1' },
+        ],
+        assignments: [boardAssignment],
+        ranks: [],
+        users: [{ id: 'u9', name: 'Zed Quarles' }],
+        offers: [],
+        events: [],
+        onOffersChanged: async () => {},
+        onAdminDataChanged: async () => {},
+      })
+    );
+  } catch (error) {
+    return { error };
+  }
+})();
+check(
+  'the board renders without a reader',
+  typeof boardStaleHtml === 'string',
+  boardStaleHtml.error && boardStaleHtml.error.message
+);
+check(
+  'and names nobody from the shared array it was handed, because it draws its own month',
+  !String(boardStaleHtml).includes('Zed Quarles'),
+  'the board is still drawing the array App holds rather than the month it read'
 );
 
 console.log('\n--- the Firefighter Runner easter egg ---');
@@ -1203,7 +1255,7 @@ console.log('\n--- rank color and icon on the All Members list ---');
 // tab, and each member's rank_id comes from utils/availability.js, so the two are checked here.
 // The roster opens on the CURRENT month (its viewDate is internal state), so the fixture has to
 // land in that month or the list legitimately shows nothing. The first Monday of this month it is.
-const rosterMonday = (() => {
+const _rosterMonday = (() => {
   const day = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   while (day.getDay() !== 1) day.setDate(day.getDate() + 1);
   return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
@@ -1636,9 +1688,9 @@ check('and it does not await the refresh', !/await onDataChanged\(/.test(saveHan
 // old ones. The saved row is applied locally first, and the refresh is reported rather than silent.
 check('the saved row is applied locally first', /onRowSaved\?\.\('users', \{ \.\.\.formData/.test(saveHandlerSource), true);
 check('before the form is reset', usersSource.indexOf("onRowSaved?.('users', { ...formData") < usersSource.indexOf('resetForm();\n\n      // The refresh is NOT awaited'), true);
-check('the background refresh is started', /Promise\.resolve\(onDataChanged\?\.\(\)\)/.test(usersSource), true);
+check('the background refresh is started', /Promise\.resolve\(onDataChanged\?\.\('users'\)\)/.test(usersSource), true);
 check('and tracked so it can be shown', /setRefreshing\(true\)/.test(usersSource) && /finally\(\(\) => setRefreshing\(false\)\)/.test(usersSource), true);
-check('with a visible indicator', /Reloading the full list in the background/.test(usersSource), true);
+check('with a visible indicator', /Reloading the list in the background/.test(usersSource), true);
 
 // Bounded by the end of the element rather than by a character count, which is what a fixed window
 // gets wrong. Declared here because more than one section asserts on an element's props.
@@ -1799,7 +1851,52 @@ check('and the location filter lists the locations present', String(adminReportW
 const boardSource = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
 check(
   'the board scopes its rows to the visible month',
-  /const monthRows = useMemo\([\s\S]{0,500}?return from <= monthEndKey && to >= monthStartKey;/.test(boardSource),
+  /const scopeToMonth = \(rows\) =>[\s\S]{0,400}?return from <= monthEndKey && to >= monthStartKey;/.test(boardSource),
+  true
+);
+// A MONTH CHANGE MUST RE-SEED, WHATEVER THE DRAFT. The guard that lets an unsaved draft outlive a server refresh used to
+// apply to the month change as well, and that combination lost saved rows: `working` kept the previous month's rows, the
+// board drew the new month, and - because the same guard skipped the re-seed that fresh server rows cause - Refresh
+// could not bring them back either. The draft is now keyed to its month for the same reason.
+check(
+  'and it re-seeds when the month changes, even with a draft in hand',
+  /const monthChanged = seededMonth\.current !== monthKey;[\s\S]{0,200}?if \(!monthChanged && dirtyRef\.current\) return;/.test(
+    boardSource
+  ),
+  'the month change is being skipped while a draft exists'
+);
+check(
+  'and a restored draft is discarded unless it belongs to the month on screen',
+  /if \(savedMonth && savedMonth !== monthKey\)/.test(boardSource),
+  true
+);
+check(
+  'and the draft is stored with the month it was made in',
+  /JSON\.stringify\(\{ month: monthKey, rows: working \}\)/.test(boardSource),
+  true
+);
+// A SAVE RE-READS THE MONTH IT EDITED, so the shared array holds what was written. This is the precise read of the
+// month that changed - the section refresh answers with the whole window and can be skipped - and it is what stops a
+// drag-move from being drawn back on the day it came from after a month round-trip.
+check(
+  'and a save re-reads the month it just wrote, so the board cannot show a stale day',
+  /if \(onNeedSchedule\) void onNeedSchedule\(monthStartKey, monthEndKey\);/.test(boardSource),
+  'the save relies on a refresh that may not carry the schedule'
+);
+// AN EMPTY-LOOKING MONTH HAS TO SAY WHICH KIND OF EMPTY IT IS. Three states draw the same grid of empty slots - nothing
+// loaded, loaded but matched to no slot, and genuinely nobody rostered - and only the last is innocent. Every one of them
+// used to read as "nobody is on duty", which is how a loading problem looked like a roster problem for a whole session.
+check(
+  'and an empty month says whether nothing was loaded or nothing matched a slot',
+  /monthHoldsNothing && visibleSlots\.length > 0/.test(boardSource) && /unmatchedRows\.length > 0/.test(boardSource),
+  'the board can still draw an unexplained empty month'
+);
+// The count is what distinguishes "a shift is on the board but beside its slot" - which reads as "it did not save" and is
+// the exact shape of a report that took a whole session to pin down.
+check(
+  'and it counts the shifts that are loaded but not sitting in a slot, by name',
+  /unmatchedRows\.length} of \{working\.length}/.test(boardSource) &&
+    /const matchedKeys = new Set\(visibleSlots\.map\(\(slot\) => slotOccupant\(slot\)\?\._key\)/.test(boardSource),
   true
 );
 check(
@@ -1807,16 +1904,100 @@ check(
   /setWorking\(monthRows\);[\s\S]{0,80}?setBase\(monthRows\);/.test(boardSource),
   true
 );
+// The board owns its month and re-reads it from the server, so a failed read must NOT look like an empty month: it leaves
+// the rows already on screen in place (loadScheduleWindow returns null, not []).
+check(
+  'and a failed read leaves the rows on screen rather than emptying the month',
+  /if \(Array\.isArray\(rows\)\)/.test(boardSource),
+  'a failed read would wipe the board to an empty month'
+);
+
 check(
   'with nothing left seeding state from the whole array',
   !/useState\(\(\) => normalizeRows\(schedule\)\)/.test(boardSource),
   true
 );
+// A PROP THAT STOPS AT AdminPanel PRODUCES NO ERROR - only a board that quietly shows the wrong month. `onNeedSchedule`
+// was passed by App.jsx and never forwarded, so every month this board asked for went nowhere and it fell back to the
+// shared array the payload left behind. These three checks are the forwarding itself.
+const boardPanelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
 check(
-  'and it asks for a month the window does not cover',
-  /windowCoversMonth\(scheduleWindow, monthKey\)/.test(boardSource) &&
-    /void onNeedSchedule\(monthStartKey, monthEndKey\)/.test(boardSource),
-  true
+  'the board is handed the month reader it needs to draw anything at all',
+  /onNeedSchedule=\{onNeedSchedule\}/.test(boardPanelSource) && /^\s+onNeedSchedule,$/m.test(boardPanelSource),
+  'the month reader stops at AdminPanel, and the board draws nothing'
+);
+check(
+  'and the reason a read failed, so a failed month is not drawn as an empty one',
+  /scheduleWindowError=\{scheduleWindowError\}/.test(boardPanelSource),
+  'a failed read would look like a month nobody is rostered on'
+);
+// The claims' RANGE, because an empty claims list and an unread month are the same list of zero rows: without the range
+// the board cannot tell "the member marked nothing" from "this app has never read the month" - and it answered the second
+// by naming every filled shift as a member who had marked no availability.
+check(
+  'and the range the crew\'s claims cover, so no warning is made from an unread month',
+  /rosterClaimsFrom=\{rosterScope\?\.from \|\| ''\}/.test(boardPanelSource) &&
+    /rosterClaimsTo=\{rosterScope\?\.to \|\| ''\}/.test(boardPanelSource),
+  'the board would judge every day, whether or not it read it'
+);
+// ...and the way to close that gap: the board fetches the month it is judging rather than waiting for a screen the
+// officer may never open. One month of claims, which is all this tab reads them for.
+check(
+  'and the way to ask for a month of claims this app does not hold',
+  /onRosterMonth=\{onRosterMonth\}/.test(boardPanelSource),
+  'the board can only judge months another screen happened to load'
+);
+check(
+  'and the board asks for that month once, not on every render',
+  /claimsAskedFor\.current === monthKey/.test(boardSource) && /ask\(year, month\)/.test(boardSource),
+  'the claims for an unread month are never asked for, or are asked for on every render'
+);
+// ...and the board's own side of that contract: a verdict is only given for a day inside the read range.
+check(
+  'and the board only judges a day it actually read',
+  /if \(!dayCovered\(entry\._from\)\) return true;/.test(boardSource) && /dayCovered\(e\._from\) &&/.test(boardSource),
+  'a day outside the loaded range is still treated as unclaimed'
+);
+check(
+  'and says which month it could not check instead of naming members',
+  /!claimsMonthLoaded && working\.length > 0/.test(boardSource),
+  'an unchecked month is reported as members who marked nothing'
+);
+check(
+  'and it re-reads its own month on every change, never trusting a window a save may have left stale',
+  /void read\(monthStartKey, monthEndKey\)/.test(boardSource) &&
+    !/windowCoversMonth\(scheduleWindow, monthKey\)\) return;/.test(boardSource),
+  'the board waits on a window that a save could leave stale'
+);
+// THE READER IS HELD IN A REF, AND THE EFFECT WATCHES THE MONTH ONLY. `loadScheduleWindow` is a plain function in App's
+// body, so App re-creates it on every render - and an effect that listed it as a dependency re-ran after every read it
+// had just started: read, setState, new identity, read again, forever. That is an unbounded loop of Firestore reads, and
+// nothing in this file can catch it, because effects do not run during a server render. So the shape is pinned here, and
+// the same guard is asserted for the claims read, which takes `loadRosterMonth` from the same place.
+check(
+  'and the read cannot loop: the reader is held in a ref, and the effect watches the month',
+  /const needScheduleRef = useRef\(onNeedSchedule\);/.test(boardSource) &&
+    /\}, \[monthStartKey, monthEndKey, monthKey\]\);/.test(boardSource),
+  'the effect depends on a callback App re-creates every render, which re-reads forever'
+);
+check(
+  'and the claims read cannot loop either',
+  /const rosterMonthRef = useRef\(onRosterMonth\);/.test(boardSource) &&
+    /\}, \[claimsMonthLoaded, monthKey, year, month\]\);/.test(boardSource),
+  'the claims effect depends on a callback App re-creates every render'
+);
+// READS ARE NUMBERED, NOT CANCELLED. `main.jsx` wraps the app in StrictMode, which mounts the board, unmounts it, and
+// mounts it again - so this effect runs twice on first load. A cleanup flag paired with an "already reading this month"
+// guard turns that into a board that never loads at all: run one starts a read and is then cancelled, run two sees the
+// month already in flight and starts nothing, and the answer that arrives is discarded because it was cancelled. No rows
+// are ever applied and the spinner never stops - which is exactly how this presented. Nothing in this file can catch it,
+// because effects do not run during a server render, so the shape is pinned here.
+check(
+  'and a superseded read cannot strand the board: reads are numbered and nothing cancels the one in flight',
+  /const readSeq = useRef\(0\);/.test(boardSource) &&
+    /if \(readSeq\.current !== thisRead\) return;/.test(boardSource) &&
+    !/let cancelled = false;/.test(boardSource),
+  'StrictMode mounts the board twice; cancelling plus deduplicating leaves the second mount with no read at all'
 );
 
 //
@@ -1986,10 +2167,9 @@ check('it does not clear the FCM token either', !/fcm_token|unregister/.test(log
 // Registration is a settings write, so it does need a session - inherent, not a regression. Read
 // here rather than reusing a const declared further down, which is a use-before-declaration that
 // silently evaluated as "no match".
-const pushCodeSource = readFileSync('src/services/Code.gs', 'utf8');
 check(
-  'the token is written through the session-guarded settings action',
-  /case "UPDATE_USER_SETTINGS"/.test(pushCodeSource) && /fcm_token/.test(pushCodeSource)
+  'the token is registered through the callable',
+  /export const registerPushDevice/.test(readFileSync('src/services/api.js', 'utf8'))
 );
 
 check('it re-checks when the tab becomes visible', /addEventListener\('visibilitychange', evaluate\)/.test(timeoutAppSource), true);
@@ -2012,14 +2192,10 @@ check('listeners are removed on cleanup', /removeEventListener\(event, markActiv
 
 const apiSource = readFileSync('src/services/api.js', 'utf8');
 // The PING action is gone from the client: it existed to push the Apps Script session window out, and there is no such
-// window now. The sheet still carries it, and that is worth keeping asserted - Code.gs is the record of how the app
-// behaved, so a reader comparing the two can see what the client stopped doing and when.
+// window now - Firebase's SDK keeps its own session fresh.
 // `check` here takes a CONDITION, not an (actual, expected) pair - so the negation belongs inside it. Passing `false`
 // as a third argument reads as "and here is the detail to print", not as "this must be false".
 check('the PING action is gone from the client', /action: 'PING'/.test(apiSource) === false);
-const codeForPing = readFileSync('src/services/Code.gs', 'utf8');
-check('though the sheet still carries it, as the record of what it did', /case "PING"/.test(codeForPing), true);
-check('guarded by a session like every other action', /case "PING"[\s\S]{0,400}?getAuthContext\(ss, data\)/.test(codeForPing), true);
 
 // --- the clock-refusal modal, actually rendered -------------------------------------------------
 //
@@ -2230,7 +2406,7 @@ CLOSING_TABS.forEach((file) => {
   // The handler's BODY, not the file after it: searching forward from the definition runs straight into the next
   // function, which is how an editor whose only sin was a nearby `startNew` looked like it never closed.
   const body = (
-    new RegExp(`const ${named} = \\(\\) => \\{([\\s\\S]{0,300}?)\\};`).exec(src) || [, '']
+    new RegExp(`const ${named} = \\(\\) => \\{([\\s\\S]{0,300}?)\\};`).exec(src) || ['', '']
   )[1];
   check(
     `${file}'s close handler closes rather than opens`,

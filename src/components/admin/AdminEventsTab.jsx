@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertCircle, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, RefreshCw,
-  Repeat, Save, Trash2, UserRound, X,
+  AlertCircle, CalendarPlus, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, RefreshCw,
+  Repeat, Trash2, UserRound,
 } from 'lucide-react';
 import { adminDeleteEvent, adminFetchEvents, adminSaveEvent } from '../../services/api';
 import ViewportModal from '../ViewportModal';
@@ -307,11 +307,23 @@ export default function AdminEventsTab({
     setSaving(true);
     setError(null);
     try {
-      // The same rules the backend enforces, so a bad event is caught before a round trip.
+      // The same rules the client enforces on read, so a bad event is caught before a round trip.
       const problem = eventValidation(form);
       if (problem) throw new Error(problem);
 
-      const result = await adminSaveEvent(form, token);
+      // A repeat's date columns exist only to carry the anchor's TIMES - left alone they read as a day the
+      // event never happens on, which is how "every Tuesday" ended up filed under the day the form was open.
+      // The sheet backend stamped this on save (eventFieldsFrom); the write is the client's now, so the same
+      // stamp happens here, immediately before the request.
+      const payload = form.is_recurring
+        ? {
+            ...form,
+            date_from: `${dateKeyOf(form.recurring_start)} ${timeOf(form.date_from)}`.trim(),
+            date_to: `${dateKeyOf(form.recurring_start)} ${timeOf(form.date_to)}`.trim(),
+          }
+        : form;
+
+      const result = await adminSaveEvent(payload, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save the event.');
 
       void onDataChanged?.();

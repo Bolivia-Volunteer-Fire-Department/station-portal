@@ -16,6 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { replaceRowsInRange } from '../src/utils/savedRow.js';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from '../src/utils/refreshWave.js';
 import { isReadAction } from '../src/utils/readCoalescing.js';
 
@@ -108,56 +109,6 @@ check(
   refreshBody.includes('settle('),
   'a rejected request would abandon the whole refresh'
 );
-
-// The backend half: every field the batch returns must be built by the same helper as the action it replaces,
-// or a save could refresh a screen from a different definition of the data than the tab that wrote it.
-console.log('\n--- and the batch reads each field the same way its own action does ---');
-const bootstrapGs = read('src/services/Code.gs');
-// A `case "ACTION": {...}` block, from its case to the next case at the same indentation.
-const caseBodyFor = (source, action) => {
-  const start = source.indexOf(`case "${action}":`);
-  if (start === -1) return '';
-  const rest = source.slice(start + 1);
-  const next = rest.search(/\n      case "/);
-  return next === -1 ? rest : rest.slice(0, next);
-};
-const bootstrapSource = `${extractFunction(bootstrapGs, 'function memberBootstrapPayload(')}\n${extractFunction(
-  bootstrapGs,
-  'function adminBootstrapPayload('
-)}`;
-
-// The callee each cache and its action must SHARE. Two of them are viewer-scoped helpers rather than a sheet read,
-// because availability and clock history are cut to the viewer: a member gets their own rows, an administrator the
-// whole table (see clockLogsForViewer in Code.gs). Naming the helper here is what keeps the batch and the action on
-// the same rows, which is why a member's background refresh cannot widen what their sign-in had just narrowed.
-const SHARED_READS = [
-  ['the schedule rows', 'GET_SCHEDULE', 'getSheetData(ss, "schedule")'],
-  ['the member assignment projection', 'GET_SCHEDULE', 'memberAssignmentRows('],
-  ['the member template projection', 'GET_SCHEDULE', 'memberScheduleTemplateRows('],
-  ['availability, cut to the viewer', 'GET_AVAILABILITY', 'availabilityForViewer('],
-// The roster is NOT in this list any more. `GET_ROSTER` was reachable code with no caller: the roster a screen draws comes
-// from the sign-in payload, where it is a projection of the `users` read the payload was making anyway. It was retired from
-// both backends together - the route, the reader, the api.js function, the Code.gs action and this row - because a route
-// check that is only satisfied on one side is exactly the drift this list exists to catch.
-  ['who is on duty', 'GET_ON_DUTY', 'onDutyRowsFor('],
-  ['the member\u2019s own offers', 'GET_SHIFT_OFFERS', 'offersForUser('],
-  ['clock history, cut to the viewer', 'GET_TIMECLOCK_LOGS', 'clockLogsForViewer('],
-  ['the training list', 'GET_TRAINING', 'trainingRowsForApp('],
-  ['the member\u2019s signatures', 'GET_TRAINING', 'trainingSignaturesForUser('],
-  ['the announcements', 'MY_ANNOUNCEMENTS', 'announcementRowsFor('],
-  ['events', 'GET_EVENTS', 'eventsForViewer('],
-  ['the user directory', 'ADMIN_GET_USERS', 'getSheetData(ss, "users")'],
-  ['the schedule templates', 'ADMIN_GET_SCHEDULE_TEMPLATES', 'getSheetData(ss, "schedule_templates")'],
-  ['the assignments', 'ADMIN_GET_SCHEDULE_TEMPLATES', 'getSheetData(ss, "assignments")'],
-  ['the offers table', 'ADMIN_GET_SCHEDULE_OFFERS', 'normalizeOffer'],
-];
-for (const [cache, action, callee] of SHARED_READS) {
-  check(
-    `${cache}: the batch and ${action} use the same reader`,
-    bootstrapSource.includes(callee) && caseBodyFor(bootstrapGs, action).includes(callee),
-    `"${callee}" is in one place but not the other`
-  );
-}
 
 // ---------------------------------------------------------------------------
 // 2. Every writing tab asks for a refresh
@@ -295,82 +246,6 @@ const tabsStartingRefresh = tabFiles.filter((name) =>
 check('and the refresh is still started after saving', tabsStartingRefresh.length >= 8, `${tabsStartingRefresh.length} tabs`);
 
 // ---------------------------------------------------------------------------
-// 6. The script lock is taken for WRITES only.
-//
-// Apps Script runs executions concurrently, but doPost used to take a script lock before it even knew which
-// action was asked for, so every request queued behind every other. With a ten-request refresh wave behind
-// each save, that was the difference between a save settling in ~2s and in ~30s.
-//
-// Skipping the lock is only safe if the actions that skip it genuinely do not write, which is what this
-// section checks: it reads each action's own body out of Code.gs and fails if a write call appears in one.
-console.log('\n--- the script lock is taken for writes only ---');
-const gsSource = read('src/services/Code.gs');
-
-const listMatch = /var READ_ONLY_ACTIONS = \{([\s\S]*?)\n\};/.exec(gsSource);
-check('the read-only action list exists', !!listMatch, 'READ_ONLY_ACTIONS is missing from Code.gs');
-const readOnlyActions = [...(listMatch ? listMatch[1] : '').matchAll(/^\s{2}([A-Z_]+): true/gm)].map((m) => m[1]);
-check('and covers the refresh wave', readOnlyActions.length >= 10, `${readOnlyActions.length} actions listed`);
-
-check(
-  'doPost gates the lock on the action',
-  /const gate = acquireWriteLock\(lock, action\)/.test(gsSource),
-  'the lock decision no longer goes through acquireWriteLock'
-);
-// A gate whose answer is ignored is not a gate. This is the rule that was broken before: a timed-out tryLock
-// used to be discarded, so the write ran UNLOCKED and two of them could allocate the same id.
-check(
-  'and refuses a write it cannot serialize rather than running it unlocked',
-  /if \(!gate\.ok\)[\s\S]{0,300}busyResponseData/.test(gsSource),
-  'a failed lock acquisition is ignored again, so a write can run without the lock'
-);
-check(
-  'and releases only what it took',
-  /if \(locked\) lock\.releaseLock\(\)/.test(gsSource),
-  'the release is unconditional, so a read-only request would release a lock it never held'
-);
-
-// The action's own block: from its `case` to the next case or default at the same indentation.
-const actionBlock = (name) => {
-  const start = gsSource.indexOf(`case "${name}":`);
-  if (start === -1) return '';
-  const rest = gsSource.slice(start + name.length + 8);
-  const end = rest.search(/\n {6}(case "|default:)/);
-  return end === -1 ? rest : rest.slice(0, end);
-};
-
-const WRITE_CALLS =
-  /upsertSheetRowById|upsertUserSettingsColumns|bulkUpsertSheetRowsById|bulkDeleteSheetRowsById|setSystemSettingsBatch|ensureRowVersionColumn|appendRowByHeader|appendRow\(|deleteRow\(|deleteRows\(|insertSheet\(|setValue\(|setValues\(|logSystemEvent|createSession|bumpSessionEpoch|revokeSessionsForUser|clearStaleFcmTokens|retuneSessions|saveRunnerScore/;
-
-const readOnlyOffenders = [];
-readOnlyActions.forEach((name) => {
-  const block = actionBlock(name);
-  if (!block) {
-    readOnlyOffenders.push(`${name}: no such case`);
-    return;
-  }
-  const hit = WRITE_CALLS.exec(block);
-  if (hit) readOnlyOffenders.push(`${name}: calls ${hit[0]}`);
-});
-// A NOTE on what this can and cannot see: it reads the DIRECT calls in the action's handler. A read-only
-// action that reached a writing helper indirectly would pass, so each name in the list was also read by hand
-// before it was added. What this check does is stop one being added carelessly.
-// The condition is `length === 0`, NOT the array: `check` here takes a boolean, so passing the array would
-// pass for any array at all - including one full of offenders. That mistake made this check vacuous until a
-// bite test put a known writer (LOGIN) into the list and nothing failed.
-check('every read-only action only reads', readOnlyOffenders.length === 0, readOnlyOffenders.join(', '));
-
-// NEGATIVE CONTROL: the detector must find writes in an action that is KNOWN to write. Without this, the
-// check above could pass by detecting nothing at all - an empty block, or a regex that no longer matches.
-// LOGIN mints a session and logs an event, so it is a reliable writer to test against.
-const controlHit = WRITE_CALLS.exec(actionBlock('LOGIN'));
-check('and the write detector works on a known writer', !!controlHit, 'LOGIN was not detected as writing');
-check('and that writer is not in the read-only list', !readOnlyActions.includes('LOGIN'));
-
-// A read-only action that is not handled at all would silently skip the lock AND fail at the switch.
-const unhandled = readOnlyActions.filter((name) => actionBlock(name).length < 20);
-check('and every one is a real action', unhandled.length === 0, unhandled.join(', '));
-
-// ---------------------------------------------------------------------------
 // 7. A background wave reports itself, without getting in the way.
 console.log('\n--- background waves report themselves ---');
 const { createWaveReporter, nextWaveId, waveMessage, waveDoneMessage } = await import('../src/utils/activity.js');
@@ -495,6 +370,98 @@ for (const [name, section] of [
     true
   );
 }
+
+// EVERY OTHER TAB WHOSE WRITE LANDS IN A COLLECTION THE PAYLOAD DOES NOT CARRY, NAMED - the same story as the two
+// above, generalised after the third time it bit.
+//
+// `schedule`, `users`, `assignments` and `schedule_templates` LEFT THE PAYLOAD when the app began loading lazily (they
+// are the collections that grow with the station, or without limit - see firestorePayload). An unnamed refresh does not
+// fail: it falls back to the whole payload, refreshes everything EXCEPT the collection that changed, and returns
+// success. So the board showed the shift it had just saved, and lost it on the next month change, because the array
+// still held the snapshot and the window still claimed the month was loaded.
+//
+// `sections` is a LIST because approving an offer writes a schedule row AND closes the offer. The unnamed form is
+// asserted absent per file, because that is the call that silently does refresh-work without refreshing the write.
+for (const [name, sections] of [
+  // The board re-reads its own month after a save through `onNeedSchedule` (asserted in verify-admin-render), which is
+  // the precise read of the month it changed; resolving an offer here fills an empty slot with a new schedule row, so
+  // this tab names the section for the same reason.
+  ['AdminPendingApprovalsTab.jsx', ['schedule', 'scheduleOffers']],
+  // The roster left the payload with the schedule, and this tab's spinner used to refresh everything but `users`.
+  ['AdminUsersTab.jsx', ['users']],
+  // Already correct, and in the table so they stay that way: these name theirs, which is why they survived the
+  // lazy-loading change that broke the schedule.
+  ['AdminAssignmentsTab.jsx', ['assignments']],
+  ['AdminScheduleTemplatesTab.jsx', ['scheduleTemplates']],
+  ['AdminTrainingTab.jsx', ['trainings']],
+]) {
+  const source = read('src/components/admin/' + name);
+  const unnamed = sections.filter(
+    (section) => !new RegExp(`on(?:Admin)?DataChanged\\??\\.?\\([^)]*'${section}'`).test(source)
+  );
+  check(`${name} names every section it writes`, unnamed.length === 0, `unnamed: ${unnamed.join(', ')}`);
+  check(
+    `${name} never falls back to the unnamed refresh`,
+    !/on(?:Admin)?DataChanged\??\.?\(\s*\)/.test(source),
+    'a bare call refreshes the payload, which no longer carries the collections these tabs write'
+  );
+}
+
+// A WINDOW READ REPLACES THE ROWS INSIDE ITS OWN RANGE - the half a merge cannot do, and the reason a deleted shift
+// used to be drawn back. Behavioural, because utils/savedRow.js is dependency-free and loadable under Node.
+const rangeKept = [
+  { id: 'sept', date_from: '2026-09-30' },
+  { id: 'stale', date_from: '2026-10-14' },
+  { id: 'nov', date_from: '2026-11-02' },
+];
+const rangeAfter = replaceRowsInRange(rangeKept, [{ id: 'fresh', date_from: '2026-10-20' }], '2026-10-01', '2026-10-31');
+check(
+  'a window read replaces its own range and leaves the months outside it alone',
+  rangeAfter.map((r) => r.id).sort().join(',') === 'fresh,nov,sept',
+  `got ${rangeAfter.map((r) => r.id).sort().join(',')}`
+);
+// The deletion case, which is the whole reason it exists: the row is simply absent from the reply.
+const rangeDeleted = replaceRowsInRange(rangeKept, [], '2026-10-01', '2026-10-31');
+check(
+  'and a shift missing from the reply is dropped rather than merged back',
+  rangeDeleted.map((r) => r.id).sort().join(',') === 'nov,sept',
+  `got ${rangeDeleted.map((r) => r.id).sort().join(',')}`
+);
+// A row whose date cannot be read is KEPT: this read cannot say it was deleted, and dropping it would lose a shift to
+// a typo - the same rule the date repair follows.
+const rangeUnreadable = replaceRowsInRange([{ id: 'odd', date_from: 'whenever' }], [], '2026-10-01', '2026-10-31');
+check('an unreadable date is kept rather than swept away', rangeUnreadable.length === 1, 'it was dropped');
+check('and an empty range is a no-op', replaceRowsInRange([], [], '', '').length === 0, 'it invented rows');
+// THE RANGE APPLIES TO A NAMED COLUMN, because a clock entry's date is its `time_in` and nothing else. Comparing a
+// datetime against a bare date bound would sort the last day's entries PAST the end of their own window - so the
+// value is cut to the day, and a clock row on the window's final day survives.
+const clockKept = [
+  { id: 'first-day', time_in: '2026-10-01 06:30:00' },
+  { id: 'last-day', time_in: '2026-10-31 22:15:00' },
+  { id: 'outside', time_in: '2026-11-01 07:00:00' },
+];
+const clockAfter = replaceRowsInRange(
+  clockKept,
+  [{ id: 'last-day', time_in: '2026-10-31 22:15:00' }],
+  '2026-10-01',
+  '2026-10-31',
+  'time_in'
+);
+check(
+  'a clock entry on the last day of the window survives its own bound',
+  clockAfter.some((r) => r.id === 'last-day'),
+  `got ${clockAfter.map((r) => r.id).join(',')}`
+);
+check(
+  'and one the reply no longer carries leaves, because the reply owns its range',
+  !clockAfter.some((r) => r.id === 'first-day') && clockAfter.some((r) => r.id === 'outside'),
+  `got ${clockAfter.map((r) => r.id).join(',')}`
+);
+check(
+  'and a schedule row without the named column is kept, not silently dropped',
+  replaceRowsInRange([{ id: 's1', date_from: '2026-10-05' }], [], '2026-10-01', '2026-10-31', 'time_in').length === 1,
+  'the date_from fallback swept it away'
+);
 
 check('the reporter tolerates a nonsense total', createWaveReporter({ label: 'x', total: 0 }).settle() === undefined);
 
@@ -670,141 +637,6 @@ for (const name of ['AdminRolesTab', 'AdminRanksTab', 'AdminAssignmentsTab', 'Ad
   );
 }
 
-// ---------------------------------------------------------------------------
-// 5c. One read of each sheet per read-only request
-// ---------------------------------------------------------------------------
-//
-// The section above establishes which actions cannot write. That is what makes the sheet cache safe rather than
-// merely plausible: a request that caches is a request with nothing that could change a cell underneath it, so
-// there is no invalidation to forget, and a writing request caches nothing at all.
-console.log('\n--- a read-only request reads each sheet once ---');
-
-// Top-level functions, sliced from one header to the next. extractFunction above is for `const x = …;` blocks and
-// would throw on a plain `function f() { … }`.
-const functionBlock = (name) => {
-  const start = gsSource.indexOf(`function ${name}(`);
-  if (start === -1) return '';
-  const rest = gsSource.slice(start);
-  const end = rest.slice(1).search(/\n(function |var |const )/);
-  return end === -1 ? rest : rest.slice(0, end + 1);
-};
-
-const getSheetDataSource = functionBlock('getSheetData');
-const cacheSource = functionBlock('sheetCacheEnabled');
-check(
-  'getSheetData and the cache switch were both lifted out of Code.gs',
-  getSheetDataSource.length > 400 && cacheSource.length > 40,
-  'an empty source here would make every label below meaningless'
-);
-// Off unless a request turns it on. A cache that started on would be shared by every execution the Apps Script
-// runtime reuses, which is the one way this could go wrong.
-check(
-  'the cache starts off',
-  /^var SHEET_VALUES_CACHE = null;$/m.test(gsSource),
-  'SHEET_VALUES_CACHE does not start null, so it could outlive the request that filled it'
-);
-check(
-  'and only a request turns it on',
-  /SHEET_VALUES_CACHE = enabled \? \{\} : null;/.test(cacheSource),
-  'the switch no longer clears it'
-);
-check(
-  'getSheetData stores the values it read',
-  /SHEET_VALUES_CACHE\[key\] = readValues\(\)/.test(getSheetDataSource),
-  'the read no longer goes into the cache'
-);
-check(
-  'and reads afresh whenever it is off',
-  /if \(!SHEET_VALUES_CACHE\) \{\s*values = readValues\(\);/.test(getSheetDataSource),
-  'with the cache off there is no path that reads the sheet, so a write would see stale data'
-);
-// The cache holds 2D values; the row OBJECTS are rebuilt on every call, after the cache read. Sharing those
-// instead would let one caller's sort or edit reach another's array - the classic way a cache like this breaks.
-check(
-  'the row objects are rebuilt after the cached read, not shared',
-  /values = SHEET_VALUES_CACHE\[key\];[\s\S]{0,120}const results = \[\];/.test(getSheetDataSource),
-  'the object-building sits inside the cached branch, so callers share row objects'
-);
-
-// The wiring, and the point of it: the cache is switched on by the SAME test acquireWriteLock uses, so the two can
-// never disagree about what a read is.
-check(
-  'doPost switches the cache on for the read-only actions',
-  /sheetCacheEnabled\(READ_ONLY_ACTIONS\[String\(action\)\] === true\);/.test(gsSource),
-  'nothing turns the cache on, so this is dead code'
-);
-check(
-  'using the very test the lock gate uses',
-  (gsSource.match(/READ_ONLY_ACTIONS\[String\(action\)\] === true/g) || []).length === 2,
-  'the cache and the lock decide what a read is with two different tests, and they will drift'
-);
-
-
-// Behaviour, on the real functions, against a fake sheet that counts how often it is read.
-const counting = { reads: 0 };
-const fakeBook = () => ({
-  getSheetByName: () => ({
-    getDataRange: () => ({
-      getValues: () => {
-        counting.reads += 1;
-        return [['id'], ['a']];
-      },
-    }),
-  }),
-});
-const sandboxWithCache = (on) =>
-  new Function(
-    'SHEET_VALUES_CACHE',
-    `${cacheSource}\n${getSheetDataSource}\nreturn { getSheetData };`
-  )(on ? {} : null);
-
-counting.reads = 0;
-const cached = sandboxWithCache(true);
-cached.getSheetData(fakeBook(), 'users');
-cached.getSheetData(fakeBook(), 'users');
-cached.getSheetData(fakeBook(), 'users');
-check('three questions about one sheet cost one read', counting.reads === 1, `read ${counting.reads} times`);
-
-counting.reads = 0;
-cached.getSheetData(fakeBook(), 'roles');
-check('and each sheet keeps its own entry', counting.reads === 1, `read ${counting.reads} times`);
-
-counting.reads = 0;
-const uncached = sandboxWithCache(false);
-uncached.getSheetData(fakeBook(), 'users');
-uncached.getSheetData(fakeBook(), 'users');
-check('with it off - a writing request - every call reads the sheet', counting.reads === 2, `read ${counting.reads} times`);
-
-const freshlyRead = cached.getSheetData(fakeBook(), 'users');
-const reread = cached.getSheetData(fakeBook(), 'users');
-check(
-  'and two callers get separate objects, so one sorting its rows cannot disturb another',
-  freshlyRead !== reread && freshlyRead[0] !== reread[0],
-  'the cache is handing the same row objects to every caller'
-);
-
-// Every harness that lifts getSheetData into its own sandbox has to declare the global too. Without it the
-// function throws on the read, and a harness that catches errors quietly returns defaults - which is precisely how
-// the first version of this cache turned nine session-timeout assertions into "43200000 (expected 1800000)", a
-// symptom nowhere near its cause. The count floor matters: if the detection below stops matching, `every` over an
-// empty list would pass this while testing nothing.
-const liftingHarnesses = fs
-  .readdirSync(path.resolve(root, 'scripts'))
-  .filter((name) => name.endsWith('.mjs'))
-  .filter((name) => /extract\('getSheetData'\)|sheetDataSource/.test(read(`scripts/${name}`)));
-check(
-  'the harnesses that lift getSheetData are found',
-  liftingHarnesses.length >= 5,
-  `found ${liftingHarnesses.length} - either the detection stopped matching or a harness lost its extraction`
-);
-// Requiring the DECLARATION, not just the name: the comment above each of these says "SHEET_VALUES_CACHE" as
-// well, and a guard satisfied by a comment word would pass while the sandbox still threw on the read.
-const undeclaredHarnesses = liftingHarnesses.filter((name) => !/var SHEET_VALUES_CACHE/.test(read(`scripts/${name}`)));
-check(
-  'and every one of them declares the cache global it now depends on',
-  undeclaredHarnesses.length === 0,
-  `${undeclaredHarnesses.join(', ')} would throw on the sheet read and pass on defaults instead`
-);
 
 // The rule that matters for members: a save must never put a password into a list that holds none.
 const userRowSource = read('src/utils/userRow.js');

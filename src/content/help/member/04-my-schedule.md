@@ -1,5 +1,7 @@
 **My Schedule** is a month calendar of the shifts that concern you: the ones you are on, and the open ones you could take.
 
+The month in front of you is read when you open this screen, so the first look — or the first look at a month you have moved to — may show a brief **Loading …** line. That line is worth knowing about: a month with nothing scheduled at all looks the same as one that is still arriving, and the loading line is what tells them apart.
+
 ## Reading a pill
 
 Each shift is drawn as a colored pill. The color comes from the **assignment**, so you can tell at a glance which kind of shift it is.

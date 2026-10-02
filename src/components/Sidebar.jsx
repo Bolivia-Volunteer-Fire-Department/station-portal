@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, Shield, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl } from '../utils/assets';

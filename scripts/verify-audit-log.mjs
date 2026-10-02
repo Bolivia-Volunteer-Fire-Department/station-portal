@@ -9,6 +9,7 @@
 // something the Functions emulator implements.
 //
 // Run with: npm run verify:audit-log
+import { readFileSync } from 'node:fs';
 import audit from '../functions/auditLog.js';
 
 let failures = 0;
@@ -26,7 +27,7 @@ const checkIs = (label, condition, detail) => {
   console.log(`${condition ? 'ok  ' : 'FAIL'} ${label}${condition || !detail ? '' : ` -> ${detail}`}`);
 };
 
-const { buildAuditFilter, orderByFor, pageSizeFor, auditRowFrom, facetsFrom } = audit;
+const { buildAuditFilter, orderByFor, pageSizeFor, auditRowFrom, facetsFrom, logReplyFrom } = audit;
 
 console.log('--- the filter anchors on this app’s own lines ---');
 const bare = buildAuditFilter({});
@@ -126,6 +127,76 @@ check(
 check('an empty sample gives empty dropdowns', facetsFrom([]), { actions: [], members: [] });
 check('and so does no sample at all', facetsFrom(undefined), { actions: [], members: [] });
 checkIs('the sample is bounded, so the dropdowns cannot become a scan', audit.FACET_SAMPLE_SIZE <= 500, String(audit.FACET_SAMPLE_SIZE));
+
+// THE REPLY THE TAB READS, FIELD FOR FIELD - the seam this harness did not hold, and the seam that broke.
+//
+// The tab and the function are deployed SEPARATELY, so the reply's shape is a contract between two artifacts that can
+// each look correct on their own and be wrong together. The first Cloud Logging deployment answered with every field the
+// tab reads EXCEPT `api`, and the tab's staleness check is `Number(result.api) !== SYSTEM_LOG_API_VERSION`: a missing
+// field is NaN, NaN is not equal to anything, and the "your deployment is stale" banner fired on EVERY load - sending an
+// officer to redeploy a backend nothing calls any more. Nothing threw anywhere: the function was right, the tab was
+// right, and the two together were wrong. That is exactly what a contract check exists for.
+console.log('\n--- the reply the tab reads, field for field ---');
+const entry = {
+  insertId: 'abc123',
+  timestamp: '2026-03-04T14:05:00.000Z',
+  payload: { audit: { user_id: 'u1', action: 'ADMIN_SAVE_ROLE', details: 'roles/r2' } },
+};
+const replyOf = (over = {}) =>
+  logReplyFrom({
+    entries: [entry],
+    nextQuery: { pageToken: 'next-1' },
+    sampleEntries: [entry],
+    data: { sort: 'timestamp_asc' },
+    pageSize: 20,
+    stationTimestamp: station,
+    ...over,
+  });
+const reply = replyOf();
+
+// The client's own copy of the number. It cannot be IMPORTED here: this harness runs in plain node, and
+// src/utils/systemLog.js imports its neighbours WITHOUT extensions, which node's ESM resolver refuses (vite resolves
+// them, which is why the harnesses that import src are built by vite first). So the one literal is read off the line
+// that declares it - and the alternative is no check on this seam at all.
+const clientVersion = Number(
+  /export const SYSTEM_LOG_API_VERSION = (\d+);/.exec(
+    readFileSync(new URL('../src/utils/systemLog.js', import.meta.url), 'utf8')
+  )?.[1]
+);
+checkIs(
+  'the client and the function agree on the contract version',
+  clientVersion === audit.SYSTEM_LOG_API_VERSION,
+  `client ${clientVersion}, function ${audit.SYSTEM_LOG_API_VERSION}`
+);
+checkIs(
+  'and the reply CARRIES it, so the staleness check can be satisfied at all',
+  Number(reply.api) === clientVersion,
+  String(reply.api)
+);
+// The tab's own expression, and the failure it cannot see: with no version in the reply the comparison is NaN !== 3,
+// which is true, so "stale" is the answer for a perfectly current deployment. Wrong, but at least it errs loud.
+checkIs('a reply carrying no version reads as STALE rather than as current', Number(undefined) !== clientVersion);
+
+check('every field the tab reads is present, and nothing else is', Object.keys(reply).sort(), [
+  'actions',
+  'api',
+  'has_more',
+  'members',
+  'next_page_token',
+  'page_size',
+  'rows',
+  'sort',
+]);
+check('the rows are the mapped entries', reply.rows.map((one) => one.action), ['ADMIN_SAVE_ROLE']);
+check('the sort the officer asked for is echoed back', reply.sort, 'timestamp_asc');
+check('and an absent one is the default rather than empty', replyOf({ data: {} }).sort, audit.AUDIT_SORT_DEFAULT);
+check('the next-page token is the field the tab reads', reply.next_page_token, 'next-1');
+checkIs('and has_more says there is a next page', reply.has_more === true);
+check('the last page says there is not', replyOf({ nextQuery: null }).has_more, false);
+check('and offers an empty token rather than an undefined one', replyOf({ nextQuery: null }).next_page_token, '');
+check('the page size is the clamped one the callable chose', reply.page_size, 20);
+check('the dropdowns describe the sample, not the page', replyOf({ sampleEntries: [] }).actions, []);
+checkIs('a reply with no entries is an empty table rather than a crash', replyOf({ entries: undefined }).rows.length === 0);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
