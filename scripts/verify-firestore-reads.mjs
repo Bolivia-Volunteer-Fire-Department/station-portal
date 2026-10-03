@@ -19,6 +19,9 @@ import { scoreToStore } from './normalize-runner-scores.mjs';
 import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { firebaseAuth, firebaseConfigured, firestore } from '../src/services/firebase.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
+// The app's own day arithmetic, so the window assertions below ask the question the way the reader does. Comparing a
+// datetime column against a bare date key is what dropped the boundary day in the first place.
+import { nextDateKey } from '../src/utils/scheduleDate.js';
 
 let failures = 0;
 let cases = 0;
@@ -749,11 +752,54 @@ const main = async () => {
   // jane (u1), whose only seeded entry is c1, while bo's is c2: so this fails loudly if the reader ever loses its `user_id`
   // filter and starts handing a member the whole station's history (refused by the rules if it is lucky, allowed if not).
   check('and nothing else: it is the viewer\'s own entries', logs.logs.map((row) => row.id), ['c1']);
+
+  // THE LAST DAY OF THE WINDOW, WHICH IS WHERE THE BUG WAS. Written here rather than left to the seed because the seed's
+  // only entry (c1, '2026-03-02 07:55') sits in the MIDDLE of the window - which is why this read was wrong in the field
+  // for as long as it was, with every harness green: nothing was ever stamped on the boundary day to be dropped.
+  //
+  // `time_in` is a datetime and the window's bounds are bare 'yyyy-MM-dd' keys, so Firestore compares them as TEXT and
+  // an inclusive `<= '2026-03-31'` excludes every entry on the 31st, because the space after the date sorts before the
+  // end of the string. On a screen asking for "[12 months back, TODAY]" that is exactly the entry a member has just
+  // clocked in: the write succeeded, the row was not there, and every older row was. So the fixture is an entry dated
+  // the LAST day of the window, and the assertion names it - a check over "the rows that came back" cannot notice one
+  // that did not, which is precisely the gap that let this ship.
+  const boundaryRef = doc(firestore(), 'timeclock', 'c-boundary');
+  await setDoc(boundaryRef, { user_id: 'u1', time_in: '2026-03-31 14:33:12', time_out: '', is_manual: false });
   // WINDOWED, which is how the screen asks for it: a range is applied, and a range with nothing in it returns nothing rather
   // than quietly returning everything - which is the failure that would turn a saving into a larger read than before.
+  //
+  // The bound check cuts `time_in` to its day with nextDateKey rather than repeating the bare-key comparison, because
+  // repeating it is what let a datetime row pass an assertion written for a date column in the first place.
   const windowed = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-03-01', to: '2026-03-31' });
-  checkIs('a window narrows the history to that range', windowed.logs.every((row) => row.time_in >= '2026-03-01' && row.time_in <= '2026-03-31'), JSON.stringify(windowed.logs));
+  checkIs(
+    'a window narrows the history to that range',
+    windowed.logs.every((row) => {
+      const day = nextDateKey(row.time_in.slice(0, 10));
+      return day >= '2026-03-01' && day <= nextDateKey('2026-03-31');
+    }),
+    JSON.stringify(windowed.logs)
+  );
   check('and says which window it applied', windowed.logs_window, { from: '2026-03-01', to: '2026-03-31' });
+  check(
+    'AND THE ENTRY DATED THE LAST DAY OF THE WINDOW COMES BACK - the one that used to vanish',
+    windowed.logs.map((row) => row.id).sort(),
+    ['c-boundary', 'c1']
+  );
+  // ...while the day AFTER it still does not, so the bound is the day it claims to be rather than the whole month. An
+  // "exclusive" bound that quietly became inclusive would pass the case above and lose this one.
+  await setDoc(boundaryRef, { user_id: 'u1', time_in: '2026-04-01 00:00:01', time_out: '', is_manual: false });
+  const afterWindow = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-03-01', to: '2026-03-31' });
+  check(
+    'and an entry a day past it is still excluded, so the bound did not simply widen',
+    afterWindow.logs.map((row) => row.id).sort(),
+    ['c1']
+  );
+  // A one-day window is the tightest form of the same question, and it is what a member's date filter effectively asks
+  // for when they pick the 31st on its own.
+  await setDoc(boundaryRef, { user_id: 'u1', time_in: '2026-03-31 14:33:12', time_out: '', is_manual: false });
+  const singleDay = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-03-31', to: '2026-03-31' });
+  check('a one-day window still returns that day\'s entry', singleDay.logs.map((row) => row.id), ['c-boundary']);
+  await deleteDoc(boundaryRef);
   const empty = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-04-01', to: '2026-04-30' });
   check('a window with nothing in it returns nothing, not everything', empty.logs, []);
 

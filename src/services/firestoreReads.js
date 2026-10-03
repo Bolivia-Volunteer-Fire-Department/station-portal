@@ -15,7 +15,7 @@ import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFo
 import { firebaseFunctions, firestore } from './firebase.js';
 // A window's date key, and the id-merge that makes two bounded queries answer as one list. Both are the app's own helpers
 // rather than service-local copies: the admin list merges the same way a screen does when it loads an older window.
-import { toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
+import { nextDateKey, toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
 // The certification decoration, shared with the payload so a sign-in and a refresh agree.
 import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
 import { mergeRowsById } from '../utils/savedRow.js';
@@ -263,12 +263,29 @@ export const READERS = {
     // happily. That is how Clock History came to load nothing in the field while every harness stayed green. Ordering
     // by time_in desc makes the query servable by the declared index (and hands back newest first, which the screen
     // re-sorts anyway - the direction costs nothing and buys the index).
+    //
+    // THE UPPER BOUND IS THE DAY AFTER `to`, EXCLUSIVE - and this is the bug that hid a member's own shift from
+    // them. `time_in` is a DATETIME ("yyyy-MM-dd HH:mm:ss") while `to` is a bare "yyyy-MM-dd" key, and Firestore
+    // compares these as TEXT: the space after the date sorts BEFORE the end of the string, so
+    //
+    //     '2026-10-02 14:33:12' <= '2026-10-02'   ->  false
+    //
+    // An inclusive bound therefore excluded EVERY entry clocked in on the last day of the window - and since the
+    // History screen asks for `[12 months back, TODAY]`, that was precisely the entry a member had just made. The
+    // older ones were there, the new one was not, and the write had plainly succeeded: the read was asking a
+    // different question of a correct answer.
+    //
+    // It failed silently in every harness because the seeded entry sits mid-window, and because a passing assertion
+    // over rows that all came back cannot notice a row that did not. `<` the start of the next day admits the whole
+    // of `to`, and also admits a migrated ISO value ('2026-10-02T04:00:00.000Z', where 'T' > ' ') that a
+    // `<= '2026-10-02 23:59:59'` bound would still drop. The LOWER bound is already correct for the same reason -
+    // anything stamped on `from` sorts at or after the bare key - and is left as the inclusive `>=` it should be.
     const logs = await rowsOf(
       query(
         collection(firestore(), 'timeclock'),
         where('user_id', '==', uid),
         where('time_in', '>=', from || '0000-01-01'),
-        where('time_in', '<=', to || '9999-12-31'),
+        where('time_in', '<', to ? nextDateKey(to) : '9999-12-31'),
         orderBy('time_in', 'desc')
       )
     );

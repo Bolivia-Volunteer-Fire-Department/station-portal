@@ -120,7 +120,24 @@ const declaredIndex = (collectionGroup, first, second, secondOrder) =>
   );
 checkIs(
   'the windowed clock query orders by the range field',
-  /collection\(firestore\(\), 'timeclock'\),\s*\n\s*where\('user_id', '==', uid\),\s*\n\s*where\('time_in', '>=', from \|\| '0000-01-01'\),\s*\n\s*where\('time_in', '<=', to \|\| '9999-12-31'\),\s*\n\s*orderBy\('time_in', 'desc'\)/.test(readsSourceForClockIndex)
+  /collection\(firestore\(\), 'timeclock'\),\s*\n\s*where\('user_id', '==', uid\),\s*\n\s*where\('time_in', '>=', from \|\| '0000-01-01'\),\s*\n\s*where\('time_in', '<', to \? nextDateKey\(to\) : '9999-12-31'\),\s*\n\s*orderBy\('time_in', 'desc'\)/.test(readsSourceForClockIndex)
+);
+// THE UPPER BOUND MUST BE EXCLUSIVE, AND THIS IS THE ASSERTION THAT WAS MISSING. `time_in` is a datetime and `to` is
+// a bare date key, so Firestore's TEXT comparison drops every entry stamped on the last day of the window - which, on a
+// screen that asks for "the last twelve months, up to today", is the entry the member had just clocked in. A member saw
+// a successful write and an empty row, and the row before it was still there. Nothing caught it because the seeded
+// entry sits mid-window and because an assertion phrased over the rows that DID come back cannot notice one that did
+// not. So the operator is pinned here, and verify:firestore-reads proves the boundary day end-to-end against the
+// emulator. `<=` on a bare date is the exact regression.
+checkIs(
+  'and bounds the end of the window EXCLUSIVE, so an entry on the last day is not dropped',
+  /where\('time_in', '<', to \? nextDateKey\(to\) : '9999-12-31'\)/.test(readsSourceForClockIndex) &&
+    !/where\('time_in', '<=', to \|\| '9999-12-31'\)/.test(readsSourceForClockIndex),
+  readsSourceForClockIndex.match(/where\('time_in'[^)]*\)[^\n]*/)?.[0]
+);
+checkIs(
+  'the exclusive bound comes from the shared day helper rather than a bound built in place',
+  /import \{[^}]*nextDateKey[^}]*\} from '\.\.\/utils\/scheduleDate\.js'/.test(readsSourceForClockIndex)
 );
 checkIs(
   'and the index it needs is declared for production',

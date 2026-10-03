@@ -86,8 +86,9 @@ import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
 import { mergeSavedUser } from './utils/userRow';
 import { mergeSavedRow, mergeRowsById, replaceRowsInRange } from './utils/savedRow';
-// Date keys, for the windows this screen asks for (the clock history, and the schedule before it).
-import { toDateKey } from './utils/scheduleDate';
+// Date keys, for the windows this screen asks for (the clock history, and the schedule before it). The history's
+// window is measured on the STATION's clock, because that is the clock its entries are stamped on.
+import { dateKeyMonthsBack, stationTodayKey, toDateKey } from './utils/scheduleDate';
 // The trustworthy-clock rule, for the clock card: it must not offer a button it cannot honour, and it must say why.
 import { OFFLINE_CLOCK_MESSAGE, isOffline } from './utils/connectivity';
 import { createWaveReporter, nextWaveId } from './utils/activity';
@@ -1084,10 +1085,12 @@ const getLoadingMessage = () => {
   };
 
   // The window the screen opens with, and the one its "older entries" button asks for: twelve months at a time.
-  const monthsBack = (months) => {
-    const now = new Date();
-    return toDateKey(new Date(now.getFullYear(), now.getMonth() - months, now.getDate()));
-  };
+  //
+  // MEASURED ON THE STATION'S CLOCK, not the device's. Entries are stamped with `stationTimestamp` (Eastern), so a
+  // phone whose own date has already rolled over - or has not yet - would put the window's edge on the wrong day and
+  // hide exactly the entry just written. The end of a window is the one bound that must not be approximate, which is
+  // what makes this the same `stationTodayKey` the rest of the app asks "is this in force today?" with.
+  const monthsBack = (months) => dateKeyMonthsBack(months);
 
   // ONCE PER SESSION PER WINDOW, which is what makes this different from re-fetching a module on every visit: the guard is
   // the scope itself, so moving between tabs costs nothing after the first look.
@@ -1100,7 +1103,7 @@ const getLoadingMessage = () => {
   useEffect(() => {
     const wantsTheHistory = activeTab === 'clock-history' || (activeTab === 'admin' && adminSubTab === 'clock');
     if (!wantsTheHistory || !authToken || logsScope) return;
-    void loadLogs(monthsBack(12), toDateKey(new Date())).catch((error) => {
+    void loadLogs(monthsBack(12), stationTodayKey()).catch((error) => {
       console.error('[logs] could not load the clock history', error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -21,6 +21,35 @@ export const stationTodayKey = (date = new Date()) => {
   return `${at('year')}-${at('month')}-${at('day')}`;
 };
 
+// The day AFTER a 'yyyy-MM-dd' key, for an EXCLUSIVE upper bound on a window.
+//
+// A window's `to` names a DAY, and the column being ranged is usually a DATETIME ("yyyy-MM-dd HH:mm:ss") which
+// sorts as text. That makes an inclusive `<= '2026-03-31'` drop every entry ON the 31st: the space that follows the
+// date sorts before the end of the string, so '2026-03-31 07:30:00' > '2026-03-31'. A migrated ISO value
+// ('2026-03-31T04:00:00.000Z') sorts past it too, since 'T' > ' '. Bounding with `<` the START of the following day
+// admits both, and keeps the bound a day rather than a moment - which is what a date field means.
+//
+// UTC arithmetic throughout, deliberately: this is a calendar key, and running it through the device's zone is how a
+// window's edge lands on the wrong day for whoever is standing somewhere else.
+export const nextDateKey = (key) => {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? '').trim());
+  if (!parts) return '';
+  const next = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]) + 1));
+  return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
+};
+
+// A 'yyyy-MM-dd' key that many whole months before another one, defaulting to the STATION's today.
+//
+// The clock history opens on "the last twelve months", and that end has to be measured on the same clock the entries
+// are stamped on. The device's own date is the wrong one to ask (see stationTodayKey), and the arithmetic is done in
+// UTC so a phone in another zone cannot shift the start of the window.
+export const dateKeyMonthsBack = (months, fromKey = stationTodayKey()) => {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(fromKey ?? '').trim());
+  if (!parts) return '';
+  const shifted = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1 - Number(months || 0), Number(parts[3])));
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+};
+
 export function parseSheetDateKey(value) {
   if (value === undefined || value === null) return null;
 
