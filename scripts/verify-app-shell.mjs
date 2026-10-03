@@ -453,11 +453,133 @@ check('taps do not wait out a double-tap zoom', ruleFor(css, 'html')?.['touch-ac
 checkIs('iOS cannot inflate the type on rotation', /-webkit-text-size-adjust:\s*100%/.test(css));
 // A control is not text. The selectors matter: CONTENT has to stay selectable or the fix is worse than the
 // bug, so the rule is checked as written rather than as "something somewhere sets user-select".
-const controlRule = /(?:^|\n)\s*button,\s*\n\s*a,\s*\n\s*label,\s*\n\s*summary,\s*\n\s*th,\s*\n\s*\[role='button'\],\s*\n\s*\.no-select\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+//
+// The selector list is matched as a BLOCK rather than spelled out inline, because the list is the app's own
+// CLICKABLE_SELECTOR (utils/soundRules.js) and it grows as controls are added - pinning today's seven
+// selectors here would have made every addition a reason to edit this file, and editing it is exactly what
+// this harness exists to prevent. What is checked instead is the property: the rule covers every control
+// that plays a click, and it is a real declaration rather than a match against some other rule in the file.
+const controlRuleBlock = /(?:^|\n)((?:\s*[a-z]*[^\n{]*,\s*\n)+)\s*\.no-select\s*\{([^}]*)\}/.exec(css);
+const controlSelectors = (controlRuleBlock?.[1] || '')
+  .split(',')
+  .map((selector) => selector.trim())
+  .filter(Boolean);
+const controlRule = controlRuleBlock?.[2] || '';
 checkIs('the chrome does not select like text', /user-select:\s*none/.test(controlRule), controlRule.trim());
 checkIs('no long-press menu on a control', /-webkit-touch-callout:\s*none/.test(controlRule));
 checkIs('and no grey flash on the way in', /-webkit-tap-highlight-color:\s*transparent/.test(controlRule));
+// EVERY control the click sound recognises is also unselectable, so a menu item or a tab cannot select
+// like text just because it is drawn as a div rather than a <button>. Held against the sound list rather
+// than a copied list, so the two cannot drift - a control that sounds like a button must not also behave
+// like a paragraph.
+//
+// The list is read out of CLICKABLE_SELECTOR ITSELF rather than scraped from the whole module: soundRules
+// is full of other quoted strings (sound names, action verbs, icon names), and a scrape of the file would
+// hold this check against things that were never selectors.
+const soundSource = readFileSync('src/utils/soundRules.js', 'utf8');
+const clickableBlock = /CLICKABLE_SELECTOR\s*=\s*\[([\s\S]*?)\]\.join/.exec(soundSource)?.[1] || '';
+const soundSelectors = [...clickableBlock.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+checkIs(
+  'the sound list was found to compare against',
+  soundSelectors.length > 5,
+  `${soundSelectors.length} selectors read`
+);
+// `input` and `select` are FIELDS and are governed by the caret carve-out below rather than by this rule,
+// and `[data-sound="click"]` is the escape hatch for chrome the sound selector does not recognise - so
+// none of the three is expected up here.
+//
+// The comparison also has to allow a BROADER selector to cover a narrower one. The sound list says
+// `a[href]` and the rule says `a`, which covers it and more (two shell anchors have no href and act as
+// buttons); reading that as a gap would push someone to add a redundant selector, or to "fix" it by
+// narrowing the rule and losing those two anchors. So a selector counts as covered when the rule carries
+// it exactly, or carries a bare tag that the sound selector is built from.
+const FIELD_SELECTORS = ['input', 'select', '[data-sound="click"]'];
+const quoted = (selector) => selector.replace(/"/g, "'");
+const coversASoundSelector = (selector) => {
+  const want = quoted(selector);
+  // A rule that is a bare TAG (`a`, `button`) covers anything built from it - `a` covers `a[href]`.
+  // The character class asks only whether the rule carries a qualifier at all.
+  const isBareTag = /^[a-z]+$/;
+  return controlSelectors.some((have) => {
+    const rule = quoted(have);
+    return rule === want || (isBareTag.test(rule) && want.startsWith(rule));
+  });
+};
+const covered = soundSelectors.filter(
+  (selector) => !FIELD_SELECTORS.includes(selector) && !coversASoundSelector(selector)
+);
+checkIs(
+  'every control that plays a click also opts out of selection',
+  covered.length === 0,
+  JSON.stringify(covered)
+);
+// ...and the fields really are carved out, rather than merely absent: `user-select: none` reaching a text
+// field stops a member selecting what they just typed, which is the one outcome worse than the bug this
+// rule fixes. Both halves are checked where they are written - the SELECTORS say which elements, the
+// declarations say what they get - since a field missing from the selector list is not carved out at all.
+const fieldBlock = /(?:^|\n)((?:[a-z]+,[^\n]*\n)+[^\n{]*)\{([\s\S]*?)\n\}/.exec(css);
+const fieldSelectors = (fieldBlock?.[1] || '').split(',').map((selector) => selector.trim()).filter(Boolean);
+checkIs(
+  'and the fields that do play a click are carved out instead',
+  /user-select:\s*text/.test(fieldBlock?.[2] || '') &&
+    fieldSelectors.includes('input') &&
+    fieldSelectors.includes('select'),
+  `selectors ${JSON.stringify(fieldSelectors)} declarations ${JSON.stringify(fieldBlock?.[2] || '')}`
+);
+// ...and CONTENT still can be selected, which is the half that must not regress: a member may want to copy
+// an announcement, a document or a schedule row, and taking that away is worse than the original bug.
+checkIs(
+  'and a paragraph is still selectable',
+  !/^p$/m.test(controlSelectors.join('\n')) && !/^\s*p,/.test(controlRuleBlock?.[1] || ''),
+  controlSelectors.join(', ')
+);
 checkIs('a typed value stays selectable', /(?:^|\n)\s*input,[\s\S]{0,120}user-select:\s*text/.test(css), 'Safari carries user-select: none into a field from its label');
+
+// THE FINGER, AND WHERE IT IS ALLOWED TO LAND. Two things are being held at once, and either alone would be
+// a bug: a control with no pointer is invisible feedback, and a pointer on something inert (a disabled
+// button, a text field) promises a click that cannot happen.
+console.log('\n--- and the pointer tells the truth about what is pressable ---');
+const pointerRule = /@layer base\s*\{([\s\S]*?cursor:\s*pointer;[\s\S]*?)\}/.exec(css)?.[1] || '';
+checkIs('the app gives clickable things a finger', /cursor:\s*pointer/.test(pointerRule), pointerRule.trim());
+// IT MUST BE IN `@layer base`. Unlayered CSS beats every cascade layer, so an unlayered `button { cursor:
+// pointer }` would quietly override each of these - the twenty `disabled:cursor-not-allowed`, the
+// `cursor-grab` on a shift pill mid-drag, the `cursor-default` on an already-signed training. The rule is a
+// default that utilities override, and that ordering IS the design.
+checkIs(
+  'and it sits in @layer base so a deliberate cursor utility still wins',
+  /@layer base\s*\{[^}]*cursor:\s*pointer/.test(css)
+);
+checkIs(
+  'every special cursor in the app is a utility, so it outranks that default',
+  // If any of these were set by an unlayered stylesheet rule instead, the base-layer pointer could not
+  // be relied on to lose to them, and the ordering above would be a claim rather than a fact.
+  ['cursor-not-allowed', 'cursor-grab', 'cursor-grabbing', 'cursor-default', 'cursor-pointer'].every(
+    (cursor) => !new RegExp(`@layer[\\s\\S]*?${cursor}\\s*:`).test(css)
+  )
+);
+// A disabled control must not offer a hand, and the honest test for that is the control's own state.
+checkIs(
+  'a disabled control is excluded rather than styled',
+  /button:not\(:disabled\)/.test(pointerRule) && !/button\s*,\s*\n\s*\[role='button'\]/.test(pointerRule),
+  'the pointer rule would put a hand on something that cannot be pressed'
+);
+checkIs(
+  'and so is one the app renders as inert',
+  (pointerRule.match(/\[aria-disabled='true'\]/g) || []).length >= 10,
+  'aria-disabled controls are not all excluded'
+);
+// A text field's I-beam and a select's dropdown cursor are both more honest than a hand, so neither is in
+// the list. A hand over a caret would be the same lie as a pointer on a disabled button.
+checkIs(
+  'a text field keeps its caret and a select keeps its own cursor',
+  !/^\s*input[,:]/m.test(pointerRule) && !/^\s*select[,:]/m.test(pointerRule),
+  'input or select is in the pointer rule'
+);
+checkIs(
+  'and an anchor with no href is not a link',
+  /a\[href\]/.test(pointerRule) && !/(^|[\s,])a[,:]/m.test(pointerRule),
+  'every <a> was treated as clickable'
+);
 // The zoom members actually hit. 16px is the threshold iOS uses, and these rules are unlayered on purpose
 // so they beat the utility classes that ask for 12-14px.
 checkIs('a field cannot zoom the page on a phone', /@media \(max-width: 767px\)[\s\S]{0,120}font-size:\s*16px/.test(css));

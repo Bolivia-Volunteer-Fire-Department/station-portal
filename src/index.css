@@ -53,13 +53,35 @@ html.dark {
 // a real <button> or <a> - a row, a tile, a pill.
 //
 // `-webkit-tap-highlight-color` rides along because it is the same giveaway: the grey flash is painted
-// on the way IN to a tap, so a control that keeps it can never feel pressed rather than selected. */
+// on the way IN to a tap, so a control that keeps it can never feel pressed rather than selected.
+//
+// THE CLICKABLE ROLES ARE HERE TOO, and they are the same list the click sound uses - see
+// CLICKABLE_SELECTOR in utils/soundRules.js. A menu item or a tab is a control whatever element it is
+// drawn with, so leaving them out of this rule would mean the fix holds for the <button> version of a
+// control and silently fails for the div version, which is how "it works on the Schedule tab" and "it
+// does not work on the Availability tab" happen. `draggable` is in for the schedule board's pills:
+// those are draggable divs carrying a member's name, and a press-and-hold halfway into a drag would
+// otherwise select the text under the finger.
+//
+// The bare `a` and the bare `label` are deliberate and are broader than the sound list's `a[href]`: two
+// anchors in the shell have no href and act as buttons. `input` and `select` are NOT here even though both
+// play a click - they are FIELDS, and the caret carve-out below is what governs them, which is also why
+// adding them above would be dead CSS the next rule immediately overrides. */
 button,
 a,
 label,
 summary,
 th,
 [role='button'],
+[role='menuitem'],
+[role='menuitemcheckbox'],
+[role='menuitemradio'],
+[role='option'],
+[role='tab'],
+[role='switch'],
+[role='checkbox'],
+[role='radio'],
+[draggable='true'],
 .no-select {
   -webkit-user-select: none;
   user-select: none;
@@ -79,6 +101,58 @@ select,
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+}
+
+/* THE FINGER, WHERE THE THING UNDER IT ACTUALLY DOES SOMETHING.
+//
+// Browsers do not give a <button> a pointing hand - the user agent stylesheet leaves it on the default
+// arrow - so every control in the app was inviting a click with an arrow, and the hand was something a
+// screen added by remembering to. It was on nineteen elements and absent from two hundred more, which is
+// the worst of both: inconsistent, and impossible to keep up by hand as controls are added.
+//
+// This is a DEFAULT rather than a decoration, and that is what decides where it goes. It lives in
+// `@layer base` on purpose: unlayered rules beat every layer, so an unlayered `button { cursor: pointer }`
+// would silently defeat every deliberate cursor in the app - the `cursor-not-allowed` on a disabled
+// control, the `cursor-grab` on a shift pill being dragged, the `cursor-default` on a training already
+// signed. Inside `base`, Tailwind's utilities are in the later `utilities` layer and still win, so those
+// twenty-odd exceptions keep working and this one only fills in the blanks. (The same reasoning is noted
+// on the press rule further down, for the same reason.)
+//
+// IT IS THE APP'S OWN LIST OF CLICKABLES - CLICKABLE_SELECTOR in utils/soundRules.js, the selectors that
+// play a click. A control that sounds like a button must also look like one, and one list is the only way
+// those two stay in step; a pointer on something silent would be the same drift in the other direction.
+// `a[href]` rather than every `a`, because an anchor with no href goes nowhere.
+//
+// `input` is deliberately NOT here. A text field's I-beam is more truthful than a hand, and a hand over a
+// caret a member is trying to place is actively misleading.
+//
+// `select` IS here, which looks inconsistent until you notice what it holds: a select has no text of its
+// own, only a list of someone else's, so it is the same shape as a button and deserves the same pointer.
+// It is still a FIELD for the caret carve-out above - `user-select: text` is right for it - because
+// `cursor` and `user-select` are independent properties. That is why it appears in one rule and not the
+// other, and why the harness holds the carve-out to `input`/`textarea`/`select` explicitly rather than
+// letting this paragraph be the evidence.
+//
+// DISABLED EXCLUDED RATHER THAN STYLED. A control that cannot be pressed should not offer a hand, and
+// `:disabled` is the only honest test for that - `aria-disabled` is included too because the app uses it
+// on controls it renders as pressed-but-inert (see the press rule below), and a member pressing one of
+// those deserves the same "not this one" the `disabled:` classes already say. */
+@layer base {
+  button:not(:disabled):not([aria-disabled='true']),
+  [role='button']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true']),
+  [role='menuitemcheckbox']:not([aria-disabled='true']),
+  [role='menuitemradio']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']),
+  [role='switch']:not([aria-disabled='true']),
+  [role='checkbox']:not([aria-disabled='true']),
+  [role='radio']:not([aria-disabled='true']),
+  label[for],
+  summary,
+  a[href] {
+    cursor: pointer;
+  }
 }
 
 /* Tapping a field must not zoom the page.

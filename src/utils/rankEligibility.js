@@ -81,6 +81,21 @@ export const minRankChoices = (ranks) => {
   return [...byOrder.values()].sort((a, b) => b.order - a.order);
 };
 
+// Members in a listable order: by NAME, then by id so two members who share a name still land in a
+// fixed order rather than wherever the roster happened to put them.
+//
+// This is deliberately NOT the order members arrive in. The roster travels by id, so a list built in
+// arrival order is sorted by an internal key nobody can see - and the one list an officer reads to
+// find a name is the one that has to be alphabetical.
+//
+// The BUCKETS are the other half of the order and are not alphabetical to each other: eligible first,
+// then each reason it cannot (rank, unverifiable, excluded, inactive). That sequence is the "who can
+// actually work this shift" answer, and it is why every consumer can put the non-schedulable members
+// at the bottom simply by listing the buckets in this order.
+const byName = (a, b) =>
+  String(a?.name ?? '').localeCompare(String(b?.name ?? '')) ||
+  String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+
 // Classifies every member for a given assignment using `rank_order_required`.
 //
 // Buckets:
@@ -90,6 +105,10 @@ export const minRankChoices = (ranks) => {
 //                  rank_order, so it can't be compared against the requirement
 //   excluded     - exclude_from_scheduling is TRUE
 //   inactive     - status is set to anything other than "active"
+//
+// EACH BUCKET IS ALPHABETICAL, and the buckets stay in the order above. The member picker, the quick-add
+// dropdown and the assignment table all read these lists directly, so sorting here sorts all three
+// rather than leaving each caller to remember.
 export const eligibilityFor = ({ users = [], ranks = [], assignment } = {}) => {
   const list = Array.isArray(users) ? users : [];
   const requiredOrder = parseRankOrder(assignment?.rank_order_required);
@@ -134,6 +153,15 @@ export const eligibilityFor = ({ users = [], ranks = [], assignment } = {}) => {
     if (userOrder >= requiredOrder) result.eligible.push(user);
     else result.rankBlocked.push(user);
   }
+
+  // Sorted LAST, and on the buckets rather than on the input: the caller decides where one bucket sits
+  // relative to the next (eligible above the rest), and no caller should also have to remember to sort
+  // within it. `result`'s arrays are this function's own, so sorting them leaves `users` untouched.
+  result.eligible.sort(byName);
+  result.rankBlocked.sort(byName);
+  result.unverifiable.sort(byName);
+  result.excluded.sort(byName);
+  result.inactive.sort(byName);
 
   return result;
 };

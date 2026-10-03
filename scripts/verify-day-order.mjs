@@ -114,8 +114,65 @@ check(
   ['Three-day event', 'Day shift']
 );
 
+console.log('\n--- a custom shift sorts by its own times, not to the foot of the day ---');
+// THE REPORTED FAULT: a custom shift added in the morning hours was drawn LAST on its day, below the
+// evening shift. It was not a sorting mistake in utils/dayOrder at all - the board drew the day's
+// merged rows and then, in a SECOND block underneath, every row that had no template slot behind it.
+// A custom shift never has one, so it was in that second list by construction, whatever time it
+// started at. The cell reads top to bottom in the order the day happens, so an 08:00 shift belongs
+// among the shifts that start around it.
+//
+// These cases are about the SHAPE the board feeds in: a slot and a custom row are now one list, each
+// carrying the minute that decides its place, and the marker (`entry`) is what the render branches on.
+const custom = (label, startMin) => ({ entry: { _key: `tmp-${label}`, label }, startMin });
+const drawn = (rows) =>
+  mergeDayItems(rows, []).map(({ value }) => (value?.entry ? value.entry.label : value?.name));
+
+check(
+  'a morning custom shift lands between the morning and evening shifts',
+  drawn([shift('Day shift', 420), shift('Night shift', 1140), custom('08:00', 480)]),
+  ['Day shift', '08:00', 'Night shift']
+);
+check(
+  'and an evening custom shift lands after them, not first',
+  drawn([shift('Day shift', 420), custom('19:00', 1140), shift('Night shift', 1140)]),
+  ['Day shift', '19:00', 'Night shift']
+);
+check(
+  'two custom shifts order against each other',
+  drawn([custom('18:00', 1080), shift('Day shift', 420), custom('09:00', 540)]),
+  ['Day shift', '09:00', '18:00']
+);
+// THE TIMELESS ROW IS THE CASE THAT MUST NOT REGRESS INTO MIDNIGHT. A row that has lost both its
+// template and its times has no known start; it sorts last rather than pretending to begin at 00:00,
+// which would put it above the morning shifts.
+check(
+  'a row with no readable start sorts last rather than as midnight',
+  drawn([custom('no time', null), shift('Day shift', 420), shift('Night shift', 1140)]),
+  ['Day shift', 'Night shift', 'no time']
+);
+check(
+  'and a custom shift interleaves with EVENTS too, not only with slots',
+  mergeDayItems([shift('Day shift', 420), custom('12:00', 720)], [event('Standup', 480)]).map(
+    ({ value }) => (value?.entry ? value.entry.label : value?.name ?? value?.title)
+  ),
+  ['Day shift', 'Standup', '12:00']
+);
+
 console.log('\n--- shapes and safety ---');
 check('the kinds are tagged', kinds([shift('A', 540)], [event('B', 540)]), ['event', 'shift']);
+// A custom row is a SHIFT as far as the merge is concerned - it has a start minute and takes a place in
+// the day. It carries `entry` so the render can tell it from a slot, and that must not change the kind,
+// or the board would look for a template the row does not have.
+check(
+  'a custom row is tagged as a shift, with its entry kept for the render',
+  (() => {
+    const row = custom('08:00', 480);
+    const [item] = mergeDayItems([row], []);
+    return [item.kind, item.value.entry.label];
+  })(),
+  ['shift', '08:00']
+);
 check('nothing is dropped', mergeDayItems([shift('A', 1), shift('B', 2)], [event('C', 3)]).length, 3);
 check('an empty day', mergeDayItems([], []), []);
 check('shifts only', order([shift('A', 540)], []), ['A']);
@@ -148,6 +205,24 @@ for (const { file, where } of CALENDARS) {
   checkIs(`${where} merges events into the day`, usesMerge(source));
   checkIs(`${where} has no events block above the pills`, !rendersEventsSeparately(source));
 }
+
+// ...AND THE DAY IS ONE LIST, NOT TWO. This is the custom-shift fault, and it is invisible to the
+// checks above: the board DID merge its events into the day, correctly, and still drew the custom
+// shift last - because it merged SLOTS and then rendered the rows that have no slot in a second block
+// underneath. The tell is a second pass over those rows outside the merge, so that is what is held
+// here: a custom row is built with a start minute and fed INTO the merge, and is not drawn a second time.
+const board = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+checkIs('the board merges the slots AND the rows without a slot together', /mergeDayItems\(dayRows,/.test(board));
+// Each of those rows is given a start minute, taken from its own template-or-row times. Without it the
+// merge has nothing to order by and every custom shift ties at the end - the symptom, one layer down.
+checkIs(
+  'and each row without a slot is given a start minute from its own times',
+  /extraPills\.map\(\(entry\) => \(\{ entry, startMin: entryStartMinute\(entry\) \}\)\)/.test(board),
+  'a custom row reaches the merge with no time to sort by'
+);
+// The second block is GONE, not copied. Leaving it would draw every custom shift twice, which is why this
+// is asserted separately rather than trusted to the merge check above.
+checkIs('and the rows without a slot are not drawn in a block of their own', !/\{extraPills\.map\(/.test(board));
 
 console.log('\n--- the wiring checks themselves ---');
 const calendarSource = readFileSync('src/components/ScheduleCalendar.jsx', 'utf8');

@@ -423,6 +423,15 @@ export default function AdminScheduleManagementTab({
     return template ? timeRangeOf(template) : rowTimeRangeOf(entry);
   };
 
+  // An entry's start MINUTE, from the same two places as its range above: the template's when it still has one, its own
+  // start_time when it does not (which is what a custom shift is). Deliberately NOT defaulted to 0 - midnight is a real
+  // start time, so a row whose start cannot be read must not borrow it (see the MISSING convention in utils/dayOrder).
+  // Null here sorts last, which is the honest answer for a row that has lost both its template and its times.
+  const entryStartMinute = (entry) => {
+    const template = entryTemplate(entry);
+    return timeToMinutes(template ? template.start_time : entry?.start_time);
+  };
+
   // WHETHER THE MEMBER MARKED ANYTHING AVAILABLE THAT DAY - and that is the honest question this board can ask.
   //
   // Availability is expressed as WINDOWS: a nickname, hours, and the days of the week the window runs on, claimed one day
@@ -1678,9 +1687,9 @@ export default function AdminScheduleManagementTab({
             </span>
           </div>
         )}
-        {!monthPending && !showWindowError && unmatchedRows.length > 0 && (
-          <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+        {/* {!monthPending && !showWindowError && unmatchedRows.length > 0 && (
+          <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-slate-50 text-slate-800 border border-slate-200 dark:bg-slate-950/70 dark:text-slate-300 dark:border-slate-800">
+            <InfoCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span className="flex-1">
               {unmatchedRows.length} of {working.length} shift{working.length === 1 ? '' : 's'} loaded for {monthLabel}{' '}
               {unmatchedRows.length === 1 ? 'is' : 'are'} not sitting in a slot:{' '}
@@ -1688,11 +1697,10 @@ export default function AdminScheduleManagementTab({
                 .slice(0, 3)
                 .map((entry) => `${userName(entry.user_id)} \u00b7 ${entry._from || 'no date'}`)
                 .join(', ')}
-              {unmatchedRows.length > 3 ? `, and ${unmatchedRows.length - 3} more` : ''}. They are drawn beside their
-              slots rather than in them, which is what a shift that did not save also looks like.
+              {unmatchedRows.length > 3 ? `, and ${unmatchedRows.length - 3} more` : ''}.
             </span>
           </div>
-        )}
+        )} */}
 
         {/* Dismissible availability warnings - scheduling is still allowed */}
         {visibleUnavailable.length > 0 && (
@@ -1708,7 +1716,7 @@ export default function AdminScheduleManagementTab({
                 ))}
                 {visibleUnavailable.length > 5 && <li>…and {visibleUnavailable.length - 5} more.</li>}
               </ul>
-              <p className="text-xs mt-1">You can still save these shifts — availability is informational and doesn't block scheduling.</p>
+              {/* <p className="text-xs mt-1">You can still save these shifts — availability is informational and doesn't block scheduling.</p> */}
             </div>
             <button
               type="button"
@@ -2174,6 +2182,24 @@ export default function AdminScheduleManagementTab({
             // template slots (e.g. manual shifts with no matching template)
             const extraPills = dayPills.filter((e) => !slotEntryKeys.has(e._key));
 
+            // ...AND THEY ARE PART OF THE DAY'S ORDER, NOT A LIST UNDER IT.
+            //
+            // These two used to be drawn as two separate blocks: the merged day (slots, ordered by start time, with
+            // events among them) and then every entry without a slot, in whatever order the rows arrived. A CUSTOM
+            // SHIFT is the common case here - it has no template, so it is never a slot - and it carries real times of
+            // its own, so drawing it after the day's shifts put an 08:00 custom shift BELOW an evening one on the
+            // same day. The cell reads top to bottom in the order the day happens, so a shift that has a start time
+            // belongs among the shifts that start around it.
+            //
+            // Each is given the minute its own template-or-row says (entryStartMinute above) and joined to the slots
+            // as one shift-like list, so mergeDayItems orders them together with the events. `entry` is the marker the
+            // render branches on; a row with no readable start keeps null and sorts last, which is the right answer
+            // for a shift whose template AND times are both gone.
+            const dayRows = [
+              ...daySlots,
+              ...extraPills.map((entry) => ({ entry, startMin: entryStartMinute(entry) })),
+            ];
+
             return (
               <div
                 key={dateKey}
@@ -2196,7 +2222,7 @@ export default function AdminScheduleManagementTab({
                     utils/dayOrder. Events stay plain divs, so they carry none of the board's selection or drag
                     behavior; only their position changes. */}
 
-                {mergeDayItems(daySlots, eventSegmentsByDate.get(dateKey) || []).map(({ kind, value }) => {
+                {mergeDayItems(dayRows, eventSegmentsByDate.get(dateKey) || []).map(({ kind, value }) => {
                   if (kind === 'event') {
                     const segment = value;
                     return (
@@ -2205,6 +2231,46 @@ export default function AdminScheduleManagementTab({
                         segment={segment}
                         timeFormat={timeFormat}
                       />
+                    );
+                  }
+
+                  // A ROW WITH NO SLOT BEHIND IT - the custom-shift case. It came in through `dayRows` above so it
+                  // sorts in the order the day happens, but it is drawn here rather than by the slot branch below,
+                  // which needs a template this row does not have.
+                  if (value.entry) {
+                    const e = value.entry;
+                    // Same rule as the occupant branch below: an unfilled row is a
+                    // vacancy, so it is drawn like an empty slot rather than a
+                    // color-filled shift.
+                    const vacant = String(e.user_id ?? '').trim() === '';
+                    // A row that still points at a template borrows that template's
+                    // nickname; a custom shift has none, so it shows its own times.
+                    const pillTime = shiftTimeLabel(entryTemplate(e), entryTimeRangeOf(e));
+                    return (
+                      <div
+                        key={e._key}
+                        draggable={!isOccurred(e)}
+                        // Same reason as the shift pill below: a past event is not draggable but is still clickable.
+                        data-sound="click"
+                        onDragStart={(e2) => handlePillDragStart(e2, e, dateKey)}
+                        onDragEnd={handleDragEndPill}
+                        onClick={(ev) => openEntryPopover(ev, e)}
+                        // A custom shift accepts the drag so it can say why it will not take it: it is not a board
+                        // slot, so there is no slot for the moved shift to adopt.
+                        onDragOver={(e2) => e2.preventDefault()}
+                        onDrop={(e2) => handlePillDrop(e2, e)}
+                        title={`${occupantLabel(e, entryTemplate(e))} · ${assignmentById(e.assignment_id)?.description || 'No assignment'}${entryTimeRangeOf(e) ? ` · ${entryTimeRangeOf(e)}` : ''}${isOccurred(e) ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'}`}
+                        className={`${vacant ? VACANT_PILL_CLASS : FILLED_PILL_CLASS} cursor-grab active:cursor-grabbing ${
+                          isOccurred(e) ? 'opacity-40 saturate-50' : ''
+                        } ${selectedKey === e._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''}`}
+                        style={vacant ? undefined : { backgroundColor: assignmentColor(e.assignment_id, assignments) }}
+                      >
+                        {assignmentIcon(e.assignment_id) && (
+                          <RankIcon name={assignmentIcon(e.assignment_id)} className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]" />
+                        )}
+                        {occupantLabel(e, entryTemplate(e))}
+                        {pillTime ? ` · ${pillTime}` : ''}
+                      </div>
                     );
                   }
 
@@ -2318,44 +2384,6 @@ export default function AdminScheduleManagementTab({
                         </span>
                       </div>
                     </div>
-                  );
-                })}
-
-                {/* Rows with no matching slot this day - a shift whose template is gone, or one added by hand -
-                    keep the foot of the day. They have no slot to sit among, and they sat here before. */}
-                {extraPills.map((e) => {
-                  // Same rule as the occupant branch above: an unfilled row is a
-                  // vacancy, so it is drawn like an empty slot rather than a
-                  // color-filled shift.
-                  const vacant = String(e.user_id ?? '').trim() === '';
-                  // A row that still points at a template borrows that template's
-                  // nickname; a custom shift has none, so it shows its own times.
-                  const pillTime = shiftTimeLabel(entryTemplate(e), entryTimeRangeOf(e));
-                  return (
-                  <div
-                    key={e._key}
-                    draggable={!isOccurred(e)}
-                    // Same reason as the shift pill above: a past event is not draggable but is still clickable.
-                    data-sound="click"
-                    onDragStart={(e2) => handlePillDragStart(e2, e, dateKey)}
-                    onDragEnd={handleDragEndPill}
-                    onClick={(ev) => openEntryPopover(ev, e)}
-                    // A custom shift accepts the drag so it can say why it will not take it: it is not a board
-                    // slot, so there is no slot for the moved shift to adopt.
-                    onDragOver={(e2) => e2.preventDefault()}
-                    onDrop={(e2) => handlePillDrop(e2, e)}
-                    title={`${occupantLabel(e, entryTemplate(e))} · ${assignmentById(e.assignment_id)?.description || 'No assignment'}${entryTimeRangeOf(e) ? ` · ${entryTimeRangeOf(e)}` : ''}${isOccurred(e) ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'}`}
-                    className={`${vacant ? VACANT_PILL_CLASS : FILLED_PILL_CLASS} cursor-grab active:cursor-grabbing ${
-                      isOccurred(e) ? 'opacity-40 saturate-50' : ''
-                    } ${selectedKey === e._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''}`}
-                    style={vacant ? undefined : { backgroundColor: assignmentColor(e.assignment_id, assignments) }}
-                  >
-                    {assignmentIcon(e.assignment_id) && (
-                      <RankIcon name={assignmentIcon(e.assignment_id)} className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]" />
-                    )}
-                    {occupantLabel(e, entryTemplate(e))}
-                    {pillTime ? ` · ${pillTime}` : ''}
-                  </div>
                   );
                 })}
               </div>
