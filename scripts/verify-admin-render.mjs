@@ -44,7 +44,7 @@ import MyClockHistory from '../src/components/MyClockHistory.jsx';
 import { clockLocationNotice } from '../src/utils/clockLocation.js';
 import FirefighterRunner from '../src/components/FirefighterRunner/FirefighterRunner.jsx';
 import ScheduleCalendar from '../src/components/ScheduleCalendar.jsx';
-import UserSettings from '../src/components/UserSettings.jsx';
+import UserSettings from '../src/components/MySettings.jsx';
 
 let failures = 0;
 const check = (label, condition, detail) => {
@@ -148,7 +148,10 @@ for (const [name, role] of Object.entries(ROLES)) {
   }
   if (name === 'usersOnly') {
     check('a users-only role gets the People category', panelHtml.includes('>People<'));
-    check('and the menu lists the Users tab it may open', panelHtml.includes('>Users<'));
+    // The tab's LABEL is "Members" (id 'users') - it always has been, and the id is what the permission resolves. This
+    // assertion said ">Users<" and had been failing for that reason alone: a stale label, not a regression, and it was
+    // masking whether the rest of this file ran. Asserted on the label the nav actually carries.
+    check('and the menu lists the members tab it may open', panelHtml.includes('>Members<'));
     check('and no tab panel is rendered on the menu', !panelHtml.includes('Scheduling</th>'));
   }
   if (name === 'administrator') {
@@ -654,6 +657,75 @@ const windowsTabHtml = renderToStaticMarkup(
 check('the empty tab still offers New window', windowsTabHtml.includes('New window'));
 check('with the count it is listing', windowsTabHtml.includes('Availability windows (0)'));
 check('and says what it is doing rather than showing nothing', /Loading availability windows|No availability windows yet/.test(windowsTabHtml));
+
+// -----------------------------------------------------------------------------------------------------------
+// MEMBER AVAILABILITY MUST HAVE ITS WINDOWS, OR NO CLAIM CAN EVER BE SHOWN.
+// -----------------------------------------------------------------------------------------------------------
+// The reported fault: members had marked themselves available, and Administration > Member Availability showed none of
+// it - "No availability windows fall in <month>", and nothing at all in the single-member view.
+//
+// IT WAS NOT THE CLAIMS READ. `ADMIN_GET_AVAILABILITY` returns the crew's rows correctly (verify-firestore-reads covers
+// the shape; the read itself is exercised there too). A claim is only ever DRAWN attached to a WINDOW, and the windows list
+// was empty in this module - so the claims arrived and had nothing to hang on. That is what these checks hold.
+//
+// WHY THE LIST WAS EMPTY, and it is the part worth writing down: two readers, neither reachable from Administration.
+//   - the sign-in payload deliberately omits the windows (see firestorePayload.js), so `setAvailabilityWindows` in
+//     applyBootstrap was reading a field no payload ever wrote;
+//   - the other reader is gated on `activeTab === 'availability'`, the MEMBER's own screen, which an officer working in
+//     Administration never opens.
+// Read here rather than reusing the `appSource` further down this file: that one is declared AFTER this block, and a
+// `const` used before its declaration is a temporal dead zone error - the build failed on exactly that.
+const rosterAppSource = readFileSync('src/App.jsx', 'utf8');
+const adminRosterEffect = /const wantsRoster[\s\S]*?\n  \}, \[activeTab, adminSubTab/;
+
+// The officer's roster effect reads the windows. Without this the tab renders from an empty list forever.
+check(
+  'the officer roster effect reads the availability windows',
+  /const wantsRoster[\s\S]*?adminFetchAvailabilityWindows\(/.test(rosterAppSource),
+  'the windows are never read for the Administration module'
+);
+// ...and it reads them with the SHARED once-per-session guard, so opening both screens is still one read.
+check('under the shared windowsLoaded guard', /const wantsRoster[\s\S]*?if \(!windowsLoaded\)\s*\{[\s\S]*?setWindowsLoaded\(true\)/.test(rosterAppSource));
+// ...and BEFORE the claims-scope guard. This ordering is load-bearing: that guard legitimately skips the claims read when
+// the range is already held, and the windows are needed either way, so reading them after it would reintroduce the bug
+// for exactly the officer who had already browsed the board.
+const effectBody = adminRosterEffect.exec(rosterAppSource)?.[0] || '';
+const windowsAt = effectBody.indexOf('adminFetchAvailabilityWindows(');
+const scopeGuardAt = effectBody.indexOf('rosterScope.from && rosterScope.from <= from');
+check(
+  'and before the claims-scope guard, which can skip its own read',
+  windowsAt > -1 && scopeGuardAt > -1 && windowsAt < scopeGuardAt,
+  'the windows read sits after a guard that may return first'
+);
+// The window read must not be gated on the MEMBER's own tab, which is what left the module empty in the first place.
+check(
+  'and not gated on the member\'s own availability screen',
+  !/adminSubTab === 'availability'[\s\S]{0,400}?activeTab === 'availability'/.test(effectBody),
+  'the read is behind a member-screen gate an officer never passes'
+);
+
+// THE JOIN ITSELF, on the tab's own derivation: a claim row with a matching window draws the member; without the window
+// there is nothing to draw it on. This is the claim the two lines above exist to keep true.
+const claimRow = { id: 'aw1|2026-10-06', user_id: 'u2', availability_window_id: 'aw1', date_from: '2026-10-06' };
+const octoberWindows = [{ id: 'aw1', nickname: 'Tuesday night', start_time: '18:00', end_time: '08:00', is_tuesday: true }];
+const rosterUsers = [{ id: 'u2', name: 'Bo Jones', rank_id: 'k2' }];
+const rosterFor = (windows) =>
+  renderToStaticMarkup(
+    React.createElement(AdminAvailabilityTab, {
+      token: 'test-token',
+      users: rosterUsers,
+      rosterAvailability: [claimRow],
+      windows,
+      loadedFrom: '2026-10-01',
+      loadedTo: '2026-10-31',
+    })
+  );
+const withWindowsHtml = rosterFor(octoberWindows);
+const withoutWindowsHtml = rosterFor([]);
+
+check('a claim whose window is loaded is drawn', /Tuesday night/.test(withWindowsHtml) && !/No availability windows fall in/.test(withWindowsHtml));
+// The bug's exact symptom, and the reason it read as "the data is not loading" rather than "the windows are missing".
+check('the same claim with no windows says there are none', /No availability windows fall in/.test(withoutWindowsHtml));
 // And the source, because the render above cannot reach the settled empty state: the button must sit ABOVE the
 // empty-list branch rather than inside it, which is precisely how the dead end was built.
 const windowsTabSource = readFileSync('src/components/admin/AdminAvailabilityWindowsTab.jsx', 'utf8');
@@ -1041,6 +1113,29 @@ check(
   'every nav tab id is unique',
   new Set(ADMIN_NAV_CATEGORIES.flatMap((category) => category.items.map((item) => item.id))).size,
   ADMIN_NAV_CATEGORIES.flatMap((category) => category.items.length).reduce((a, b) => a + b, 0)
+);
+
+// THE SCHEDULING ORDER IS THE ORDER THE WORK HAPPENS IN, and it was moved by request: the board an officer actually
+// schedules on leads, the queue waiting on their decision is next, and the configuration the board depends on follows.
+// Asserted as an exact list because the whole point of the change IS the sequence - a membership check like the ones above
+// passes on any arrangement, which is why this one is spelled out item by item.
+const schedulingOrder = (ADMIN_NAV_CATEGORIES.find((c) => c.id === 'catScheduling') || { items: [] }).items;
+check(
+  'Scheduling opens on Schedule Management and Pending Approvals',
+  schedulingOrder.slice(0, 2).map((item) => item.id),
+  ['schedule', 'approvals']
+);
+check(
+  'then availability, events, templates and the windows',
+  schedulingOrder.slice(2, 6).map((item) => item.id),
+  ['availability', 'events', 'templates', 'availability-windows']
+);
+// ...and nothing was dropped or duplicated in the move. A reorder that quietly loses a tab would still satisfy the two
+// checks above, because they only look at the first six.
+check(
+  'and reordering lost no tab',
+  schedulingOrder.map((item) => item.id),
+  ['schedule', 'approvals', 'availability', 'events', 'templates', 'availability-windows', 'assignments']
 );
 // The retired Shifts tab stays out of the nav.
 check('the retired Shifts tab is still absent', categoryOf('shifts') === null);
@@ -1643,7 +1738,7 @@ check('and an unknown tab is not capped either', !centeredFor('nonsense'));
 // lives in utils/contentWidth, applied via App for whole modules and CenteredContent for part of a screen.
 // Those two files are the only places a content max-width class may appear.
 const widthPolicyFiles = [
-  'src/components/UserSettings.jsx',
+  'src/components/MySettings.jsx',
   'src/components/ScheduleCalendar.jsx',
   'src/components/MyClockHistory.jsx',
   'src/components/HelpGuides.jsx',

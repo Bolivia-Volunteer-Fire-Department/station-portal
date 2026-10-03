@@ -674,6 +674,30 @@ export const fetchMemberDocumentRecords = async (userId, token) =>
 export const fetchDocumentSignatures = async (id, token) =>
   dispatchRequest({ action: 'GET_DOCUMENT_SIGNATURES', token, id });
 
+// --- Assessment scores -------------------------------------------------------------------------------------------
+//
+// A MEMBER'S OWN SCORE IS NOT HERE, and that is deliberate: it arrives with `fetchDocument`, because the caller is never
+// named in that request and so cannot ask it for anybody else. There is no `fetchMyAssessmentScore(userId)` on purpose -
+// a function taking a member id and returning "their own" score is a function whose argument nobody should be able to set.
+//
+// These two are the officer's half. `fetchMemberAssessmentScore` is the lookup behind the member picker, and
+// `setAssessmentScore` is the save. Both NAME the member, and both are refused by the rules for anybody without
+// `can_add_assessment_scores` - the read because the row is not theirs, the write because only a scorer may create one.
+export const fetchMemberAssessmentScore = async (documentId, userId, token) =>
+  dispatchRequest({ action: 'GET_MEMBER_ASSESSMENT_SCORE', token, document_id: documentId, user_id: userId });
+
+// `score` is sent as the string it is. No Number(), no parseFloat, no validation that turns it into something else -
+// the field is a string in the database because that is what lets "Pass", "4:52" and "12/15" share one column.
+export const setAssessmentScore = async (documentId, userId, score, scoredOn, token) =>
+  dispatchRequest({
+    action: 'SET_DOCUMENT_ASSESSMENT_SCORE',
+    token,
+    document_id: documentId,
+    user_id: userId,
+    score: String(score ?? ''),
+    scored_on: scoredOn,
+  });
+
 export const adminRemoveDocumentSignature = async (signatureId, token) =>
   dispatchRequest({ action: 'ADMIN_REMOVE_DOCUMENT_SIGNATURE', token, id: signatureId });
 

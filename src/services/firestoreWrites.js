@@ -24,6 +24,9 @@ import { availabilityMonthId } from '../utils/availability.js';
 // compares against must be the same reading of the same column, or an announcement can be live on screen and expired in
 // the query that feeds it.
 import { parseSheetDateKey } from '../utils/scheduleDate.js';
+// The assessment score's row id and type guard, shared with the reader so the two cannot disagree about which documents
+// carry scores or what a score row is called.
+import { assessmentScoreId, assessmentScoreLimit as ASSESSMENT_SCORE_LIMIT, isAssessment } from '../utils/documents.js';
 // The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
 // device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
 import { isOffline } from '../utils/connectivity.js';
@@ -556,6 +559,66 @@ export const verifyChecklistRemaining = async ({ verifierId, documentId, memberI
   });
   await batch.commit();
   return { success: true, verified: pending.length, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
+};
+
+// -----------------------------------------------------------------------------------------------------------
+// ASSESSMENT SCORES
+// -----------------------------------------------------------------------------------------------------------
+// One member's score on one assessment, recorded by somebody who may add scores. The ONLY way a score is ever written -
+// there is no member path, not even for their own, and the rules refuse one independently of anything said here.
+//
+// WHY A WRITE AND NOT A DELETE-THEN-ADD. The row id is `{documentId}_{userId}`, so this is a `set` and re-scoring
+// REPLACES the previous value rather than accumulating rows. `merge` is used so `updated_at` is refreshed without the
+// caller's values being able to drop a field the rules require - a plain overwrite is the same thing here and says so
+// more clearly.
+//
+// The refusals are the sheet's own, restated: a score for yourself, a score with no text (indistinguishable from never
+// having been scored), a score with no date (a result with no day is not a record of anything), and a document that is
+// not an assessment. `String(score)` deliberately, with NO numeric coercion anywhere: the score is a string because
+// stations score time, counts and pass/fail with the same field.
+export const setDocumentAssessmentScore = async ({ scorerId, documentId, memberId, score, scoredOn }) => {
+  const member = String(memberId || '').trim();
+  const document = String(documentId || '').trim();
+  const value = String(score === undefined || score === null ? '' : score).trim();
+  const on = parseSheetDateKey(scoredOn);
+
+  if (!member || !document) return { success: false, message: 'Which member, on which assessment?' };
+  if (member === scorerId) {
+    // The rules refuse this too. It is refused HERE as well so the officer is told why in words rather than by a
+    // permission error, and because a screen that offers the control and then fails is worse than one that does not.
+    return { success: false, message: 'You cannot record your own score. Somebody else administers the assessment.' };
+  }
+  if (!value) return { success: false, message: 'Enter a score.' };
+  if (value.length > ASSESSMENT_SCORE_LIMIT) {
+    return { success: false, message: `That score is too long (the limit is ${ASSESSMENT_SCORE_LIMIT} characters).` };
+  }
+  if (!on) return { success: false, message: 'Enter the date the score was taken.' };
+
+  const source = await getDoc(doc(firestore(), 'documents', document));
+  if (!source.exists()) return { success: false, message: 'That document is not available.' };
+  if (!isAssessment({ ...source.data(), id: source.id })) {
+    return { success: false, message: 'That document is not an assessment.' };
+  }
+
+  const id = assessmentScoreId(document, member);
+  await setDoc(
+    doc(firestore(), 'document_assessment_scores', id),
+    {
+      document_id: document,
+      user_id: member,
+      score: value,
+      scored_on: on,
+      // The caller, always - the rules require it, so it could not be anyone else, but writing it truthfully means the
+      // field says who administered the test rather than only that somebody did.
+      scored_by_user_id: String(scorerId || '').trim(),
+      updated_at: stationTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const saved = await getDoc(doc(firestore(), 'document_assessment_scores', id));
+  // Id last, as everywhere else: the row may carry a stale `id` of its own and the document key is the truth.
+  return { success: true, saved: 1, score: { ...(saved.data() || {}), id: saved.id } };
 };
 
 // The two limits the sheet enforced, kept at the same numbers: a reorder is one batch request, and a folder name is a

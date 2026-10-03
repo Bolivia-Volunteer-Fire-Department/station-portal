@@ -19,12 +19,20 @@ import { renderToString } from 'react-dom/server';
 import MarkdownEditor from '../src/components/MarkdownEditor.jsx';
 import DocumentsModule from '../src/components/DocumentsModule.jsx';
 import AdminDocumentsTab from '../src/components/admin/AdminDocumentsTab.jsx';
-import { ADMIN_PERMISSIONS, allowedAdminTabs, permissionTab } from '../src/utils/permissions.js';
+import { ADMIN_PERMISSIONS, MEMBER_PERMISSIONS, allowedAdminTabs, permissionTab } from '../src/utils/permissions.js';
+// The security rules, read as text. They are what actually decide a score can be written, and the assessment checks
+// below assert the shape of that decision rather than trusting the client to have hidden the control. The emulator proof
+// that they behave is in verify-rules.mjs.
+const rulesSource = readFileSync('firestore.rules', 'utf8');
 import { ADMIN_BAR_LABELS, PAGE_BAR_LABELS } from '../src/utils/pageLabels.js';
 import {
   DOCUMENT_CONTENT_LIMIT,
   DOCUMENT_TYPES,
   UNFILED_LABEL,
+  assessmentScoreDateLabel,
+  assessmentScoreId,
+  assessmentScoreLimit,
+  assessmentScoreProblem,
   documentCharactersLeft,
   documentFolders,
   documentIsLive,
@@ -40,9 +48,12 @@ import {
   folderSummaries,
   groupDocumentsByFolder,
   isChecklist,
+  isAssessment,
   isLink,
+  memberAssessmentScore,
   memberSignatureFor,
   normalizeChecklistItemList,
+  normalizeAssessmentScore,
   normalizeDocument,
   normalizeDocumentList,
   normalizeSignatureList,
@@ -141,7 +152,10 @@ check('a checklist is recognized', isChecklist(rows.find((row) => row.id === 'b'
 // A link document: `content` is an address, and only http(s) is followable.
 // ---------------------------------------------------------------------------
 console.log('\n--- link documents ---');
-check('link is one of the three types', DOCUMENT_TYPES, ['markdown', 'checklist', 'link']);
+// Four types now. `assessment` joined the list and this line said "three" with the old three spelled out, so it caught
+// the addition rather than riding along with it - which is what a list assertion is for. The new type has its own block
+// below.
+check('link is one of the four types', DOCUMENT_TYPES, ['markdown', 'checklist', 'link', 'assessment']);
 check('a link is recognized', isLink({ id: 'l', doc_type: 'link', content: 'https://example.com' }), true);
 check('and a document is not', isLink({ id: 'm', doc_type: 'markdown' }), false);
 check('an https address is usable', documentLinkProblem('https://example.com/policy'), '');
@@ -779,9 +793,15 @@ checkIs('the editor is not on the page until it is opened', !/id="document-edito
 checkIs('the editor can set an effective date', /id="document-effective-date"/.test(documentsTab));
 checkIs('and an end date', /id="document-end-date"/.test(documentsTab));
 checkIs('and says what an end date does to signatures', /Signatures already on it are kept/.test(documentsTab));
-// Three document types now, and the third one is a link. The options are built from DOCUMENT_TYPES (imported
-// above), so this asserts the label the tab gives it rather than the label existing somewhere.
-checkIs('the type list offers a Link', /type === 'link' \? 'Link'/.test(documentsTab));
+// Four document types now. The options are built from DOCUMENT_TYPES (imported above), so these assert the labels the
+// editor actually renders rather than the labels existing somewhere - and the regexes match the ternary's arms, which is
+// why reformatting that chain into more lines is a change this file has to be told about.
+checkIs('the type list offers a Link', /type === 'link'[\s\S]{0,80}?'Link'/.test(documentsTab));
+checkIs(
+  'and an Assessment',
+  /type === 'assessment'[\s\S]{0,80}?'Assessment'/.test(documentsTab),
+  'the editor offers no Assessment type, so one cannot be created'
+);
 
 // A role that may VERIFY but not MANAGE gets the verification view on its own - no editor, and no list to click
 // through to one.
@@ -830,6 +850,66 @@ checkIs(
   'and nothing claims the checklist is verified before it loads',
   !/Verified<\/span>/.test(verifierChecklistHtml),
   'a verified badge rendered with no data'
+);
+
+// -----------------------------------------------------------------------------------------------------------
+// THE "VIEW AS" PICKER MUST NOT DEPEND ON ANOTHER SCREEN HAVING BEEN OPENED.
+// -----------------------------------------------------------------------------------------------------------
+// The reported fault: the ability to select another member "is really inconsistent - sometimes the dropdown is there,
+// sometimes it isn't", and as an administrator it currently was not.
+//
+// The control is gated on `canVerify && viewableMembers.length > 0`, and `viewableMembers` is built from the `users`
+// PROP. That prop was `users` in App.jsx - a state filled only by the Administration Members tab's section read and by the
+// applier after a member save. The Documents module is not an Administration sub-tab, so opening it read neither: an
+// administrator who went straight to Documents got an empty list, the picker was hidden, and the same officer who had
+// visited Administration first got it. The control was borrowing another screen's side effect.
+//
+// So two halves. Below: the module must actually draw the picker when it IS given members, and must not draw one when
+// it is not (that is not a bug, it is what "no list" honestly looks like). And in App.jsx: the module must be given a
+// list that does not depend on where the officer has been.
+const officers = [
+  { id: 'user-officer', name: 'Ada Quinn', rank_id: 'k1' },
+  { id: 'user-ff', name: 'Bo Jones', rank_id: 'k2' },
+];
+const pickerHtml = renderToString(
+  React.createElement(DocumentsModule, {
+    token: 't1',
+    currentUser: { id: 'user-officer' },
+    users: officers,
+    canVerify: true,
+  })
+);
+checkIs('given a member list, a verifier is offered the picker', /aria-label="View another member&#x27;s records"/.test(pickerHtml));
+checkIs('and it lists the other members by name', /Bo Jones/.test(pickerHtml));
+checkIs(
+  'and never the reader themselves',
+  !/value="user-officer"/.test(pickerHtml),
+  'the picker offered the reader their own records'
+);
+const noListHtml = renderToString(
+  React.createElement(DocumentsModule, { token: 't1', currentUser: { id: 'user-officer' }, users: [], canVerify: true })
+);
+checkIs(
+  'with no list it draws nothing rather than an empty picker',
+  !/aria-label="View another member&#x27;s records"/.test(noListHtml),
+  'an empty picker was rendered'
+);
+// ...which is exactly why the module must never be handed an empty list. This is the App.jsx half, read as source.
+checkIs(
+  'the Documents module is handed the directory, not the Administration-only `users` state',
+  /users=\{documentsMembers\}/.test(appSource) &&
+    /const documentsMembers = directory\.length \? directory : users;/.test(appSource),
+  'the module is still wired to `users`, which only Administration fills'
+);
+checkIs(
+  'and the directory is read when the documents tab opens',
+  /activeTab !== 'documents'\) return;[\s\S]*?fetchAdminSections\(\['directory'\]\)/.test(appSource),
+  'nothing reads the directory for the Documents module'
+);
+checkIs(
+  'and only for the two roles that can actually use the picker',
+  /if \(!canVerifyDocuments && !canAddAssessmentScores\) return;/.test(appSource),
+  'the read is not limited to the roles that name members'
 );
 
 const itemEditorSource = readFileSync(
@@ -1282,6 +1362,213 @@ check(
   'and lays its fields out by container width, not viewport width',
   /@md:grid-cols-2/.test(clockFormSource) && !/md:grid-cols-3/.test(clockFormSource),
   true
+);
+
+// -----------------------------------------------------------------------------------------------------------
+// ASSESSMENTS: a document that also carries one score per member.
+// -----------------------------------------------------------------------------------------------------------
+// The requirement, in one sentence: every member sees the assessment and can read their OWN score, nobody can write
+// their own score, and only somebody with "Add assessment scores" can write one - for somebody else.
+//
+// These checks cover the pure half of that (the shapes, the id, the validation, the per-member lookup). The half that
+// actually decides it - that a member's write is refused - lives in firestore.rules, asserted at the end of this block
+// and proved against the emulator by verify-rules.mjs.
+console.log('\n--- assessments ---');
+check('an assessment is recognized', isAssessment({ id: 'a', doc_type: 'assessment' }), true);
+check('and a document is not', isAssessment({ id: 'd', doc_type: 'markdown' }), false);
+check('nor is a checklist', isAssessment({ id: 'c', doc_type: 'checklist' }), false);
+// An unrecognized type still falls back to markdown rather than to assessment, so a typo cannot quietly create a
+// document nobody can score.
+check('an unknown type is not an assessment', isAssessment({ id: 'x', doc_type: 'assessmentx' }), false);
+
+// THE SCORE IS A STRING. These are the reason the field is not a number: a time, a fraction and a word all have to
+// survive a round trip unchanged, and any numeric coercion anywhere would quietly mangle two of them.
+const scoreRow = { id: 'a1_u2', document_id: 'a1', user_id: 'u2', score: '4:52', scored_on: '2026-10-06' };
+check('a time stays a time', normalizeAssessmentScore(scoreRow).score, '4:52');
+check('a fraction is not turned into a number', normalizeAssessmentScore({ score: '12/15' }).score, '12/15');
+check('a pass/fail word is kept', normalizeAssessmentScore({ score: 'Pass' }).score, 'Pass');
+check('a mark out of ten keeps its denominator', normalizeAssessmentScore({ score: '8/10' }).score, '8/10');
+
+// The id carries BOTH the assessment and the member, and that is load-bearing twice over: the rules can prove whose row
+// a single-document get is about, and a re-score replaces rather than accumulates.
+check('the row id carries the assessment and the member', assessmentScoreId('a1', 'u2'), 'a1_u2');
+check('and is the same id for the same pair', assessmentScoreId('a1', 'u2') === assessmentScoreId('a1', 'u2'), true);
+check('but a different id for another member', assessmentScoreId('a1', 'u2') === assessmentScoreId('a1', 'u3'), false);
+
+// The date is the DAY the score was taken, and it is read through the app's own date parser rather than kept raw.
+check('the date is read as a day key', normalizeAssessmentScore({ scored_on: '2026-10-06' }).scored_on, '2026-10-06');
+check('and an unusable date is no date', normalizeAssessmentScore({ scored_on: 'sometime' }).scored_on, '');
+check('the label says when it was scored', assessmentScoreDateLabel(scoreRow), 'Scored 2026-10-06');
+check('and says nothing when there is no date', assessmentScoreDateLabel({ scored_on: '' }), '');
+
+// AN EMPTY SCORE IS REFUSED, and this is not pedantry: a blank row and a member who has never been scored would look
+// identical on the panel, which is exactly the ambiguity the feature exists to remove.
+check('an empty score is refused', assessmentScoreProblem(''), 'Enter a score.');
+check('whitespace is the same as empty', assessmentScoreProblem('   '), 'Enter a score.');
+check('any text is accepted', assessmentScoreProblem('Pass'), '');
+check('a number is accepted as the text it is', assessmentScoreProblem('42'), '');
+check('an over-long score is refused', assessmentScoreProblem('x'.repeat(assessmentScoreLimit + 1)).length > 0, true);
+check('a score exactly on the limit is fine', assessmentScoreProblem('x'.repeat(assessmentScoreLimit)), '');
+
+// The per-member lookup. The panel shows ONE member at a time and this is what keeps it to one: asking for somebody
+// else's score must not fall back to the first row in the list.
+const scoreRows = [
+  { id: 'a1_u1', document_id: 'a1', user_id: 'u1', score: 'Pass' },
+  { id: 'a1_u2', document_id: 'a1', user_id: 'u2', score: '4:52' },
+  { id: 'a2_u2', document_id: 'a2', user_id: 'u2', score: 'Slow' },
+];
+check('it finds that member on that assessment', memberAssessmentScore(scoreRows, 'a1', 'u2')?.score, '4:52');
+check('and a different member gets their own', memberAssessmentScore(scoreRows, 'a1', 'u1')?.score, 'Pass');
+check('the assessment is part of the key', memberAssessmentScore(scoreRows, 'a2', 'u2')?.score, 'Slow');
+check('a member with no score is null, not the first row', memberAssessmentScore(scoreRows, 'a1', 'u9'), null);
+check('and a blank member id is null', memberAssessmentScore(scoreRows, 'a1', ''), null);
+
+// THE PERMISSION. A member permission rather than an administration one - the Documents module is not an Administration
+// tab - and it rests on "View documents", which is what that module itself needs.
+console.log('\n--- the permission that may write a score ---');
+const scorePermission = MEMBER_PERMISSIONS.find((permission) => permission.key === 'can_add_assessment_scores');
+checkIs('the permission exists', Boolean(scorePermission));
+check('and is not an administration tab', scorePermission?.tab, undefined);
+check('its label is the one the role table shows', scorePermission?.label, 'Add assessment scores');
+check('it requires View documents', scorePermission?.requires, 'can_view_documents');
+// Holding the score permission opens no Administration tab of its own - which is the point of making it a member
+// permission rather than an administrative one.
+check(
+  'and it opens no Administration tab by itself',
+  allowedAdminTabs({ can_add_assessment_scores: true }),
+  []
+);
+
+// THE RULES ARE THE AUTHORITY. These three assert the client is not asked to be the thing that decides: the screen hides
+// the control, and the rules refuse the write. Neither on its own. The emulator proof is in verify-rules.mjs.
+console.log('\n--- and the rules are what refuse ---');
+checkIs('the collection has rules of its own', /match \/document_assessment_scores/.test(rulesSource));
+checkIs(
+  'the only branch that writes one requires the permission',
+  /allow create, update: if signedIn\(\)\s*&&\s*permission\('can_add_assessment_scores'\)/.test(rulesSource)
+);
+checkIs(
+  'a member reads their own',
+  /allow read: if signedIn\(\)\s*&&\s*\(resource\.data\.user_id == uid\(\)/.test(rulesSource)
+);
+// THE REQUIREMENT'S HARD PART, asserted as text: there is no branch anywhere in the write that lets the caller write
+// their OWN score, and the rule actively forbids it.
+checkIs(
+  'and a member is refused their own, by name',
+  /request\.resource\.data\.get\('user_id', ''\) != uid\(\)/.test(rulesSource),
+  'the rules do not refuse a self-scored write'
+);
+
+// The panel needs an OPEN assessment, and SSR renders the INITIAL state - nothing opened, nothing loaded - so this
+// asserts the two things that are true on that first render, and the wiring for the rest. Rendering the open state would
+// mean standing the whole module up with a fetcher, which is what the read and write harnesses are for.
+console.log('\n--- and the reader is never offered a way to change their own score ---');
+// `moduleSource` is already read earlier in this file (line 918), so it is reused rather than redeclared, and this slice
+// gets its own name because `panelSource` is already the AdminPanel's source further up. Two `const`s of one name are a
+// build error - which is how both of those mistakes were found.
+const scorePanelSource = moduleSource.slice(
+  moduleSource.indexOf('function AssessmentScorePanel'),
+  moduleSource.indexOf('export default function DocumentsModule')
+);
+// ONE CARD, THREE STATES - and the member it is about is chosen by the module's "View as" dropdown, NOT by a picker in
+// here. These checks hold that: the card has no member picker at all, and what it renders is decided by which of the two
+// questions is true.
+//
+//   "Myself"                     -> their own score, read-only
+//   somebody else, no permission -> that member's score, read-only
+//   somebody else, permission    -> that member's score, and the form to replace it
+//
+// The picker this card used to carry was a second control for a choice the module's header already made, and two controls
+// for one choice is how they disagree - which is the same failure that hid the header's own "View as" dropdown.
+checkIs(
+  'the assessment card holds no member picker of its own',
+  !/<select/.test(scorePanelSource) && !/pickMember/.test(scorePanelSource) && !/Choose a member/.test(scorePanelSource),
+  'the card still carries a member dropdown'
+);
+// ...and it is told WHICH member it is showing, by name, so a score on screen is never anonymous.
+checkIs(
+  'it names the member being shown',
+  /viewedMember \? `\$\{viewedMember\.label\}'s score` : 'Your score'/.test(scorePanelSource)
+);
+// "Myself": the reader's own score, read-only, with the reason stated rather than implied by an absent box.
+checkIs('on Myself it shows the reader their own score', /\{!viewedMember && \(/.test(scorePanelSource));
+checkIs(
+  'and says they cannot change it, even their own',
+  /cannot change it &mdash; not even your own/.test(scorePanelSource)
+);
+// Another member WITHOUT the permission: readable, and it says the form is absent on purpose.
+checkIs(
+  'on another member without the permission it is read-only',
+  /\{viewedMember && !canAddScores && \(/.test(scorePanelSource) &&
+    /Changing it needs the &ldquo;Add assessment scores&rdquo; permission/.test(scorePanelSource)
+);
+// Another member WITH the permission: the only place a score is written.
+const formGuardAt = scorePanelSource.indexOf('{viewedMember && canAddScores && (');
+const inputAt = scorePanelSource.indexOf('type="text"');
+checkIs(
+  'and the form appears only for another member WITH the permission',
+  formGuardAt > -1 && inputAt > formGuardAt,
+  'the score input is outside the "another member + may add scores" guard'
+);
+// The module does the looking up, keyed on the one navigator, rather than the card doing it for a member it chose.
+checkIs(
+  'the module reads the viewed member\'s score, keyed on the viewed member',
+  /const memberId = viewAsMember\.id;[\s\S]*?fetchMemberAssessmentScore\(openDocumentId, memberId, token\)/.test(moduleSource),
+  'the score read is not driven by the viewed member'
+);
+// ...and it may only ever DRAW a row that belongs to the member being viewed. That comparison is the whole reason there is
+// no clearing pass: switching "View as" cannot leave the previous member's score on screen, because their row simply stops
+// matching the moment the selection moves.
+checkIs(
+  'and a score is only drawn when the row belongs to the member being viewed',
+  /const scoreBelongsToViewed = Boolean\(viewAsMember\) && scoreRead\?\.user_id === viewAsMember\?\.id;/.test(moduleSource)
+);
+checkIs(
+  'and the View as dropdown is offered to either permission',
+  /const canSelectMember = canVerify \|\| canAddScores;/.test(moduleSource) &&
+    /\{canSelectMember && viewableMembers\.length > 0 && \(/.test(moduleSource),
+  'an assessor cannot reach the navigator the card follows'
+);
+// The records read behind the same control is the verifier's, and an assessor is refused it by the rules - so it is gated
+// on the permission that actually grants it, rather than on "somebody is selected".
+checkIs(
+  'the other member\'s document list is still gated on the verification permission',
+  /if \(!viewingSomeoneElse \|\| !canVerify\) \{/.test(moduleSource),
+  'an assessor without verification would be refused the records read across the whole pane'
+);
+// The reader's half has no input of any kind, and the explanation is stated rather than merely implied by an absence.
+checkIs(
+  'a member without the permission is told they cannot change their own',
+  /cannot change it &mdash; not even your own/.test(scorePanelSource)
+);
+checkIs(
+  'and is shown their score when there is one',
+  // One read for both members now: `shown` is whichever score is on screen, so the reader's own and a viewed member's
+  // are drawn by the same block rather than two copies that could drift apart.
+  /const shown = viewedMember \? viewedScore : myScore;/.test(scorePanelSource) && /\{shown\.score\}/.test(scorePanelSource)
+);
+checkIs(
+  'and told plainly when there is not',
+  /No score has been recorded for you yet/.test(scorePanelSource)
+);
+// The navigator leaves the reader out - it is the MODULE's "View as" now, so this is asserted there rather than in the card.
+// Without it the reader could select themselves and be offered a score form that the rules always refuse.
+checkIs(
+  'the View as dropdown leaves the reader out',
+  /\.filter\(\(user\) => String\(user\.id\) !== String\(userId\)/.test(moduleSource),
+  'the reader is listed in their own View as dropdown'
+);
+// The score is a TEXT input: `type="number"` would refuse "4:52" and "12/15", which is most of what a station records.
+checkIs('the score field is text, not a number', /type="text"[\s\S]{0,400}?Score/.test(scorePanelSource));
+checkIs('and it is capped at the length the server enforces', /maxLength=\{assessmentScoreLimit\}/.test(scorePanelSource));
+// The panel is drawn for an assessment only, and the reader's score comes from the document read rather than a second one.
+checkIs(
+  'the panel is drawn only for an assessment',
+  /\{documentIsAssessment && \([\s\S]*?<AssessmentScorePanel/.test(moduleSource)
+);
+checkIs(
+  'and the reader score arrives with the document',
+  /setMyScore\(result\.assessment_score \? normalizeAssessmentScore/.test(moduleSource)
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

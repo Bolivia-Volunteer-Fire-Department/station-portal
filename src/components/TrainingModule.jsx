@@ -187,9 +187,15 @@ export default function TrainingModule({
                   setEditing(null);
                   setEditorOpen(true);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                // THE SAME SIZE AS "Save signatures" BESIDE IT: px-4 py-2, text-sm, a w-4 h-4 icon and a gap-2. The two
+                // sit in one toolbar at the right-hand end, so a smaller button beside a larger one read as a secondary
+                // action - which it is not: adding a training is a peer of saving a signature, not a lesser version of it.
+                // The CHROME is still deliberately different (outlined rather than filled red), because Save is the one
+                // that commits pending work and Add is not - matching the size while keeping the two readable apart is
+                // the point, and it is why only the box changed here.
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
               >
-                <PenLine className="h-3.5 w-3.5" />
+                <PenLine className="h-4 w-4" />
                 Add training
               </button>
             )}

@@ -209,6 +209,10 @@ export const ROUTED_FEATURES = {
       'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
       'ADMIN_RENAME_DOCUMENT_FOLDER',
       'ADMIN_REORDER_DOCUMENTS',
+      // An assessment score is written by the officer who administers the test, and by nobody else - not by the member
+      // it is about. It is a member-module action rather than an Administration one, so it belongs to this feature and
+      // not to the `admin` one, even though only an officer ever calls it.
+      'SET_DOCUMENT_ASSESSMENT_SCORE',
     ],
     reads: [
       'GET_DOCUMENTS',
@@ -216,6 +220,10 @@ export const ROUTED_FEATURES = {
       'ADMIN_GET_DOCUMENT',
       'GET_MEMBER_DOCUMENT_RECORDS',
       'GET_DOCUMENT_SIGNATURES',
+      // The scorer's lookup of ONE member's score on ONE assessment. The reader's own score is not here because it
+      // travels with GET_DOCUMENT - see that reader - which is what keeps "my score" impossible to ask for somebody
+      // else's by accident.
+      'GET_MEMBER_ASSESSMENT_SCORE',
     ],
     switchReads: [],
   },
@@ -566,6 +574,22 @@ const DISPATCH = {
   SIGN_DOCUMENT: async (body, uid) => {
     const { signDocument } = await writes();
     return ok(await signDocument({ userId: uid, documentId: body.id }));
+  },
+
+  // THE SCORE WRITE. `body.user_id` is the member the score is ABOUT and `uid` is the officer recording it - two
+  // different people by construction, which is the property the whole feature rests on and the reason the member is
+  // named in the request rather than taken from the session the way a signature is.
+  SET_DOCUMENT_ASSESSMENT_SCORE: async (body, uid) => {
+    const { setDocumentAssessmentScore } = await writes();
+    return ok(
+      await setDocumentAssessmentScore({
+        scorerId: uid,
+        documentId: body.document_id,
+        memberId: body.user_id,
+        score: body.score,
+        scoredOn: body.scored_on,
+      })
+    );
   },
 
   SIGN_CHECKLIST_ITEM: async (body, uid) => {

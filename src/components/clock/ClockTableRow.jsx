@@ -2,14 +2,27 @@ import React from 'react';
 import { MapPin, Clock } from 'lucide-react';
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
+import { clockLogHours } from '../../utils/clockLogs';
 import { unnamedLabel } from '../../utils/displayLabel';
 
 export default function ClockTableRow({ log, showUserColumn = false, timeFormat = '12', shifts = [] }) {
-  const formattedHours = log.calc_hours 
-    ? typeof log.calc_hours === 'number' 
-      ? log.calc_hours.toFixed(2) 
-      : log.calc_hours
-    : '--';
+  // THE DURATION COMES FROM THE SHARED RULE, not from `calc_hours` on its own.
+  //
+  // This cell used to read `log.calc_hours ? ... : '--'`, and `calc_hours` is a LEGACY SPREADSHEET COLUMN that nothing in
+  // this app writes - not the clock-in transaction, not the officer's manual entry, not the migration's readers. So for
+  // every entry the app itself created the column was blank, and the reported symptom was a Duration that "sometimes"
+  // does not calculate: it did calculate for rows carried over from the sheet, and never for the ones the app wrote.
+  //
+  // `clockLogHours` is the rule the SAME SCREEN already uses a few lines away for its totals card, and it was right all
+  // along: the stored number when it is usable, otherwise measured from `time_in` to `time_out`. That left the page
+  // contradicting itself - the card summed 8.5 hrs while the row beside it said `--` - and sorting "longest duration
+  // first" was ranking blanks. Administration > Clock Management never showed it, because that tab has always had the
+  // fallback locally; using the shared helper makes the two screens agree by construction rather than by coincidence.
+  //
+  // An entry still clocked in has no end yet, and neither has a duration to state - that stays `--`, which is why the
+  // totals skip it too (an unfinished shift is not zero hours, it is an unknown number).
+  const hours = clockLogHours(log);
+  const formattedHours = hours === null ? '--' : hours.toFixed(2);
 
   const breakdown = computeShiftBreakdown(log, shifts);
   const shiftTimeDisplay =
@@ -68,7 +81,9 @@ export default function ClockTableRow({ log, showUserColumn = false, timeFormat 
       <td className="px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white">
         <div className="flex items-center gap-1.5">
           <Clock className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-          <span>{formattedHours} hrs</span>
+          {/* The unit belongs to a NUMBER. A row with no hours reads "-- hrs" otherwise, which states a unit for a
+              figure that is not there - and an entry still clocked in is the common case, not an edge. */}
+          <span>{hours === null ? '--' : `${formattedHours} hrs`}</span>
         </div>
       </td>
       <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white break-words leading-snug">

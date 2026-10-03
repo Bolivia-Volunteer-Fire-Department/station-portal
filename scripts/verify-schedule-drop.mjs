@@ -11,7 +11,8 @@
  *
  * Run with: npm run verify:schedule-drop
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, dropMessage, DROP_MESSAGES, DROP_NOTICES, SWAP_DWELL_MS, SWAP_POP_MS, SWAP_SLOT_FIELDS } from '../src/utils/scheduleDrop.js';
 
 let failures = 0;
@@ -400,6 +401,68 @@ check(
 );
 // A blinking ring is exactly what a reduced-motion preference is about, so the meaning has to survive without it.
 checkIs('reduced motion keeps the meaning of the blink', /@media \(prefers-reduced-motion: reduce\)/.test(styles));
+
+// -----------------------------------------------------------------------------------------------------------
+// THE TEMPLATE BLOCKS MUST NOT COVER THE NAVIGATION MENU.
+// -----------------------------------------------------------------------------------------------------------
+// The reported fault: on Schedule Templates, opening one of the Administration category dropdowns drew the menu UNDER the
+// template blocks on the week grid, so the tabs it navigates to were hidden behind coloured rectangles.
+//
+// The cause is a stacking CONTEXT, not a missing z-index. Each block sets `zIndex: 10` inline, and that number was being
+// compared in the page's context against the nav bar's `z-[5]` - so 10 beat 5. The dropdown's own `z-30` could not rescue
+// it: that z-30 is INSIDE the bar's context, and a z-index only competes with its own siblings, so the bar's entire
+// subtree entered the page at 5. Raising the block to 31 would have "fixed" this by making the bug depend on a larger
+// number, and would have put the blocks over the sticky app bar and every dialog in the app besides.
+//
+// The fix is to CONTAIN the block's z-index in the grid with `isolate`, so it is compared only against the hour lines and
+// day borders it was always meant to sit above. These two checks hold both halves: the grid is isolated, and the block's
+// z-index has not been changed into something that would need the containment.
+console.log('\n--- and the blocks cannot cover the navigation ---');
+const templatesTab = readFileSync('src/components/admin/AdminScheduleTemplatesTab.jsx', 'utf8');
+const adminPanel = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
+// Scan CODE, not prose. This file explains the stacking in a long comment that names `zIndex: 10`, and matching that would
+// let the check pass while the real value had been deleted - which it did, on the first run of these checks.
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const tabCode = stripComments(templatesTab);
+const panelCode = stripComments(adminPanel);
+const weekGridIsolated = /className="relative isolate [^"]*overflow-hidden/.test(tabCode);
+
+checkIs('the week grid is its own stacking context', weekGridIsolated);
+// ...and the block's z-index is a LAYER ORDER INSIDE that grid rather than a page-level claim. The check above is what makes
+// it one; this holds the number it must not become. Raising it past the nav bar's z-5 would make the containment
+// unnecessary and re-open the bug, so 10 - comfortably inside - is the shape that has to survive. It is deliberately NOT
+// asserted as "below the nav bar": the value does not need to be, because the isolate above means it is never compared.
+const blockZ = Number(/zIndex:\s*(\d+)/.exec(tabCode)?.[1]);
+const navBarZ = /className="relative z-\[(\d+)\]/.exec(panelCode)?.[1];
+checkIs(
+  'and the block z-index stays a small layer order rather than a page-level claim',
+  Number.isFinite(blockZ) && blockZ > 0 && blockZ < 40,
+  `block z-index ${blockZ} - large values mean the containment was dropped to chase the symptom`
+);
+// The reverse direction still has to hold, and it is why the nav bar is z-5 rather than z-20: the sticky app bar is z-10,
+// and a menu above THAT was a separate bug this same file's comment records.
+checkIs('while the nav bar still sits under the sticky app bar', Number(navBarZ) < 10, `nav bar ${navBarZ}`);
+// The raw inline z-index is kept, deliberately: it is what lifts a block above the hour lines and the day-column borders it
+// overlaps. Dropping it would sink the blocks behind the grid lines, so the value is asserted as well as the containment -
+// and read from the stripped source, so deleting it really does fail here.
+checkIs(
+  'the block keeps the z-index it needs over the grid lines',
+  Number.isFinite(blockZ) && blockZ > 0,
+  `block z-index ${blockZ}`
+);
+// ...and there is no second raw z-index, since one would need the same containment treatment and there is no reason for
+// it to exist. Counted over the whole components tree rather than just this file, so a new one elsewhere is caught too.
+const rawZIndexFiles = readdirSync('src/components', { recursive: true })
+  .filter((f) => /\.(jsx|js)$/.test(String(f)))
+  .flatMap((f) => {
+    // Stripped first, for the same reason as above: these files carry comments about this very z-index, and counting
+    // those would report a second one that does not exist and miss a real one that does.
+    const n = (stripComments(readFileSync(join('src/components', String(f)), 'utf8')).match(/zIndex/g) || []).length;
+    return n ? [`${f} (${n})`] : [];
+  });
+// `check`, not `checkIs`: this is an EQUALITY against a known list, and passing it to checkIs would test the truthiness
+// of the string - which passes for any file at all, including none.
+check('and it is the only raw z-index in the app', rawZIndexFiles.join(', '), 'admin/AdminScheduleTemplatesTab.jsx (1)');
 const reducedBlock = styles.split('@media (prefers-reduced-motion: reduce)')[1] || '';
 checkIs('by replacing the blink with a steady outline', /\.animate-swapDwell \{[\s\S]{0,120}?animation: none;[\s\S]{0,120}?box-shadow/.test(reducedBlock));
 checkIs('and dropping the pop', /\.animate-swapPop \{[\s\S]{0,80}?animation: none;/.test(reducedBlock));

@@ -190,7 +190,7 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
   // window is kept on purpose - claims point at it, and the history should read - so the screen has to say which ones are
   // retired rather than leaving an officer to work it out from two dates.
   const todayKey = toDateKey(new Date());
-  const lifeLabel = (row) => (windowIsLiveOn(row, todayKey) ? 'In force' : 'Retired');
+  const lifeLabel = (row) => (windowIsLiveOn(row, todayKey) ? 'Active' : 'Inactive');
 
   return (
     <div className="space-y-6">

@@ -5,13 +5,22 @@
 // filter, the row shape, and the client half of the save validation. Pure and dependency-free, so it is testable
 // without a browser - see scripts/verify-documents.mjs.
 
-import { formatLogTimestamp } from './systemLog';
-import { dateLifecycle, dateWindowError, dateWindowLabel, effectiveDateKey } from './effectiveDates';
+// THE FILE EXTENSIONS ARE LOAD-BEARING. Vite resolves `./systemLog` happily, so these two lines looked fine for as long
+// as this module was only ever reached through the bundler. It is not any more: `firestoreReads.js` and
+// `firestoreWrites.js` import this module for `isAssessment`/`assessmentScoreId`, and `scripts/verify-firestore-writes.mjs`
+// imports THOSE unbundled, straight into Node - which requires the extension and failed with ERR_MODULE_NOT_FOUND.
+// Naming the file is what makes the same module work in both.
+import { formatLogTimestamp } from './systemLog.js';
+import { dateLifecycle, dateWindowError, dateWindowLabel, effectiveDateKey } from './effectiveDates.js';
 
-// The three kinds of document. `markdown` is free text with formatting; `checklist` adds items signed one at a
-// time; `link` is a single address pointing at something kept elsewhere. Anything unrecognized reads as markdown
-// rather than as an empty screen.
-export const DOCUMENT_TYPES = ['markdown', 'checklist', 'link'];
+// The kinds of document. `markdown` is free text with formatting; `checklist` adds items signed one at a
+// time; `link` is a single address pointing at something kept elsewhere; `assessment` is a document that also
+// carries a SCORE per member. Anything unrecognized reads as markdown rather than as an empty screen.
+//
+// `assessment` IS a markdown body plus a score panel, not a replacement for one: the assessment's wording is what the
+// score is a score OF, so it is kept in the same `content` field and rendered by the same reader. The panel underneath
+// is the whole of the difference.
+export const DOCUMENT_TYPES = ['markdown', 'checklist', 'link', 'assessment'];
 
 // A link is only offered as followable when it is an address a browser will treat as one, and only http(s) counts.
 // The server refuses to STORE anything else, so this is the second half of one rule rather than a second rule -
@@ -92,6 +101,11 @@ export const isChecklist = (document) => normalizeDocument(document).doc_type ==
 
 // A link document holds an address instead of a body, so the reader offers to open it rather than rendering text.
 export const isLink = (document) => normalizeDocument(document).doc_type === 'link';
+
+// An assessment document keeps its body and adds a score per member. The screen uses this to decide whether to draw the
+// score panel - and, importantly, the READER only ever draws it read-only; entering a score needs its own permission
+// and lives in the panel's officer half.
+export const isAssessment = (document) => normalizeDocument(document).doc_type === 'assessment';
 
 // ---------------------------------------------------------------------------
 // Ordering by dragging
@@ -462,3 +476,69 @@ export const signatureDateLabel = (signature, timeFormat = '12') => {
 // Whether a signature is older than the document it is on. The server decides this for the report; the module
 // uses the same flag for the member's own signature, so both screens agree.
 export const signatureIsStale = (signature) => normalizeSignature(signature).stale;
+
+// ---------------------------------------------------------------------------
+// Assessment scores
+// ---------------------------------------------------------------------------
+// A score is one member's result on one assessment: a STRING the station chose the wording of ("Pass", "4:52", "12/15",
+// or free text), and the day it was recorded.
+//
+// A STRING, DELIBERATELY, and not a number. Every assessment in this app scores something different - a time, a count, a
+// mark out of ten, a pass/fail - and a number would force each one to invent a unit and a scale that mean nothing across
+// the list. Sorting and arithmetic are not what a station does with these; reading back what was written last is.
+// `normalizeAssessmentScore` therefore never parses it as a number, and nothing here sorts by it.
+//
+// ONE CURRENT SCORE PER MEMBER PER ASSESSMENT, not a history: the document id is `{documentId}_{userId}`, so a second
+// save REPLACES the first. That is the reading of "a single input field for a score", and it is worth knowing that
+// re-testing the same member overwrites what was there.
+
+export const assessmentScoreLimit = 200;
+
+// The document id for one member's score on one assessment. The member is IN the id, which is what lets the rule prove
+// whose score it is without reading anything else - the same convention as `availability_months/{uid}_{YYYY-MM}`.
+export const assessmentScoreId = (documentId, userId) =>
+  `${String(documentId ?? '').trim()}_${String(userId ?? '').trim()}`;
+
+export const normalizeAssessmentScore = (row) => {
+  const source = row || {};
+  return {
+    id: text(source.id),
+    document_id: text(source.document_id),
+    user_id: text(source.user_id),
+    // Kept as written and trimmed only. NOT parsed: see the note above on why a score is a string.
+    score: text(source.score),
+    scored_on: effectiveDateKey(source.scored_on),
+    scored_by_user_id: text(source.scored_by_user_id),
+    updated_at: text(source.updated_at),
+  };
+};
+
+export const normalizeAssessmentScoreList = (rows) =>
+  (Array.isArray(rows) ? rows : []).map(normalizeAssessmentScore).filter((score) => score.id !== '');
+
+// One member's score for one document, or null. Scoped to a single member deliberately: the reader is shown their own,
+// and the officer's lookup names the member explicitly, so no screen can accidentally render the whole crew's scores.
+export const memberAssessmentScore = (scores, documentId, userId) =>
+  normalizeAssessmentScoreList(scores).find(
+    (score) => score.document_id === text(documentId) && score.user_id === text(userId)
+  ) || null;
+
+// "Scored 12 Mar 2026". The date is a plain 'YYYY-MM-DD' the officer typed, so it is formatted as a date rather than
+// through the server-timestamp helper `signatureDateLabel` uses - these are different kinds of stamp and reading one
+// with the other's formatter is how a date comes out as a time.
+export const assessmentScoreDateLabel = (score) => {
+  const on = normalizeAssessmentScore(score).scored_on;
+  return on ? `Scored ${on}` : '';
+};
+
+// The client half of the server's validation, so the officer is told before the request rather than by a refusal. A
+// score may be any text within the limit - but it may not be EMPTY, because an empty row is indistinguishable from a
+// member who has never been scored, and that is exactly the ambiguity this feature exists to remove.
+export const assessmentScoreProblem = (score) => {
+  const value = text(score);
+  if (!value) return 'Enter a score.';
+  if (value.length > assessmentScoreLimit) {
+    return `That score is too long (the limit is ${assessmentScoreLimit} characters).`;
+  }
+  return '';
+};

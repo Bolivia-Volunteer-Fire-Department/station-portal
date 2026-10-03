@@ -954,7 +954,13 @@ export default function AdminDocumentsTab({
                   >
                     {DOCUMENT_TYPES.map((type) => (
                       <option key={type} value={type}>
-                        {type === 'checklist' ? 'Checklist' : type === 'link' ? 'Link' : 'Document'}
+                        {type === 'checklist'
+                          ? 'Checklist'
+                          : type === 'link'
+                            ? 'Link'
+                            : type === 'assessment'
+                              ? 'Assessment'
+                              : 'Document'}
                       </option>
                     ))}
                   </select>

@@ -189,9 +189,13 @@ const main = async () => {
   console.log('\n--- an administrator reads the full payload ---');
   await signIn('jane');
   const asAdmin = await fetchAdminPayload(accountFor('u1'));
-  checkIs(
+  // THREE roles now, not two: `r3` is the Assessor, seeded for the assessment-score rules - "an officer who may add scores
+// still may not score themselves" needs an identity that HOLDS the permission and is not the subject, which the
+// administrator cannot be (`is_admin` passes everything and would answer "allowed" for the wrong reason). The count is
+// asserted rather than assumed, so adding a role again would fail here rather than silently pass.
+checkIs(
     'the member half is still all there',
-    Array.isArray(asAdmin.onDuty) && asAdmin.roles.length === 2,
+    Array.isArray(asAdmin.onDuty) && asAdmin.roles.length === 3,
     JSON.stringify({ onDuty: (asAdmin.onDuty || []).length, roles: (asAdmin.roles || []).length })
   );
   // THE SCHEDULE IS ASKED FOR RATHER THAN CARRIED, on both payloads - driven for real in the window section below, which is
@@ -213,6 +217,9 @@ const main = async () => {
   check('the directory that tab reads carries names, usernames and status', directory.users.map((user) => [user.name, user.user_name, user.status]), [
     ['Jane Smith', 'jane', 'active'],
     ['Bo Jones', 'bo', 'active'],
+    // Rae Nolan is the Assessor: the third seeded member, with `can_add_assessment_scores` and nothing else
+    // administrative. Present so the rules harness has somebody who may score but must not score themselves.
+    ['Rae Nolan', 'rae', 'active'],
   ]);
   checkIs('and no password, because there is none to leak', !JSON.stringify(directory.users).toLowerCase().includes('password'));
   // THE BOARD'S SECTIONS ARE NOT CARRIED EITHER - the assignments and templates with their private notes, the offers still waiting,
@@ -746,12 +753,57 @@ const main = async () => {
   );
   const training = await routeRead('GET_TRAINING');
   checkIs('and training its list', Array.isArray(training.trainings), 'no trainings');
-  const logs = await routeRead('GET_TIMECLOCK_LOGS');
-  checkIs('and the clock history the member may read their own of', Array.isArray(logs.logs), 'no logs');
+  checkIs('and the clock history, as an array', Array.isArray((await routeRead('GET_TIMECLOCK_LOGS')).logs), 'no logs');
   // SCOPED TO THE VIEWER - the property that the payload no longer states by carrying the history around. This session is
   // jane (u1), whose only seeded entry is c1, while bo's is c2: so this fails loudly if the reader ever loses its `user_id`
   // filter and starts handing a member the whole station's history (refused by the rules if it is lucky, allowed if not).
-  check('and nothing else: it is the viewer\'s own entries', logs.logs.map((row) => row.id), ['c1']);
+  //
+  // CHECKED AS BO FIRST, WHO HAS NO TIME-CLOCK PERMISSION. An officer's read is widened (the assertions after this block),
+  // and holding the member case here - BEFORE the widening - is what makes that widening safe: a change that dropped the
+  // `user_id` filter unconditionally would fail THIS line and not the officer's, which is the direction that leaks.
+  await signIn('bo');
+  const memberLogs = await routeRead('GET_TIMECLOCK_LOGS');
+  check(
+    'a member without the timeclock permission reads only their own entries',
+    memberLogs.logs.map((row) => row.id),
+    ['c2']
+  );
+  // ...AND THE SAME FOR THE WINDOWED FORM, which is a DIFFERENT branch in the reader - and the one an officer's read
+  // actually takes. Asserting only the unbounded form left the windowed query untested against widening.
+  //
+  // The reader resolves the permission BEFORE choosing a query, so this still returns bo's own row rather than an error.
+  // That the reader could get this wrong is covered by verify:rules, which asks the RULES directly; what is asserted here
+  // is that the client never even tries the wider query for a member - a refusal arriving as an exception rather than an
+  // answer is the failure this guards.
+  const memberWindow = await routeRead('GET_TIMECLOCK_LOGS', { from: '2026-01-01', to: '2026-12-31' });
+  check(
+    'and the same when a window is named, which is the query shape an officer uses',
+    memberWindow.logs.map((row) => row.id),
+    ['c2']
+  );
+  await signIn('jane');
+  const logs = await routeRead('GET_TIMECLOCK_LOGS');
+
+  // AN OFFICER SEES THE STATION'S, WHICH IS WHAT Clock Management IS FOR. This is the reported fault and it was not a
+  // permissions problem: the rules have always allowed an officer to read anybody's entry
+  // (`resource.data.user_id == uid() || permission('can_edit_timeclock')`) and the tab has always offered a member picker.
+  // The reader hard-coded `where('user_id', '==', uid)`, so picking another member changed the filter and not the rows -
+  // the dropdown was honest and the data was not. jane is signed in here and her role (r1) carries is_admin.
+  check(
+    'while an officer reads the whole station, not just their own',
+    logs.logs.map((row) => row.id).sort(),
+    ['c1', 'c2']
+  );
+  checkIs(
+    'including their own, still attributed to them',
+    logs.logs.some((row) => row.id === 'c1' && row.user_id === 'u1'),
+    JSON.stringify(logs.logs)
+  );
+  checkIs(
+    'and somebody else\'s entry is attributed to THAT member, so the picker can label it',
+    logs.logs.some((row) => row.id === 'c2' && row.user_id === 'u2'),
+    JSON.stringify(logs.logs)
+  );
 
   // THE LAST DAY OF THE WINDOW, WHICH IS WHERE THE BUG WAS. Written here rather than left to the seed because the seed's
   // only entry (c1, '2026-03-02 07:55') sits in the MIDDLE of the window - which is why this read was wrong in the field
@@ -780,10 +832,13 @@ const main = async () => {
     JSON.stringify(windowed.logs)
   );
   check('and says which window it applied', windowed.logs_window, { from: '2026-03-01', to: '2026-03-31' });
+  // c2 IS HERE AND EXPECTED: this is jane's windowed read, and jane manages the timeclock, so the window spans the
+  // STATION - bo's March entry is in it too. That IS the change. The April row NOT appearing below is what keeps the range
+  // honest, and the block above (as bo) is what keeps the widening from reaching a member.
   check(
     'AND THE ENTRY DATED THE LAST DAY OF THE WINDOW COMES BACK - the one that used to vanish',
     windowed.logs.map((row) => row.id).sort(),
-    ['c-boundary', 'c1']
+    ['c-boundary', 'c1', 'c2']
   );
   // ...while the day AFTER it still does not, so the bound is the day it claims to be rather than the whole month. An
   // "exclusive" bound that quietly became inclusive would pass the case above and lose this one.
@@ -792,7 +847,7 @@ const main = async () => {
   check(
     'and an entry a day past it is still excluded, so the bound did not simply widen',
     afterWindow.logs.map((row) => row.id).sort(),
-    ['c1']
+    ['c1', 'c2']
   );
   // A one-day window is the tightest form of the same question, and it is what a member's date filter effectively asks
   // for when they pick the 31st on its own.

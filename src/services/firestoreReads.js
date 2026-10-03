@@ -20,6 +20,12 @@ import { nextDateKey, toDateKey, stationTodayKey } from '../utils/scheduleDate.j
 import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
 import { mergeRowsById } from '../utils/savedRow.js';
 import { claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js';
+// The score row's id, which is `{documentId}_{userId}` - the read asks for one document by that id rather than
+// querying by document_id and filtering, which the rules would refuse for a member. See assessmentScoreRow.
+import { assessmentScoreId, isAssessment as isAssessmentDocument } from '../utils/documents.js';
+// The tab gate for `can_edit_timeclock`, so the reader can tell an officer's read from a member's. The RULES are what
+// actually decide - see managesWholeTimeclock below - but the client has to know which query to send.
+import { roleAllowsTab } from '../utils/permissions.js';
 
 // The roster the calendar used to ask for separately (`GET_ROSTER`, now retired) is a projection of `users` that the sign-in
 // payload already carries - see the note where the route used to be listed, in firestoreRouting.js. Nothing in the app asks
@@ -49,6 +55,34 @@ const onDutyRows = async (_uid) => {
 const keysFor = async (uid) => {
   const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
   return audienceKeysFor({ userId: uid, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
+};
+
+// Whether this caller may manage OTHER MEMBERS' clock entries - the `can_edit_timeclock` permission, which is what the
+// Administration > Clock Management tab is gated on and what the rules already honour on the timeclock collection
+// (`resource.data.user_id == uid() || permission('can_edit_timeclock')`).
+//
+// WHY THIS IS ASKED OF THE CLIENT AT ALL, when the rules are the thing that actually decides: the rules REFUSE a query
+// that would return a row the caller may not read, so asking for the whole collection as a member fails the whole read -
+// and the admin screen would get an error rather than its own history. So the permission is resolved first and only then
+// is the narrower query chosen. This is belt-and-braces against our own rules rather than a substitute for them: the rules
+// still refuse anything this gets wrong, which is the property that matters.
+//
+// `is_admin` is honoured the same way the rules honour it (see `permission()` in firestore.rules): a master permission
+// passes everything, so it has to pass this too or a station owner would see an empty Clock Management tab.
+const managesWholeTimeclock = async (uid) => {
+  if (!uid) return false;
+  const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
+  const roleId = String(me.role_id || '');
+  if (!roleId) return false;
+  let role = null;
+  try {
+    role = (await getDoc(doc(firestore(), 'roles', roleId))).data() || null;
+  } catch {
+    // A role that cannot be read is treated as granting nothing. Failing open here would mean a read error widened
+    // the query; the rules would refuse it anyway, but the honest answer is "this caller manages their own entries".
+    return false;
+  }
+  return roleAllowsTab(role, 'clock');
 };
 
 ;
@@ -92,6 +126,37 @@ const checklistItemRows = async (documentId) => {
     }))
     .filter((item) => item.id !== '' && item.label !== '')
     .sort((a, b) => a.sort_order - b.sort_order || (a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1));
+};
+
+// One member's score on one assessment, as a row.
+//
+// ONE MEMBER AT A TIME, and that is the whole of the read's design. A station's assessment scores are exactly the sort
+// of thing nobody should be able to page through, so there is no "read them all" query anywhere in this app - the
+// reader is always handed a member and asks for that member's row on that document.
+//
+// IT READS BY DOCUMENT ID, and that is not a shortcut - it is the only shape that works. The score's id is
+// `{documentId}_{userId}`, so asking for that one document asks for exactly one row, and the rules can prove it
+// belongs to the member who asked: a single-document get is evaluated against that document alone. The obvious
+// alternative - `where('document_id', '==', ...)` and filter in JS - returns EVERY member's score on that assessment,
+// which a member is not allowed to read, and Firestore does not hand back the readable subset of a query it cannot
+// prove: the whole query fails. That is the same trap as the timeclock read, where widening the query to "everything"
+// gives a member an error rather than their own history. It would also have needed a composite index.
+//
+// Naming NO member means the caller, which is how the Documents screen gets "my score" without the client having to
+// name itself - a client that named its own id could ask for somebody else's, and the rules would allow that for a
+// scorer, so the default is the safe reading of an unnamed request rather than a convenience.
+const assessmentScoreRow = async (documentId, userId) => {
+  const wantedDocument = String(documentId || '').trim();
+  const wantedMember = String(userId || '').trim();
+  if (!wantedDocument || !wantedMember) return null;
+
+  const snapshot = await getDoc(
+    doc(firestore(), 'document_assessment_scores', assessmentScoreId(wantedDocument, wantedMember))
+  );
+  // `.exists()` is a METHOD in the client SDK - the Admin SDK is where it is a property, and the two are easy to
+  // confuse. Read as a property it yields a function, which is truthy, so a missing score would report as present.
+  if (!snapshot.exists()) return null;
+  return { ...snapshot.data(), id: snapshot.id };
 };
 
 // How many items each checklist holds, and how many of them one member has signed - the two numbers a checklist's
@@ -254,7 +319,30 @@ export const READERS = {
   GET_TIMECLOCK_LOGS: async (uid, body) => {
     const from = String((body && body.from) || '').trim();
     const to = String((body && body.to) || '').trim();
-    if (!from && !to) return { logs: await rowsFor('timeclock', 'user_id', uid) };
+
+    // DOES THIS CALLER MANAGE THE WHOLE TIMECLOCK? It is asked once, here, because the answer decides the shape of the
+    // query rather than filtering what it returned: a member's read is scoped by `user_id` in the QUERY, so the rules can
+    // prove every row it hands back is theirs, and an officer's read has no such filter.
+    //
+    // This was the reported fault, and it was not a permission problem at all - the rules have always allowed an officer
+    // to read anybody's entry (`resource.data.user_id == uid() || permission('can_edit_timeclock')`), and Clock Management
+    // has always had a member picker that offered other people's names. What the reader did was hard-code
+    // `where('user_id', '==', uid)`, so the picker chose a member and the list underneath it never changed: the rows for
+    // anybody else were never requested. The dropdown was honest and the data was not.
+    //
+    // A MEMBER'S READ IS UNCHANGED, and that is the point worth holding: they still get their own entries and nothing
+    // else, because the filter is in the query. Widening this to "fetch everything and filter in the app" would have been
+    // the one-line version, and it would have been refused by the rules outright - a query returning a row the caller may
+    // not read fails as a whole, so a member asking for everything gets NOTHING rather than their own history.
+    const managesAll = await managesWholeTimeclock(uid);
+
+    if (!from && !to) {
+      // The unbounded form. An officer's is the whole collection - which is what the Clock Management tab asks for, and
+      // the read it has always meant. It is bounded there in practice by the window below whenever a range is named.
+      return managesAll
+        ? { logs: await rowsOf(collection(firestore(), 'timeclock')) }
+        : { logs: await rowsFor('timeclock', 'user_id', uid) };
+    }
 
     // THE ORDER BY IS LOAD-BEARING, and that is not obvious. Equality on `user_id` plus a range on `time_in` needs a
     // composite index, and the one declared in firestore.indexes.json is (user_id ASC, time_in DESC). Without an
@@ -283,7 +371,11 @@ export const READERS = {
     const logs = await rowsOf(
       query(
         collection(firestore(), 'timeclock'),
-        where('user_id', '==', uid),
+        // THE `user_id` FILTER IS THE MEMBER'S, AND ONLY THE MEMBER'S. An officer's read has none, which leaves the same
+        // query shape - a range on `time_in`, ordered by it - with one filter fewer, so the declared
+        // `timeclock (user_id ASC, time_in DESC)` index still serves the member's and the officer's falls back to the
+        // single-field index on `time_in` that Firestore keeps for every collection.
+        ...(managesAll ? [] : [where('user_id', '==', uid)]),
         where('time_in', '>=', from || '0000-01-01'),
         where('time_in', '<', to ? nextDateKey(to) : '9999-12-31'),
         orderBy('time_in', 'desc')
@@ -505,6 +597,14 @@ export const READERS = {
       document: await documentFullRow(document),
       signature,
       signature_stale: signatureIsStale(signature, document),
+      // The CALLER'S OWN assessment score, and only that. It travels with the document for the same reason the signature
+      // does: the reader opens an assessment and needs "what is my result" in the same request, rather than a second
+      // round trip that a document with no score would still have to make to learn it is null.
+      //
+      // `null` for every other document type, so the screen can read one field without first asking what kind of
+      // document it is holding. `assessmentScoreRow` returns null for a member who has never been scored, which is a
+      // real answer and not a failure.
+      assessment_score: isAssessmentDocument(document) ? await assessmentScoreRow(wanted, uid) : null,
     };
   },
 
@@ -551,6 +651,33 @@ export const READERS = {
     // which is the whole point of the screen.
     const live = visible.filter((document) => documentIsLive(document, today));
     return { documents: withItemSummaries(live, summaries).sort(documentSort), signatures };
+  },
+
+  // ONE MEMBER'S score on ONE assessment, for somebody who may add scores. The lookup behind the panel's member picker:
+  // pick a member, and this answers "what is already on file for them" so the officer edits the existing score rather
+  // than replacing it with a blank.
+  //
+  // IT IS A SEPARATE ACTION FROM GET_DOCUMENT, and that is the whole point of the asymmetry the requirement asks for.
+  // GET_DOCUMENT hands the CALLER their own score and nobody can ask it for anybody else's, because the member is not
+  // named anywhere in it - it is taken from the session. This one names the member in the request, which is what an
+  // officer needs and what the RULES then have to agree to. There is deliberately no branch here for a plain member:
+  // a member asking this is refused by the rules (the row is not theirs), and the client is not offered the control.
+  //
+  // It checks the DOCUMENT is an assessment as well as checking it exists, so a stale panel pointed at a document that
+  // has since been retyped reports the truth instead of hunting for a score that can never exist on it.
+  GET_MEMBER_ASSESSMENT_SCORE: async (uid, body) => {
+    const documentId = String((body && body.document_id) || body && body.id || '').trim();
+    const memberId = String((body && body.user_id) || '').trim();
+    if (!documentId) return { success: false, message: 'Which assessment?' };
+    if (!memberId) return { success: false, message: 'Which member?' };
+
+    const snapshot = await getDoc(doc(firestore(), 'documents', documentId));
+    if (!snapshot.exists()) return { success: false, message: 'That document is not available.' };
+    if (!isAssessmentDocument({ ...snapshot.data(), id: snapshot.id })) {
+      return { success: false, message: 'That document is not an assessment.' };
+    }
+
+    return { success: true, score: await assessmentScoreRow(documentId, memberId) };
   },
 
   // A document's checklist items and the signatures taken on it: the one read the Documents tab makes per document.

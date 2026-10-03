@@ -482,8 +482,20 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
             })}
           </div>
 
-          {/* 24h week grid */}
-          <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700" style={{ height: TRACK_H }}>
+          {/* 24h week grid. `isolate` puts it in a stacking context of its own, and that is what stops a template block
+              from painting over the Administration nav dropdown.
+              THE BUG: each block sets `zIndex: 10` inline, and that number was being compared in the PAGE's stacking
+              context. The nav bar is `z-[5]`, so 10 beat 5 and the blocks drew over the open menu. The dropdown's own
+              `z-30` could not rescue it, because that z-30 lives INSIDE the nav bar's context - a z-index only competes
+              with its own siblings, so the bar's whole subtree entered the page at 5. Raising the block to 31 would have
+              "fixed" this by making the bug depend on a bigger number, and would have put the blocks over the sticky app
+              bar and every dialog in the app besides.
+              Isolating CONTAINS the 10 instead: it is compared only against the blocks' siblings in here, where it still
+              does its real job - keeping a block above the hour lines and the day columns' borders - and the grid enters
+              the page at `auto`, so the nav bar draws over it as intended.
+              It was the ONLY raw `zIndex` in the app; everything else uses a utility, which is why that convention is
+              worth keeping. verify:schedule-drop holds both halves. */}
+          <div className="relative isolate rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700" style={{ height: TRACK_H }}>
             {/* Hour lines */}
             {Array.from({ length: 25 }, (_, h) => (
               <div

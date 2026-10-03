@@ -14,7 +14,11 @@
 // Dependency-free apart from the shared TRUE parser, so the rules can be exercised
 // directly - see scripts/verify-permissions.mjs.
 
-import { isTruthyFlag } from './rankEligibility';
+// The `.js` is not optional here. This module is imported by firestoreReads.js, which the firestore harnesses load
+// through plain Node ESM, and Node will not resolve an extensionless relative specifier - so a bare './rankEligibility'
+// failed the whole read with ERR_MODULE_NOT_FOUND, in a place that had never loaded this file before. The app's bundler
+// hides that class of mistake, which is exactly why it survived until a second importer arrived.
+import { isTruthyFlag } from './rankEligibility.js';
 
 // Permission flags that unlock a tab in the Administration module. `tab` matches
 // the sub-tab ids used by AdminPanel, which is what lets one list gate both the
@@ -219,6 +223,20 @@ export const MEMBER_PERMISSIONS = [
     // member's truck checklist was really done is not an administrator, and should not need to become one.
     // Verifying happens on the Documents tab, which this permission opens on its own.
     description: 'Confirm other members\' signed checklist items, from Documents. Requires "View documents". Nobody can verify their own checklist.',
+    requires: 'can_view_documents',
+  },
+  {
+    // Recording an assessment result is RECORDING, not defining - the assessment itself is a document and is written
+    // with "Manage documents", exactly like any other. So this is a separate permission from that one rather than a
+    // part of it: a station may well want somebody who runs the agility test every month to be able to enter the result
+    // without also being able to rewrite the test's wording or delete the document.
+    //
+    // A member permission, not an administration one, for the same reason `can_verify_documents` is: entering a score
+    // happens on the Documents module, which is not an Administration tab.
+    key: 'can_add_assessment_scores',
+    label: 'Add assessment scores',
+    description:
+      'Enter and change an assessment score for another member, with the date it was taken, from Documents. Members can read their own score but can never change it, including their own - this permission is the only way any score is written. Requires "View documents".',
     requires: 'can_view_documents',
   },
 ];

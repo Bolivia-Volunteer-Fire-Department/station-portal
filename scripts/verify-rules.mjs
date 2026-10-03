@@ -115,6 +115,30 @@ const main = async () => {
   await read('but not another member availability month', false, doc(db, 'availability_months', 'u1_2026-09'));
   await read('reads its own clock entry', true, doc(db, 'timeclock', 'c2'));
   await read('but not another member clock entry', false, doc(db, 'timeclock', 'c1'));
+
+  // A MEMBER CANNOT ASK FOR THE WHOLE COLLECTION, and this is the half of the Clock Management change that must not go
+  // wrong. Firestore refuses such a query OUTRIGHT rather than filtering it down, so a client that dropped the
+  // `user_id` filter by mistake gets nothing at all - a loud failure, not a silent leak. (The officer half is asserted in
+  // the officer section below, where it can actually pass.) A rejection THROWS rather than returning an empty snapshot,
+  // so it is caught - otherwise the expected refusal would be reported as a crash.
+  const memberWholeClock = await (async () => {
+    try {
+      return { ok: true, size: (await getDocs(query(collection(db, 'timeclock')))).size };
+    } catch (error) {
+      return { ok: false, code: error && error.code };
+    }
+  })();
+  checkIs(
+    'a member asking for the whole clock collection is REFUSED, not quietly filtered',
+    memberWholeClock.ok === false && memberWholeClock.code === 'permission-denied',
+    `got ${memberWholeClock.size} rows instead of a refusal`
+  );
+  const memberOwnClock = await getDocs(query(collection(db, 'timeclock'), where('user_id', '==', 'u2')));
+  checkIs(
+    'while the member\'s own scoped query is still accepted',
+    memberOwnClock.size === 1,
+    `got ${memberOwnClock.size} rows`
+  );
   await write('opens its own clock entry', true, doc(db, 'timeclock', 'c3'), {
     user_id: 'u2',
     time_in: '2026-03-03 08:00',
@@ -140,6 +164,26 @@ const main = async () => {
   await signInAs('u1');
   await read('reads another member account record', true, doc(db, 'users_private', 'u2'));
   await read('and the private settings', true, doc(db, 'settings', 'private'));
+
+  // CLOCK MANAGEMENT, AS THE RULES SEE IT - the officer half of the pair asserted for a member above. Clock Management has
+  // always listed every member and an officer has always been able to add an entry for somebody who forgot to clock in, so
+  // the RULES have always permitted reading anybody's entry. What the client lacked was the query that ASKS for it: the
+  // reader scoped every read to the caller, so an officer picked a member from the dropdown and the rows did not change.
+  //
+  // This asserts the widened read is PERMITTED rather than refused, which is what makes the client's fix possible - and
+  // paired with the member case above it is the whole security story of that fix, one half in each direction.
+  const officerClock = await getDocs(query(collection(db, 'timeclock')));
+  checkIs(
+    'an officer reads the WHOLE clock collection, so Clock Management is permitted',
+    officerClock.size >= 2,
+    `got ${officerClock.size} rows`
+  );
+  checkIs(
+    'including another member\'s entry, which the tab exists to show and correct',
+    officerClock.docs.some((entry) => entry.data().user_id === 'u2'),
+    JSON.stringify(officerClock.docs.map((entry) => entry.data().user_id))
+  );
+  await read('and another member clock entry directly', true, doc(db, 'timeclock', 'c2'));
   await write('edits a member name, rank and role', true, doc(db, 'users', 'u2'), {
     name: 'Bo Jones',
     rank_id: 'k1',
@@ -252,6 +296,115 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('nor attribute their own row to somebody else', misattributed.includes('permission-denied'), misattributed);
+
+  // ASSESSMENT SCORES. The whole requirement in four rules, each tested as a thing that actually happened rather than as
+  // a line of rules text: a member reads their own; a member reads nobody else's; a member writes NO score at all - not
+  // their own, not anybody's; and an assessor writes one for somebody else but still not for themselves.
+  console.log('\n--- assessment scores ---');
+  const scoreRow = (member, score = 'Pass', on = '2026-10-06') => ({
+    id: `doc-a_${member}`,
+    document_id: 'doc-a',
+    user_id: member,
+    score,
+    scored_on: on,
+    scored_by_user_id: 'u3',
+  });
+
+  // The assessor records a score for Bo, so there is something for the refusals below to be refused ON.
+  await asUser('u3');
+  const writtenByAssessor = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u2'), scoreRow('u2')).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('an assessor writes a score for another member', writtenByAssessor, 'written');
+
+  await asUser('u2');
+  const ownScore = await getDoc(doc(db, 'document_assessment_scores', 'doc-a_u2')).then(
+    (snapshot) => (snapshot.exists() ? 'read' : 'missing'),
+    (error) => String(error.code || '')
+  );
+  checkIs('a member reads their own score', ownScore, 'read');
+
+  // THE REQUIREMENT'S HARD PART, first half: a member writing ANY score. Their own first, because that is the one the
+  // requirement names - and it is also the one a "user_id must be mine" check would happily allow.
+  const memberWritesOwn = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u2'), scoreRow('u2', 'Fail')).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('and is refused their OWN score', memberWritesOwn.includes('permission-denied'), memberWritesOwn);
+  // ...and somebody else's, which needs no permission at all to be wrong.
+  const memberWritesOther = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u3'), scoreRow('u3')).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('and somebody else\'s', memberWritesOther.includes('permission-denied'), memberWritesOther);
+  // THE PROVENANCE-ONLY CASE, and the one that actually tests the PERMISSION.
+  //
+  // `memberWritesOther` above is refused by TWO rules at once: the missing permission, and `scored_by_user_id == uid()` -
+  // the fixture's scorer is u3 while the caller is u2. Deleting the permission line from the rules leaves that test
+  // passing, because the provenance check catches it anyway. It proved nothing about the permission.
+  //
+  // This one satisfies EVERY rule except the permission: it is about somebody else, and it is honestly attributed to the
+  // caller. With `can_add_assessment_scores` required, it is refused; without it, it is written. So it is the difference
+  // between "refused" and "refused for a reason that had nothing to do with permissions" - which is the whole claim.
+  const memberWritesHonest = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u3'), {
+    id: 'doc-a_u3',
+    document_id: 'doc-a',
+    user_id: 'u3',
+    score: 'Pass',
+    scored_on: '2026-10-06',
+    scored_by_user_id: 'u2',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'and it is the PERMISSION that refuses, not the provenance check',
+    memberWritesHonest.includes('permission-denied'),
+    memberWritesHonest
+  );
+  const memberReadsOther = await getDoc(doc(db, 'document_assessment_scores', 'doc-a_u3')).then(
+    () => 'read',
+    (error) => String(error.code || '')
+  );
+  checkIs('and cannot read another member\'s score', memberReadsOther.includes('permission-denied'), memberReadsOther);
+
+  // The second half: holding the permission is not a licence to grade yourself.
+  await asUser('u3');
+  const assessorWritesOwn = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u3'), scoreRow('u3')).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'and an assessor is refused their OWN score too',
+    assessorWritesOwn.includes('permission-denied'),
+    assessorWritesOwn
+  );
+  // Provenance cannot be forged: the scorer field has to be the caller.
+  const misattributedScore = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u2'), {
+    ...scoreRow('u2'),
+    scored_by_user_id: 'u1',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'nor may a score be filed under somebody else\'s name',
+    misattributedScore.includes('permission-denied'),
+    misattributedScore
+  );
+  // A score with no text is refused, so a blank row can never masquerade as "never scored".
+  const emptyScore = await setDoc(doc(db, 'document_assessment_scores', 'doc-a_u2'), scoreRow('u2', '')).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('and an empty score is refused', emptyScore.includes('permission-denied'), emptyScore);
+  // The scorer sees what is on file for a member they are scoring - which is why the read branch is not owner-only.
+  const assessorReads = await getDoc(doc(db, 'document_assessment_scores', 'doc-a_u2')).then(
+    (snapshot) => (snapshot.exists() ? 'read' : 'missing'),
+    (error) => String(error.code || '')
+  );
+  checkIs('while an assessor can read a score they recorded', assessorReads, 'read');
 
   // The Users-tab save now writes one more field on the roster document, so the rules have to allow it - and allow
   // nothing else with it. `exclude_from_scheduling` is a scheduling preference; the status is not.

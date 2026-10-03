@@ -1,6 +1,6 @@
-import { displayDate } from './scheduleDate';
-import { formatClock } from './shiftTime';
-import { toTimeInputValue } from './timeInputValue';
+import { displayDate } from './scheduleDate.js';
+import { formatClock } from './shiftTime.js';
+import { toTimeInputValue } from './timeInputValue.js';
 
 // Time formatting for the CLOCK log screens, which is all that is left of this module: the System Log tab it was
 // written for is gone, along with its `system_log` collection, and the app's audits are Cloud Logging lines now (see

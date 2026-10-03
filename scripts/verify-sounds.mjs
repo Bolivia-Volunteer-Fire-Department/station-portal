@@ -733,7 +733,7 @@ checkIs('and removes every one of them again', /removeEventListener\(event, hand
 
 
 // The member's switch, and the station default behind it.
-const userSettingsSource = readSource('src/components/UserSettings.jsx');
+const userSettingsSource = readSource('src/components/MySettings.jsx');
 checkIs('User Settings offers the switch', /label="Sound Effects"/.test(userSettingsSource));
 checkIs('and the switch is sent by the settings screen', /is_sounds_active: String\(formData\.is_sounds_active\)/.test(userSettingsSource));
 // ToggleSwitch.jsx is the definition (it reads the prop); a *usage* is what this is about, so it is excluded.
@@ -742,7 +742,7 @@ const onOffUsers = allSources.filter(
 );
 checkIs(
   'and it is the ONLY switch that speaks for itself',
-  onOffUsers.length === 1 && onOffUsers[0].endsWith('UserSettings.jsx'),
+  onOffUsers.length === 1 && onOffUsers[0].endsWith('MySettings.jsx'),
   onOffUsers.join(', ')
 );
 checkIs('and sends the decision on save', /is_sounds_active: String\(formData\.is_sounds_active\)/.test(userSettingsSource));

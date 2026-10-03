@@ -31,6 +31,7 @@ import {
   fetchMyShiftOffers,
   fetchAvailability,
   adminFetchAvailability,
+  adminFetchAvailabilityWindows,
   submitClockAction,
   saveUserSettings,
   updateUserPassword,
@@ -321,6 +322,10 @@ export default function App() {
   // member's truck checklist is not an administrator. The server re-checks it, so this flag only shapes what is
   // offered. Verifying happens on the Documents tab (see AdminPanel) as well as in the member module.
   const canVerifyDocuments = can('can_verify_documents');
+// Recording an assessment score is its own permission, not part of managing documents: the assessment is a document, but
+// entering somebody's result is a recording job, and a station may well want the person who runs the agility test to have
+// it without also being able to rewrite the test or delete the document.
+const canAddAssessmentScores = can('can_add_assessment_scores');
 
   // Reading documents at all. Without this the module has no sidebar entry and the app will not open it - and the
   // server refuses every documents action, which is where the rule actually lives. The other two documents
@@ -1095,11 +1100,20 @@ const getLoadingMessage = () => {
   // ONCE PER SESSION PER WINDOW, which is what makes this different from re-fetching a module on every visit: the guard is
   // the scope itself, so moving between tabs costs nothing after the first look.
   //
-  // The admin Clock Management tab is included because it is drawn from this same list. Worth saying plainly: that list is
-  // the SIGNED-IN member's own entries, for an officer as much as for a member, because the payload it used to come from was
-  // always per-member - so the tab shows an officer their own clock entries, not the station's. That is a gap of its own (an
-  // admin-wide clock read does not exist yet), and it is deliberately left exactly as it was here: this pass must not turn
-  // "the officer's own entries" into "nothing at all".
+  // The admin Clock Management tab is included because it is drawn from this same list. It used to read as "this list is the
+  // SIGNED-IN member's own entries, for an officer as much as for a member, so the tab shows an officer their own clock
+  // entries and not the station's - an admin-wide clock read does not exist yet". That was a real gap and it was reported:
+  // an officer picked another member from the dropdown and the rows underneath did not change, because the reader scoped
+  // every read to the caller. The reader now widens the query for a caller who manages the timeclock (see
+  // GET_TIMECLOCK_LOGS), so ONE list serves both screens and the officer's is the station's.
+  //
+  // ONE LIST FOR BOTH IS THE POINT, and it is why nothing here branches on who is looking: the member's Clock History
+  // narrows to `currentUser` itself (MyClockHistory), so an officer arriving at it with the station's rows sees only their
+  // own, which is exactly what that screen is for. The admin tab does not narrow, so it shows what it was asked to show.
+  //
+  // ONE LIST FOR BOTH IS THE POINT, and it is why nothing here branches on who is looking: the member's Clock History
+  // narrows to `currentUser` itself (MyClockHistory), so an officer arriving at it with the station's rows sees only their
+  // own, which is exactly what that screen is for. The admin tab does not narrow, so it shows what it was asked to show.
   useEffect(() => {
     const wantsTheHistory = activeTab === 'clock-history' || (activeTab === 'admin' && adminSubTab === 'clock');
     if (!wantsTheHistory || !authToken || logsScope) return;
@@ -1206,6 +1220,11 @@ const getLoadingMessage = () => {
   //
   // The windows are reference data, read once for the session. The claims come in MONTHS, so a quarter around today is what the
   // grid starts with, and the Load <month> button inside it asks for anything outside that (App#loadAvailabilityMonth).
+  //
+  // `windowsLoaded` IS SHARED BY BOTH SCREENS that need the list - the member's own grid here, and the officer's roster in
+  // the effect below - so whichever is opened first pays for the read and the second costs nothing. It is the same list and
+  // the same rules allow it either way (`availability_windows` is `allow read: if signedIn()`), so there is no reason to
+  // read it twice; the guard is what makes that true rather than a coincidence of navigation order.
   const [windowsLoaded, setWindowsLoaded] = useState(false);
   useEffect(() => {
     if (!authToken) return;
@@ -1264,6 +1283,43 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, activeTab, adminSubTab, trainingLoaded]);
 
+  // THE DOCUMENTS MODULE'S MEMBER LIST, read when that module is open and the reader is somebody who NAMES other people -
+  // a verifier looking at their paperwork, or an assessor entering a score.
+  //
+  // WHY IT IS NOT THE `users` STATE, which is what that module used to be handed. `users` is filled by exactly two things:
+  // the Administration section effect when the Members tab is opened, and the applier that runs after a member save. The
+  // Documents module is NOT an Administration sub-tab, so nothing about opening it read either of them. The control that
+  // names a member - the "View as" picker, and the assessment score picker beside it - is hidden whenever its list is
+  // empty (`canVerify && viewableMembers.length > 0`), so it appeared or did not depending on whether the officer had
+  // happened to visit Administration first in the session. That is the "sometimes it's there" report: the module was
+  // borrowing a screen's side effect.
+  //
+  // `directory` is the right source and not `roster`: it is the full public `users` rows, which `allow read: if signedIn()`
+  // lets ANY member read, so this needs no permission of its own; the roster projection is aimed at the calendar. One read
+  // per session, and only for the two roles that can actually use it - a member who may neither verify nor score sees no
+  // picker, so paying for a list they would never look at would be a read for nothing.
+  useEffect(() => {
+    if (!authToken || activeTab !== 'documents') return;
+    if (directory.length) return;
+    if (!canVerifyDocuments && !canAddAssessmentScores) return;
+    let cancelled = false;
+    fetchAdminSections(['directory'])
+      .then((data) => {
+        if (cancelled) return;
+        if (Array.isArray(data?.directory)) setDirectory(data.directory);
+      })
+      .catch((error) => console.error('[documents] could not read the member directory', error));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, canVerifyDocuments, canAddAssessmentScores, directory.length]);
+
+  // What the Documents module is handed. The directory when it has been read, and the `users` state otherwise - which is
+  // what an officer who opened Administration first already has, so the common case costs no second read. Either way the
+  // module gets a populated list on its own terms rather than depending on another screen having been visited.
+  const documentsMembers = directory.length ? directory : users;
+
   // THE CREW DIRECTORY, read when a screen that LISTS people is opened - the calendar's pill names, and everything in the
   // Administration module that names somebody - and once per session after that.
   //
@@ -1305,6 +1361,34 @@ const getLoadingMessage = () => {
     if (!wantsRoster || !authToken) return;
     const from = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 3, 1));
     const to = toDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 4, 0));
+
+    // THE STATION'S WINDOWS, read here because NOTHING ELSE reads them for this module. That is the reported fault, and it
+    // was not a failure to read the CLAIMS - those arrive fine (see ADMIN_GET_AVAILABILITY). It was that a claim is only
+    // ever shown ATTACHED TO A WINDOW, and `availabilityWindows` was still `[]` by the time this tab drew:
+    //   - the sign-in payload deliberately leaves the windows out (see firestorePayload.js - a member signing in to clock
+    //     in has no use for them), so the setter in applyBootstrap was reading a field nothing ever wrote;
+    //   - the only other reader is the effect above, and it is gated on `activeTab === 'availability'` - the MEMBER's own
+    //     screen, which an officer working inside Administration never opens.
+    // So the tab showed "No availability windows fall in <month>" for every month, and the single-member view had nothing
+    // to tick at all. The Administration > Availability Windows tab was unaffected, which is exactly why this looked like
+    // the claims were missing rather than the windows: the station's patterns were plainly visible one tab away.
+    //
+    // READ HERE, RATHER THAN PUT BACK IN THE PAYLOAD. These are officer reference data, and the whole point of that
+    // omission was that a member's sign-in should not pay to read them. This keeps the cost with the screen that needs it,
+    // and reuses the shared guard so it is still one read per session however the officer arrives.
+    //
+    // BEFORE the scope guard below, deliberately: the windows are needed whichever claims the officer already holds, and
+    // that guard can legitimately skip the claims read.
+    if (!windowsLoaded) {
+      adminFetchAvailabilityWindows(authToken)
+        .then((data) => {
+          if (!data || !Array.isArray(data.availabilityWindows)) return;
+          setAvailabilityWindows(data.availabilityWindows);
+          setWindowsLoaded(true);
+        })
+        .catch((error) => console.error('[availability] could not read the windows for the officer screens', error));
+    }
+
     // SKIPPED ONLY WHEN THIS RANGE IS ALREADY HELD - which is not the same as "a read has happened". A bare
     // `rosterScope.from` check treated one month the board asked for as the whole range, and these screens then drew a
     // month they did not hold.
@@ -1313,7 +1397,7 @@ const getLoadingMessage = () => {
       console.error('[availability] could not load the crew availability', error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, adminSubTab, authToken, rosterScope.from, rosterScope.to]);
+  }, [activeTab, adminSubTab, authToken, windowsLoaded, rosterScope.from, rosterScope.to]);
 
   // Loading another month for a screen that navigated outside the scope it holds.
   const loadRosterMonth = async (year, month) => {
@@ -2169,8 +2253,12 @@ const getLoadingMessage = () => {
                 token={authToken}
                 currentUser={currentUser}
                 timeFormat={activeTimeFormat}
-                users={users}
+                users={documentsMembers}
                 canVerify={canVerifyDocuments}
+                // Recording an assessment score for somebody else. Separate from `canVerify` because the two jobs are
+                // different, and because this one hides the officer's half of the score panel and nothing else - the
+                // RULES are what refuse the write without it (see document_assessment_scores in firestore.rules).
+                canAddScores={canAddAssessmentScores}
               />
             )}
 

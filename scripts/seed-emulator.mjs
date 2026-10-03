@@ -52,6 +52,7 @@ const PERMISSION_FLAGS = [
   'can_sign_trainings',
   'can_use_timeclock',
   'can_verify_documents',
+  'can_add_assessment_scores',
   'can_view_certifications',
   'can_view_documents',
   'can_view_full_schedule',
@@ -82,6 +83,18 @@ export const DEMO_ACCOUNTS = [
     rank: 'k2',
     role: 'r2',
     claims: { role_id: 'r2', is_admin: false },
+  },
+  {
+    // The assessor: holds `can_add_assessment_scores` and nothing else administrative. Third identity on purpose - the
+    // rule "somebody who may score still may not score THEMSELVES" cannot be tested with the administrator, because
+    // `is_admin` passes every permission and would answer "allowed" for the wrong reason.
+    uid: 'u3',
+    username: 'rae',
+    email: 'rae@boliviavfd.invalid',
+    name: 'Rae Nolan',
+    rank: 'k2',
+    role: 'r3',
+    claims: { role_id: 'r3', is_admin: false },
   },
 ];
 
@@ -154,6 +167,16 @@ export const seed = async () => {
       'can_view_documents',
       'can_view_certifications',
       'can_sign_trainings',
+    ])
+  );
+  // A THIRD role, for the assessment-score rules: somebody who may enter a score for other members. It exists because
+  // "a member may not write a score" is only half the claim - the other half is that the officer who CAN is still refused
+  // their own, and testing that needs an identity that holds the permission and is not the subject.
+  await put(
+    'roles/r3',
+    roleRow('Assessor', false, [
+      'can_view_documents',
+      'can_add_assessment_scores',
     ])
   );
 

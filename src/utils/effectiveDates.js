@@ -14,7 +14,7 @@
 // That is what makes these columns safe to add: every existing record keeps doing what it did before,
 // because an empty cell is "no restriction" rather than "retired".
 
-import { parseSheetDateKey } from './scheduleDate';
+import { parseSheetDateKey } from './scheduleDate.js';
 
 const text = (value) => String(value ?? '').trim();
 

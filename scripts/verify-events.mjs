@@ -881,7 +881,7 @@ check('the availability grid uses it too', viewToggleCalls(availabilitySource), 
 check('and so does the board', viewToggleCalls(boardSource), 1);
 check('and My Schedule uses it twice', viewToggleCalls(calendarSource), 2);
 // Settings keep the switch, because those persist. A pressed chip would read as a temporary filter.
-check('preference switches are left alone', /<ToggleSwitch/.test(readFileSync('src/components/UserSettings.jsx', 'utf8')), true);
+check('preference switches are left alone', /<ToggleSwitch/.test(readFileSync('src/components/MySettings.jsx', 'utf8')), true);
 // The rendered controls must carry the pressed state, not just the source. Rendered with the crew permission so
 // BOTH toggles appear - that is the pairing the request was about. "Show everyone" starts OFF and "Show events"
 // starts ON, so both states are represented: that is the assertion, not merely "a chip appeared".

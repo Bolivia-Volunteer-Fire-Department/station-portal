@@ -47,11 +47,11 @@ export default function AdminMenuPage({ categories, onSelectTab, pendingCount = 
                   <CategoryIcon className="h-6 w-6" />
                 </span>
                 <span className="text-lg font-semibold text-slate-900 dark:text-white">{label}</span>
-                {cardBadge > 0 && (
+                {/* {cardBadge > 0 && (
                   <span className="ml-auto inline-flex min-w-[22px] items-center justify-center rounded-full bg-amber-400 px-1.5 py-0.5 text-xs font-bold text-amber-950">
                     {cardBadge}
                   </span>
-                )}
+                )} */}
               </button>
 
               <div className="mt-4 flex flex-col gap-1 border-t border-slate-100 dark:border-slate-700/60 pt-3">

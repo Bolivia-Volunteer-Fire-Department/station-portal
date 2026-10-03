@@ -465,6 +465,50 @@ service cloud.firestore {
       allow update, delete: if permission('can_manage_documents');
     }
 
+    // An assessment score: one member's result on one assessment, as free text and the day it was taken.
+    //
+    // THIS COLLECTION IS THE POINT OF THE WHOLE FEATURE, and the asymmetry between its two halves is deliberate.
+    //
+    // READ: your own score, always. Anybody else's, only if you may add scores - because somebody who can enter a
+    // score has to be able to see what is already on file, or the panel would let them overwrite it blind. The same
+    // shape as document_signatures above, and for the same reason.
+    //
+    // WRITE: `can_add_assessment_scores` and NOTHING else. In particular there is NO branch for a member writing their
+    // OWN score, even a verified one, even with the member's consent - which is the whole requirement. A member can
+    // read their result and cannot touch it; the person who administers the test records it for them.
+    //
+    // `request.resource.data.user_id != uid()` closes the loop on that from the other side: somebody who administers
+    // assessments still may not enter a score for THEMSELVES. That is not paranoia about an officer's honesty - it is
+    // that "your score" and "the score the station recorded" are two different statements, and a self-entered one
+    // would quietly make them the same. (The checklist rules above take the same position on self-verification.)
+    //
+    // The field types are asserted rather than assumed. `score is string` is what makes this a STRING column in the
+    // database instead of whatever a client sent, so a number written once cannot come back as a number; `scored_on is
+    // string` is the same guard on the date. `get(k, default)` rather than `data.k` throughout, because reading a field
+    // that is NOT THERE makes the rule ERROR and an error is indistinguishable from a denial in the log.
+    match /document_assessment_scores/{scoreId} {
+      allow read: if signedIn()
+        && (resource.data.user_id == uid()
+          || permission('can_add_assessment_scores'));
+
+      allow create, update: if signedIn()
+        && permission('can_add_assessment_scores')
+        && request.resource.data.get('user_id', '') != ''
+        && request.resource.data.get('user_id', '') != uid()
+        && request.resource.data.get('document_id', '') != ''
+        && request.resource.data.get('score', '') is string
+        && request.resource.data.get('score', '') != ''
+        && request.resource.data.get('scored_on', '') is string
+        && request.resource.data.get('scored_on', '') != ''
+        // The scorer is the caller, always. A client cannot file somebody else's name as the officer who did it, which
+        // is the only way this row's provenance could be made to lie.
+        && request.resource.data.get('scored_by_user_id', '') == uid();
+
+      // Removal is the scorer's, and deliberately not the manager's-only: an assessment that is withdrawn is cleaned up
+      // by whoever runs assessments. Kept separate from the update above so the two rules can be reasoned about alone.
+      allow delete: if signedIn() && permission('can_add_assessment_scores');
+    }
+
     // Everything not named above is denied, including the collections whose rules arrive with their client code
     // (documents and their signatures). This is the default that makes a missing rule fail closed instead of open.
     match /{document=**} {

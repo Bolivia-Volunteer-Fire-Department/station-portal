@@ -103,9 +103,14 @@ check(
 // composite index, and THE EMULATOR IGNORES INDEX REQUIREMENTS - it answers any query - while PRODUCTION refuses with
 // failed-precondition. That gap is exactly how Clock History loaded nothing in the field while this suite was green: the
 // reader asked for (user_id ==, time_in range) with no orderBy, the implied ascending scan matched no declared index
-// (firestore.indexes.json declares user_id ASC, time_in DESC), and no check here could see it. So two checks pin the
+// (firestore.indexes.json declares user_id ASC, time_in DESC), and no check here could see it. So the checks below pin the
 // shape: the reader names the range field in its own order, and the index file declares that exact pair. A query shape
 // that changes without the index, or an index dropped without the reader, now fails here rather than in the field.
+//
+// THE MEMBER SCOPING IS NOT PINNED LITERALLY ANY MORE, and that is a consequence of the officer's read rather than a
+// loosening: `user_id` is now a CONDITIONAL filter, so the literal line it used to be has stopped existing. Pinning it
+// would have made the fix that lets Clock Management show other members' entries impossible to make. What is checked
+// instead is the property - the range and the order the index serves, and the member narrowing still being present.
 const readsSourceForClockIndex = readFileSync('src/services/firestoreReads.js', 'utf8');
 const declaredIndexes = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')).indexes;
 const declaredIndex = (collectionGroup, first, second, secondOrder) =>
@@ -118,9 +123,26 @@ const declaredIndex = (collectionGroup, first, second, secondOrder) =>
       index.fields[1].fieldPath === second &&
       index.fields[1].order === secondOrder
   );
+// THE ORDER BY AND THE RANGE ARE WHAT MAKE IT SERVABLE, and the `user_id` filter is deliberately NOT pinned here any more.
+// It used to be matched literally, which was right while the read was member-only and wrong the moment an officer's was
+// added: the filter is now conditional (a member's read scopes by `user_id` in the QUERY; an officer's does not), so the
+// literal line no longer exists to match. What still matters is the shape that the declared index serves - a range on
+// `time_in` ordered by `time_in` - and that the member's narrowing filter is still THERE, conditionally, because a read
+// that quietly lost it would hand a member the whole station's history.
+const clockQueryBlock = /collection\(firestore\(\), 'timeclock'\),([\s\S]*?)\)\s*\)\s*;/.exec(readsSourceForClockIndex)?.[1] || '';
 checkIs(
   'the windowed clock query orders by the range field',
-  /collection\(firestore\(\), 'timeclock'\),\s*\n\s*where\('user_id', '==', uid\),\s*\n\s*where\('time_in', '>=', from \|\| '0000-01-01'\),\s*\n\s*where\('time_in', '<', to \? nextDateKey\(to\) : '9999-12-31'\),\s*\n\s*orderBy\('time_in', 'desc'\)/.test(readsSourceForClockIndex)
+  /where\('time_in', '>=', from \|\| '0000-01-01'\)/.test(clockQueryBlock) &&
+    /orderBy\('time_in', 'desc'\)/.test(clockQueryBlock),
+  clockQueryBlock.trim()
+);
+// ...and the member narrowing is conditional rather than gone. The conditional spread is what an officer's read turns
+// off, so its ABSENCE is the bug this whole change was about; a plain literal here would have been pinned out by the very
+// fix that made the admin screen work.
+checkIs(
+  'and a member\'s read is still scoped by user_id, conditionally',
+  /managesAll \? \[\] : \[where\('user_id', '==', uid\)\]/.test(clockQueryBlock),
+  'the reader no longer narrows a member\'s read to their own rows'
 );
 // THE UPPER BOUND MUST BE EXCLUSIVE, AND THIS IS THE ASSERTION THAT WAS MISSING. `time_in` is a datetime and `to` is
 // a bare date key, so Firestore's TEXT comparison drops every entry stamped on the last day of the window - which, on a

@@ -10,7 +10,10 @@
 //
 // Eligibility is decided purely on rank ORDER - rank ids are never compared.
 
-import { unnamedLabel } from './displayLabel';
+// `.js` included: utils/permissions.js imports this file, and permissions.js is imported by firestoreReads.js - which
+// the firestore harnesses load through plain Node ESM, where an extensionless relative specifier does not resolve. The
+// bundler hides that class of mistake, so it is worth stating here rather than rediscovering it next time.
+import { unnamedLabel } from './displayLabel.js';
 
 export const isTruthyFlag = (value) =>
   value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';

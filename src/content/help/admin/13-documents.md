@@ -20,7 +20,7 @@ While a save is in flight the editor is **disabled** — every field, in one go 
 |---|---|
 | **Title** | What members see in the list. Required |
 | **Folder** | Groups documents in the list. Type a new name to make a new folder |
-| **Type** | *Document* for reading, *Checklist* for something signed item by item, or *Link* for an address kept elsewhere |
+| **Type** | *Document* for reading, *Checklist* for something signed item by item, *Link* for an address kept elsewhere, or *Assessment* for something a member is given a **score** on |
 | **Minimum rank** | Who may see it. *Everyone*, or a rank and above |
 | **Effective Date** | The first date members may see it. Blank means it is live now |
 | **End Date** | The last date members may see it. After that it is **retired** — see below |
@@ -154,6 +154,26 @@ On a checklist, **each item appears once per member**. A signature and a verific
 
 > [!WARNING]
 > Editing a document does not require anyone to sign again — it marks the signatures they already gave as older than the current text. Whether that matters is a judgment for you, which is why it is reported rather than enforced.
+
+## Assessments
+
+A document of type **Assessment** is an ordinary document with one extra thing under it: a **score** for each member.
+
+Every member the assessment is shared with sees the document, exactly like any other, and under it they see **their own score** — or a line saying none has been recorded yet. That is all a member can do with it. There is no input on that half of the panel at all, and the screen says so in words rather than leaving you to work out why.
+
+**Nobody enters their own score.** Not a member, and not an officer either — the security rules refuse a score whose subject is the person writing it, so an assessor cannot grade themselves even with the permission in hand. If somebody who runs the test also takes it, somebody else records the result.
+
+To record scores, a role needs **Add assessment scores** (a member-level permission, like *Verify checklists* — it opens the Documents module, not an Administration tab).
+
+The member a score belongs to is chosen with the **View as** dropdown at the top right — the same one that switches whose paperwork you are reading. There is no second dropdown on the assessment itself, so there is only ever one answer to "whose records am I looking at".
+
+- On **Myself** you see your own score, read-only. You can never change it, including your own.
+- On another member you see **their** score. If you also hold *Add assessment scores*, the boxes to add or replace it appear underneath.
+
+The **score is free text, not a number** — "Pass", "4:52", "12/15" and "Needs retest" all work in the same field, because assessments in a fire station measure different things and a number would force each one to invent a scale. The **date taken** is required alongside it, and saving **replaces** the previous score: there is one current score per member per assessment, not a history.
+
+> [!IMPORTANT]
+> Entering a score is deliberately separate from *Manage documents*. Somebody who runs the agility test every month can be given *Add assessment scores* and record results without also being able to rewrite the test's wording or delete the document.
 
 ## Checklist items
 

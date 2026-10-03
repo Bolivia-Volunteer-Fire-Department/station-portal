@@ -166,5 +166,38 @@ const memberSource = readFileSync('src/components/MyClockHistory.jsx', 'utf8');
 check('the member view totals the filtered rows', memberSource.includes('clockLogTotals(visibleLogs)'), true);
 check('and labels the cards when filtered', memberSource.includes("Total Hours Logged{isFiltered ? ' (filtered)' : ''}"), true);
 
+// THE DURATION COLUMN, WHICH HAD A SECOND COPY OF THIS RULE AND LOST THE FALLBACK.
+// The row used to read `log.calc_hours ? ... : '--'` on its own, while the totals card a few lines away used the shared
+// helper. `calc_hours` is a LEGACY SPREADSHEET COLUMN that nothing in this app writes - not the clock-in transaction, not
+// an officer's manual entry - so the column was blank for every entry the app had created, and the page contradicted
+// itself: the card summed a shift's hours while the row beside it read `--`. "Sometimes" was rows carried over from the
+// sheet, which do carry the column. Administration never showed it because that tab has always had the fallback locally.
+const rowSource = readFileSync('src/components/clock/ClockTableRow.jsx', 'utf8');
+check('the table row takes its duration from the shared rule', rowSource.includes('clockLogHours(log)'), true);
+// `check` compares two values, so the negative case is asserted by asking whether the old line is still there and
+// expecting it to be gone - rather than by passing a boolean, which would compare `true` against a literal.
+check(
+  'and no longer decides it from calc_hours alone',
+  /const formattedHours = log\.calc_hours/.test(rowSource),
+  false
+);
+// ...and the COLUMN and the TOTAL must be computed by the same call. Asserting only that the helper is imported would pass
+// a row that imported it and then ignored it, so this is held as a rendered value instead - the helper's own answer for
+// the entry the app writes, which is the one that used to come out blank.
+const appWritten = log({ calc_hours: undefined });
+check(
+  'so an entry the app wrote shows the hours the card totals',
+  `${clockLogHours(appWritten).toFixed(2)} hrs`,
+  `${clockLogTotals([appWritten]).hours.toFixed(2)} hrs`
+);
+check(
+  'and a row still clocked in states no hours, rather than "-- hrs"',
+  clockLogHours(log({ calc_hours: '', time_out: '' })),
+  null
+);
+// The unit belongs to a number. An active entry is the COMMON case on this screen, not an edge, and `-- hrs` states a
+// unit for a figure that is not there.
+check('the unit is not printed beside a missing value', /hours === null \? '--' : `\$\{formattedHours\} hrs`/.test(rowSource), true);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

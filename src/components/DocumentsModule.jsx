@@ -18,7 +18,9 @@ import {
   fetchDocument,
   fetchDocumentSignatures,
   fetchDocuments,
+  fetchMemberAssessmentScore,
   fetchMemberDocumentRecords,
+  setAssessmentScore,
   signChecklistItems,
   signDocument,
   verifyChecklistItem,
@@ -28,6 +30,9 @@ import { toast } from '../utils/toast';
 import ConfirmModal from './ConfirmModal';
 import Markdown from './Markdown';
 import {
+  assessmentScoreDateLabel,
+  assessmentScoreLimit,
+  assessmentScoreProblem,
   documentFolder,
   documentLinkUrl,
   documentSignatureState,
@@ -35,9 +40,11 @@ import {
   documentsInFolder,
   filterDocuments,
   folderSummaries,
+  isAssessment,
   isChecklist,
   isLink,
   memberSignatureFor,
+  normalizeAssessmentScore,
   normalizeChecklistItemList,
   normalizeDocument,
   normalizeDocumentList,
@@ -56,6 +63,9 @@ import {
   verificationQueue,
 } from '../utils/checklists';
 import { unnamedLabel, userLabel } from '../utils/displayLabel';
+// The STATION's today, for the date the score was taken. The station's day and the device's day disagree for a few hours
+// a day, and a score stamped with the wrong one is a score nobody can find again.
+import { stationTodayKey } from '../utils/scheduleDate';
 
 // The Documents module, member-facing.
 //
@@ -227,12 +237,196 @@ function FolderOption({ entry, active, compact = false, onClick }) {
   );
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// THE ASSESSMENT PANEL
+// ---------------------------------------------------------------------------------------------------------------
+// The whole difference between an assessment and any other document, and it is two halves that never share a control.
+//
+// THE READER'S HALF IS ALWAYS DRAWN and has no input in it at all. Every member the document is published to sees their
+// own score, or is told plainly that there is not one yet. That is the whole of what a member can do with an assessment:
+// read it, read their result, and stop.
+//
+// THE OFFICER'S HALF IS DRAWN ONLY WITH `canAddScores`, and it is the only place in the app a score can be entered.
+//
+// Split out of DocumentsModule so this - the part with the inputs in it - can be read on its own. It is presentation
+// plus two callbacks, and it holds the panel's own state, which is cleared when a different assessment is opened so one
+// member's score can never be left on screen under another's heading.
+// WHO IS BEING SHOWN is decided entirely by the module's "View as" dropdown. The panel holds NO member picker of its
+// own, which is the point of this revision: the module already had one, and two controls for one choice is how they
+// disagree - and disagreeing about whose score is on screen is the worst disagreement this screen can have.
+function AssessmentScorePanel({ myScore, canAddScores, viewedMember, viewedScore, scoreLoading, scoreError, save }) {
+  // The draft is seeded from whatever is on file for the member being shown, so "edit" and "first entry" are one action.
+  // Keyed on the member as well as the document, so switching "View as" moves the box to that member rather than leaving
+  // the previous member's text in it to be saved against the wrong person.
+  const seedKey = `${viewedMember?.id || ''}|${viewedScore?.score || ''}|${viewedScore?.scored_on || ''}`;
+  const [draft, setDraft] = useState('');
+  const [onDate, setOnDate] = useState('');
+  const [seededFor, setSeededFor] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState('');
+  const [saved, setSaved] = useState('');
+
+  if (seededFor !== seedKey) {
+    setSeededFor(seedKey);
+    setDraft(viewedScore?.score ?? '');
+    setOnDate(viewedScore?.scored_on || stationTodayKey());
+    setProblem('');
+    setSaved('');
+  }
+
+  const submit = async () => {
+    const textProblem = assessmentScoreProblem(draft);
+    if (textProblem) {
+      setProblem(textProblem);
+      return;
+    }
+    if (!onDate) {
+      setProblem('Enter the date the score was taken.');
+      return;
+    }
+
+    setSaving(true);
+    setProblem('');
+    setSaved('');
+    try {
+      const written = await save(viewedMember.id, draft, onDate);
+      const now = written ? normalizeAssessmentScore(written) : null;
+      setDraft(now?.score ?? '');
+      setOnDate(now?.scored_on ?? onDate);
+      // The notice names the member: an officer works down a list in this box many times over, so a save that did not say
+      // whose it was would not be much use.
+      setSaved(`Saved ${now?.score ?? ''} for ${viewedMember.label}.`);
+    } catch (err) {
+      setProblem(err?.message || 'Could not save that score.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+// ONE CARD, THREE STATES, chosen by two questions: is anybody else being viewed, and may this reader write?
+  //
+  //   "Myself"                     -> THEIR OWN score, read-only. The original requirement, unchanged.
+  //   somebody else, no permission -> that member's score, read-only, and it says why it cannot be changed here.
+  //   somebody else, permission    -> that member's score AND the form to add or replace it.
+  //
+  // There is NO PICKER anywhere in here. Which member is decided by the module's "View as" dropdown in the header, so there
+  // is exactly one control for that choice and this card cannot contradict it.
+  const shown = viewedMember ? viewedScore : myScore;
+
+  return (
+    <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+      <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+        <ListChecks className="w-4 h-4" />
+        {viewedMember ? `${viewedMember.label}'s score` : 'Your score'}
+      </p>
+
+      {viewedMember && scoreLoading && (
+        <p className="mt-2 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Reading their score…
+        </p>
+      )}
+
+      {/* THE SCORE IS SHOWN IN EVERY STATE, including the read-only ones: an assessor has to see what is already on file
+          before deciding whether to replace it, and a member has to be able to read it at all. */}
+      {!scoreLoading &&
+        (shown ? (
+          <>
+            <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{shown.score}</p>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{assessmentScoreDateLabel(shown)}</p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {viewedMember
+              ? 'No score has been recorded for this member yet.'
+              : 'No score has been recorded for you yet. Whoever administers this assessment records it for you.'}
+          </p>
+        ))}
+
+      {scoreError && <p className="mt-2 text-sm font-medium text-red-600 dark:text-red-400">{scoreError}</p>}
+
+      {/* YOUR OWN, READ-ONLY. Said in words rather than left as the absence of a box: a member who cannot find an input
+          will reasonably assume the app failed to load it. Pointing at "View as" also tells them the other half exists. */}
+      {!viewedMember && (
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          Scores are recorded by somebody with the &ldquo;Add assessment scores&rdquo; permission. You can read your own,
+          but you cannot change it &mdash; not even your own. Choose another member under &ldquo;View as&rdquo; to see
+          theirs.
+        </p>
+      )}
+
+      {/* SOMEONE ELSE, WITHOUT THE PERMISSION TO WRITE. Readable, and it says why the form is absent rather than leaving
+          the reader to guess whether one failed to load. */}
+      {viewedMember && !canAddScores && (
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          You can read this member&rsquo;s score. Changing it needs the &ldquo;Add assessment scores&rdquo; permission.
+        </p>
+      )}
+
+      {/* THE ONE PLACE A SCORE IS WRITTEN: another member is selected, and this reader may add scores. */}
+      {viewedMember && canAddScores && (
+        <div className="mt-4 space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700">
+          {viewedScore && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">Saving replaces the score above.</p>
+          )}
+
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+            {/* A TEXT input, with `maxLength` set to the limit the server enforces. Deliberately not `type="number"`:
+                "4:52" and "12/15" are both legitimate scores, and a number input would refuse to let the officer type
+                either of them. */}
+            Score
+            <input
+              type="text"
+              value={draft}
+              maxLength={assessmentScoreLimit}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Pass, 4:52, 12/15…"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+          </label>
+
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+            Date taken
+            <input
+              type="date"
+              value={onDate}
+              onChange={(event) => setOnDate(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+          </label>
+
+          {problem && <p className="text-sm font-medium text-red-600 dark:text-red-400">{problem}</p>}
+          {saved && <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">{saved}</p>}
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {viewedScore ? 'Update score' : 'Save score'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DocumentsModule({
   token,
   currentUser,
   timeFormat = '12',
   users = [],
   canVerify = false,
+  // MAY THIS READER RECORD A SCORE FOR SOMEBODY ELSE? It is the whole of what the officer's half of the assessment
+  // panel is gated on, and it is a SEPARATE prop from `canVerify` because the two jobs are different: verifying asks
+  // "did this person do the checklist", scoring records "here is what they got on the test". A station routinely wants
+  // somebody who runs the agility test to be able to record it without also being the one who checks checklists.
+  //
+  // This HIDES the control and nothing more. The rules are what refuse a write without it - see
+  // document_assessment_scores in firestore.rules - so hiding it here is a courtesy, not the protection.
+  canAddScores = false,
 }) {
   const [documents, setDocuments] = useState([]);
   const [signatures, setSignatures] = useState([]);
@@ -311,6 +505,17 @@ export default function DocumentsModule({
     };
   }, [loadList]);
 
+  // THE READER'S OWN SCORE, which arrives with the document rather than in a second request - see GET_DOCUMENT.
+  //
+  // DECLARED BEFORE `openDocumentById`, which is the callback that sets it. That is not a style preference: a setter read
+  // before its `useState` has initialized is a temporal dead zone error at runtime, and the linter names it exactly -
+  // "`setMyScore` is read while its declaration is still being initialized". Moving this line down to sit beside the other
+  // score state made the build pass and the component wrong.
+  //
+  // It is its own state rather than a field on `openDocument` so the officer's half of the panel can never write into the
+  // value the reader is looking at.
+  const [myScore, setMyScore] = useState(null);
+
   const openDocumentById = useCallback(
     async (id) => {
       setOpenId(id);
@@ -325,6 +530,14 @@ export default function DocumentsModule({
         loaded.signature = result.signature ? normalizeSignature(result.signature) : null;
         loaded.signature_stale = result.signature_stale === true;
         setOpenDocument(loaded);
+        // THE READER'S OWN SCORE, from the SAME request - no second round trip for a field that was already sent. It is
+        // held separately from `openDocument` so the officer's half below can never write into what the reader is shown,
+        // and so opening a different assessment starts from that member's score rather than the last one's.
+        //
+        // NO `try` AROUND IT and no separate read: a failure here is a failure to open the document, which the catch
+        // above already reports. Reading the score again would be a second chance to fail quietly - and quietly is how a
+        // member gets told "no score recorded" when one exists.
+        setMyScore(result.assessment_score ? normalizeAssessmentScore(result.assessment_score) : null);
       } catch (err) {
         setOpenDocument(null);
         setOpenError(err?.message || 'That document could not be opened.');
@@ -336,9 +549,12 @@ export default function DocumentsModule({
   );
 
   const documentIsChecklist = isChecklist(openDocument || {});
+  const documentIsAssessment = isAssessment(openDocument || {});
   const openDocumentId = openDocument?.id || '';
 
-  // A checklist's items are always signable: the type IS the consent, and the server no longer consults the
+
+
+// A checklist's items are always signable: the type IS the consent, and the server no longer consults the
   // document-level flag for items at all (it forces that flag on for a checklist anyway). Deriving it here means a
   // checklist created before that rule - one whose stored flag is still false - behaves like every other one,
   // rather than showing lines that refuse to be ticked.
@@ -350,13 +566,17 @@ export default function DocumentsModule({
 
   // The members a verifier can look at: everyone except themselves, by name. The list is the roster the module
   // already holds for putting names beside signatures, so nothing new travels for it.
+  // The members the module's "View as" dropdown can name. It is the ONE member navigator the module has, and TWO different
+  // permissions need it: a verifier looks through somebody else's paperwork, and an assessor records their score. So it is
+  // offered to either - see `canSelectMember`.
+  const canSelectMember = canVerify || canAddScores;
   const viewableMembers = useMemo(() => {
-    if (!canVerify) return [];
+    if (!canSelectMember) return [];
     return (Array.isArray(users) ? users : [])
       .filter((user) => String(user.id) !== String(userId) && String(user.id).trim() !== '')
       .map((user) => ({ id: String(user.id), label: userLabel(user) }))
       .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
-  }, [canVerify, users, userId]);
+  }, [canSelectMember, users, userId]);
 
   const viewAsMember = viewableMembers.find((member) => member.id === viewAsMemberId) || null;
   const viewingSomeoneElse = Boolean(viewAsMember);
@@ -371,8 +591,15 @@ export default function DocumentsModule({
   // Somebody else's records, in one request: their documents (as THEY see them - the server applies their rank, not
   // the verifier's) and their signature rows. The same action a verifier's permission already covers, aimed at a
   // named member, so this is the report that exists rather than a new way in.
+  //
+  // GATED ON `canVerify`, NOT ON "somebody is selected", and that is the consequence of widening the "View as" dropdown to
+  // assessors. `GET_MEMBER_DOCUMENT_RECORDS` reads `document_signatures`, which the rules open only to the owner, a
+  // verifier or a documents manager - so an assessor who may add scores but not verify them is REFUSED it. Firing the read
+  // anyway would put an error across the whole left pane for somebody whose only sin is holding the other permission. They
+  // still get the navigator, because the assessment score read is a different action with a different rule; what they do not
+  // get is another member's document list, which is the verifier's report and was never theirs to see.
   useEffect(() => {
-    if (!viewingSomeoneElse) {
+    if (!viewingSomeoneElse || !canVerify) {
       setViewerDocuments([]);
       setViewerSignatures([]);
       setViewerError('');
@@ -404,7 +631,77 @@ export default function DocumentsModule({
     return () => {
       canceled = true;
     };
-  }, [viewingSomeoneElse, viewAsMember, token]);
+  }, [viewingSomeoneElse, viewAsMember, canVerify, token]);
+
+// THE VIEWED MEMBER'S SCORE, read when "View as" names somebody. The reader's OWN score arrives with the document (see
+  // GET_DOCUMENT) and needs no request; somebody else's does.
+  //
+  // IT FOLLOWS THE ONE NAVIGATOR. There is deliberately no picker inside the assessment card: the module already has "View
+  // as" in its header, and a second one inside the panel would be two controls for one choice that could disagree - the
+  // same failure that hid the header's own dropdown.
+  //
+  // WHATEVER IS SHOWN IS DERIVED BY WHOSE IT WAS, NEVER CLEARED, AND "STILL LOADING" IS DERIVED TOO. The effect below
+  // starts a read and sets no state on the way into it at all; every row it stores carries the member it was read FOR, so
+  //   - a row belonging to somebody else is not this member's, and drawing nothing is the only safe answer; and
+  //   - a member whose answer has not arrived yet is distinguishable from one with no score, WITHOUT a `loading` flag,
+  //     because "no row for this member" and "no score for this member" are different states and conflating them is how a
+  //     spinner disappears into a lie.
+  // That also means the effect sets state only inside its own `.then`/`.catch`, which is the shape its three neighbours in
+  // this file already use and the reason they set state there rather than on the way in.
+  const [scoreRead, setScoreRead] = useState(null);
+  const [scoreErrorFor, setScoreErrorFor] = useState('');
+
+  useEffect(() => {
+    // Nothing to ask for - nobody selected, or a document that carries no score. Returning without touching state IS the
+    // clearing, because `scoreBelongsToViewed` below is false for exactly these cases.
+    if (!viewAsMember || !openDocumentId || !documentIsAssessment) return undefined;
+
+    const memberId = viewAsMember.id;
+    let canceled = false;
+    fetchMemberAssessmentScore(openDocumentId, memberId, token)
+      .then((result) => {
+        if (canceled) return;
+        if (!result?.success) throw new Error(result?.message || 'Could not read that score.');
+        setScoreErrorFor('');
+        setScoreRead(result.score ? normalizeAssessmentScore(result.score) : { user_id: memberId, score: '' });
+      })
+      .catch(() => {
+        if (canceled) return;
+        setScoreErrorFor(memberId);
+        // A row naming THIS member, with no text: it is how "the read failed" stops reading as "the read has not come
+        // back". The error line above is what actually tells the officer which of the two it was.
+        setScoreRead({ user_id: memberId, score: '' });
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [viewAsMember, openDocumentId, documentIsAssessment, token]);
+
+  // THE SCORE THAT MAY BE DRAWN, and the two flags beside it. Each is gated on the member it belongs to, so moving "View
+  // as" to a member whose score has not arrived shows nothing rather than the previous member's.
+  const scoreBelongsToViewed = Boolean(viewAsMember) && scoreRead?.user_id === viewAsMember?.id;
+  const shownViewedScore = scoreBelongsToViewed ? scoreRead : null;
+  const scoreLoading = Boolean(viewAsMember) && !scoreBelongsToViewed;
+  const scoreError = Boolean(viewAsMember) && scoreErrorFor === viewAsMember.id;
+
+  // THE WRITE, for the member "View as" currently names. The document and the member are both taken from the module's own
+  // state rather than passed in, so there is no argument the card could get wrong: what it saves is what the header says is
+  // being viewed. The card holds only the text and the date.
+  const saveScoreForMember = useCallback(
+    async (memberId, score, scoredOn) => {
+      const result = await setAssessmentScore(openDocumentId, memberId, score, scoredOn, token);
+      if (!result?.success) throw new Error(result?.message || 'Could not save that score.');
+      // What is now on file is the truth; `score` is what the officer typed. Handing the saved row back rather than the
+      // draft means the card cannot display something the database disagreed with.
+      const saved = result.score ? normalizeAssessmentScore(result.score) : null;
+      // Written back into the same store the read fills, tagged with the member it is for - so the score shown above the
+      // form comes from the database's answer rather than from the text box, and the `user_id` check still holds.
+      setScoreRead(saved ? { ...saved, user_id: memberId } : { user_id: memberId, score: '' });
+      return saved;
+    },
+    [openDocumentId, token]
+  );
 
   // The document being read is fetched for THIS reader whichever mode is on - opening a body answers to the
   // caller's own rank, which is the server's decision and not something this screen can change. Whose signature
@@ -712,11 +1009,12 @@ export default function DocumentsModule({
             </span>
           )}
 
-          {/* "View as": a verifier reading somebody else's records. It is a READER rather than a switch of the whole
+          {/* "View as": the module's ONE member navigator. It is a READER rather than a switch of the whole
               module - which documents exist is decided by the server from the session's own rank, and impersonation
               is not what any of this is for - so it changes whose ticks and whose signature are shown, and nothing
-              else. Offered only to a role that may verify, because what it opens is the signature report. */}
-          {canVerify && viewableMembers.length > 0 && (
+              else. Offered to either of the two permissions that need it: a verifier, who reads somebody else's
+              paperwork, and an assessor, who records their score. The assessment card follows this same control. */}
+          {canSelectMember && viewableMembers.length > 0 && (
             <label
               className={`flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 ${
                 openId || outstanding.length > 0 ? 'ml-auto' : ''
@@ -941,12 +1239,12 @@ export default function DocumentsModule({
                   {viewingSomeoneElse && (
                     <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                       <p className="font-medium">
-                        Viewing {viewAsMember.label}&rsquo;s records — read only.
+                        Viewing {viewAsMember.label}&rsquo;s records.
                       </p>
                       <p className="mt-0.5">
                         {viewerLoading
                           ? 'Loading their signatures…'
-                          : 'What is shown below is theirs, not yours. Ticking and signing are theirs to do from their own sign-in.'}
+                          : ''}
                       </p>
                       {viewerError && <p className="mt-0.5 font-medium">{viewerError}</p>}
                     </div>
@@ -959,6 +1257,7 @@ export default function DocumentsModule({
                       : ''}
                     {isChecklist(openDocument) ? ' · Checklist' : ''}
                     {isLink(openDocument) ? ' · Link' : ''}
+                    {documentIsAssessment ? ' · Assessment' : ''}
                   </p>
 
                   {/* A link document has no body to render: its content IS an address, and the useful thing to do
@@ -993,6 +1292,24 @@ export default function DocumentsModule({
                     <div className="mt-4">
                       <Markdown markdown={openDocument.content} />
                     </div>
+                  )}
+
+                  {/* The assessment panel - the reader's own score always, and the officer's entry form only with the
+                      permission. It is placed after the body because the body is what the score is a score OF: an
+                      assessment's wording explains what the number means, and reading the result before knowing what was
+                      tested would be the wrong order. */}
+                  {documentIsAssessment && (
+                    <AssessmentScorePanel
+                      myScore={myScore}
+                      canAddScores={canAddScores}
+                      // The module's "View as" decides all three of these, so the card follows one navigator rather
+                      // than keeping a second one of its own.
+                      viewedMember={viewAsMember}
+                      viewedScore={shownViewedScore}
+                      scoreLoading={scoreLoading}
+                      scoreError={scoreError}
+                      save={saveScoreForMember}
+                    />
                   )}
 
                   {/* The signature block: what this document asks of the reader, and the answer already on file.
