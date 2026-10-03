@@ -192,7 +192,7 @@ export default function Sidebar({
                     </button>
                     )}
 
-                    {/* Help is open to everyone, like User Settings - no permission gates
+                    {/* Help is open to everyone, like My Settings - no permission gates
                         it, and the guides it lists are the member-facing ones. */}
                     <button
                         onClick={() => { setActiveTab('help'); setIsSidebarOpen(false); }}
@@ -211,7 +211,7 @@ export default function Sidebar({
                             }`}
                     >
                         <Settings className="w-5 h-5" />
-                        User Settings
+                        My Settings
                     </button>
 
                     {canAdminister && (

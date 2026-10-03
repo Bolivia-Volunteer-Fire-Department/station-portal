@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
@@ -20,7 +20,27 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
   // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
+  // True while the background refresh after a save is still in flight.
   const [refreshing, setRefreshing] = useState(false);
+  const [sortField, setSortField] = useState('user_name');
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  const sortedUsers = useMemo(() => {
+    let filtered = [...users];
+    if (filterStatus) {
+      filtered = filtered.filter((u) => u.status === filterStatus);
+    }
+    filtered.sort((a, b) => {
+      const aVal = a[sortField] || '';
+      const bVal = b[sortField] || '';
+      if (sortDirection === 'asc') {
+        return String(aVal).localeCompare(String(bVal));
+      }
+      return String(bVal).localeCompare(String(aVal));
+    });
+    return filtered;
+  }, [users, sortField, sortDirection, filterStatus]);
 
   const isEditing = !!formData.id;
 
@@ -293,13 +313,25 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <UsersIcon className="h-4 w-4 shrink-0 text-red-500" />
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Members</h3>
+
+          {/* Status filter */}
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="ml-auto rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+
           <button
             type="button"
             onClick={() => {
               resetForm();
               setEditorOpen(true);
             }}
-            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+            className="flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
           >
             <Plus className="h-4 w-4" />
             New member
@@ -308,17 +340,43 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>
-              <th className="px-4 py-3">Username</th>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Role</th>
-              <th className="px-4 py-3">Rank</th>
+              {[
+                { field: 'user_name', label: 'Username' },
+                { field: 'name', label: 'Name' },
+                { field: 'status', label: 'Status' },
+                { field: 'role_id', label: 'Role' },
+                { field: 'rank_id', label: 'Rank' },
+              ].map(({ field, label }) => (
+                <th
+                  key={field}
+                  className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200"
+                  onClick={() => {
+                    if (sortField === field) {
+                      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+                    } else {
+                      setSortField(field);
+                      setSortDirection('asc');
+                    }
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {label}
+                    {sortField === field ? (
+                      sortDirection === 'asc' ? (
+                        <ChevronUp className="w-3 h-3" />
+                      ) : (
+                        <ChevronDownIcon className="w-3 h-3" />
+                      )
+                    ) : null}
+                  </span>
+                </th>
+              ))}
               <th className="px-4 py-3">Scheduling</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
-            {users.map((user) => (
+            {sortedUsers.map((user) => (
               <tr key={user.id} className="text-slate-700 dark:text-slate-200">
                 <td className="px-4 py-3 font-mono text-slate-500 dark:text-slate-400">{user.user_name}</td>
                 <td className="px-4 py-3 font-medium"><MemberName user={user} /></td>
@@ -362,9 +420,9 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {sortedUsers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">No users found.</td>
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">No members found.</td>
               </tr>
             )}
           </tbody>
@@ -375,7 +433,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
           (ConfirmModal plays the tone), and it names what is about to be deleted. */}
       {pendingDelete && (
         <ConfirmModal
-          title="Delete user"
+          title="Delete member"
           message={<>Delete <strong className="text-slate-900 dark:text-white">{pendingDelete.name}</strong>? This cannot be undone.</>}
           confirmLabel="Delete"
           onConfirm={confirmDelete}

@@ -142,14 +142,21 @@ export default function IconPicker({ value = '', onChange, disabled = false, lab
         position &&
         renderInViewport(
           <>
-            {/* Clicking away closes, as anywhere else in the app. */}
-            <div className="fixed inset-0 z-40" onClick={close} aria-hidden="true" />
+            {/* Clicking away closes, as anywhere else in the app.
+                //
+                // THE LAYERS SIT ABOVE THE DIALOG LAYER, and that is not a stylistic choice. This picker is
+                // opened from INSIDE an editor dialog (ViewportModal is z-[60] - the certification setup,
+                // ranks, assignments and announcements editors all host it), while this panel renders to
+                // document.body. At the popover-grade z-50 the dialog's own shade painted OVER the panel and
+                // swallowed every click: the picker "opened" and no icon could ever be chosen. z-[65] clears
+                // the dialog layer, and the panel sits one step above its own click-away. */}
+            <div className="fixed inset-0 z-[65]" onClick={close} aria-hidden="true" />
 
             <div
               ref={panelRef}
               role="dialog"
               aria-label={`Choose an ${label}`}
-              className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl origin-top animate-popoverIn dark:border-slate-700 dark:bg-slate-800"
+              className="fixed z-[66] flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl origin-top animate-popoverIn dark:border-slate-700 dark:bg-slate-800"
               style={position}
             >
               <div className="flex items-center gap-2 border-b border-slate-200 p-2 dark:border-slate-700">

@@ -23,6 +23,7 @@ import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
 import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
+import AdminMenuPage from './AdminMenuPage';
 
 // Categorical dropdown groups for the admin bar. Item ids match the sub-tabs
 // rendered below, so the active tab state stays driven by one value.
@@ -36,7 +37,7 @@ export const ADMIN_NAV_CATEGORIES = [
     label: 'People',
     icon: Users,
     items: [
-      { id: 'users', label: 'Users', icon: User },
+      { id: 'users', label: 'Members', icon: User },
       { id: 'roles', label: 'Roles', icon: ShieldCheck },
       { id: 'ranks', label: 'Ranks', icon: Award },
       { id: 'certifications', label: 'Certifications', icon: BadgeCheck },
@@ -113,6 +114,11 @@ export default function AdminPanel({
   currentRole,
   isAdmin,
   users,
+  // THE CREW DIRECTORY: the full public `users` rows ({ id, name, rank_id, exclude_from_scheduling, runner_sound_profile }),
+  // read as a section when a tab that names a member opens. Distinct from `users` on purpose - the full rows are the
+  // Users tab's section, and their private-half join is refused to roles without can_edit_users. Defaulted, because a
+  // caller that has not read it yet is a real state rather than a mistake.
+  directory = [],
   roles,
   ranks,
   shifts,
@@ -145,9 +151,16 @@ export default function AdminPanel({
   onAvailabilityChanged,
   onLogsChanged,
   onAdminDataChanged,
-  // Reports the open sub-tab upward, so the app bar can say "Admin: Schedule Mgt" once the page
-  // heading has scrolled away. Optional: the panel works without it.
+  // Reports the sub-tab that ACTUALLY rendered upward, so the app bar can name it ("Admin: Schedule
+  // Mgt"). This is not always the requested one: the menu page reports '' (which is what makes the
+  // label fall back to the bare "Administration"), and a mid-session role edit reports '' too.
   onActiveSubTabChange,
+  // THE OPEN SUB-TAB IS THE APP'S, not this panel's: '' (or an id the role may no longer use)
+  // renders the menu page, and every selection is reported back through onSelectTab. Owning the
+  // value in one place is what makes "press Administration again to return to the menu" possible -
+  // the sidebar resets it, and this panel renders whatever the app says.
+  subTab = '',
+  onSelectTab,
   offers = [],
   onOffersChanged,
   // Training record and signatures. An administrator receives every signature; a member
@@ -184,15 +197,32 @@ export default function AdminPanel({
   );
 
   const [openCategory, setOpenCategory] = useState(null);
-  const [requestedSubTab, setRequestedSubTab] = useState(null);
   const barRef = useRef(null);
 
-  // The open tab is DERIVED: the request stands only while the role may use it,
-  // otherwise the first permitted tab is used. That covers the initial open, a role
-  // edited mid-session, and any stale request, without an effect that would cause a
-  // second render pass.
-  const activeSubTab =
-    requestedSubTab && allowedTabs.includes(requestedSubTab) ? requestedSubTab : allowedTabs[0] ?? null;
+  // THE ROWS THE TABS THAT NAME A MEMBER DRAW THOSE NAMES FROM - the merge, in one place rather than ten.
+  //
+  // Two sources, and each covers the other's gap:
+  //
+  //   * the DIRECTORY section: the full public `users` rows, read when a name-drawing tab opens. Public, so every
+  //     officer may read it whatever else their role grants - which is the point, since the joined Users section
+  //     reads `users_private` and the rules refuse that collection to anybody without can_edit_users (and they
+  //     refuse it WHOLE, so one refused document would take the tab's own data down with it).
+  //   * the USERS section: the same rows joined to their private half, which is what the Users TAB needs (it edits
+  //     the username and the status) and which carries `status` for the tabs that filter on it.
+  //
+  // The join is laid OVER the directory, so a row that has both arrives as the fuller one and a row that only one
+  // source has still arrives. The bug this replaces: every tab read `users`, the payload refactor left that empty
+  // on a fresh session, and every member on the Certifications and Schedule tabs was rendered as "Unnamed member".
+  const nameRows = useMemo(() => {
+    const byId = new Map((Array.isArray(directory) ? directory : []).map((user) => [String(user?.id), user]));
+    (Array.isArray(users) ? users : []).forEach((user) => byId.set(String(user?.id), user));
+    return [...byId.values()];
+  }, [directory, users]);
+
+  // The open tab is DERIVED from the app's value: an id the role may still use renders that tab;
+  // anything else - the initial open, the sidebar asking for the menu again, a role edited
+  // mid-session, a stale request - renders the menu page. No effect, no second render pass.
+  const activeSubTab = allowedTabs.includes(subTab) ? subTab : null;
 
   // The pending count the last auto-focus was based on. Only an INCREASE moves the
   // user to approvals, so opening another tab stays put while an offer is still
@@ -202,10 +232,14 @@ export default function AdminPanel({
   useEffect(() => {
     const previous = lastApprovalCount.current;
     lastApprovalCount.current = pendingApprovalsCount;
+    // ON THE MENU the badge is the whole answer: the member has not chosen a screen, so an offer
+    // arriving must update the count they can see, not drag them to it. Once a tab is open the old
+    // rule applies - an increase claims focus, and everything else leaves navigation alone.
+    if (activeSubTab === null) return;
     if (shouldFocusApprovals(previous, pendingApprovalsCount, allowedTabs)) {
-      setRequestedSubTab('approvals');
+      onSelectTab('approvals');
     }
-  }, [pendingApprovalsCount, allowedTabs]);
+  }, [pendingApprovalsCount, allowedTabs, activeSubTab, onSelectTab]);
 
   const closeMenus = () => setOpenCategory(null);
 
@@ -228,15 +262,15 @@ export default function AdminPanel({
   // Report the open sub-tab so the app bar can name it.
   //
   // An effect rather than a call inside selectItem, because the tab also changes on its own: a role edit
-  // falls back to the first permitted tab, and a new shift offer auto-focuses approvals. The parent
-  // passes a state setter, so this is a stable prop and setting the same value is a no-op.
+  // falls back to the menu, and a new shift offer focuses approvals. The parent passes a state setter,
+  // so this is a stable prop and setting the same value is a no-op.
   useEffect(() => {
     if (onActiveSubTabChange) onActiveSubTabChange(activeSubTab || '');
   }, [activeSubTab, onActiveSubTabChange]);
 
   const categoryHasActive = (items) => items.some((item) => item.id === activeSubTab);
   const selectItem = (itemId) => {
-    setRequestedSubTab(itemId);
+    onSelectTab(itemId);
     closeMenus();
   };
 
@@ -249,6 +283,20 @@ export default function AdminPanel({
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading Administration…
       </div>
+    );
+  }
+
+  // THE MENU PAGE: the landing screen, a card per category. It replaces the first-permitted-tab
+  // default, so opening Administration reads nothing the member did not ask for - the badge rides
+  // with `offers`, which the member payload already carries for a role that may see this module.
+  // The dropdown bar below is skipped entirely, and comes back the moment a section is chosen.
+  if (activeSubTab === null) {
+    return (
+      <AdminMenuPage
+        categories={visibleCategories}
+        onSelectTab={selectItem}
+        pendingCount={pendingApprovalsCount}
+      />
     );
   }
 
@@ -357,11 +405,11 @@ export default function AdminPanel({
 
       {/* Who holds what. The catalog comes with the payload (it is small and every tab that shows an icon needs
           it); the records only arrive for a role that may manage them, so a Setup-only role sees an empty table
-          rather than somebody else's data. */}
+          rather than somebody else's data. The names come from `nameRows` - see the note on it above. */}
       {activeSubTab === 'certifications' && (
         <AdminCertificationsTab
           token={token}
-          users={users}
+          users={nameRows}
           setup={certificationSetup}
           records={certificationRecords}
           onDataChanged={onAdminDataChanged}
@@ -391,7 +439,7 @@ export default function AdminPanel({
           token={token}
           assignments={assignments}
           ranks={ranks}
-          users={users}
+          users={nameRows}
           // Only for the warning that a new end date will stop these templates drawing shifts.
           scheduleTemplates={scheduleTemplates}
           onDataChanged={onDataChanged}
@@ -411,7 +459,7 @@ export default function AdminPanel({
           scheduleTemplates={scheduleTemplates}
           assignments={assignments}
           ranks={ranks}
-          users={users}
+          users={nameRows}
           // The CREW'S claims, not this officer's own: they are what the "nothing marked that day" warning below the
           // board reads (read once by App.jsx and shared with the roster).
           rosterAvailability={rosterAvailability}
@@ -434,7 +482,7 @@ export default function AdminPanel({
       {activeSubTab === 'availability' && (
         <AdminAvailabilityTab
           token={token}
-          users={users}
+          users={nameRows}
           // The windows, the CREW'S claims and the scope they were read over. `availability` (this officer's own rows)
           // is deliberately NOT passed here any more: it was what made the roster list the wrong people.
           windows={availabilityWindows}
@@ -452,7 +500,7 @@ export default function AdminPanel({
       {activeSubTab === 'clock' && (
         <AdminClockManagementTab
           token={token}
-          users={users}
+          users={nameRows}
           ranks={ranks}
           shifts={shifts}
           logs={logs}
@@ -483,7 +531,7 @@ export default function AdminPanel({
       {/* The audit log fetches its own page when it mounts, so a tab nobody visits costs no requests - and the request
           goes to Cloud Logging on demand, not to a collection. */}
       {activeSubTab === 'system-log' && (
-        <AdminSystemLogTab token={token} users={users} timeFormat={timeFormat} />
+        <AdminSystemLogTab token={token} users={nameRows} timeFormat={timeFormat} />
       )}
 
       {/* Debug: fires the app's own feedback on demand. Gated on can_access_debug by the nav. It takes no token
@@ -509,7 +557,7 @@ export default function AdminPanel({
           token={token}
           roles={roles}
           ranks={ranks}
-          users={users}
+          users={nameRows}
           onDataChanged={onDataChanged}
         />
       )}
@@ -521,7 +569,7 @@ export default function AdminPanel({
         <AdminDocumentsTab
           token={token}
           ranks={ranks}
-          users={users}
+          users={nameRows}
           timeFormat={timeFormat}
           currentUserId={currentUserId}
           canManageDocuments={permissionGranted(currentRole, 'can_manage_documents')}
@@ -536,7 +584,7 @@ export default function AdminPanel({
           token={token}
           roles={roles}
           ranks={ranks}
-          users={users}
+          users={nameRows}
           timeFormat={timeFormat}
           // The board's own refresh wave does not fetch events, so the tab re-reads them itself.
           onDataChanged={onDataChanged}
@@ -551,7 +599,7 @@ export default function AdminPanel({
           token={token}
           trainings={trainings}
           signatures={trainingSignatures}
-          users={users}
+          users={nameRows}
           currentUserId={currentUserId}
           departmentName={departmentName}
           onDataChanged={onAdminDataChanged}
@@ -563,7 +611,7 @@ export default function AdminPanel({
           token={token}
           offers={offers}
           onOffersChanged={onOffersChanged}
-          users={users}
+          users={nameRows}
           assignments={assignments}
           schedule={schedule}
           scheduleTemplates={scheduleTemplates}

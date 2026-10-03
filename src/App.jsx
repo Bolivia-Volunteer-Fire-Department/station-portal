@@ -53,9 +53,11 @@ import ClockBlockedModal from './components/ClockBlockedModal';
 import Sidebar from './components/Sidebar';
 import ClockCard from './components/ClockCard';
 import OnDutyCard from './components/OnDutyCard';
+import SplashScreen from './components/SplashScreen';
 import LoadingOverlay from './components/LoadingOverlay';
 import {
   MASTER_PERMISSION_KEY,
+  allowedAdminTabs,
   permissionGranted,
   roleHasAdministration,
 } from './utils/permissions';
@@ -176,6 +178,11 @@ export default function App() {
   // directory via refreshAdminUsers; members only get this projection, and it's
   // what lets the schedule calendar name other people's shifts.
   const [roster, setRoster] = useState([]);
+  // THE DIRECTORY the admin tabs name members from: the full public users rows, read as a section when a tab that
+  // draws names opens (see sectionsForTab). Deliberately NOT the roster projection and NOT the users section: the
+  // projection lacks the scheduling fields the board filters on, and the users section joins users_private, which
+  // the rules refuse to officers without can_edit_users.
+  const [directory, setDirectory] = useState([]);
   // WHETHER IT HAS BEEN ASKED FOR YET. The roster is a DIRECTORY - one document per member - and it is not in the sign-in
   // payload any more: the dashboard names nobody except whoever is on duty (which the payload carries by id), and most
   // sign-ins are clock-ins. The effect below fetches it the first time a screen that LISTS people is opened, and once for the
@@ -227,6 +234,9 @@ export default function App() {
 
   // Initial Boot Loading
   const [initialLoading, setInitialLoading] = useState(true);
+  // The splash's own timeline has finished (the fade has run and onFinish fired). While it is
+  // false the splash overlays the app - including the boot it covers.
+  const [splashDone, setSplashDone] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState([]);
 
   // Global Shade & Spinner State
@@ -687,6 +697,7 @@ const getLoadingMessage = () => {
   // a sign-in cannot put one collection in two different places.
   const ADMIN_SECTION_SETTERS = {
     users: setUsers,
+    directory: setDirectory,
     roles: setRoles,
     ranks: setRanks,
     shifts: setShifts,
@@ -887,20 +898,43 @@ const getLoadingMessage = () => {
     // those); two tabs exist for one of those rows each, and each also wants the assignments a template is filtered by; the
     // approvals queue is the offers table; the clock table labels each entry with the shift it belonged to.
     //
-    // A TAB WITH NO ENTRY READS NOTHING, which is what makes this worthwhile rather than a different arrangement of the same
-    // reads: the module's shell - its home, the system log, the documents tab - costs nothing beyond the member payload.
+    // A TAB WITH NO ENTRY READS NOTHING (the menu's own entry is the badge exception above), which is what makes this
+    // worthwhile rather than a different arrangement of the same
+    // reads: the module's shell - the documents tab - costs nothing beyond the member payload.
+    //
+    // `directory` IS ON EVERY TAB THAT NAMES A MEMBER, and that is the fix for a whole class of bug rather than one
+    // report: the payload refactor left the tabs' `users` prop empty on a fresh session, and every screen that draws a
+    // name drew "Unnamed member" instead. The section is the full public `users` collection - readable by every
+    // officer, unlike the `users` section's `users_private` join - and AdminPanel merges the two before handing them
+    // to a tab (see AdminPanel#nameRows).
     const sectionsForTab = {
+      // THE MENU PAGE (an empty sub-tab - it is what Administration opens on now) reads the ONE small
+      // thing its badge needs, the offers still waiting, and nothing else: deferring every other read
+      // until a section is chosen is the point of the menu. The badge is only meaningful to a role that
+      // can act on offers, so any other role's menu reads nothing at all - the rules would refuse the
+      // read, and a refusal here would be noise on every visit.
+      '': allowedAdminTabs(currentUserRole).includes('approvals') ? ['scheduleOffers'] : [],
       // THE BOARD READS THE SCHEDULE, and this line is the bug that lost the member names: the tab read its templates,
       // its assignments and its offers - which is enough to draw a month of EMPTY SLOTS - and never read the rows that
       // fill them. The board looked like a month nobody was rostered on. The `schedule` section answers with the rows
       // and the window they came in, which its setter above unwraps.
-      schedule: ['schedule', 'scheduleTemplates', 'assignments', 'scheduleOffers'],
+      schedule: ['schedule', 'scheduleTemplates', 'assignments', 'scheduleOffers', 'directory'],
       templates: ['scheduleTemplates', 'assignments'],
-      assignments: ['assignments', 'scheduleTemplates'],
-      approvals: ['scheduleOffers'],
-      clock: ['shifts'],
+      assignments: ['assignments', 'scheduleTemplates', 'directory'],
+      approvals: ['scheduleOffers', 'directory'],
+      clock: ['shifts', 'directory'],
       users: ['users'],
-      certifications: ['certificationRecords'],
+      certifications: ['certificationRecords', 'directory'],
+      // AVAILABILITY HAD NO ENTRY AT ALL, which is the same lost-names bug the board's line once had: the tab
+      // draws the crew by name and drew nothing until it read the directory.
+      availability: ['directory'],
+      // The tabs whose only use for the directory is the name beside a record (an audit row's actor, an audience
+      // picker, a signature, a pending offer). Their own rows arrive by the route they always did - a live listener
+      // for announcements, the events read, each tab's own section - so this is the one addition each of them needs.
+      'system-log': ['directory'],
+      announcements: ['directory'],
+      events: ['directory'],
+      training: ['directory'],
     };
     const wanted = (sectionsForTab[adminSubTab] || []).filter((section) => !adminSectionLoaded[section]);
     if (!wanted.length) return;
@@ -930,15 +964,18 @@ const getLoadingMessage = () => {
   // are clock-ins, and this is the same laziness the clock history and the schedule get: a module's data is read when the
   // module is.
   //
-  // It fires on the FIRST opening and thereafter behaves exactly as before, including re-reading on a token change. The menu
-  // is unaffected: permissions come from `roles/{roleId}`, which is in the shared wave beside the caller's own profile, so
-  // the sidebar knows what this officer may do before anything is opened.
+  // It fires on the FIRST SECTION CHOSEN, not on the menu: landing on the menu page must be free, which
+  // is the whole point of it (see AdminMenuPage). Thereafter it behaves exactly as before, including
+  // re-reading on a token change. The menu itself is unaffected: permissions come from `roles/{roleId}`,
+  // which is in the shared wave beside the caller's own profile, so the sidebar knows what this officer
+  // may do before anything is opened.
   const [adminModuleOpened, setAdminModuleOpened] = useState(false);
   // Whether that first read has come back - so the module draws a spinner rather than a panel full of "No users yet".
   const [adminWaveSettled, setAdminWaveSettled] = useState(false);
   useEffect(() => {
-    if (activeTab === 'admin' && canAdminister) setAdminModuleOpened(true);
-  }, [activeTab, canAdminister]);
+    // A REAL SECTION, not the menu: an empty sub-tab IS the menu page, and opening it must cost nothing.
+    if (activeTab === 'admin' && canAdminister && adminSubTab) setAdminModuleOpened(true);
+  }, [activeTab, canAdminister, adminSubTab]);
 
   // Refresh all admin-scoped data for an administrator - ONCE THE MODULE HAS BEEN OPENED, not at sign-in (see above).
   useEffect(() => {
@@ -1424,6 +1461,7 @@ const getLoadingMessage = () => {
 
     setIsSidebarOpen(false);
     setActiveTab('dashboard');
+    setAdminSubTab('');
     // A refusal modal belongs to the session that hit it, so it must not survive a sign-out - the
     // next person to sign in should never be greeted by someone else's message.
     setClockNotice(null);
@@ -1431,6 +1469,14 @@ const getLoadingMessage = () => {
     // The Debug page's sound levels are a per-session experiment: the next person to sign in on this machine gets
     // the app's own mix back, not somebody's test levels.
     resetSoundVolumes();
+  };
+
+  // Every navigation through the sidebar. Administration is special: it ALWAYS lands on the menu page
+  // (AdminMenuPage) - including pressing the item again while already inside the module, which is the
+  // only way back to the menu once a section is open. An empty sub-tab is what the menu renders.
+  const handleSidebarNavigate = (tab) => {
+    if (tab === 'admin') setAdminSubTab('');
+    setActiveTab(tab);
   };
 
   // Ends the session with an explanation, which is the only difference from a normal sign-out.
@@ -1611,7 +1657,7 @@ const getLoadingMessage = () => {
 
     // BEFORE THE GPS PROMPT, not after. A permission dialog is a poor first answer to a request that cannot work, and this
     // is the documented behaviour rather than a nicety: clocking in and out requires connectivity and says so when it is
-    // missing (docs/FIRESTORE_MODEL.md, "Offline"). The writers refuse too - that is what protects the record itself; this
+    // missing (the README, "Offline"). The writers refuse too - that is what protects the record itself; this
     // is what stops the member from being asked for their location first and told second.
     if (isOffline()) {
       setStatusMessage({ type: 'error', text: OFFLINE_CLOCK_MESSAGE });
@@ -1766,33 +1812,40 @@ const getLoadingMessage = () => {
     }
   };
 
-  if (initialLoading) {
-    // Use configured loading messages from system settings, or fall back to default ones
-    const configuredMessages = loadingMessages.filter((msg) => msg.trim() !== '');
-    const defaultMessages = [
-      'Starting the engine...',
-      'Deciding who cleans the bay today...',
-      'Waking up the night shift...',
-      'Asking CCOM for a radio check...',
-      'Looking for a ladder truck...',
-      'Looking for a radio strap...',
-      'Warming up the coffee...',
-      'Making sure the hydrant still flows water...',
-    ];
-    const messages = configuredMessages.length > 0 ? configuredMessages : defaultMessages;
-
-    return (
-      <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white flex items-center justify-center">
-        <Clock className="w-8 h-8 animate-spin text-red-500 mr-3" />
-        <span className="text-xl font-medium">{messages[Math.floor(Math.random() * messages.length)]}</span>
-      </div>
-    );
-  }
+  // THE SPLASH plays first, so the rotating loading messages only show if loading outlasts it: one
+  // of the station's own messages - configured in Administration → System → Settings, or the
+  // defaults - spins under the boot screen's clock. Picked once per mount, so a re-render as data
+  // arrives does not reshuffle it mid-boot.
+  const bootMessage = useMemo(() => {
+    const configured = loadingMessages.filter((msg) => msg.trim() !== '');
+    const messages = configured.length > 0
+      ? configured
+      : [
+          'Starting the engine...',
+          'Deciding who cleans the bay today...',
+          'Waking up the night shift...',
+          'Asking CCOM for a radio check...',
+          'Looking for a ladder truck...',
+          'Looking for a radio strap...',
+          'Warming up the coffee...',
+          'Making sure the hydrant still flows water...',
+        ];
+    return messages[Math.floor(Math.random() * messages.length)];
+    // The message is chosen once per boot on purpose: loadingMessages arriving later must not
+    // reshuffle it, and the boot screen only shows while initialLoading, which starts true.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
+      {/* THE SPLASH: the brand moment that plays first, while the app's data loads concurrently
+          underneath (loadAppData runs on mount). It fades on its own beat - straight into a ready
+          app on an ordinary launch; the boot screen below only shows if loading outlasts it. */}
+      {!splashDone && <SplashScreen onFinish={() => setSplashDone(true)} />}
+
       {/* Global Shade & Animated Spinner Overlay */}
       <LoadingOverlay
+
         isLoading={globalLoading.active}
         message={globalLoading.message}
       />
@@ -1862,7 +1915,15 @@ const getLoadingMessage = () => {
         <ClockBlockedModal notice={clockNotice} onDismiss={() => setClockNotice(null)} />
       )}
 
-      {!currentUser ? (
+      {/* The boot screen: the splash plays FIRST, and this only appears if loading has outlasted
+          the animation on a slow connection - the app's data has been loading concurrently the whole
+          time, so an ordinary launch never sees this at all. */}
+      {initialLoading ? (
+        <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white flex items-center justify-center">
+          <Clock className="w-8 h-8 animate-spin text-red-500 mr-3" />
+          <span className="text-xl font-medium">{bootMessage}</span>
+        </div>
+      ) : !currentUser ? (
         <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} />
       ) : (
         <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
@@ -1935,7 +1996,7 @@ const getLoadingMessage = () => {
             announcements={announcements}
             announcementAudience={announcementAudience}
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={handleSidebarNavigate}
             isSidebarOpen={isSidebarOpen}
             setIsSidebarOpen={setIsSidebarOpen}
             onLogout={handleLogout}
@@ -1975,7 +2036,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'training' && 'Training'}
                 {activeTab === 'certifications' && 'Certifications'}
                 {activeTab === 'help' && 'Help'}
-                {activeTab === 'settings' && 'User Settings'}
+                {activeTab === 'settings' && 'My Settings'}
                 {activeTab === 'admin' && 'Administration'}
               </h2>
               <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
@@ -1987,7 +2048,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
                 {activeTab === 'help' && 'Guides for using the portal. Administrators have their own set under Administration → System → Help.'}
                 {activeTab === 'settings' && 'Customize your personal account preferences.'}
-                {activeTab === 'admin' && 'Manage users, roles, ranks, and system settings.'}
+                {activeTab === 'admin' && 'Manage members, roles, ranks, and system settings.'}
               </p>
             </div>
 
@@ -2140,18 +2201,28 @@ const getLoadingMessage = () => {
 
             {activeTab === 'admin' && canAdminister && (
               <AdminPanel
-                // THE MODULE'S DATA IS READ WHEN IT IS OPENED (see the adminModuleOpened effect), so the panel can be
+                // THE MODULE'S DATA IS READ WHEN A SECTION IS CHOSEN (see the adminModuleOpened effect), so a tab can be
                 // holding its props before the read has landed - and every tab below renders "No users yet" from an empty
-                // list, which reads as a broken station rather than a read in flight.
-                loading={!adminWaveSettled}
+                // list, which reads as a broken station rather than a read in flight. The menu page is exempt: it reads
+                // only the badge's offers, and an empty list there is a real answer, not a read in flight. (For a role
+                // without is_admin the wave never runs at all - its sections load per tab - so the spinner must not gate it.)
+                loading={isAdmin && !!adminSubTab && !adminWaveSettled}
                 // Used only on the printed schedule sheet's header.
                 departmentName={departmentName}
+                // The open sub-tab is OWNED HERE: '' is the menu page, a tab id is that tab. The sidebar
+                // resets it to '' on every visit to Administration, which is the way back to the menu.
+                subTab={adminSubTab}
+                onSelectTab={setAdminSubTab}
                 // Lets the app bar name the open Administration tab ("Admin: Schedule Mgt").
                 onActiveSubTabChange={setAdminSubTab}
                 // Certifications: the catalog rides with every payload, the records only for a role that may
                 // manage them (see adminBootstrapPayload).
                 certificationSetup={certificationSetup}
                 certificationRecords={certificationRecords}
+                // The crew directory the admin tabs name members from (see sectionsForTab): read when a tab that
+                // draws names opens, because the users section's users_private join is refused to an officer
+                // without can_edit_users.
+                directory={directory}
                 currentRole={currentUserRole}
                 isAdmin={isAdmin}
                 currentUserId={String(currentUser?.id ?? '')}

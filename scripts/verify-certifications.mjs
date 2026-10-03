@@ -244,7 +244,13 @@ checkIs(
   /const TYPED_ICON = \/\^\(\?:\\d\{1,2\}\|\[IVX\]\{1,4\}\)\$\//.test(iconPicker),
   'the icon set has no digits, so 1, 2 and III have to be drawn as text'
 );
-checkIs('it renders into the viewport so a card cannot clip it', /renderInViewport\(/.test(iconPicker) && /fixed z-50/.test(iconPicker));
+checkIs('it renders into the viewport so a card cannot clip it', /renderInViewport\(/.test(iconPicker) && /fixed z-\[66\]/.test(iconPicker));
+// AND ABOVE THE DIALOG LAYER (ViewportModal is z-[60]), because the editors that host this picker are dialogs
+// and the panel renders to document.body: at the old popover-grade z-50 the dialog's own shade painted over the
+// panel and swallowed every click - "the icon dropdown doesn't work, no icon can be chosen". The click-away
+// catcher clears the dialog at z-[65]; the panel sits one step above it at z-[66]. Pinned so the dialog layer
+// cannot rise past it again unnoticed.
+checkIs('and above the dialog layer that hosts its callers', /z-\[65\]/.test(iconPicker) && /z-\[66\]/.test(iconPicker));
 checkIs('Escape closes it', /event\.key === 'Escape'/.test(iconPicker));
 checkIs(
   'and so does scrolling, heard in the capture phase',

@@ -537,7 +537,7 @@ exports.updateMemberAccount = onCall(async (request) => {
 //     creation fails rather than falling through. That is the right way round for a security control, and it is why
 //     the logic here is deliberately trivial: the more it does, the more ways it has to break sign-ups.
 //   - It needs the project upgraded to Identity Platform, which is a one-click action in the Firebase console and
-//     free at this scale. See docs/FIREBASE_SETUP.md.
+//     free at this scale. See the Firebase setup section of the README.
 const { beforeUserCreated } = require('firebase-functions/v2/identity');
 
 // The audit toggle's other half: the same save, done by a function so an audit row can be written first.

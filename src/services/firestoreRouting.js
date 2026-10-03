@@ -283,7 +283,7 @@ export const ROUTED_FEATURES = {
   // NOTHING IS LEFT ON THE SHEET. The three actions that used to be named here - ADMIN_GET_USERS,
   // ADMIN_GET_CERTIFICATIONS, ADMIN_GET_SCHEDULE_TEMPLATES - had no caller anywhere in the app, so they have been
   // deleted from api.js rather than left as a promise: the routing table's job is to say what is routed, and a
-  // `switchReads` entry that names a function nobody calls is a note, not a route. See docs/MIGRATION_MAP.md.
+  // `switchReads` entry that names a function nobody calls is a note, not a route. See the README's data-model section.
   adminReads: {
     requires: ['adminPayload'],
     writes: [],
@@ -665,7 +665,7 @@ const DISPATCH = {
     // `slot_key` is derived by slotKeyOfOffer when the offer is written ('row-<schedule id>', or
     // 'slot-<date>-<template id>'), and the calendar matches its open pills against it - so a routed offer has to
     // carry the same value or it will not find its slot. This belongs in makeOffer, as a field materialized by the
-    // writer that owns it (see option D in docs/FIRESTORE_MODEL.md); it is written here for now because the
+    // writer that owns it (see the README's data-model section); it is written here for now because the
     // payload layer lands first and this whole feature sits behind it.
     const scheduleId = String(body.schedule_id || '');
     const dateKey = String(body.date_from || '').slice(0, 10);

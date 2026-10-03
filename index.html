@@ -95,7 +95,13 @@
     <link rel="apple-touch-startup-image" media="screen and (device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/splash/splash-2048x1536.png" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static first paint: the same dark canvas index.css paints on html.dark (the theme the page
+           ships with), with a literal fallback for the moment before the stylesheet arrives. This is
+           what shows while the module graph loads, so a cold start goes canvas → patch settles in →
+           shimmer → fade, and never flashes white. React clears it on its first render. -->
+      <div style="position: fixed; inset: 0; background: var(--color-slate-900, oklch(0.208 0.042 265.755))"></div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

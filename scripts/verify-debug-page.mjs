@@ -98,10 +98,14 @@ check(
 // The source checks above say the panel renders the tab. This says the GATE works: the same panel, driven by two
 // different roles, must reach the Debug page for one and be unable to for the other. Rendered rather than read,
 // because a permission that is declared and then never consulted looks identical from the source.
+// The sub-tab is passed EXPLICITLY: landing on Administration renders the menu page now, so the
+// gate is exercised the way a member reaches it - by choosing Debug from the menu.
 const debugOnlyPanel = renderToString(
   React.createElement(AdminPanel, {
     currentRole: { can_access_debug: true },
     systemSettings: [{ key: 'loading_message0', value: 'Fetching the schedule…' }],
+    subTab: 'debug',
+    onSelectTab: () => {},
   })
 );
 check(
@@ -110,7 +114,7 @@ check(
   'the panel did not render the debug controls for a role that has the permission'
 );
 const otherPermissionPanel = renderToString(
-  React.createElement(AdminPanel, { currentRole: { can_manage_roles: true } })
+  React.createElement(AdminPanel, { currentRole: { can_manage_roles: true }, subTab: 'debug' })
 );
 check(
   'and a role without it cannot reach that page',

@@ -351,6 +351,17 @@ const readStationRows = async (db) => {
 // already read it (fetchAdminPayload does, so nothing is read twice); a scoped refresh passes nothing and reads only its
 // own collections.
 const ADMIN_SECTIONS = {
+  // THE CREW DIRECTORY: the full public `users` rows, and nothing else. The tabs that NAME a member (the board, the
+  // clock table, availability, certifications) read this instead of the `users` section, because that one joins
+  // `users_private` - a whole-collection read the rules refuse to anybody without can_edit_users, which would take
+  // the names AND the rows down together for a tab whose officer lacks that permission. Every field here is public
+  // by the rules (the users collection is readable signed-in), so this section is safe for every officer.
+  //
+  // It is a superset of what the name joins need and the same rows the crew-directory read hands the member
+  // calendar, minus the projection: `exclude_from_scheduling` and the runner sound profile travel, because the
+  // board's quick-add filters on the flag and the eligibility picker reads both.
+  directory: async () => ({ directory: await readUsersOnce() }),
+
   users: async (db, station) => {
     const [users, privateRows] = await Promise.all([
       // The station wave no longer carries the directory (a sign-in does not read it), so this falls back to the shared read
@@ -367,6 +378,10 @@ const ADMIN_SECTIONS = {
         ...user,
         user_name: (privateById[user.id] || {}).username || '',
         status: (privateById[user.id] || {}).status || '',
+        // The password-change flag: the edit form has a checkbox AND a "Password change due" badge for it, so it
+        // is read here with the other two private fields rather than at sign-in. A member with no private row yet
+        // is treated as not waiting for a change, the same default the username join uses for a missing row.
+        is_change_password_on_login: (privateById[user.id] || {}).is_change_password_on_login === true,
       })),
     };
   },
@@ -424,7 +439,7 @@ const ADMIN_SECTIONS = {
   //
   // `apparatus` is deliberately NOT among them, and no longer read at all: the client carries `apparatus_id` on rows and
   // never renders an apparatus name, so the collection was read on every load for no reader. It is still written by the
-  // migration and by nobody in the app - see docs/MIGRATION_MAP.md when the data phase comes.
+  // migration and by nobody in the app - see the README's data-model section.
   roles: async (db) => ({ roles: await rowsOf(collection(db, 'roles')) }),
   ranks: async (db) => ({ ranks: await rowsOf(collection(db, 'ranks')) }),
   shifts: async (db) => ({ shifts: await rowsOf(collection(db, 'shifts')) }),

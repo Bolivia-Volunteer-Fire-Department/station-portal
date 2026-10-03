@@ -78,7 +78,10 @@ checkIs('the dark canvas is painted', /^var\(--color-slate-\d+\)$/.test(darkRule
 // and the branch a member is looking at is the one that matters when they overscroll.
 console.log('\n--- and in the same colors as the shell ---');
 const shellBranches = [...app.matchAll(/className="min-h-dvh ([^"]*)"/g)].map((match) => match[1]);
-checkIs('the full-screen branches were found', shellBranches.length >= 2, `${shellBranches.length} found`);
+// ONE shell branch: the app itself. The old boot screen was a second one; it was replaced by the
+// splash, which is a fixed overlay with its own canvas - the brand navy, asserted below - and no
+// scrollable surface, so overscroll can never reveal it.
+checkIs('the full-screen branches were found', shellBranches.length >= 1, `${shellBranches.length} found`);
 const shellColors = shellBranches.map((classes) => ({
   light: /(?:\s|^)bg-slate-(\d+)/.exec(classes)?.[1] || null,
   dark: /dark:bg-slate-(\d+)/.exec(classes)?.[1] || null,
@@ -91,6 +94,12 @@ check(
 checkIs('and each of them names both', shellColors.every((pair) => pair.light && pair.dark), JSON.stringify(shellColors));
 check('the canvas uses the light color the shell uses', lightRule?.['background-color'], `var(--color-slate-${shellColors[0]?.light})`);
 check('the canvas uses the dark color the shell uses', darkRule?.['background-color'], `var(--color-slate-${shellColors[0]?.dark})`);
+// The splash paints the SAME canvas the shell and login screen do - the slate pair the html rules
+// use, in both themes - so the launch reads as one continuous surface whatever the member's theme.
+const splashRule = ruleFor(css, '.splash-screen');
+const splashDarkRule = ruleFor(css, 'html.dark .splash-screen');
+checkIs('the splash paints the shell canvas in light', splashRule?.['background-color'] === 'var(--color-slate-100)', splashRule?.['background-color']);
+checkIs('and in dark', splashDarkRule?.['background-color'] === 'var(--color-slate-900)', splashDarkRule?.['background-color']);
 // The theme class lives on <html>, which is what `html.dark` keys off. If that moved, the dark canvas would never
 // apply and the reveal would be a light band in a dark app.
 checkIs('the dark class is toggled on the html element', /document\.documentElement\.classList\.toggle\('dark'/.test(app));

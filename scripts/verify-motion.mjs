@@ -157,13 +157,16 @@ check(
   ['.animate-swapDwell']
 );
 // Every animation takes its duration from the vocabulary rather than naming its own, so "how fast is this
-// app" has one answer - except the swap animations, which predate it and are about a gesture in progress.
+// app" has one answer - except the swap animations, which predate it and are about a gesture in progress,
+// and the splash, whose whole point is to outlast the interaction vocabulary: it is a brand moment played
+// once per page load, not a response to a press. It is still one-shot and reduced-motion-aware (both held
+// by the checks above and below), so the exception is about DURATION, not about the other two rules.
 check(
   'the durations all come from the vocabulary',
   animationRules(css)
     .filter(({ declarations }) => !/var\(--motion-/.test(declarations))
     .map(({ selector }) => selector),
-  ['.animate-swapDwell', '.animate-swapPop']
+  ['.animate-swapDwell', '.animate-swapPop', '.splash-logo-wrap', '.splash-shimmer::before']
 );
 
 console.log('\n--- every animation honors prefers-reduced-motion ---');

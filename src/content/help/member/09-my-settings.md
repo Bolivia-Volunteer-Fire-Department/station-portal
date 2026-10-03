@@ -1,4 +1,4 @@
-**User Settings** holds everything about your own account: how the app looks, what it tells you about, your password, and a readout of what your role lets you do. Every setting has a description of what it means, refer to those for assistance.
+**My Settings** holds everything about your own account: how the app looks, what it tells you about, your password, and a readout of what your role lets you do. Every setting has a description of what it means, refer to those for assistance.
 
 ## Notifications
 

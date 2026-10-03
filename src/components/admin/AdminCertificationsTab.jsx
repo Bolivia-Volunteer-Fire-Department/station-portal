@@ -52,6 +52,10 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
+  // The rows names are drawn from arrive as `users` - the panel merges the crew directory with the joined Users
+  // section before handing them over (see AdminPanel#nameRows), so this tab does not care which of the two a row
+  // came from. They are directory-shaped on a fresh session, which is why nothing here reads `user_name` or
+  // `status`: userLabel already falls back to the name.
   const usersById = useMemo(() => {
     const index = {};
     users.forEach((user) => {

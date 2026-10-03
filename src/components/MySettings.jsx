@@ -937,7 +937,7 @@ function AccessCard({ currentRole }) {
 
         {audit.granted.length === 0 && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            No permissions are granted, so only the dashboard and User Settings are available.
+            No permissions are granted, so only the dashboard and My Settings are available.
           </p>
         )}
 

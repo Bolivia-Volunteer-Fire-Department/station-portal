@@ -1404,7 +1404,12 @@ export default function AdminScheduleManagementTab({
     const pool = users.filter(
       (u) =>
         !isTruthyFlag(u.exclude_from_scheduling) &&
-        String(u.status ?? '').trim().toLowerCase() === 'active'
+        // A MISSING STATUS COUNTS AS ACTIVE, and this is not a shortcut: `status` lives in `users_private`, which the
+        // rules hand only to an officer with can_edit_users, while the directory these rows come from is the public
+        // half (see AdminPanel#nameRows). Requiring the field outright emptied the quick-add for every officer who
+        // could not read the private half - the list silently lost everybody rather than showing somebody suspended.
+        // The tab still excludes whoever it CAN see is suspended, which is the useful half of the filter.
+        (String(u.status ?? '').trim().toLowerCase() === 'active' || String(u.status ?? '').trim() === '')
     );
     const rankById = new Map(ranks.map((r) => [String(r.id), r]));
     const byGroup = new Map();

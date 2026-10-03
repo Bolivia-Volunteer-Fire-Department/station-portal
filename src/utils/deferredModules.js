@@ -23,7 +23,7 @@ const loaders = {
   DocumentsModule: () => import('../components/DocumentsModule'),
   TrainingModule: () => import('../components/TrainingModule'),
   CertificationsModule: () => import('../components/CertificationsModule'),
-  UserSettings: () => import('../components/UserSettings'),
+  UserSettings: () => import('../components/MySettings'),
   HelpGuides: () => import('../components/HelpGuides'),
   MyClockHistory: () => import('../components/MyClockHistory'),
   FirefighterRunner: () => import('../components/FirefighterRunner/FirefighterRunner'),
@@ -31,6 +31,10 @@ const loaders = {
 
 // Named exports, so every `import X from './components/X'` in App.jsx became `import { X } from
 // './utils/deferredModules'` and not one of the render sites below had to change.
+//
+// The export is still called `UserSettings`: it is a code identifier, and renaming it is a diff across the app for
+// no reader. Only the words members SEE were renamed to "My Settings" (the heading, the nav label and the help
+// guide).
 export const AdminPanel = lazy(loaders.AdminPanel);
 export const ScheduleCalendar = lazy(loaders.ScheduleCalendar);
 export const MyAvailability = lazy(loaders.MyAvailability);

@@ -47,6 +47,9 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * **Reads keep working with no signal.** If you lose your bars, the schedule, your history and these guides still open. Clocking in and out is the exception: that needs a connection, because the app has to record the *real* time it happened rather than the time your phone thinks it is. While you are offline, the clock buttons are switched off and say why.
 * Two people editing at the same moment can no longer overwrite each other, and every entry gets its own unique number so a slow save cannot collide with a fast one.
 * Internal codes are no longer shown anywhere in the app — you see names, not identifiers.
+* Condensed README.md & other docs that didn't belong in their own doc.
+* Added a new menu-like landing page for the Administration module.
+* Renamed anything "users" to "members".
 
 **Version 1.06x**
 * Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...

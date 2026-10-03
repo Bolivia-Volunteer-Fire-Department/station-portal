@@ -22,10 +22,7 @@ That line is worth knowing about, because it tells apart two things that look al
 
 Administration is edited by more than one person, so a save can meet another save. Nothing is lost silently:
 
-- **"Someone else changed this record while you were editing it, so your change was NOT saved."** Another administrator saved the same record after you opened it. Reload it (open it again from the list) and reapply your change — the app refuses the write rather than letting your copy overwrite theirs.
-- **"The station portal is busy saving something else, so your change was NOT saved."** Two large saves met, for the space of a moment. Your change was not applied and nothing was half-written; it retries once by itself, and pressing Save again is safe.
-
-Both messages mean the same thing: **nothing happened**, so acting again is the right response. The technical detail — locks, row versions, what is deliberately not protected — is in [`docs/WRITE_SAFETY.md`](../../../docs/WRITE_SAFETY.md) in the repository.
+Administration saves are last-writer-wins: if two people save the same record, the second save is the one that stands, so open a record fresh before editing it rather than leaving one open in a tab. The writes that could corrupt each other — clocking in and out, approving a shift offer, saving a personal-best score — run as all-or-nothing transactions on the server, and a save that fails for any reason means **nothing was applied**, so pressing Save again is safe.
 
 ## Adding a tab's guide
 

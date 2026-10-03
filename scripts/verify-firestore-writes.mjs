@@ -118,7 +118,7 @@ const main = async () => {
 
   // --- offline: the pair of writes that must NOT queue ------------------------------------------------------------------
   //
-  // A queued clock-in carries the DEVICE's clock rather than the server's (docs/FIRESTORE_MODEL.md, "Offline"), so a member
+  // A queued clock-in carries the DEVICE's clock rather than the server's (the README, "Offline"), so a member
   // in a dead spot would create a record asserting they arrived at a time nobody can vouch for - and that record is what the
   // station uses to say who was on duty. The guard lives in the WRITER, which is why this asserts through BOTH doors: the
   // function the app calls, and the route it travels.

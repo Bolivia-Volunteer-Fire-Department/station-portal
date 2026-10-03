@@ -1,6 +1,6 @@
 // The sheet-to-collection mapping, as data rather than as prose.
 //
-// Read alongside docs/MIGRATION_MAP.md, which explains the reasoning; this file is what the tools execute. Every
+// Read alongside the data-model section of the README, which explains the reasoning; this file is what the tools execute. Every
 // decision here came from the live spreadsheet, the security rules, or Code.gs - and where Code.gs decides something
 // subtle, the comment names the behaviour being reproduced, because reproducing the wrong half of it silently changes
 // who can see what.

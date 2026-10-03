@@ -66,7 +66,7 @@ export const notificationPrefFields = (settings) => {
 // THE ONE GATE EVERY DATA CALL PASSES THROUGH, and its name is now historical: the bodies are still shaped as the
 // action envelopes they were when a sheet answered them, because the action NAMES are what the routing tables are
 // keyed by and every call site still names one. The name is kept rather than renamed across a hundred call sites in
-// the same change that removes the backend - see docs/MIGRATION_MAP.md.
+// the same change that removes the backend - see the README's data-model section.
 //
 // An action with no route THROWS rather than being swallowed or asked of somewhere else: there is no second backend
 // now, and a screen that quietly receives nothing is the failure this module exists to prevent.
@@ -367,6 +367,12 @@ export const adminSaveUser = async (userData) => {
 
       // The three fields the rules allow, in one write - plus the scheduling preference, which the rules allow there
       // too and which the tab has a checkbox for.
+      //
+      // NO MERGE, and that is the bug this save came with: the rules evaluate `request.resource.data` as the document
+      // AFTER the write, and their allowlist (`hasOnly`) is checked against THAT. The migration left the sheet's `id`
+      // column inside every stored users document, so a merge re-produced a six-field document and the rule refused
+      // the save - "missing or insufficient access" - for every member whose row predated the app. A full replace
+      // writes exactly the declared shape, passes the rule, and drops the debris field while it is at it.
       await setDoc(
         doc(firestore(), 'users', String(userData.id)),
         {
@@ -378,8 +384,7 @@ export const adminSaveUser = async (userData) => {
           // it belongs here rather than in `user_settings` because it is a fact about the member's PLACE in the station
           // - the leaderboard draws it - rather than a preference only their own screen reads.
           runner_sound_profile: String(userData.runner_sound_profile ?? ''),
-        },
-        { merge: true }
+        }
       );
 
       if (userData.status) await setMemberStatus({ userId: String(userData.id), status: String(userData.status) });

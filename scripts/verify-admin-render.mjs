@@ -21,6 +21,7 @@ import Sidebar from '../src/components/Sidebar.jsx';
 import AdminRolesTab from '../src/components/admin/AdminRolesTab.jsx';
 import AdminScheduleTemplatesTab from '../src/components/admin/AdminScheduleTemplatesTab.jsx';
 import AdminAssignmentsTab from '../src/components/admin/AdminAssignmentsTab.jsx';
+import AdminCertificationsTab from '../src/components/admin/AdminCertificationsTab.jsx';
 import AdminSystemLogTab from '../src/components/admin/AdminSystemLogTab.jsx';
 import MyAvailability from '../src/components/MyAvailability.jsx';
 import AvailabilityCalendar from '../src/components/AvailabilityCalendar.jsx';
@@ -77,7 +78,7 @@ check(
   typeof appRender.html === 'string',
   appRender.error && `${appRender.error.name}: ${appRender.error.message}`
 );
-check('and gets as far as the loading screen', String(appRender.html || '').includes('animate-spin'));
+check('and gets as far as the splash (the boot screen)', String(appRender.html || '').includes('splash-screen'));
 check('with nothing from the signed-in shell in it', !String(appRender.html || '').includes('My Schedule'));
 
 // The role shapes that matter: full access, one tab only, member-only, and a role
@@ -111,7 +112,8 @@ const adminPanelProps = {
 };
 
 for (const [name, role] of Object.entries(ROLES)) {
-  // 1. The Administration panel, opened on whatever tab the role is allowed.
+  // 1. The Administration panel, LANDING ON THE MENU PAGE: no sub-tab is requested, so the panel
+  // renders the category cards rather than any tab's content.
   let panelError = null;
   let panelHtml = '';
   try {
@@ -135,11 +137,10 @@ for (const [name, role] of Object.entries(ROLES)) {
   if (name === 'nothing') {
     check('a role with no permissions sees an explanation', panelHtml.includes('does not include access'));
   }
-  // The category bar is filtered by the same permission list, so it shows what the
-  // role can reach. (The sub-tab labels themselves only exist inside an open
-  // dropdown, so the categories are the reliable thing to assert on.) Note the
-  // Users tab has its own "Scheduling" column, so presence of that word alone
-  // proves nothing - the table header is the precise marker.
+  // The menu is filtered by the same permission list, so it shows what the role can reach. (The
+  // item labels exist on the cards, so the category headings and item names are the reliable
+  // things to assert on.) Note the Users tab has its own "Scheduling" column, so presence of that
+  // word alone proves nothing - the table header is the precise marker.
   if (name === 'approverOnly') {
     check('an approver-only role gets the Scheduling category', panelHtml.includes('Scheduling'));
     check('and not the People category it cannot use', !panelHtml.includes('>People<'));
@@ -147,13 +148,29 @@ for (const [name, role] of Object.entries(ROLES)) {
   }
   if (name === 'usersOnly') {
     check('a users-only role gets the People category', panelHtml.includes('>People<'));
-    check('and lands on the Users panel', panelHtml.includes('Scheduling</th>'));
+    check('and the menu lists the Users tab it may open', panelHtml.includes('>Users<'));
+    check('and no tab panel is rendered on the menu', !panelHtml.includes('Scheduling</th>'));
   }
   if (name === 'administrator') {
     check('an administrator sees every category', ['People', 'Scheduling', 'Timeclock', 'System'].every((label) => panelHtml.includes(label)));
   }
   if (name === 'memberOnly' || name === 'nothing') {
     check(`a ${name} role sees no administration panels`, !panelHtml.includes('Scheduling</th>'));
+  }
+
+  // ...and CHOOSING a tab from the menu renders that tab: the menu's cards and the dropdown bar
+  // drive the same controlled value, so this is the same panel with a sub-tab requested.
+  if (name === 'usersOnly') {
+    const usersPanelHtml = renderToString(
+      React.createElement(AdminPanel, {
+        ...adminPanelProps,
+        currentRole: role,
+        isAdmin: role.is_admin === true,
+        subTab: 'users',
+        onSelectTab: () => {},
+      })
+    );
+    check('and choosing Users from the menu renders the Users panel', usersPanelHtml.includes('Scheduling</th>'));
   }
 
   // 2. The Roles editor, including the form for an administrator-only role.
@@ -409,6 +426,21 @@ const iconPickerSrc = readFileSync('src/components/IconPicker.jsx', 'utf8');
 check(
   'and the catalog the ranks editor uses',
   iconPickerSrc.includes('from') && iconPickerSrc.includes("'./RankIcon'") && iconPickerSrc.includes('RANK_ICON_MAP')
+);
+// THE PICKER RENDERS ABOVE THE DIALOG LAYER, because it is opened FROM one: every editor that hosts it is a
+// ViewportModal (z-[60]) while the panel renders to document.body - and at the popover-grade z-50 the dialog's
+// own shade painted over the panel and swallowed every click, which is how "the icon dropdown doesn't work, no
+// icon can be chosen" happened with every check green. The catcher and the panel are asserted against the
+// dialog layer they must clear, in order: catcher above the dialog, panel above its own catcher.
+const dialogLayerZ = 'z-[60]';
+check(
+  'the icon picker opens above the dialog layer',
+  [
+    /fixed inset-0 z-\[65\]/.test(iconPickerSrc),
+    /fixed z-\[66\] /.test(iconPickerSrc),
+    readFileSync('src/components/ViewportModal.jsx', 'utf8').includes(dialogLayerZ),
+  ],
+  [true, true, true]
 );
 check('and the saved icon drawn in the list', String(assignmentsHtml).includes('lucide-truck'));
 
@@ -1435,6 +1467,14 @@ check(
 );
 // The Administration sub-tab has to reach the bar, or it would always read the bare page name.
 check('the open sub-tab is reported upward', /onActiveSubTabChange=\{setAdminSubTab\}/.test(shellSource), true);
+// The sub-tab is CONTROLLED: the app owns the value (an empty one is the menu page), the panel
+// renders whatever it is given, and selections are reported back through the setter.
+check('the panel is driven by the app’s sub-tab value', /subTab=\{adminSubTab\}/.test(shellSource), true);
+check('and reports selections back through it', /onSelectTab=\{setAdminSubTab\}/.test(shellSource), true);
+// The menu page is the landing view: an empty or unusable sub-tab renders the category cards, never
+// a tab's content - which is what keeps opening Administration from paying for a tab nobody asked for.
+check('the menu page is the landing view', /allowedTabs\.includes\(subTab\) \? subTab : null/.test(adminPanelSource), true);
+check('and the menu renders the category cards', /<AdminMenuPage/.test(adminPanelSource), true);
 check(
   'and AdminPanel reports it as it changes',
   /onActiveSubTabChange\(activeSubTab \|\| ''\)/.test(adminPanelSource),
@@ -2359,6 +2399,55 @@ check('with no (filtered) label, since nothing is filtered', !/\(filtered\)/.tes
 const historySource = readFileSync('src/components/MyClockHistory.jsx', 'utf8');
 check('the admin-only sort is excluded deliberately', /value !== 'name_asc'/.test(historySource), true);
 check('the table and the cards read the same list', /logs=\{visibleLogs\}/.test(historySource), true);
+
+// ---------------------------------------------------------------------------
+// THE TABS THAT NAME A MEMBER DRAW THOSE NAMES FROM THE MERGED ROWS. The bug this exists for: every tab read a
+// `users` prop, the payload refactor left it empty on a fresh session, and the rows of the Certifications and
+// Schedule tabs read "Unnamed member" - with every other check green. The fix is one merge (AdminPanel#nameRows:
+// the public directory, with the joined Users section laid over it) handed to every name-drawing tab. The rows are
+// DIRECTORY-SHAPED on a fresh session, so nothing in a tab may require `user_name` or `status` to draw a name.
+const directoryRows = [
+  { id: '10', name: 'Member 1', rank_id: 'r1', exclude_from_scheduling: false, runner_sound_profile: '' },
+];
+const certFixture = {
+  token: 'test-token',
+  setup: [{ id: 'c1', name: 'EMT-B', icon: 'heart-pulse', is_renewable: true }],
+  records: [
+    {
+      id: 'k1',
+      user_id: '10',
+      certification_id: 'c1',
+      icon: 'heart-pulse',
+      name: 'EMT-B',
+      effective_date: '2026-08-19',
+      end_date: '2030-08-19',
+      state: 'active',
+    },
+  ],
+};
+const certFromDirectory = renderToString(
+  React.createElement(AdminCertificationsTab, { ...certFixture, users: directoryRows })
+);
+check(
+  'the certifications tab names members from directory-shaped rows',
+  String(certFromDirectory).includes('Member 1') && !String(certFromDirectory).includes('Unnamed member'),
+  true
+);
+// The merge lives in ONE place, and the props follow from it: every name-drawing tab takes the merged rows, while
+// the Users tab keeps the joined section (it edits the username and the status, which the directory does not carry).
+const panelForNames = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
+check('the panel merges the directory with the joined users rows', /const nameRows = useMemo\(/.test(panelForNames), true);
+const nameRowConsumers = (panelForNames.match(/users=\{nameRows\}/g) || []).length;
+check('and hands them to every tab that names a member', nameRowConsumers >= 10, `${nameRowConsumers} consumer(s)`);
+check('while the Users tab keeps the joined rows it edits', /<AdminUsersTab[\s\S]{0,400}?users=\{users\}/.test(panelForNames), true);
+// THE NEGATIVE, which is what actually broke: no name-drawing tab may be wired to the joined rows alone.
+check(
+  'and nothing still draws names from the unjoined rows',
+  !/<Admin(Certifications|ScheduleManagement|Availability|ClockManagement|Assignments|SystemLog|Announcements|Events|Training|PendingApprovals)Tab[\s\S]{0,400}?users=\{users\}/.test(
+    panelForNames
+  ),
+  true
+);
 
 // ---------------------------------------------------------------------------
 // A "New X" card is an editor modal: the form is not on the page until it is asked for, it is submitted from the

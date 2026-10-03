@@ -153,6 +153,27 @@ const main = async () => {
     role_id: 'r2',
     password: 'HASHED-FORGERY',
   });
+  // AND THE SAME IS TRUE OF A FIELD THE APP ITSELF LEFT BEHIND. `hasOnly` is checked against the document AFTER the
+  // write, so a stored column the rule does not name refuses EVERY save of that member - which is what
+  // "missing or insufficient access" was on a real station: the migration copied the spreadsheet's `id` into the
+  // document body, and the editor's save merged over it. The rule is right and stays as it is; the app now REPLACES
+  // the document with exactly the five declared fields (see adminSaveUser in services/api.js, pinned by
+  // verify:user-row). The two cases below are the pair that documents it.
+  await write('refuses a write that carries a field the rules do not name', false, doc(db, 'users', 'u2'), {
+    name: 'Bo Jones',
+    rank_id: 'k1',
+    role_id: 'r2',
+    exclude_from_scheduling: false,
+    runner_sound_profile: '',
+    id: 'u2',
+  });
+  await write('and accepts the declared shape, which is what the editor now sends', true, doc(db, 'users', 'u2'), {
+    name: 'Bo Jones',
+    rank_id: 'k1',
+    role_id: 'r2',
+    exclude_from_scheduling: false,
+    runner_sound_profile: '',
+  });
   // WRITE-DENIED to clients now, and this assertion flipped to say so: saveScheduleBoard in functions/index.js is
   // the only writer of a schedule row, because a board save needs an audit row and a conflict check that a browser
   // cannot do. An officer used to be able to write here directly; that was the second writer.

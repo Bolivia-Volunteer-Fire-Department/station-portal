@@ -1,17 +1,25 @@
 /**
- * Verifies the Users tab's immediate-update path.
+ * Verifies the Users tab's save path: the local merge that keeps the list live, and the SHAPE OF THE WRITE.
  *
- * A user save is one write, but the list it renders is refreshed by a separate wave of requests
- * that Apps Script serializes behind a script lock - tens of seconds. The saved row is therefore
- * merged into the list locally, and these are the rules that merge has to keep:
+ * The save is one write, but the list it renders is refreshed by a separate wave of requests - tens of seconds
+ * under Apps Script, and a scoped section read now. The saved row is therefore merged into the list locally, and
+ * these are the rules that merge has to keep:
  *
  *   - only an EXISTING row is touched (a new member's id is server-assigned)
  *   - no password ever reaches the list
  *   - only the fields the editor owns are copied, so a server-set column is not clobbered
  *   - the refresh still runs, so the local copy is eventually replaced
  *
+ * The second half is the one a member reported: "missing or insufficient access" when saving a member, from an
+ * administrator who could save roles and certifications. The cause was mine, not the rules': `users` writes are
+ * checked with `hasOnly`, against the document AFTER the write - and the save used `{ merge: true }`, so every extra
+ * field already on the stored row (the spreadsheet's `id`, which the migration left in place) was re-produced in
+ * `request.resource.data` and the write was refused. The rule's allowlist and the fields api.js sends are therefore
+ * asserted AGAINST EACH OTHER here, so a merge cannot come back without one of them noticing.
+ *
  *   npm run verify:user-row
  */
+import { readFileSync } from 'node:fs';
 import {
   EDITABLE_USER_FIELDS,
   mergeSavedUser,
@@ -75,6 +83,33 @@ check('a null patch is safe', mergeSavedUser(USERS, null), USERS);
 check('an empty patch is a no-op', mergeSavedUser(USERS, { id: 'u1' }), USERS);
 check('numeric ids still match', mergeSavedUser([{ id: 7, name: 'x' }], { id: '7', name: 'y' })[0].name, 'y');
 check('a null row in the list is passed over', mergeSavedUser([null, { id: 'u1', name: 'x' }], { id: 'u1', name: 'y' })[0], null);
+
+console.log('\n--- the write sends exactly the shape the rules allow ---');
+// The rule's allowlist, read out of the rules file rather than restated, so the two cannot drift apart.
+// Paths are relative to the REPO ROOT, which is where the harness is run from - and it has to be that, not
+// import.meta.url: this file is run from a built copy under tmp-test-out/, one directory away from the sources.
+const rulesSource = readFileSync('firestore.rules', 'utf8');
+const usersRule = /match \/users\/\{userId\} \{[\s\S]*?hasOnly\(\[([^\]]*)\]\)/.exec(rulesSource)?.[1];
+const allowedFields = String(usersRule || '')
+  .split(',')
+  .map((name) => name.trim().replace(/^'|'$/g, ''))
+  .filter(Boolean);
+check('the rules list the fields a client may write', allowedFields.length >= 5, true);
+
+const apiSource = readFileSync('src/services/api.js', 'utf8');
+const writeStart = apiSource.indexOf("doc(firestore(), 'users', String(userData.id))");
+check('the member save writes the users document', writeStart > -1, true);
+// The call, comments stripped: a comment naming a field would otherwise be read as one being written.
+const writeCall = apiSource
+  .slice(writeStart, apiSource.indexOf(');', writeStart))
+  .replace(/\/\/[^\n]*/g, '');
+const writtenFields = [...writeCall.matchAll(/^\s*([a-z_]+):/gm)].map((match) => match[1]);
+check('it writes no field the rules do not allow', writtenFields.filter((field) => !allowedFields.includes(field)), []);
+check('and it writes every field they do', allowedFields.filter((field) => !writtenFields.includes(field)), []);
+// THE BUG ITSELF. A merge makes the written document the post-merge one, so ANY field already stored - a spreadsheet
+// column the migration copied, a field added by an older build - is re-produced and refused by `hasOnly`. A full
+// replace writes the declared shape and nothing else, which is why it is required rather than preferred.
+check('and it REPLACES the document rather than merging into it', /merge\s*:/.test(writeCall), false);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

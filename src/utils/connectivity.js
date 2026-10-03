@@ -4,7 +4,7 @@
 // BEFORE it asks for GPS (a permission prompt is a poor first answer to a request that cannot work), and the writers,
 // which must refuse before Firestore QUEUES the write.
 //
-// THE TRUSTWORTHY-CLOCK RULE (docs/FIRESTORE_MODEL.md, "Offline"). Firestore queues a write made with no connection and
+// THE TRUSTWORTHY-CLOCK RULE (the README, "Offline"). Firestore queues a write made with no connection and
 // applies it when one returns, and every timestamp in that write is whatever the DEVICE said when the button was pressed.
 // For most writes that is not merely acceptable but right: a note written on the way to the station should carry the time
 // it was written. For CLOCKING IN AND OUT it is not, because that record is itself an assertion about when somebody was at

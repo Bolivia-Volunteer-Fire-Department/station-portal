@@ -1,4 +1,4 @@
-// Where the Firebase SDK is initialised, for the move off Google Sheets (see docs/FIRESTORE_MODEL.md).
+// Where the Firebase SDK is initialised (see the README's data-model section for the shape it serves).
 //
 // The config is NOT a secret: a Firebase web config is public by design, and the project is protected by
 // firestore.rules and App Check rather than by hiding these values. They arrive at build time from .env (see
@@ -62,7 +62,7 @@ export const firebaseConfigured = () => {
 
 let app = null;
 
-// APP CHECK: the site key, and the debug token that is only ever for local development (see docs/FIREBASE_SETUP.md, step 7).
+// APP CHECK: the site key, and the debug token that is only ever for local development (see the README, App Check).
 //
 // TWO THINGS ABOUT THE WEB SDK THAT COST AN AFTERNOON IF YOU DO NOT KNOW THEM:
 //
@@ -106,7 +106,7 @@ export const firebaseApp = () => {
       // Skipping is therefore the honest state rather than a workaround: with no debug token there is no
       // attestation to be had on a loopback origin, and pretending otherwise only buys noise. Production is
       // untouched - it is not a loopback origin - and neither is a local run that does have the debug token,
-      // which is the supported way to develop against App Check (docs/FIREBASE_SETUP.md, step 7).
+      // which is the supported way to develop against App Check (see the README, App Check).
       if (!appCheckDebugToken && loopbackOrigin()) {
         // SAID ONCE, and it can only be said once, because this whole block sits inside the `if (!app)` above.
         // Announced rather than silent for the reason `firebaseConfigured()` announces itself: a decision the
@@ -167,7 +167,7 @@ const browserCache = () => {
 
 export const firestore = () => {
   if (!firestoreInstance) {
-    // OFFLINE PERSISTENCE, which is the "dead spots" half of docs/FIRESTORE_MODEL.md: a station's coverage is patchy, and
+    // OFFLINE PERSISTENCE, which is the "dead spots" half of the offline rule (see the README): a station's coverage is patchy, and
     // with no local cache every read made in one is a FAILURE rather than a slightly old answer. `getDoc`/`getDocs` remain
     // server-first while there is a connection - the cache is what answers when there is not - so switching this on does
     // not weaken the rule the rest of the app is built on: a read after a write still sees the write, because the write

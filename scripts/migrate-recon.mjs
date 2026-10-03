@@ -1,7 +1,7 @@
 // Read-only reconnaissance of the station spreadsheet, for the move to Firestore.
 //
 // WHY THIS COMES FIRST: the migration has to map each sheet to a collection, and the only honest source for that
-// mapping is the sheet's own headers. docs/FIRESTORE_MODEL.md describes the shape the CODE expects; the sheet is
+// mapping is the sheet's own headers. The README's data-model section describes the shape the CODE expects; the sheet is
 // what is actually there, and the two have drifted before. So this pass reads, prints, and writes nothing.
 //
 // It needs two things and will say so plainly if either is missing:

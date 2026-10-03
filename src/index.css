@@ -312,6 +312,119 @@ button:not(:disabled):active,
   transform: scale(0.98);
 }
 
+/* THE SPLASH: the department patch, large, played once per full page load while the app loads
+// underneath it. The background is the SAME canvas the login screen and shell paint - the slate
+// pair off the html rules below - so the launch reads as one continuous surface in either theme,
+// and the shimmer is tuned per theme (a white glare would vanish on the light canvas).
+//
+// The logo is at least 60% of the viewport's height. The patch is SQUARE (4600x4600 viewBox), so
+// its width equals its height - on a narrow phone 60vh would be wider than the screen, hence the
+// second term of the min(), which caps it at 86% of the width and keeps a margin around it.
+//
+// The durations are deliberately NOT the vocabulary: a splash is a brand moment rather than a
+// response to a press, and its whole point is to last a beat longer than the app ever does. It is
+// still a one-shot (nothing loops), it is listed in the reduced-motion block below - where it
+// becomes a still logo cut away without a fade - and verify:motion holds both of those decisions.
+//
+// index.html paints the same dark canvas inside #root as a static first paint, so the launch never
+// flashes white before React mounts. */
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-slate-100);
+}
+
+html.dark .splash-screen {
+  background-color: var(--color-slate-900);
+}
+
+.splash-screen--fade {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-logo-wrap {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+  animation: splashEnter 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.splash-logo {
+  height: min(60vh, 86vw);
+  width: auto;
+  display: block;
+}
+
+/* One light pass across the patch. The overlay is STATIC and masked with the patch's own alpha
+   channel (--splash-logo, set from SplashScreen.jsx), so the glare only lands on the artwork's
+   pixels - the transparent canvas inside the square SVG file stays exactly as transparent as it
+   was. The band itself is a ::before child that does the moving, so the mask never shifts with it.
+   It sits off-canvas at rest, so a member with reduced motion - whose animation is dropped - never
+   sees it at all; and if the mask image has not arrived yet, the glare is simply absent rather
+   than flashing over the whole square. */
+.splash-shimmer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  -webkit-mask-image: var(--splash-logo);
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: var(--splash-logo);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+}
+
+.splash-shimmer::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -150%;
+  width: 100%;
+  height: 200%;
+  background: linear-gradient(
+    60deg,
+    transparent 20%,
+    rgb(15 23 42 / 0.08) 50%,
+    transparent 80%
+  );
+  transform: rotate(25deg);
+  animation: splashShine 1.3s 0.35s ease-in-out both;
+}
+
+html.dark .splash-shimmer::before {
+  background: linear-gradient(
+    60deg,
+    transparent 20%,
+    rgb(255 255 255 / 0.22) 50%,
+    transparent 80%
+  );
+}
+
+@keyframes splashEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes splashShine {
+  from {
+    left: -150%;
+  }
+  to {
+    left: 150%;
+  }
+}
+
 /* Reduced motion: keep the MEANING and drop the movement. The dwell still has to say "this spot will swap", so it
 // becomes a solid outline instead of a blink - a flashing ring is exactly what this preference is about - and the
 // pop is removed, since the pills have already changed places by then. */
@@ -344,8 +457,16 @@ button:not(:disabled):active,
   .animate-monthInLeft,
   .animate-monthInRight,
   .animate-overlayOut,
-  .animate-overlayOut .animate-modalIn {
+  .animate-overlayOut .animate-modalIn,
+  /* The splash: without motion it is a still patch on the canvas, and the exit is a cut rather than a
+     fade - a member who asked for less movement gets the brand moment as a single frame. */
+  .splash-logo-wrap,
+  .splash-shimmer::before {
     animation: none;
+  }
+
+  .splash-screen {
+    transition-duration: 0s;
   }
 
   button:not(:disabled):active,

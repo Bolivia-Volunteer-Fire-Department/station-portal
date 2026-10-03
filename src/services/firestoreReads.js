@@ -157,7 +157,7 @@ const documentSort = (a, b) => {
 
 // One document as the DETAIL view needs it: the row, its length, and - for a checklist - its items.
 //
-// The body is ON THE ROW (`content`), which is worth stating because docs/FIRESTORE_MODEL.md describes a
+// The body is ON THE ROW (`content`), which is worth stating because the design notes in the README describe a
 // `document_bodies` split that was never built: no writer, no rules, no migration entry. A reader that looked for the
 // body there got a permission-denied from the deny-by-default catch-all and no content at all - so this reads the row,
 // and the doc is the thing to fix when the split is wanted for real.
@@ -256,12 +256,20 @@ export const READERS = {
     const to = String((body && body.to) || '').trim();
     if (!from && !to) return { logs: await rowsFor('timeclock', 'user_id', uid) };
 
+    // THE ORDER BY IS LOAD-BEARING, and that is not obvious. Equality on `user_id` plus a range on `time_in` needs a
+    // composite index, and the one declared in firestore.indexes.json is (user_id ASC, time_in DESC). Without an
+    // explicit orderBy, Firestore implies an ASCENDING range scan - which no declared index serves - and PRODUCTION
+    // refuses the query with failed-precondition while THE EMULATOR, which ignores index requirements, answers it
+    // happily. That is how Clock History came to load nothing in the field while every harness stayed green. Ordering
+    // by time_in desc makes the query servable by the declared index (and hands back newest first, which the screen
+    // re-sorts anyway - the direction costs nothing and buys the index).
     const logs = await rowsOf(
       query(
         collection(firestore(), 'timeclock'),
         where('user_id', '==', uid),
         where('time_in', '>=', from || '0000-01-01'),
-        where('time_in', '<=', to || '9999-12-31')
+        where('time_in', '<=', to || '9999-12-31'),
+        orderBy('time_in', 'desc')
       )
     );
     // The window comes back with the rows, so a caller can tell what it holds - the same arrangement GET_SCHEDULE uses.

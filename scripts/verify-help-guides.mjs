@@ -410,7 +410,7 @@ const requiredMemberModules = [
   'clock-history',
   'my-schedule',
   'my-availability',
-  'user-settings',
+  'my-settings',
   'help',
   'documents',
   'firefighter-runner',

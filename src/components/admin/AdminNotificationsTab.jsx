@@ -107,7 +107,7 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
   // THE SERVICE-ACCOUNT FIELDS ARE GONE, and that is the change rather than a tidy-up: they were write-only data nothing
   // read. The email shown below comes from the server's own status, and the private key a station used to paste in is now
   // simply the Cloud Functions service account - the runtime's own identity, which no browser should ever hold. A credential
-  // in a system-settings document is exactly what docs/FIRESTORE_MODEL.md says never to do.
+  // in a system-settings document is exactly what the data-model rules in the README say never to do.
   const [form, setForm] = useState({
     webConfig: settingValue(systemSettings, FCM_KEYS.webConfig),
     vapidPublicKey: settingValue(systemSettings, FCM_KEYS.vapidPublicKey),
@@ -185,7 +185,7 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
               <p className="font-medium">Setup still needed</p>
               <p>
                 Create a Firebase project, enable Cloud Messaging, then paste the four values below. The
-                full walkthrough is in <span className="font-mono text-xs">docs/FCM_SETUP.md</span>.
+                full walkthrough is in <span className="font-mono text-xs">the repository README</span>.
               </p>
             </div>
           </div>
@@ -315,7 +315,7 @@ function StationDefaultsCard({ token, systemSettings, onDataChanged }) {
           <div>
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Station Defaults</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              What every member is notified about unless they change it themselves in User Settings.
+              What every member is notified about unless they change it themselves in My Settings.
             </p>
           </div>
         </div>
@@ -632,7 +632,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
       {confirmingOff && (
         <ConfirmModal
           title={`Turn off notifications for ${userLabel(confirmingOff)}?`}
-          message={`This forgets ${Number(confirmingOff.device_count) === 1 ? 'their device' : `all ${Number(confirmingOff.device_count) || 0} of their devices`}, so nothing is delivered to them any more. It also blocks their account, so their browsers cannot re-register themselves by opening User Settings, and it is written to the System Log. They keep seeing announcements and their shift decisions inside the app.`}
+          message={`This forgets ${Number(confirmingOff.device_count) === 1 ? 'their device' : `all ${Number(confirmingOff.device_count) || 0} of their devices`}, so nothing is delivered to them any more. It also blocks their account, so their browsers cannot re-register themselves by opening My Settings, and it is written to the System Log. They keep seeing announcements and their shift decisions inside the app.`}
           confirmLabel="Turn off notifications"
           onConfirm={() => {
             const target = confirmingOff;

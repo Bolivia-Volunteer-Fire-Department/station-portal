@@ -15,7 +15,7 @@ export const PAGE_BAR_LABELS = {
   documents: 'Documents',
   certifications: 'Certifications',
   help: 'Help',
-  settings: 'User Settings',
+  settings: 'My Settings',
   admin: 'Administration',
 };
 
@@ -26,7 +26,7 @@ export const PAGE_BAR_LABELS = {
 // ADMIN_NAV_CATEGORIES, and a test asserts every one of those ids has an entry, so adding a tab cannot
 // silently produce "Admin: " with nothing after it.
 export const ADMIN_BAR_LABELS = {
-  users: 'Users',
+  users: 'Members',
   roles: 'Roles',
   ranks: 'Ranks',
   certifications: 'Certs',

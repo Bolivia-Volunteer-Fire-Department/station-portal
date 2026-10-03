@@ -99,6 +99,34 @@ check(
   [...new Set(readerKeys.filter((key, index) => readerKeys.indexOf(key) !== index))],
   []
 );
+// THE WINDOWED CLOCK QUERY MUST BE SERVABLE BY A DECLARED INDEX. Equality on one field plus a range on another needs a
+// composite index, and THE EMULATOR IGNORES INDEX REQUIREMENTS - it answers any query - while PRODUCTION refuses with
+// failed-precondition. That gap is exactly how Clock History loaded nothing in the field while this suite was green: the
+// reader asked for (user_id ==, time_in range) with no orderBy, the implied ascending scan matched no declared index
+// (firestore.indexes.json declares user_id ASC, time_in DESC), and no check here could see it. So two checks pin the
+// shape: the reader names the range field in its own order, and the index file declares that exact pair. A query shape
+// that changes without the index, or an index dropped without the reader, now fails here rather than in the field.
+const readsSourceForClockIndex = readFileSync('src/services/firestoreReads.js', 'utf8');
+const declaredIndexes = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')).indexes;
+const declaredIndex = (collectionGroup, first, second, secondOrder) =>
+  declaredIndexes.some(
+    (index) =>
+      index.collectionGroup === collectionGroup &&
+      index.fields.length === 2 &&
+      index.fields[0].fieldPath === first &&
+      index.fields[0].order === 'ASCENDING' &&
+      index.fields[1].fieldPath === second &&
+      index.fields[1].order === secondOrder
+  );
+checkIs(
+  'the windowed clock query orders by the range field',
+  /collection\(firestore\(\), 'timeclock'\),\s*\n\s*where\('user_id', '==', uid\),\s*\n\s*where\('time_in', '>=', from \|\| '0000-01-01'\),\s*\n\s*where\('time_in', '<=', to \|\| '9999-12-31'\),\s*\n\s*orderBy\('time_in', 'desc'\)/.test(readsSourceForClockIndex)
+);
+checkIs(
+  'and the index it needs is declared for production',
+  declaredIndex('timeclock', 'user_id', 'time_in', 'DESCENDING'),
+  JSON.stringify(declaredIndexes.filter((index) => index.collectionGroup === 'timeclock'))
+);
 // THE ONE UNBOUNDED COLLECTION IS NOT IN THE SIGN-IN WAVE AT ALL. `schedule` holds every shift the station has ever
 // scheduled, so it is read per MONTH by the screen that draws it (GET_SCHEDULE, through App#loadScheduleWindow) and never as
 // part of a sign-in. Shifting the check to the reader is the point: the wave no longer has a window to get wrong, and the
@@ -152,7 +180,10 @@ check(
   [...`${source}\n${readsSource}`.matchAll(/rowsOf\(collection\((?:db|firestore\(\)), 'users'\)/g)].length,
   1
 );
-check('which the payload projects off in exactly two places', [...source.matchAll(/readUsersOnce\(\)/g)].length, 2);
+// THREE, and the third is the name fix: the admin Users section (joined to the private half), the shared read itself,
+// and the `directory` section - the PUBLIC rows the tabs that draw a member's name read, which had to be one of these
+// because the join the Users section performs is refused to an officer without can_edit_users.
+check('which the payload projects off in exactly three places', [...source.matchAll(/readUsersOnce\(\)/g)].length, 3);
 // DOWN FROM THREE, and the one that left is the point of this pass: the sign-in wave used to read the directory so it could
 // project a roster, and now it reads no directory at all - the dashboard names only whoever is on duty, one document per
 // person, by id (usersByIds). What is left is the admin Users section and the shared read itself.
@@ -265,7 +296,15 @@ const appSource = readFileSync('src/App.jsx', 'utf8');
 check(
   'the administration wave waits for the module to be opened',
   /!authToken \|\| !adminModuleOpened\) return;/.test(appSource) &&
-    /if \(activeTab === 'admin' && canAdminister\) setAdminModuleOpened\(true\)/.test(appSource),
+    /if \(activeTab === 'admin' && canAdminister && adminSubTab\) setAdminModuleOpened\(true\)/.test(appSource),
+  true
+);
+// ...and OPENING ADMINISTRATION IS FREE NOW: the menu page reads only the offers its badge counts
+// (and only for a role that may act on them), so a member who opens the module and changes their
+// mind has paid one small filtered read, not a tab's worth.
+check(
+  'the menu page reads only the offers its badge needs',
+  /'': allowedAdminTabs\(currentUserRole\)\.includes\('approvals'\) \? \['scheduleOffers'\] : \[\]/.test(appSource),
   true
 );
 // ...and the module has to SAY it is loading rather than drawing from props that are still empty, or the first moment of
@@ -322,8 +361,27 @@ check('and App does not hold a section the payload cannot refresh', setters.filt
 // object instead of a month.
 const tabSections = /const sectionsForTab = \{([\s\S]*?)\n    \};/.exec(appSource);
 checkIs('App has a per-tab section map', Boolean(tabSections));
+const sectionListFor = (tab) => {
+  // The key may be quoted ('system-log'), because a dash is not a bare object key. Both shapes are accepted.
+  const match = tabSections ? new RegExp(`${tab}'?: \\[([^\\]]*)\\]`).exec(tabSections[1]) : null;
+  return match ? match[1] : '';
+};
 const scheduleTabList = tabSections ? /schedule: \[([^\]]*)\]/.exec(tabSections[1]) : null;
 checkIs('and the schedule board reads the schedule rows, not just its templates', Boolean(scheduleTabList) && scheduleTabList[1].includes("'schedule'"));
+// EVERY TAB THAT NAMES A MEMBER ALSO READS THE DIRECTORY, and this is the same failure as the board's line above,
+// one level up: the tab's own rows arrive by a route of their own, so nothing about the screen looks broken when the
+// names come out blank - they render as "Unnamed member" and the tab is otherwise complete. The directory is the
+// public users collection, which every officer may read; the `users` section joins users_private and is refused to
+// anybody without can_edit_users, which is why a tab cannot use it just to label a row.
+const NAME_DRAWING_TABS = [
+  'schedule', 'assignments', 'clock', 'certifications', 'availability', 'approvals',
+  'announcements', 'events', 'training', 'system-log',
+];
+check(
+  'every tab that draws member names reads the directory',
+  NAME_DRAWING_TABS.filter((tab) => !sectionListFor(tab).includes("'directory'")),
+  []
+);
 checkIs(
   'and its section setter unwraps the rows from the window they came in',
   /schedule: \(payload\) => \{[\s\S]{0,400}?payload\?\.schedule/.test(appSource)

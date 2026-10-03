@@ -25,7 +25,7 @@ export const signInWithUsername = (username, password) =>
 // is not available yet", not "you cannot sign in" - and it must never be able to produce the second message. The
 // likeliest reason it will not succeed during the move is mundane: a member's Auth account holds the temporary
 // password from the migration while the sheet still holds their old one, so the app accepts a password Firebase does
-// not. That is expected until the password flows move (see docs/MIGRATION_MAP.md), and it is logged rather than
+// not. That is expected for the legacy rows this table may still hold (see the README's data-model section), and it is logged rather than
 // shown.
 export const signInAlongside = async (username, password) => {
   if (!firebaseConfigured()) return { ok: false, reason: 'unconfigured' };
