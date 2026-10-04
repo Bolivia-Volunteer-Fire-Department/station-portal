@@ -210,6 +210,10 @@ export const ROUTED_FEATURES = {
       'VERIFY_CHECKLIST_ITEM',
       'VERIFY_CHECKLIST_REMAINING',
       'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
+      // Recording what a paper file says for a member who did the work before this app existed. A member-module action
+      // rather than an Administration one, like SET_DOCUMENT_ASSESSMENT_SCORE below and for the same reason: it is
+      // writing a signature, which lives in the Documents feature.
+      'BACKFILL_DOCUMENT_SIGNATURES',
       'ADMIN_RENAME_DOCUMENT_FOLDER',
       'ADMIN_REORDER_DOCUMENTS',
       // An assessment score is written by the officer who administers the test, and by nobody else - not by the member
@@ -633,6 +637,25 @@ const DISPATCH = {
   ADMIN_REORDER_DOCUMENTS: async (body) => {
     const { reorderDocuments } = await writes();
     return ok(await reorderDocuments({ order: body.order }));
+  },
+
+  // THE RECORDER COMES FROM THE SESSION, never from the request - the same rule as signing and verifying, and it is what
+  // makes `signed_by_user_id` worth reading: a caller cannot claim somebody else entered the row. The member it is FOR
+  // does come from the request, which is the whole point of the feature, and the rules independently require the
+  // `backfilled` flag on any member row that is not the caller's own.
+  BACKFILL_DOCUMENT_SIGNATURES: async (body, uid) => {
+    const { backfillDocumentSignatures } = await writes();
+    return ok(
+      await backfillDocumentSignatures({
+        recorderId: uid,
+        documentId: body.document_id,
+        memberId: body.user_id,
+        itemIds: body.item_ids,
+        recordedOn: body.recorded_on,
+        note: body.note,
+        confirmVerified: body.confirm_verified === true,
+      })
+    );
   },
 
   // Training: a batch of signatures from the session, and the administrator's single removal.

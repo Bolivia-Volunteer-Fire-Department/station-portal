@@ -10,8 +10,12 @@
 // bug this module could have is those two being confused - so nothing below is called "signed" when it means
 // "verified".
 
-import { normalizeChecklistItemList, normalizeSignatureList } from './documents';
-import { formatLogTimestamp } from './systemLog';
+// THE FILE EXTENSIONS ARE LOAD-BEARING, exactly as they are at the top of documents.js and for the same reason. Vite
+// resolves `./documents` happily, so these two lines were fine for as long as this module was only reached through the
+// bundler. It is not any more: `scripts/verify-firestore-writes.mjs` imports it unbundled, straight into Node, which
+// requires the extension and failed with ERR_MODULE_NOT_FOUND - the same wall that module hit, and the same fix.
+import { normalizeChecklistItemList, normalizeSignatureList } from './documents.js';
+import { formatLogTimestamp } from './systemLog.js';
 
 // One item's state for one member: what they did, and what was confirmed about it.
 //

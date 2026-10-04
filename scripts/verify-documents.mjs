@@ -33,15 +33,24 @@ import {
   assessmentScoreId,
   assessmentScoreLimit,
   assessmentScoreProblem,
+  BACKFILL_NOTE_LIMIT,
+  backfillCandidates,
+  backfillItemStates,
+  backfillSignaturePlan,
+  backfillableItemIds,
+  backfilledSignatureLabel,
   checklistItemSortOrder,
   editorChecklistItemRows,
   documentCharactersLeft,
+  documentFolder,
   documentFolders,
   documentIsLive,
   documentLifecycle,
   documentLinkProblem,
   documentLinkUrl,
+  documentOrderSignature,
   documentSaveProblem,
+  documentsInFolder,
   documentSignatureState,
   documentToForm,
   documentUpdatedLabel,
@@ -61,11 +70,15 @@ import {
   normalizeSignatureList,
   outstandingSignatureDocuments,
   applyDocumentOrder,
+  pendingDocumentOrderPairs,
+  savedDocumentOrderPairs,
   insertDocumentBefore,
   reorderDocuments,
   reorderFolders,
   signatureDateLabel,
+  signatureIsBackfilled,
   signatureIsStale,
+  signatureRecordedLabel,
   signedDocumentIds,
 } from '../src/utils/documents.js';
 import { isActiveOnDate } from '../src/utils/effectiveDates.js';
@@ -358,6 +371,28 @@ check(
   ),
   ['a1', 'a2']
 );
+// ...AND THE CHECK ABOVE CANNOT TELL, which is the reason the redraw fault got as far as it did. `held` is [a1, a2] and
+// the dragged answer is [a1, a2], so a list drawn in arrival order passes it just as well as one drawn in `sort_order`.
+// The fixture has to ARRIVE the other way round for the two answers to differ, and this is that fixture: the rows come
+// in [b1, b2] and the drag puts b2 first, so arrival order says ['b1','b2'] and the rule says ['b2','b1'].
+const arrivedBackwards = normalizeDocumentList([
+  { id: 'b1', title: 'B one', folder: 'Bravo', sort_order: 0 },
+  { id: 'b2', title: 'B two', folder: 'Bravo', sort_order: 20 },
+]);
+const draggedBackwards = applyDocumentOrder(arrivedBackwards, [
+  { id: 'b1', sort_order: 20 },
+  { id: 'b2', sort_order: 0 },
+]);
+check(
+  'a drag moves a row on screen, not only in the numbers it wrote',
+  groupDocumentsByFolder(draggedBackwards).flatMap((group) => group.documents.map((row) => row.id)),
+  ['b2', 'b1']
+);
+check(
+  'and this fixture arrives in the order a broken list would have shown',
+  arrivedBackwards.map((row) => row.id),
+  ['b1', 'b2']
+);
 // The input is never mutated, and an order that changes nothing returns the SAME list so React can skip the render -
 // the rule utils/savedRow states for its own merges.
 const heldBefore = JSON.stringify(held);
@@ -377,6 +412,310 @@ check(
   applyDocumentOrder(held, [{ id: 'ghost', sort_order: 0 }]) === held,
   true
 );
+
+// ---------------------------------------------------------------------------
+// The staged order: what is waiting to be saved, and what a save sends.
+//
+// Reordering is "move as many rows as you like, then save once". These are the two questions that makes the screen ask
+// over and over - what does the library look like now, and what is stored - so they are pure, and the bar's count and
+// the request body both come from the same answer rather than from two tallies that could drift.
+console.log('\n--- what is waiting to be saved ---');
+const savedRows = normalizeDocumentList([
+  { id: 'o1', title: 'One', folder: 'Ops', sort_order: 0 },
+  { id: 'o2', title: 'Two', folder: 'Ops', sort_order: 10 },
+  { id: 'o3', title: 'Three', folder: 'Ops', sort_order: 20 },
+]);
+const savedSignature = documentOrderSignature(savedRows);
+check('the saved order is read as a signature', [...savedSignature].map(([id, order]) => [id, order]), [
+  ['o1', 0],
+  ['o2', 10],
+  ['o3', 20],
+]);
+check('a list nobody has touched is waiting to save nothing', pendingDocumentOrderPairs(savedRows, savedSignature), []);
+
+// One row moved to the top: the other two are renumbered by the drag helper, so all three are pending.
+const movedToTop = applyDocumentOrder(savedRows, [
+  { id: 'o1', sort_order: 10 },
+  { id: 'o2', sort_order: 0 },
+  { id: 'o3', sort_order: 20 },
+]);
+check(
+  'a moved row is what is waiting, and only the rows whose number changed',
+  pendingDocumentOrderPairs(movedToTop, savedSignature),
+  [
+    { id: 'o1', sort_order: 10 },
+    { id: 'o2', sort_order: 0 },
+  ]
+);
+check(
+  'and the row that stayed put is not in the save',
+  pendingDocumentOrderPairs(movedToTop, savedSignature).some((pair) => pair.id === 'o3'),
+  false
+);
+// Measured against the SAVED order rather than against "was this touched" - so dragging a row back where it was leaves
+// nothing to write, and the bar offering to save it goes away. Tracking "touched" would keep offering forever.
+const putBack = applyDocumentOrder(movedToTop, [
+  { id: 'o1', sort_order: 0 },
+  { id: 'o2', sort_order: 10 },
+]);
+check('a drag that ends where it started is waiting to save nothing', pendingDocumentOrderPairs(putBack, savedSignature), []);
+check('though the working list is a different array', putBack !== savedRows, true);
+check('and it reads the same order again', groupDocumentsByFolder(putBack).flatMap((g) => g.documents.map((r) => r.id)), [
+  'o1',
+  'o2',
+  'o3',
+]);
+// A blocked/absent snapshot must not report the whole library as changed: "nothing is stored" is not a state this
+// screen is ever in, and treating it as one would offer to save every row on the station.
+check('with no saved order to compare against, nothing is pending', pendingDocumentOrderPairs(savedRows, undefined), []);
+check('and an empty list has nothing pending', pendingDocumentOrderPairs([], savedSignature), []);
+check('a row the server has not sent back yet is not invented', pendingDocumentOrderPairs([{ id: 'ghost' }], savedSignature), []);
+check(
+  'Discard is the saved order as pairs, so it needs no read to undo',
+  savedDocumentOrderPairs(savedSignature),
+  [
+    { id: 'o1', sort_order: 0 },
+    { id: 'o2', sort_order: 10 },
+    { id: 'o3', sort_order: 20 },
+  ]
+);
+check(
+  'and applying it puts a moved row back',
+  groupDocumentsByFolder(applyDocumentOrder(movedToTop, savedDocumentOrderPairs(savedSignature))).flatMap((g) =>
+    g.documents.map((row) => row.id)
+  ),
+  ['o1', 'o2', 'o3']
+);
+// The numbers are compared as numbers, so a row the server sent as a string is not reported as moved for ever.
+check(
+  'a sort_order that arrives as text is compared as a number',
+  pendingDocumentOrderPairs([{ id: 'o1', sort_order: '0' }], savedSignature),
+  []
+);
+
+// ---------------------------------------------------------------------------
+// GRANDFATHERING: what a paper file becomes, and how the record stays honest
+// ---------------------------------------------------------------------------
+// The feature is "enter what the crew did before the app existed, from the files, for many people at once". The two
+// things that have to be right are the ARITHMETIC - a back-filled row has to count as that member's signature
+// everywhere, or grandfathering does not work - and the HONESTY - a row an officer entered must never read like one the
+// member tapped.
+console.log('\n--- back-filling from the paper files ---');
+const backfillItems = [
+  { id: 'b1', document_id: 'doc-bf', sort_order: 1, section: 'Exterior', label: 'Tires' },
+  { id: 'b2', document_id: 'doc-bf', sort_order: 2, section: 'Exterior', label: 'Lights' },
+  { id: 'b3', document_id: 'doc-bf', sort_order: 3, section: 'Cab', label: 'Radio check' },
+];
+const ana = 'u-ana';
+const officer = 'u-officer';
+
+// The ordinary shape: a member ticks an item themselves.
+const anaOwn = {
+  id: 'sg-own',
+  document_id: 'doc-bf',
+  checklist_item_id: 'b1',
+  user_id: ana,
+  signed_by_user_id: ana,
+  signature_role: 'member',
+  signed_at: '2026-03-01 09:00:00',
+};
+check('a member\u2019s own signature is not a back-fill', signatureIsBackfilled(anaOwn), false);
+
+// The shape this feature writes.
+const anaFilled = { ...anaOwn, id: 'sg-fill', checklist_item_id: 'b2', signed_by_user_id: officer, backfilled: true };
+check('a row an officer entered is flagged as one', signatureIsBackfilled(anaFilled), true);
+// ...AND THE FLAG IS NOT THE ONLY READING. A row written before the flag existed is recognisable by its shape - the one
+// shape the rules always refused for a member - so old data reads correctly with no migration.
+const anaOld = { ...anaFilled, id: 'sg-old', backfilled: undefined };
+check('and so is one whose signer is not its owner, from before the flag existed', signatureIsBackfilled(anaOld), true);
+check('while a row naming no signer at all is not one', signatureIsBackfilled({ ...anaOwn, signed_by_user_id: '' }), false);
+check('a verification is not a back-filled signature', signatureIsBackfilled({ ...anaFilled, signature_role: 'verifier' }), false);
+
+// THE ARITHMETIC THAT MAKES IT WORK: every screen that reads progress keys off role 'member', so a back-filled row has
+// to read as the member's signature. Asserted rather than assumed, because it is the whole reason the row is shaped
+// this way rather than being a fourth role.
+check('a back-filled row counts as THAT member\u2019s signed item', checklistItemState('b2', [anaFilled], ana).signed, true);
+check('and not as somebody else\u2019s', checklistItemState('b2', [anaFilled], officer).signed, false);
+check('so the member\u2019s progress moves when it is written', checklistProgress(backfillItems, [anaFilled], ana).signed, 1);
+check(
+  'and a fully back-filled checklist is complete once confirmed',
+  checklistIsComplete(
+    backfillItems,
+    backfillItems.flatMap((item) => [
+      { ...anaFilled, id: `m-${item.id}`, checklist_item_id: item.id },
+      { ...anaFilled, id: `v-${item.id}`, checklist_item_id: item.id, signature_role: 'verifier' },
+    ]),
+    ana
+  ),
+  true
+);
+
+// What the screen says about each item.
+const bfStates = backfillItemStates(backfillItems, [anaOwn, anaFilled], ana);
+check(
+  'an item already on file is not offered again',
+  bfStates.map((state) => [state.itemId, state.recorded]),
+  [['b1', true], ['b2', true], ['b3', false]]
+);
+check(
+  'and the screen says which kind of done it is',
+  bfStates.filter((state) => state.recorded).map((state) => [state.itemId, state.signedByMember, state.backfilled]),
+  [['b1', true, false], ['b2', false, true]]
+);
+check('an item with nothing on it is bare', bfStates[2].recorded, false);
+check(
+  'the state is asked for ONE member, so another member\u2019s rows are not counted',
+  backfillItemStates(backfillItems, [anaOwn, anaFilled], 'u-other').some((state) => state.recorded),
+  false
+);
+
+// THE SELECTION RULE, shared by the screen and the writer: what a save should write.
+check(
+  'only the ticked items that are not already on file are written',
+  backfillableItemIds(backfillItems, [anaOwn, anaFilled], ana, ['b1', 'b2', 'b3']),
+  ['b3']
+);
+check('an item the officer did not tick is not written', backfillableItemIds(backfillItems, [anaOwn, anaFilled], ana, ['b3']), ['b3']);
+check('ticking nothing writes nothing', backfillableItemIds(backfillItems, [], ana, []), []);
+check(
+  'an item another checklist owns is refused',
+  backfillableItemIds(backfillItems, [], ana, ['b1', 'somebody-elses-item']),
+  ['b1']
+);
+check('and a double tick is one row, not two', backfillableItemIds(backfillItems, [], ana, ['b3', 'b3', ' b3 ']), ['b3']);
+check('a member\u2019s own signature blocks a back-fill of the same item', backfillableItemIds(backfillItems, [anaOwn], ana, ['b1']), []);
+check('but not for a different member', backfillableItemIds(backfillItems, [anaOwn], 'u-other', ['b1']), ['b1']);
+
+// The plan: the rows themselves, as data.
+const plan = backfillSignaturePlan({
+  documentId: 'doc-bf',
+  items: backfillItems,
+  signatures: [anaOwn],
+  memberId: ana,
+  recorderId: officer,
+  itemIds: ['b2', 'b3'],
+  at: '2025-05-01',
+  revision: 7,
+  note: 'Paper file',
+  confirmVerified: true,
+});
+// THE ROW HAS TO BE WHOLE, not merely to have the fields this test happens to name. A signature is read back BY
+// DOCUMENT on every screen, so a row missing `document_id` is attached to nothing: the write reports success, the row
+// exists in the collection, and the item still reads as unrecorded everywhere. That exact bug shipped through the first
+// version of these checks, which listed the fields they were interested in and never asked whether the row was complete
+// - it was caught by the emulator round trip and by nothing else. So this asserts the whole shape.
+check(
+  'every row is whole: the document, the item, the member and the role',
+  [...plan.member, ...plan.verifier].map((row) => [row.document_id, row.checklist_item_id, row.user_id, row.signature_role]),
+  [
+    ['doc-bf', 'b2', ana, 'member'],
+    ['doc-bf', 'b3', ana, 'member'],
+    ['doc-bf', 'b2', ana, 'verifier'],
+    ['doc-bf', 'b3', ana, 'verifier'],
+  ]
+);
+check(
+  'and no field of a signature row is missing from either kind',
+  [...plan.member, ...plan.verifier].every(
+    (row) => row.document_id && row.user_id && row.signed_by_user_id && row.signature_role && row.signed_at
+  ),
+  true
+);
+check('the plan writes a member row per new item', plan.member.length, 2);
+check(
+  'each one counting for the member and attributed to the officer',
+  plan.member.map((row) => [row.user_id, row.signed_by_user_id, row.signature_role]),
+  [[ana, officer, 'member'], [ana, officer, 'member']]
+);
+check(
+  'each one flagged as a back-fill, with the note and the moment it was entered',
+  plan.member.map((row) => [row.backfilled, row.backfill_note, Boolean(row.backfilled_at)]),
+  [[true, 'Paper file', true], [true, 'Paper file', true]]
+);
+check('and stamped with the date the officer gave', plan.member.map((row) => row.signed_at), ['2025-05-01', '2025-05-01']);
+check(
+  'with the document\u2019s revision, so a back-fill is never reported as stale',
+  plan.member.map((row) => row.content_revision),
+  [7, 7]
+);
+check(
+  'and a verifier row for each, attributed to the same officer',
+  plan.verifier.map((row) => [row.signature_role, row.user_id, row.signed_by_user_id, row.content_revision]),
+  [['verifier', ana, officer, 0], ['verifier', ana, officer, 0]]
+);
+check('a verification carries no back-fill flag of its own', plan.verifier.every((row) => row.backfilled === undefined), true);
+// The choice is real: with it off, the rows go to the ordinary verification queue instead.
+const unverifiedPlan = backfillSignaturePlan({
+  documentId: 'doc-bf',
+  items: backfillItems,
+  signatures: [],
+  memberId: ana,
+  recorderId: officer,
+  itemIds: ['b1'],
+  at: '2025-05-01',
+});
+check('leaving the confirmation off writes no verifier row', unverifiedPlan.verifier.length, 0);
+check('though the signature is still written', unverifiedPlan.member.length, 1);
+// A note is a note, not a body: the limit is applied rather than trusted, and the row still lands.
+check(
+  'a long note is trimmed rather than refused',
+  backfillSignaturePlan({
+    documentId: 'doc-bf',
+    items: backfillItems,
+    signatures: [],
+    memberId: ana,
+    recorderId: officer,
+    itemIds: ['b1'],
+    at: '2025-05-01',
+    note: 'x'.repeat(BACKFILL_NOTE_LIMIT + 50),
+  }).member[0].backfill_note.length,
+  BACKFILL_NOTE_LIMIT
+);
+check(
+  'and a plan with nothing new to write writes nothing',
+  backfillSignaturePlan({
+    documentId: 'doc-bf',
+    items: backfillItems,
+    signatures: [],
+    memberId: ana,
+    recorderId: officer,
+    itemIds: [],
+    at: '2025-05-01',
+  }).member.length,
+  0
+);
+
+// WHO THE PANEL OFFERS, which is the client half of the server's refusal. As a rule with cases rather than a filter in a
+// dropdown, because a mutation test found the gap: a text check for the expression passed while `false &&` in front of
+// it broke the behaviour, and every check stayed green.
+check(
+  'the member list is everyone except the officer doing the recording',
+  backfillCandidates([{ id: 'u1', name: 'Jane' }, { id: 'u2', name: 'Bo' }], 'u1').map((user) => user.id),
+  ['u2']
+);
+check('and a row with no id is not offered', backfillCandidates([{ id: '' }, { id: 'u2' }], 'u1').map((user) => user.id), ['u2']);
+check('with nobody signed in, everyone is offered', backfillCandidates([{ id: 'u1' }, { id: 'u2' }], '').length, 2);
+check('and a null list is an empty list, not a crash', backfillCandidates(null, 'u1'), []);
+
+// How the record reads back and is labelled.
+check(
+  'the record says who entered it and for whom',
+  backfilledSignatureLabel(anaFilled, 'Ana Ruiz', 'Jane Doe'),
+  'Recorded by Jane Doe for Ana Ruiz'
+);
+check('a name that cannot be resolved still says where it came from', backfilledSignatureLabel(anaFilled), 'Recorded from paper records');
+check('and a member\u2019s own signature gets no such label', backfilledSignatureLabel(anaOwn, 'Ana Ruiz', 'Ana Ruiz'), '');
+check('a member\u2019s own date reads as "Signed"', signatureDateLabel(anaOwn), 'Signed Sun, Mar 1 2026 · 9:00 AM');
+check('and a back-filled one says "Recorded"', signatureDateLabel(anaFilled, '12', 'Recorded'), 'Recorded Sun, Mar 1 2026 · 9:00 AM');
+// A date-only stamp - which is what a back-fill is given - reads as a date and shows no clock, because there is no time
+// of day to show: the paper says a day.
+check('a date with no clock on it shows no clock', signatureDateLabel({ signed_at: '2025-05-01' }, '12', 'Recorded'), 'Recorded Thu, May 1 2025');
+check(
+  'signatureRecordedLabel labels only back-filled rows',
+  [signatureRecordedLabel(anaFilled), signatureRecordedLabel(anaOwn)],
+  ['Recorded Sun, Mar 1 2026 · 9:00 AM', '']
+);
+
 
 console.log('\n--- effective and end dates ---');
 const windowed = normalizeDocument({
@@ -404,14 +743,31 @@ check('and so is one with only an end date', documentSaveProblem({ title: 'T', c
 check('documentIsLive agrees with the lifecycle', documentIsLive(windowed, '2027-01-01'), false);
 check('the window survives the round trip to the form', documentToForm(windowed).end_date, '2026-12-31');
 check('unfiled documents are shown last', documentFolders(rows), ['Apparatus', 'General', UNFILED_LABEL]);
+// IN sort_order, NOT IN ARRIVAL ORDER - and the fixture is built so the two answers differ: `a` (order 2) arrives before
+// `c` (order 1), so a group drawn as the rows arrived would answer ['a', 'c'].
+//
+// THAT IS WHAT THIS ASSERTED. The expectation below read ['a', 'c'] for as long as the list was a bare `.filter()` of
+// the array it was handed - so the check was not merely blind to the fault, it was holding it in place: it passed for
+// exactly the reason the screen was wrong. The rule is `sort_order`, and the drawn order has to be the order a drag
+// writes or a saved reorder comes back looking like it did nothing.
 check(
-  'and grouped with their folder',
+  'the fixture disagrees with itself on purpose, so an arrival-order list fails this',
+  rows.filter((row) => documentFolder(row) === 'General').map((row) => row.id),
+  ['a', 'c']
+);
+check(
+  'and grouped with their folder, in sort_order rather than the order they arrived in',
   groupDocumentsByFolder(rows).map((group) => [group.folder, group.documents.map((row) => row.id)]),
   [
     ['Apparatus', ['d']],
-    ['General', ['a', 'c']],
+    ['General', ['c', 'a']],
     [UNFILED_LABEL, ['b']],
   ]
+);
+check(
+  'which is the same order `documentsInFolder` gives for one folder',
+  documentsInFolder(rows, 'General').map((row) => row.id),
+  ['c', 'a']
 );
 
 // The folder column's two numbers. They have to agree with the second column, so they come from the same helpers -
@@ -1650,6 +2006,25 @@ checkIs(
   'which is a rule in utils/documents rather than a line in the component',
   /export const applyDocumentOrder = \(documents, pairs\)/.test(readFileSync('src/utils/documents.js', 'utf8'))
 );
+// ...AND THE ROW ORDER ON SCREEN IS `sort_order`. This is the half that was still missing after the fix above: the pairs
+// were applied to the rows, the rows kept their numbers, and NOTHING MOVED - because the list was drawn as the array
+// happened to be laid out, which only a re-read changes. The officer saw the change after leaving the tab and coming
+// back, which is precisely the shape of "the drag is broken". `documentsInFolder` is the one definition of the drawn
+// order, and the drag helpers already used it to work out where a row should land.
+checkIs(
+  'and the rows are drawn in that order rather than in the order they arrived',
+  /export const documentsInFolder = \(documents, folder\) => orderedFolderDocuments\(documents, folder\)/.test(
+    readFileSync('src/utils/documents.js', 'utf8')
+  ),
+  'a drop would write the right numbers and move nothing on screen'
+);
+checkIs(
+  'so the grouping the list is drawn from goes through it',
+  /groupDocumentsByFolder[\s\S]{0,220}documentsInFolder\(documents, folder\)/.test(
+    readFileSync('src/utils/documents.js', 'utf8')
+  ),
+  'the rows under a heading would be in arrival order again'
+);
 checkIs(
   'Unfiled cannot be dragged',
   /draggable=\{group\.folder !== UNFILED_LABEL && !savingOrder\}/.test(tabSource)
@@ -1673,6 +2048,117 @@ checkIs(
   'with the ends disabled rather than wrapping',
   /disabled=\{savingOrder \|\| selectedIndex <= 0\}/.test(tabSource) &&
     /selectedIndex >= selectedSiblings\.length - 1/.test(tabSource)
+);
+
+// ---------------------------------------------------------------------------
+// Make all the changes, then save once.
+//
+// A drag used to be a request. Ordering a shelf is one job, and a request per nudge made the officer wait on the network
+// between each move, left a half-applied order behind if the third one failed, and never let them see the finished list
+// before committing to it. Nothing is written until Save order now, and the moves survive the tab being closed.
+console.log('\n--- making all the changes, then saving once ---');
+// The half that matters: a drop and the two buttons STAGE. If any of them called the writer directly, one of the five
+// ways to move a row would save on its own again - and it would be the one nobody tested.
+const stageCalls = (tabSource.match(/stageOrder\(pairs\)/g) || []).length;
+check('all four ways to move a row go through the one stage (a drop on a row, a gap, a folder, and the buttons)', stageCalls, 4);
+checkIs(
+  'and none of them still writes as it goes',
+  !/applyOrder\(/.test(tabSource),
+  'a drop would save on its own, with no way to see the finished list first'
+);
+// ONE WRITER, COUNTED. Counting the staging calls says every move goes through the stage; it does NOT say a move cannot
+// write as well - a stray `adminReorderDocuments` beside a `stageOrder` leaves all four calls in place and still saves on
+// the drop. This is the half that closes it: there is exactly one place in this tab that writes an order.
+check(
+  'and there is exactly one writer of the order in the whole tab',
+  (tabSource.match(/adminReorderDocuments\(/g) || []).length,
+  1
+);
+checkIs(
+  'staging applies the pairs to the rows and writes nothing',
+  /const stageOrder = useCallback\([\s\S]{0,320}setRows\(\(current\) => applyDocumentOrder\(current, pairs\)\)[\s\S]{0,80}\[savingOrder\]/.test(
+    tabSource
+  ),
+  'the moved row would not appear in its new place until a reload'
+);
+// ONE REQUEST, EVERY ROW THAT MOVED. The pairs are the difference between the screen and the server, so the request body
+// is that difference rather than a working copy of the library.
+checkIs(
+  'and one save sends every row that moved',
+  /const saveOrder = useCallback\([\s\S]{0,320}adminReorderDocuments\(pairs, token\)/.test(tabSource),
+  'the save would not be one request'
+);
+checkIs(
+  'with the pending pairs as the request body, worked out in utils rather than counted here',
+  /const pairs = pendingOrder;/.test(tabSource) &&
+    /pendingDocumentOrderPairs\(rows, savedOrder\)/.test(tabSource),
+  'the count in the bar and the request body could disagree'
+);
+checkIs(
+  'and the saved order becomes the list the officer is looking at, so the bar clears',
+  /setSavedOrder\(documentOrderSignature\(rows\)\)/.test(tabSource),
+  'the bar would keep offering to save changes that had just landed'
+);
+checkIs(
+  'Discard puts the stored numbers back without a read',
+  /discardOrder[\s\S]{0,200}savedDocumentOrderPairs\(savedOrder\)/.test(tabSource),
+  'undoing a mistake would cost a request'
+);
+// The bar carries the buttons and the count, and the count is that same pending list - not a separate tally.
+checkIs(
+  'the bar is what offers the save, and it counts the pairs a save would send',
+  /orderDirty \? \(/.test(tabSource) &&
+    /pendingOrder\.length\} unsaved change/.test(tabSource) &&
+    /onClick=\{saveOrder\}/.test(tabSource) &&
+    /onClick=\{discardOrder\}/.test(tabSource),
+  'nothing would say what is waiting, or offer to save it'
+);
+checkIs(
+  'and it says the changes survive leaving the tab',
+  /Kept if you switch tabs/.test(tabSource),
+  'an officer would reasonably assume a tab switch silences the work'
+);
+// THE MODAL COVERS THE BAR. Move up / Move down live inside the editor, so the one path a touch screen can use would
+// stage a move with no way to see or save it - the bar is on the page behind the modal, and nothing else in there said
+// anything was waiting. The count and the button sit beside those two buttons, off the same `pendingOrder`.
+checkIs(
+  'the editor says how many moves are waiting',
+  /move\{pendingOrder\.length === 1 \? '' : 's'\} not saved/.test(tabSource),
+  'a tablet could move a row and never be told anything was waiting'
+);
+// COUNTED AND POSITIONED rather than matched with a distance budget: "the save appears twice at least" plus "the one in
+// the editor comes after the move buttons" is the claim, and neither depends on how long the markup between them is.
+check(
+  'so the save is offered in two places: the bar, and beside Move up / Move down',
+  (tabSource.match(/onClick=\{saveOrder\}/g) || []).length,
+  2
+);
+check(
+  'and the one inside the editor comes after the two buttons it belongs to',
+  tabSource.indexOf('onClick={saveOrder}', tabSource.indexOf('moveSelectedDocument(1)')) > tabSource.indexOf('moveSelectedDocument(1)'),
+  true
+);
+// AN UNSAVED ORDER OUTLIVES THE UNMOUNT, which is the part a staged pattern has to get right: switching Administration
+// tabs tears this one down, and losing the arrangement silently is exactly the quiet failure staging is meant to avoid.
+checkIs(
+  'an unsaved order is kept in sessionStorage, so a tab switch does not throw it away',
+  /ORDER_DRAFT_KEY = 'documents\.order\.draft'/.test(tabSource) &&
+    /sessionStorage\.setItem\(ORDER_DRAFT_KEY, JSON\.stringify\(pendingOrder\)\)/.test(tabSource) &&
+    /sessionStorage\.removeItem\(ORDER_DRAFT_KEY\)/.test(tabSource),
+  'the order would be lost by leaving the tab, with nothing said'
+);
+checkIs(
+  'and it is read back once, onto the rows that arrive',
+  /const draft = draftReadRef\.current \? pendingOrderRef\.current : readOrderDraft\(\);/.test(tabSource) &&
+    /setRows\(draft\.length > 0 \? applyDocumentOrder\(fresh, draft\) : fresh\)/.test(tabSource),
+  'a stored order would never be restored, or would be restored over a finished one'
+);
+// A reload must not undo the arrangement: every save in this tab reloads the library, and so does the mount.
+checkIs(
+  'a reload lays the working order over the rows rather than replacing it',
+  /const fresh = await loadRows\(\);/.test(tabSource) &&
+    /setSavedOrder\(documentOrderSignature\(fresh\)\)/.test(tabSource),
+  'saving a document would silently put the staged rows back where the server has them'
 );
 
 // The frame comes in two sizes. Size is the FRAME, not the contract: the toolbar, the disabled fieldset and the
@@ -1910,6 +2396,120 @@ checkIs(
 checkIs(
   'and the reader score arrives with the document',
   /setMyScore\(result\.assessment_score \? normalizeAssessmentScore/.test(moduleSource)
+);
+
+// ---------------------------------------------------------------------------
+// Back-filling the paper files: the screen, and the write behind it
+// ---------------------------------------------------------------------------
+console.log('\n--- the back-fill panel ---');
+const backfillSource = readFileSync(path.resolve(process.cwd(), 'src/components/admin/AdminSignatureBackfill.jsx'), 'utf8');
+const writesSource = readFileSync(path.resolve(process.cwd(), 'src/services/firestoreWrites.js'), 'utf8');
+const rulesSource2 = readFileSync('firestore.rules', 'utf8');
+
+// THE RULE THAT MAKES THE FEATURE SAFE. An officer may write a 'member' row for somebody else - that is what
+// grandfathering needs - and ONLY while saying it was not the member's own tap. Pinned at the source as well as in the
+// emulator, because this one clause is the difference between a back-fill and a forged signature.
+checkIs(
+  'the rules let an officer write a member row only when it is flagged as a back-fill',
+  /permission\('can_manage_documents'\)[\s\S]{0,320}request\.resource\.data\.get\('backfilled', false\) == true/.test(rulesSource2) &&
+    /request\.resource\.data\.get\('user_id', ''\) != uid\(\)/.test(rulesSource2),
+  'an officer could write an ordinary signature in a member\u2019s name'
+);
+checkIs(
+  'and the recorder is required to be the caller',
+  /get\('signed_by_user_id', ''\) == uid\(\)/.test(rulesSource2),
+  'a row could be attributed to somebody who did not enter it'
+);
+
+// The write: one action, honest rows, and no invention.
+checkIs(
+  'the writer refuses a record against the recorder themselves',
+  /member === recorder[\s\S]{0,300}A back-fill is somebody else recording what they found/.test(writesSource),
+  'a member could self-enter and make "I did this" and "the station recorded this" the same statement'
+);
+checkIs(
+  'and works the rows out with the client\u2019s own helper rather than a second copy of the rule',
+  /backfillSignaturePlan\(\{/.test(writesSource) && /import \{[\s\S]{0,200}backfillSignaturePlan/.test(writesSource),
+  'the screen\u2019s count and the rows written could disagree'
+);
+checkIs(
+  'a checklist\u2019s items come from the document, not from the request',
+  /isChecklist \? await rowsFor\('document_checklist_items', 'document_id', document\) : \[\]/.test(writesSource),
+  'a stale screen could point a row at another checklist\u2019s item'
+);
+checkIs(
+  'and a plain document gets the whole-document row instead',
+  /itemIds: isChecklist \? itemIds : \[''\]/.test(writesSource),
+  'a non-checklist would be given item rows that point at nothing'
+);
+checkIs(
+  'the date the officer gave is used, and anything else falls back to now',
+  /\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(onDay\) \? onDay : stationTimestamp\(\)/.test(writesSource),
+  'a back-filled row could be stamped with a date nobody gave'
+);
+checkIs(
+  'and it is written in chunks, because a matrix can exceed one batch',
+  /BACKFILL_CHUNK = \d+/.test(writesSource) && /start \+= BACKFILL_CHUNK/.test(writesSource),
+  'a large back-fill would fail as one oversized batch'
+);
+checkIs(
+  'member rows first, so a verification can never precede the signature it confirms',
+  /\[\.\.\.plan\.member, \.\.\.plan\.verifier\]/.test(writesSource),
+  'a chunk boundary could leave a confirmation of a row that is not there yet'
+);
+// THE READS GO TO THE SERVER, NOT THE CACHE. This is a CHOICE rather than a claim the harness can fail on, and it is
+// written down as such: both reads follow a write (one decides what a second back-fill skips, the other is what the
+// panel redraws from), and a cache-first read can hand back pre-write rows - the failure this whole area of the app has
+// already had twice, where the save works and the screen says nothing happened. Proving it would need a harness that can
+// control the local cache; what is pinned here is that the choice cannot be silently reverted.
+checkIs(
+  'the writer reads signatures from the server rather than the cache',
+  /rowsOf\(query\(collection\(firestore\(\), 'document_signatures'\), where\('document_id', '==', document\)\), \{\s*source: 'server',/.test(
+    writesSource
+  ),
+  'a pre-write cache answer would make the grid redraw as unrecorded, or let a duplicate row through'
+);
+
+// The panel: the flow the officer actually works in.
+checkIs(
+  'the panel is offered only where the write would be allowed',
+  /canManageDocuments && \([\s\S]{0,200}<AdminSignatureBackfill/.test(tabSource),
+  'a role without the permission would be offered a save the server refuses'
+);
+checkIs(
+  'the recorder cannot pick themselves as the member',
+  /backfillCandidates\(users, currentUserId\)/.test(backfillSource),
+  'the member list would offer a save that always fails'
+);
+checkIs(
+  'Save & next member moves down the list, which is what makes a stack of files one pass',
+  /if \(advance\) \{[\s\S]{0,700}const at = members\.findIndex[\s\S]{0,200}chooseMember\(String\(next\.id\)\)/.test(backfillSource),
+  'an officer would have to re-pick the checklist and the member for each file'
+);
+checkIs(
+  'the date and the note survive that move, because they belong to the sitting',
+  /recordedOn,?\s*\n?\s*note/.test(backfillSource) && !/setRecordedOn\(todayKey/.test(backfillSource.split('advance: true')[1] || ''),
+  'the date would be reset for every member in the pile'
+);
+checkIs(
+  'an item already on file is not clickable and says which kind of done it is',
+  /disabled=\{already\}/.test(backfillSource) && /state\.signedByMember/.test(backfillSource) && /'Recorded'/.test(backfillSource),
+  'the officer could not tell a member\u2019s own tick from a row entered from paper'
+);
+checkIs(
+  'the sections keep their own all/none, so a whole section is one click',
+  /onAllFor\(groupIds, !groupAll\)/.test(backfillSource) && /Select everything left/.test(backfillSource),
+  'a forty-item checklist would be forty clicks'
+);
+checkIs(
+  'and the confirmation is a visible choice rather than an implied one',
+  /Also confirm these as/.test(backfillSource) && /confirmVerified/.test(backfillSource),
+  'an officer could not tell whether their entry also confirmed the item'
+);
+checkIs(
+  'what the button says it will save is the same list the writer is given',
+  /pending\.length\} item/.test(backfillSource) && /itemIds: isChecklist \? pending : \[''\]/.test(backfillSource),
+  'the count on the button and the rows written could drift apart'
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

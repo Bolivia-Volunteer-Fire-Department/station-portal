@@ -251,6 +251,43 @@ export const applyDocumentOrder = (documents, pairs) => {
   return changed ? patched : list;
 };
 
+// The order a list is currently in, as `id -> sort_order`. The snapshot a pending change is measured against, and the
+// numbers Discard puts back.
+export const documentOrderSignature = (documents) => {
+  const signature = new Map();
+  (Array.isArray(documents) ? documents : []).forEach((document) => {
+    const id = text(document && document.id);
+    if (id) signature.set(id, Number.parseInt(document && document.sort_order, 10) || 0);
+  });
+  return signature;
+};
+
+// The pairs a save has to write: the rows whose number no longer matches the order they were last saved in.
+//
+// MEASURED AGAINST THE SAVED ORDER rather than against "did this row move". A drag that puts a document back where it
+// was has nothing to write, and the bar offering to save it has to go away when it does - which only works if the
+// question is "does this differ from what is stored" rather than "was this touched". This is also what lets the
+// unsaved order be described by the pairs alone: the draft IS this list, so it cannot drift from what the screen shows.
+//
+// A ROW WITH NO SAVED NUMBER IS NOT PENDING, and it is worth saying why that is the safe way round. A number can only be
+// missing when the row is not one the snapshot was built from - a state this screen is not in, since `rows` and the
+// snapshot are set together from a single read. Reporting it as changed instead would mean a library nobody has touched
+// offering to save every row in it, which is a worse answer to a question nobody asked. And it cannot lose a change: an
+// officer can only drag a row that is on screen, and every row on screen has a number in the snapshot.
+export const pendingDocumentOrderPairs = (documents, signature) => {
+  const saved = signature instanceof Map ? signature : new Map();
+  return (Array.isArray(documents) ? documents : [])
+    .map((document) => ({
+      id: text(document && document.id),
+      sort_order: Number.parseInt(document && document.sort_order, 10) || 0,
+    }))
+    .filter((pair) => pair.id !== '' && saved.has(pair.id) && saved.get(pair.id) !== pair.sort_order);
+};
+
+// The saved order as pairs, so an unsaved change can be undone without a read: every number put back the way it was.
+export const savedDocumentOrderPairs = (signature) =>
+  [...(signature instanceof Map ? signature : new Map())].map(([id, sort_order]) => ({ id, sort_order }));
+
 // Dragging a folder to another folder's position, as one block of documents. Writes nothing about the folder
 // itself, because there is nothing to write: every document in the moved folder is given a place in the run.
 export const reorderFolders = (documents, movedFolder, targetFolder) => {
@@ -325,11 +362,21 @@ export const documentFolders = (documents) => {
   });
 };
 
-// The documents of one folder, in the order the server sent them (its own `sort_order`, then title).
-export const documentsInFolder = (documents, folder) =>
-  (Array.isArray(documents) ? documents : []).filter((document) => documentFolder(document) === folder);
+// The documents of one folder, in the order they are shown: `sort_order`, then title.
+//
+// THIS IS `orderedFolderDocuments`, AND IT USED TO NOT BE. It was a bare `.filter()` - the order the array happened to
+// be in - while the SERVER sends the library sorted (`documentSort` in firestoreReads.js) and the drag helpers place
+// rows using `orderedFolderDocuments`. Two answers to "what order is this list in", and the screen used the one that
+// only a READ updates: a drop wrote the right numbers, the tab patched them onto its rows, and nothing moved. The new
+// order appeared when the library was read again - which is to say after leaving the tab and coming back. That is the
+// worst shape a bug can have: the save works, the screen does not, and the officer concludes the drag is broken.
+//
+// So the list is drawn through the same function the drag math uses. One definition, and a local change to `sort_order`
+// moves a row on screen because the order on screen IS `sort_order`.
+export const documentsInFolder = (documents, folder) => orderedFolderDocuments(documents, folder);
 
-// Folder groups for the list, skipping any group the filter emptied.
+// Folder groups for the list, skipping any group the filter emptied. Each group's documents come from
+// `documentsInFolder` above, so the rows under a heading are in screen order rather than in arrival order.
 export const groupDocumentsByFolder = (documents) =>
   documentFolders(documents)
     .map((folder) => ({ folder, documents: documentsInFolder(documents, folder) }))
@@ -541,6 +588,11 @@ export const normalizeSignature = (row) => {
     signed_at: text(source.signed_at),
     content_revision: Number.isFinite(revision) ? revision : 0,
     stale: source.stale === true || text(source.stale).toUpperCase() === 'TRUE',
+    // Whether an officer entered this from the paper file rather than the member ticking it. Carried through
+    // normalization like every other field, so no screen has to reach past it to the raw row to tell the difference.
+    backfilled: source.backfilled === true || text(source.backfilled).toUpperCase() === 'TRUE',
+    backfilled_at: text(source.backfilled_at),
+    backfill_note: text(source.backfill_note),
   };
 };
 
@@ -599,16 +651,209 @@ export const outstandingSignatureDocuments = (documents, signatures, userId) =>
 
 // "Signed 12 Mar 2026, 14:04" - the stored stamp is the server's Eastern timestamp, so it is formatted by the
 // same helper the System Log uses rather than a second parser.
-export const signatureDateLabel = (signature, timeFormat = '12') => {
+// "Signed Sat, Mar 14 2026". The prefix is a parameter because a back-filled row is not something anybody signed: the
+// same formatter says "Recorded Sat, Mar 14 2026" for it rather than a second one being written beside this, which is
+// how two dates end up formatted differently on the same screen.
+export const signatureDateLabel = (signature, timeFormat = '12', prefix = 'Signed') => {
   const signedAt = normalizeSignature(signature).signed_at;
   if (!signedAt) return '';
   const stamp = formatLogTimestamp(signedAt, timeFormat);
-  return stamp ? `Signed ${stamp}` : '';
+  return stamp ? `${prefix} ${stamp}` : '';
 };
+
+// The same date, said the way a back-filled row should: "Recorded Thu, May 1 2025". A no-op on a row the member signed
+// themselves, so a caller that does not want to think about the difference can just call this.
+export const signatureRecordedLabel = (signature, timeFormat = '12') =>
+  signatureIsBackfilled(signature) ? signatureDateLabel(signature, timeFormat, 'Recorded') : '';
 
 // Whether a signature is older than the document it is on. The server decides this for the report; the module
 // uses the same flag for the member's own signature, so both screens agree.
 export const signatureIsStale = (signature) => normalizeSignature(signature).stale;
+
+// ---------------------------------------------------------------------------
+// GRANDFATHERING: signatures recorded for a member, by an officer, from the paper file
+// ---------------------------------------------------------------------------
+// Somebody who did the work before this app existed has no row anywhere, and asking them to tick forty boxes they
+// already did on paper is not "recording the station's history" - it is typing practice. So an administrator can enter
+// what the paper file says, for many items and many people, and the row that lands is honest about it in three ways:
+//
+//   - `user_id` is the MEMBER it counts for, so every screen that reads progress, badges or completion keeps working
+//     unchanged. That is deliberate, and it is why this is not a fourth `signature_role`: a role nothing else
+//     recognises would leave the member's checklist still reading "outstanding", which defeats the whole point.
+//   - `signed_by_user_id` is the OFFICER who entered it. The field already existed for exactly this distinction.
+//   - `backfilled` is true, with the note and the moment of entry beside it - so "the member ticked this in the app" and
+//     "an officer copied this off a sheet of paper" can never be confused by anybody reading the record later.
+//
+// A back-filled row is therefore a member's signature in every arithmetic sense and a different STATEMENT in every
+// human sense, and the screens say which one it is.
+export const BACKFILL_NOTE_LIMIT = 200;
+
+// Whether this row was entered by somebody else rather than by the member themselves.
+//
+// ONLY A 'member' ROW CAN BE A BACK-FILL, and that is the first thing this checks. A verifier's row also has a signer
+// that is not its owner - that is its whole design - so a test that only looked at those two fields would report every
+// verification as a back-filled signature and label it wrongly on screen.
+//
+// TWO READINGS beyond that, on purpose. The stored flag is the truth for a row written by this app. The fallback - a
+// 'member' row whose signer is not its owner - catches rows that predate the flag, and it is not a guess: it is the one
+// shape the rules always refused for a member, so a row with it can only have come from an officer. Older data
+// therefore reads correctly with no migration, and the screens tell the truth about it either way.
+export const signatureIsBackfilled = (signature) => {
+  const row = normalizeSignature(signature);
+  if (row.signature_role !== 'member') return false;
+  if (row.backfilled) return true;
+  return row.signed_by_user_id !== '' && row.signed_by_user_id !== row.user_id;
+};
+
+// "Recorded by Jane Doe for Ana Ruiz" - who entered it, and whose record it is.
+//
+// The labels are passed in rather than looked up, because this module is pure and has no directory: every screen that
+// shows a signature already has the users list, and resolving a name here would be a second, worse lookup.
+export const backfilledSignatureLabel = (signature, memberLabel = '', signerLabel = '') => {
+  const row = normalizeSignature(signature);
+  if (!signatureIsBackfilled(row)) return '';
+  const recorded = signerLabel ? `Recorded by ${signerLabel}` : 'Recorded from paper records';
+  return memberLabel ? `${recorded} for ${memberLabel}` : recorded;
+};
+
+// ONE ITEM, for one member, as the back-fill screen draws it: whether it is already accounted for, and in what way.
+//
+// `recorded` covers both halves deliberately - a member who signed it themselves in the app and one an officer entered
+// from paper are both already accounted for, so the screen leaves them alone and the officer sees the difference in the
+// wording rather than in whether the cell can be clicked.
+export const backfillItemState = (item, signatures, memberId) => {
+  const wantedItem = text(item && item.id !== undefined ? item.id : item);
+  const wantedUser = text(memberId);
+  const mine = normalizeSignatureList(signatures).filter(
+    (signature) => signature.checklist_item_id === wantedItem && signature.user_id === wantedUser
+  );
+  const member = mine.find((signature) => signature.signature_role === 'member') || null;
+  const verified = mine.filter((signature) => signature.signature_role === 'verifier');
+
+  return {
+    itemId: wantedItem,
+    // Already on file - by the member, or by an officer from paper.
+    recorded: member !== null,
+    backfilled: member ? signatureIsBackfilled(member) : false,
+    signedByMember: member !== null && !signatureIsBackfilled(member),
+    recordedAt: member ? member.signed_at : '',
+    recordedByUserId: member ? member.signed_by_user_id : '',
+    verified: verified.length > 0,
+  };
+};
+
+export const backfillItemStates = (items, signatures, memberId) =>
+  normalizeChecklistItemList(items).map((item) => ({
+    item,
+    ...backfillItemState(item, signatures, memberId),
+  }));
+
+// THE IDS A SAVE SHOULD WRITE: the ones the officer ticked, that this document owns, and that are not already on file.
+//
+// SHARED BY THE SCREEN AND THE WRITER, which is the point of it being here. The screen counts what is about to be
+// written; the writer decides what to persist. If each worked it out separately they could disagree, and the failure
+// would be a count saying four beside a write that makes three - or, worse, a second row for an item somebody had
+// already signed. Duplicates are collapsed here, so a double tick cannot become two rows.
+export const backfillableItemIds = (items, signatures, memberId, wantedIds) => {
+  const wanted = (Array.isArray(wantedIds) ? wantedIds : []).map((id) => text(id)).filter(Boolean);
+  if (!wanted.length) return [];
+
+  const owned = new Set(normalizeChecklistItemList(items).map((item) => item.id));
+  const onFile = new Set(
+    normalizeSignatureList(signatures)
+      .filter(
+        (signature) =>
+          signature.user_id === text(memberId) &&
+          signature.signature_role === 'member' &&
+          signature.checklist_item_id !== ''
+      )
+      .map((signature) => signature.checklist_item_id)
+  );
+
+  return [...new Set(wanted)].filter((id) => owned.has(id) && !onFile.has(id));
+};
+
+// The rows a back-fill should create, as DATA rather than as writes - so the record can be asserted without an
+// emulator, and the writer only has to persist what this returns.
+//
+// `confirmVerified` adds the verifier's row for each one, attributed to the SAME officer. That is not an officer
+// verifying their own checklist (which the server refuses): it is the officer who copied the paper file saying "and I am
+// confirming what I just entered", which is what the supervisor's signature on the paper meant in the first place. It is
+// a visible choice rather than a default buried in the code, because a station that keeps a second pair of eyes on
+// grandfathering can turn it off and let these go to the ordinary verification queue.
+export const backfillSignaturePlan = ({
+  documentId,
+  items,
+  signatures,
+  memberId,
+  recorderId,
+  itemIds,
+  at,
+  revision = 0,
+  note = '',
+  confirmVerified = false,
+}) => {
+  const document = text(documentId);
+  const member = text(memberId);
+  const recorder = text(recorderId);
+  const stamp = text(at);
+  const trimmedNote = text(note).slice(0, BACKFILL_NOTE_LIMIT);
+  const pending = backfillableItemIds(items, signatures, member, itemIds);
+  const contentRevision = Number.parseInt(revision, 10) || 0;
+
+  const shared = {
+    // THE DOCUMENT IS THE ONE FIELD THAT MUST NOT BE MISSED, and it is worth saying because it was: a signature row
+    // without `document_id` is attached to nothing - every screen reads signatures BY DOCUMENT, so the row exists, the
+    // write reports success, and the item still reads as unrecorded. The emulator round trip caught it; the pure test
+    // did not, because it was asserting the fields it knew about rather than that the row was whole.
+    document_id: document,
+    user_id: member,
+    signed_by_user_id: recorder,
+    signed_at: stamp,
+    backfilled: true,
+    backfilled_at: stamp,
+    backfill_note: trimmedNote,
+    // The revision the document is AT as the officer records this, which is the honest stamp: these rows are being
+    // entered now, against the checklist as it reads today. It also means a back-fill is never reported as stale, which
+    // is right - nobody signed different words, there were no words.
+    content_revision: contentRevision,
+  };
+
+  return {
+    itemIds: pending,
+    member: pending.map((itemId) => ({ ...shared, checklist_item_id: itemId, signature_role: 'member' })),
+    verifier: confirmVerified
+      ? pending.map((itemId) => ({
+          document_id: document,
+          checklist_item_id: itemId,
+          user_id: member,
+          signed_by_user_id: recorder,
+          signature_role: 'verifier',
+          signed_at: stamp,
+          // A verification is not a signature OF a revision - see verifyChecklistItem - and it is not the back-fill of
+          // one either, so it carries neither the revision nor the flag.
+          content_revision: 0,
+        }))
+      : [],
+  };
+};
+
+// THE MEMBERS A BACK-FILL CAN BE RECORDED FOR: everybody except the officer doing the recording.
+//
+// It is a rule rather than a filter in a dropdown, and it is here because it is the client half of a refusal the server
+// also makes - "a back-fill is somebody else recording what they found". Leaving the officer's own name in the list
+// would be offering a save that always fails, and the two halves have to agree about who is eligible.
+//
+// It was a line inside the component's `useMemo` until a mutation test showed the gap: a text check for the expression
+// passes as long as the expression is still there, so prefixing it with `false &&` broke the behaviour and left every
+// check green. As a function with cases, the rule itself is what is asserted.
+export const backfillCandidates = (users, recorderId) => {
+  const recorder = text(recorderId);
+  return (Array.isArray(users) ? users : []).filter((user) => {
+    const id = text(user && user.id);
+    return id !== '' && id !== recorder;
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Assessment scores

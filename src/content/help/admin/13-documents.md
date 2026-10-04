@@ -116,10 +116,20 @@ Position is set by **dragging**, not by typing numbers:
 - **Drag a folder heading** to move the whole folder, and every document in it, in front of another folder.
 - **Unfiled is pinned last** and cannot be dragged: it is where documents with no folder are shown, not a shelf you chose.
 
-Both are saved the moment you drop, and the list redraws in the order you set immediately. A drag that ends where it started — including dropping a document back into the gap it is already sitting in — writes nothing at all.
+**Move as many rows as you like, then save once.** Nothing is written while you are rearranging, so you can drag one document, drag another, change your mind and drag the first one back — and the library is untouched until you commit to a finished list. An amber bar appears above the list saying how many positions are waiting, with two buttons:
+
+| Button | What it does |
+|---|---|
+| **Save order** | Writes every move in **one** go, and the bar disappears. Until you press it, the library keeps the order it had |
+| **Discard** | Puts the rows back where they are stored, without needing to reload anything — for when an arrangement does not work out |
+
+A drag that ends where it started — including dropping a document back into the gap it is already sitting in — leaves nothing to save, and the bar does not appear at all.
+
+> [!IMPORTANT]
+> **An unsaved order is kept if you switch tabs.** Move to another Administration tab and come back and the bar is still there with your arrangement — that is deliberate, because losing a list you had just spent time ordering would be worse than a save button. It is held for the browser session only: closing the window without pressing **Save order** does discard it.
 
 > [!NOTE]
-> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button grayed out. If your crew writes documents on an iPad, that is the way to set a position.
+> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button grayed out. Those stage a move exactly like a drag does, and because the editor covers the list the count and a **Save order** button appear right beside them — so an iPad can set a position and save it without ever leaving the editor. If your crew writes documents on an iPad, that is the way to set a position.
 
 A drag **never changes a document's folder**: the folder is a field on the document, and dragging is about position. Drop a document into another folder's gap, or onto a row from another folder, and the app says so instead of moving it silently — change the **Folder** field for that.
 
@@ -203,6 +213,35 @@ The list shows each item's order as `#0`, `#1` and so on, so you can see what a 
 > An item that has been signed **cannot be removed**. The app refuses and tells you how many signatures it has. That is deliberate: a signature must never outlive the thing it was about.
 
 Members tick the items they have done and save them in one go, so a forty-line checklist is still one press. Signing the document itself is separate from signing its items — a checklist that needs both shows both.
+
+## Back-filling from paper records
+
+Most stations arrive here with years of paper behind them: the truck checks, the drill attendance, the policy acknowledgements, all done and all on sheets in a filing cabinet. **Back-fill from paper records** at the bottom of this tab is how that history gets into the app — you enter what the files say, for as many people as you like, without making anybody re-do the work.
+
+The shape of the screen follows the shape of the paper. An officer sits down with a stack of files, so the screen works **one member at a time**:
+
+1. Pick the **checklist or document**.
+2. Pick the **member** — their first name from the file in your hand.
+3. Tick the items **their** file says they have done. **All** on a section, or **Select everything left** for the lot, means the whole thing is one click rather than forty.
+4. Set the **date this was done** — the date off the paper, not today. Then press **Save & next member**.
+
+**Save & next member** keeps the checklist, the date and the note and moves to the next name down the list, so a stack of thirty files is one pass with nothing to find again. **Save** on its own is for a file you are part-way through.
+
+Anything already on file — ticked by the member in the app, or entered from paper by somebody earlier — is shown with its date and cannot be ticked again, so nothing is ever recorded twice. The line above the list says how many are already recorded and how many you are about to save.
+
+### What the record says about it
+
+A back-filled entry is **a real signature for that member**: their progress moves, their checklist completes, and it counts exactly as if they had ticked it. That is the point — the station's history would be wrong otherwise.
+
+But it never pretends the member tapped it. Every row entered this way is stamped with **your name**, the **note** you typed and the **moment you entered it**, and the record reads *"Recorded by Jane Doe for Ana Ruiz"* rather than *"Signed by"*. Anybody reading it later can tell a paper record from an app one, which is the difference between a station's history and a guess about it.
+
+> [!IMPORTANT]
+> **Only administrators can do this** — it needs *Manage documents*. That is deliberate: writing a signature for somebody else is the one thing the rest of the app refuses, so the permission to do it is not handed out casually.
+
+**Also confirm these as verified** is ticked by default. It records a second row saying you confirmed what you entered — which is what the supervisor's initials on the paper already meant. Untick it if you would rather these went through the ordinary **Verify checklists** queue for a second pair of eyes, and they will appear there like anything else.
+
+> [!NOTE]
+> **No item is required.** A document that members must sign (a policy acknowledgement, say) is back-filled with a single tick per member rather than a list of items — there is only one acknowledgment to record. And you cannot back-fill your own record: enter your own items from your own checklist.
 
 ## Verifying
 

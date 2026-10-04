@@ -28,7 +28,7 @@ import { availabilityMonthId } from '../utils/availability.js';
 import { parseSheetDateKey } from '../utils/scheduleDate.js';
 // The assessment score's row id and type guard, shared with the reader so the two cannot disagree about which documents
 // carry scores or what a score row is called.
-import { assessmentScoreId, assessmentScoreLimit as ASSESSMENT_SCORE_LIMIT, isAssessment } from '../utils/documents.js';
+import { assessmentScoreId, assessmentScoreLimit as ASSESSMENT_SCORE_LIMIT, backfillSignaturePlan, isAssessment } from '../utils/documents.js';
 // The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
 // device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
 import { isOffline } from '../utils/connectivity.js';
@@ -627,6 +627,134 @@ export const setDocumentAssessmentScore = async ({ scorerId, documentId, memberI
 // label rather than a document body.
 const DOCUMENT_REORDER_LIMIT = 500;
 const DOCUMENT_FOLDER_LIMIT = 80;
+
+// -----------------------------------------------------------------------------------------------------------
+// GRANDFATHERING: an officer records what the paper file says, for a member
+// -----------------------------------------------------------------------------------------------------------
+// The write behind the Back-fill panel on the Documents tab, and it is ONE action on purpose. The alternative - the
+// officer ticking items as the member, one request each - is the typing exercise this exists to remove, and it would
+// mean forty rows written by forty requests with no way to say which half landed.
+//
+// WHAT MAKES THIS SAFE TO OFFER is the shape of the row rather than the permission attached to it. The row is a
+// 'member' signature - so the member's own progress, badges and completion read correctly, and nothing downstream had to
+// change - and it is marked `backfilled`, with `signed_by_user_id` naming the officer. The rules REQUIRE that flag for
+// any 'member' row a caller creates for somebody else, which is the most important line in this change: without it this
+// action would be a way to forge an ordinary in-app signature; with it, an officer can only ever say "the paper file
+// says so", never "they tapped the button".
+//
+// WHAT IT REFUSES: a record against the recorder themselves, because self-entering would quietly make "I did this" and
+// "the station recorded this" the same statement - the same position the assessment scores and verifications take. A
+// document that does not exist. And an item belonging to another checklist, which `backfillableItemIds` filters out, so
+// a stale screen cannot point a row at somebody else's checklist.
+//
+// CHUNKED, because a matrix can be large: Firestore takes 500 writes in a batch, and a 40-item checklist across a dozen
+// members is 480 member rows before a single verification. The rows go out in chunks that leave room for the verifier
+// half, and the caller is told what landed - a back-fill is a RECORDING rather than a transaction, so half of it written
+// and counted honestly is more use to the officer than all of it refused.
+//
+// ONE TIMESTAMP for the call, because the officer is recording a session's worth of paper rather than ticking forty
+// separate boxes. The DATE is theirs to choose: a paper file is dated, and "when did they do this" is the reason the
+// field is on the screen at all.
+const BACKFILL_CHUNK = 200;
+
+// The signatures on a document, read from the SERVER rather than from the browser's cache.
+//
+// THIS IS NOT A DETAIL, and it is the same trap the schedule board documents. Both reads below follow a write - the
+// `existing` one decides what a second back-fill will skip, and the one at the end is what the panel redraws its grid
+// from - and a cache-first read hands back the PRE-WRITE rows. The visible failure is the one this whole area of the
+// app has already had twice: the save succeeds, the rows are on the server, and the screen says nothing happened. The
+// dangerous failure is the other direction - a cache that says an item is NOT yet recorded when somebody else has just
+// recorded it, which would write a second member row for one item.
+const signaturesForDocument = (document) =>
+  rowsOf(query(collection(firestore(), 'document_signatures'), where('document_id', '==', document)), {
+    source: 'server',
+  });
+
+export const backfillDocumentSignatures = async ({
+  recorderId,
+  documentId,
+  memberId,
+  itemIds = [],
+  recordedOn = '',
+  note = '',
+  confirmVerified = false,
+}) => {
+  const recorder = String(recorderId || '').trim();
+  const member = String(memberId || '').trim();
+  const document = String(documentId || '').trim();
+  if (!document) return { success: false, message: 'Which document?' };
+  if (!member) return { success: false, message: 'Which member is this for?' };
+  if (!recorder) return { success: false, message: 'Nobody to attribute the record to.' };
+  if (member === recorder) {
+    return {
+      success: false,
+      message: 'A back-fill is somebody else recording what they found. Enter your own items from your own checklist.',
+    };
+  }
+
+  const source = await getDoc(doc(firestore(), 'documents', document));
+  if (!source.exists()) return { success: false, message: 'That document is not available.' };
+  const row = { ...source.data(), id: source.id };
+  const isChecklist = String(row.doc_type || '').trim().toLowerCase() === 'checklist';
+
+  // A checklist's rows are its items; a plain document's is one row for the whole thing. So the item ids are read from
+  // the document rather than trusted from the request - a non-checklist answers with none, whatever was sent.
+  const items = isChecklist ? await rowsFor('document_checklist_items', 'document_id', document) : [];
+  const existing = await signaturesForDocument(document);
+
+  // The date the officer gave, or now. Kept in the station's own stamp format so a back-filled row sorts and reads
+  // beside every other signature - `signatureDateLabel` takes the date half and shows no clock, which is right for
+  // "this happened some time in 2024".
+  const onDay = String(recordedOn || '').trim();
+  const at = /^\d{4}-\d{2}-\d{2}$/.test(onDay) ? onDay : stationTimestamp();
+
+  // THE ROWS ARE WORKED OUT BY THE CLIENT'S OWN PURE HELPER, like `reorderDocuments` above and for the same reason: "a
+  // tick becomes a signature unless one is already on file" is a rule a test can pin down, and the screen counts off the
+  // same answer. A non-checklist asks for the whole-document row, which is the one carrying no item.
+  const plan = backfillSignaturePlan({
+    documentId: document,
+    items,
+    signatures: existing,
+    memberId: member,
+    recorderId: recorder,
+    itemIds: isChecklist ? itemIds : [''],
+    at,
+    revision: row.content_revision,
+    note,
+    confirmVerified,
+  });
+
+  if (plan.member.length === 0) {
+    return {
+      success: true,
+      recorded: 0,
+      verified: 0,
+      already_on_file: true,
+      message: 'Everything you ticked is already recorded for that member.',
+      signatures: await signaturesForDocument(document),
+    };
+  }
+
+  // Member rows first, then the verifications, so a chunk boundary can never leave a verification whose signature is
+  // missing. That ordering matters in one direction only, and this is it: a verifier row asserts that the member's row
+  // exists, so the other order would briefly record a confirmation of nothing.
+  const everything = [...plan.member, ...plan.verifier];
+  for (let start = 0; start < everything.length; start += BACKFILL_CHUNK) {
+    const slice = everything.slice(start, start + BACKFILL_CHUNK);
+    const batch = writeBatch(firestore());
+    slice.forEach((entry) => {
+      batch.set(doc(collection(firestore(), 'document_signatures')), entry);
+    });
+    await batch.commit();
+  }
+
+  return {
+    success: true,
+    recorded: plan.member.length,
+    verified: plan.verifier.length,
+    signatures: await signaturesForDocument(document),
+  };
+};
 
 // Removing a signature is an ADMINISTRATOR's action, and it is the only way one goes: a member cannot withdraw their
 // own acknowledgment, which is why the signing writers refuse a request that carries removals rather than ignoring it.

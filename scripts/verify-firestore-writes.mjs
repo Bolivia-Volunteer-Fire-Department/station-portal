@@ -31,6 +31,9 @@ import { routeRead, routeWrite } from '../src/services/firestoreRouting.js';
 // The board's own swap helper: the entries below are built with the code the client runs, so this cannot drift from
 // what a swap really sends. It has no imports of its own, which is what makes it usable from here at all.
 import { swapSlotFields } from '../src/utils/scheduleDrop.js';
+// The checklist arithmetic, so the back-fill section can assert that the rows it writes move the member's own progress -
+// which is the claim that matters, and not the same as "the row exists".
+import { checklistProgress } from '../src/utils/checklists.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
 import { OFFLINE_CLOCK_MESSAGE } from '../src/utils/connectivity.js';
@@ -39,7 +42,14 @@ import { rankFieldsFromForm } from '../src/utils/ranks.js';
 // fed through the function the tab really uses, so "what ends up on screen" is asserted rather than described. It loads
 // under plain Node because its own imports carry `.js` specifiers - which is not true of services/api.js, and is why the
 // helper lives in utils at all.
-import { applyDocumentOrder, checklistItemSortOrder, normalizeChecklistItemList } from '../src/utils/documents.js';
+import {
+  applyDocumentOrder,
+  checklistItemSortOrder,
+  documentOrderSignature,
+  groupDocumentsByFolder,
+  normalizeChecklistItemList,
+  pendingDocumentOrderPairs,
+} from '../src/utils/documents.js';
 // The app's OWN badge registry, so the round trip at the badge section below is checked by what it DRAWS rather than
 // by what the reply looks like - "is this the index?" is not a shape a reader can eyeball. Pure and import-free, which
 // is what makes it usable from plain Node at all.
@@ -986,6 +996,49 @@ const main = async () => {
   check('leaving every other row exactly where it was', afterDrag.length, 2);
   check('so the list cannot be emptied by a reply that carries no list', applyDocumentOrder(heldRows, drag.order || undefined).length, 2);
 
+  // ...AND ONE SAVE WRITES EVERY ROW THAT MOVED. Reordering is staged: the officer arranges the whole shelf and presses
+  // Save order once, so the request body is the DIFFERENCE between the screen and the library rather than a working copy
+  // of it. What this asserts is that the route honours a multi-row request - moving several rows in one call, and only
+  // those rows - because a route that quietly wrote the first pair would leave a staged save half applied while the
+  // reply still said `success`.
+  const stagedOrder = documentOrderSignature([
+    { id: 'doc6', sort_order: 3 },
+    { id: 'doc1', sort_order: 1 },
+  ]);
+  const stagedRows = [
+    { id: 'doc6', sort_order: 0 },
+    { id: 'doc1', sort_order: 10 },
+  ];
+  const pending = pendingDocumentOrderPairs(stagedRows, stagedOrder);
+  check('a staged save is the difference between the screen and the library', pending, [
+    { id: 'doc6', sort_order: 0 },
+    { id: 'doc1', sort_order: 10 },
+  ]);
+  const batch = await routeWrite('ADMIN_REORDER_DOCUMENTS', { order: pending });
+  check('and one request moves every row of it', batch.moved, 2);
+  const landed = [
+    (await getDoc(doc(firestore(), 'documents', 'doc6'))).data().sort_order,
+    (await getDoc(doc(firestore(), 'documents', 'doc1'))).data().sort_order,
+  ];
+  check('leaving both rows where the officer arranged them', landed, [0, 10]);
+  const landedSignature = documentOrderSignature([
+    { id: 'doc6', sort_order: landed[0] },
+    { id: 'doc1', sort_order: landed[1] },
+  ]);
+  check(
+    'so what the officer is looking at is what is stored, and nothing is left pending',
+    pendingDocumentOrderPairs(stagedRows, landedSignature),
+    []
+  );
+  check(
+    'and the list draws that order, which is what makes the save visible at once',
+    groupDocumentsByFolder([
+      { id: 'doc6', title: 'Six', folder: 'Staged', sort_order: 0 },
+      { id: 'doc1', title: 'One', folder: 'Staged', sort_order: 10 },
+    ]).flatMap((group) => group.documents.map((row) => row.id)),
+    ['doc6', 'doc1']
+  );
+
   // --- a checklist item's order, and the 0 that used to become a 10 --------------------------------------------------
   //
   // The other reported fault, and it has the same shape as the drag above: nothing is wrong with the write path, which
@@ -1046,6 +1099,123 @@ const main = async () => {
     (await getDoc(doc(firestore(), 'document_checklist_items', blankOrder.id))).data().sort_order,
     40
   );
+
+  // --- GRANDFATHERING: an officer enters what the paper file says, for somebody else --------------------------------
+  //
+  // The whole feature in one call, and the thing worth proving here is that the ROW IT LANDS is both useful and honest.
+  // Useful: it counts as that member's signature everywhere, because every screen that reads progress keys off
+  // `signature_role === 'member'`. Honest: it says an officer entered it, with the note and the moment, so it can never
+  // be mistaken later for something the member tapped.
+  //
+  // It is also the case that no reading of the WRITER could have caught the risk: the danger is the RULES letting an
+  // officer write an ordinary member row with no flag, which would be a forged signature. That is why the checks below
+  // write without the flag directly, through the SDK, and assert the rules refuse it.
+  await signIn('jane');
+  const beforeFill = await rowsOf(query(collection(firestore(), 'document_signatures'), where('document_id', '==', 'doc5')));
+  const raeBefore = beforeFill.filter((row) => row.user_id === 'u3' && row.signature_role === 'member').length;
+
+  const filledRows = await routeWrite('BACKFILL_DOCUMENT_SIGNATURES', {
+    document_id: 'doc5',
+    user_id: 'u3',
+    item_ids: ['it3', 'it4'],
+    recorded_on: '2024-06-15',
+    note: 'Paper file, engine checks 2024',
+    confirm_verified: true,
+  });
+  checkIs('an officer records two items for a member', filledRows.success === true && filledRows.recorded === 2, JSON.stringify(filledRows).slice(0, 160));
+  check('and the confirmations with them', filledRows.verified, 2);
+
+  const raeRows = filledRows.signatures.filter((row) => row.user_id === 'u3' && row.signature_role === 'member');
+  check('two member rows are on file for her now', raeRows.length, raeBefore + 2);
+  const filledRow = raeRows.find((row) => row.checklist_item_id === 'it3');
+  check('the row counts for the member', filledRow.user_id, 'u3');
+  check('and is attributed to the officer who entered it, not to her', filledRow.signed_by_user_id, 'u1');
+  check('it is flagged as a back-fill', filledRow.backfilled, true);
+  check('with the note the officer gave', filledRow.backfill_note, 'Paper file, engine checks 2024');
+  check('and the date off the paper rather than today', filledRow.signed_at, '2024-06-15');
+  check('so the record carries the moment it was entered as well', Boolean(filledRow.backfilled_at), true);
+  check(
+    'and a verification row was created for it too',
+    filledRows.signatures.some((row) => row.user_id === 'u3' && row.checklist_item_id === 'it3' && row.signature_role === 'verifier'),
+    true
+  );
+
+  // IT COUNTS. The member's own progress moves, which is the entire point of grandfathering - asserted through the app's
+  // own arithmetic rather than by reading the row back, because "the row exists" is not the claim.
+  const raeItems = await rowsOf(query(collection(firestore(), 'document_checklist_items'), where('document_id', '==', 'doc5')));
+  const raeProgress = checklistProgress(raeItems, filledRows.signatures, 'u3');
+  check('her checklist then reads those items as done', raeProgress.signed, 2);
+  check('and as confirmed', raeProgress.verified, 2);
+
+  // A SECOND RUN IS NOTHING TO DO rather than an error, and it does not duplicate: the officer pressing the button twice
+  // is a double click, and a second row for one item is exactly what `backfillableItemIds` exists to prevent.
+  const again = await routeWrite('BACKFILL_DOCUMENT_SIGNATURES', { document_id: 'doc5', user_id: 'u3', item_ids: ['it3', 'it4'] });
+  check('recording the same items again writes nothing', [again.recorded, again.already_on_file], [0, true]);
+  const afterAgain = await rowsOf(query(collection(firestore(), 'document_signatures'), where('document_id', '==', 'doc5')));
+  check(
+    'and leaves no duplicate row behind',
+    afterAgain.filter((row) => row.user_id === 'u3' && row.checklist_item_id === 'it3' && row.signature_role === 'member').length,
+    1
+  );
+
+  // SELF-ENTRY IS REFUSED, by the writer and by the rules: "I did this" and "the station recorded this" must not be the
+  // same statement, the position the assessment scores and the verifications already take.
+  const own = await routeWrite('BACKFILL_DOCUMENT_SIGNATURES', { document_id: 'doc5', user_id: 'u1', item_ids: ['it3'] });
+  checkIs('an officer cannot back-fill their own checklist', own.success === false, JSON.stringify(own).slice(0, 140));
+
+  // AN ITEM ANOTHER CHECKLIST OWNS IS REFUSED, so a stale screen cannot point a row at somebody else's item.
+  const foreign = await routeWrite('BACKFILL_DOCUMENT_SIGNATURES', { document_id: 'doc5', user_id: 'u3', item_ids: ['it1'] });
+  check('an item belonging to another checklist is not written', foreign.recorded, 0);
+  const everySignature = await rowsOf(collection(firestore(), 'document_signatures'));
+  check('and no row was created pointing at it', everySignature.some((row) => row.user_id === 'u3' && row.checklist_item_id === 'it1'), false);
+
+  // A MEMBER WITHOUT THE MANAGEMENT PERMISSION cannot do any of it, however the request is shaped.
+  await signIn('bo');
+  const memberFilled = await routeWrite('BACKFILL_DOCUMENT_SIGNATURES', { document_id: 'doc5', user_id: 'u3', item_ids: ['it3'] });
+  checkIs('a member cannot record a signature for somebody else', memberFilled.success === false, JSON.stringify(memberFilled).slice(0, 140));
+
+  // SIGNED IN AGAIN AS THE OFFICER, which the checks below depend on: the member above has no management permission,
+  // so a refusal on the next two writes would be theirs rather than the flag's - an allowed-for-the-wrong-reason test in
+  // reverse, and the trap the seed file warns about around the assessor account.
+  await signIn('jane');
+  // ...AND THE RULES REFUSE THE FORGERY THE WRITER WOULD NEVER SEND: an officer writing an ordinary 'member' row for
+  // somebody else, with no `backfilled` flag. This is the check that matters most in the whole section, because that
+  // shape is what would turn this feature into a way of writing signatures in another member's name.
+  const forged = await setDoc(doc(firestore(), 'document_signatures', 'backfill-forged'), {
+    document_id: 'doc5',
+    checklist_item_id: 'it3',
+    user_id: 'u3',
+    signed_by_user_id: 'u1',
+    signature_role: 'member',
+    signed_at: '2024-06-15',
+    content_revision: 0,
+  }).then(
+    () => ({ allowed: true }),
+    (error) => ({ allowed: false, code: error.code })
+  );
+  checkIs(
+    'and the rules refuse an unflagged member row written for somebody else',
+    forged.allowed === false && forged.code === 'permission-denied',
+    JSON.stringify(forged)
+  );
+
+  // THE SAME WRITE WITH THE FLAG IS ALLOWED, which is what shows the refusal above is the flag and not the caller.
+  const flagged = await setDoc(doc(firestore(), 'document_signatures', 'backfill-flagged'), {
+    document_id: 'doc5',
+    checklist_item_id: 'it4',
+    user_id: 'u3',
+    signed_by_user_id: 'u1',
+    signature_role: 'member',
+    signed_at: '2024-06-15',
+    content_revision: 0,
+    backfilled: true,
+    backfilled_at: '2024-06-15',
+    backfill_note: '',
+  }).then(
+    () => ({ allowed: true }),
+    (error) => ({ allowed: false, code: error.code })
+  );
+  checkIs('while the flagged one is allowed, which is the whole safety property', flagged.allowed === true, JSON.stringify(flagged));
 
   // --- training signatures: the same add-only shape, and a lock that means its signatures too ------------------------
   await signIn('jane');

@@ -297,6 +297,64 @@ const main = async () => {
   );
   checkIs('nor attribute their own row to somebody else', misattributed.includes('permission-denied'), misattributed);
 
+  // A BACK-FILL, which is the one case where an OFFICER may write a 'member' row for somebody else - and only while
+  // saying that is what it is. Tested from both sides, because either one alone proves nothing: a refusal could be the
+  // permission, and an allowance could be the wrong branch.
+  //
+  // Bo (u2) is a member with no management permission, so he cannot do it however the row is shaped.
+  const memberBackfill = await setDoc(doc(db, 'document_signatures', 'sig-bf-member'), {
+    document_id: 'doc5',
+    user_id: 'u1',
+    signed_by_user_id: 'u2',
+    signature_role: 'member',
+    backfilled: true,
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('a member cannot back-fill for somebody else either', memberBackfill.includes('permission-denied'), memberBackfill);
+
+  // Jane (u1) manages documents, so the next two are about the FLAG rather than about who is asking. This is the pair
+  // that says the feature is safe: without the flag she cannot write an ordinary signature in Bo's name, and with it she
+  // can record what the paper file says.
+  //
+  // SIGNED IN AS HER EXPLICITLY, because the two checks above ran as Bo and the identity is what decides these - a
+  // refusal "because the flag is missing" and a refusal "because this caller may not manage documents" look identical
+  // from the outside, which is the trap the assessor account exists to document.
+  await asUser('u1');
+  const unflagged = await setDoc(doc(db, 'document_signatures', 'sig-bf-unflagged'), {
+    document_id: 'doc5',
+    user_id: 'u2',
+    signed_by_user_id: 'u1',
+    signature_role: 'member',
+    signed_at: '2024-06-15',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'and an officer cannot write a member row for somebody else without flagging it',
+    unflagged.includes('permission-denied'),
+    `the row was ${unflagged}`
+  );
+
+  const flaggedBackfill = await setDoc(doc(db, 'document_signatures', 'sig-bf-flagged'), {
+    document_id: 'doc5',
+    user_id: 'u2',
+    signed_by_user_id: 'u1',
+    signature_role: 'member',
+    signed_at: '2024-06-15',
+    backfilled: true,
+    backfilled_at: '2024-06-15',
+    backfill_note: '',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('while the flagged one goes through', flaggedBackfill === 'written', flaggedBackfill);
+  // Back to the member the next section starts from, so this block leaves the identity as it found it.
+  await asUser('u2');
+
   // ASSESSMENT SCORES. The whole requirement in four rules, each tested as a thing that actually happened rather than as
   // a line of rules text: a member reads their own; a member reads nobody else's; a member writes NO score at all - not
   // their own, not anybody's; and an assessor writes one for somebody else but still not for themselves.

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileText, FolderInput, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import {
   adminDeleteChecklistItem,
@@ -14,6 +14,7 @@ import {
 } from '../../services/api';
 import { toast } from '../../utils/toast';
 import AdminChecklistVerification from './AdminChecklistVerification';
+import AdminSignatureBackfill from './AdminSignatureBackfill';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import MarkdownEditor from '../MarkdownEditor';
@@ -36,6 +37,9 @@ import {
   editorChecklistItemRows,
   groupDocumentsByFolder,
   applyDocumentOrder,
+  documentOrderSignature,
+  pendingDocumentOrderPairs,
+  savedDocumentOrderPairs,
   insertDocumentBefore,
   normalizeChecklistItemList,
   normalizeDocumentList,
@@ -73,6 +77,25 @@ const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: '' };
 // folder is part of it because the same document id appears in only one folder, while a blank anchor appears in all of
 // them.
 const gapKey = (folder, beforeId) => `${folder}|${beforeId}`;
+
+// WHERE AN UNSAVED ORDER WAITS. Reordering is now "move as many rows as you like, then save once", so the moves have to
+// survive the screen going away - and switching Administration tabs unmounts this one. sessionStorage rather than state
+// because the draft has to outlive the unmount, and rather than localStorage because an order nobody saved is about this
+// sitting, not about this station. The schedule board keeps its unsaved month the same way and for the same reason.
+const ORDER_DRAFT_KEY = 'documents.order.draft';
+
+// The stored draft, as pairs. Anything unreadable is no draft at all: a corrupted entry must not stop the tab opening,
+// and forgetting where a row was put is a smaller failure than refusing to draw the library.
+const readOrderDraft = () => {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(ORDER_DRAFT_KEY) || 'null');
+    return (Array.isArray(parsed) ? parsed : [])
+      .map((pair) => ({ id: String((pair && pair.id) || ''), sort_order: Number.parseInt(pair && pair.sort_order, 10) }))
+      .filter((pair) => pair.id !== '' && Number.isFinite(pair.sort_order));
+  } catch {
+    return [];
+  }
+};
 
 // Today, once, for the window badges. The same value the schedule's own tab uses: a lifecycle label that changed
 // while a page was open would be worse than one that is a moment stale.
@@ -162,6 +185,20 @@ export default function AdminDocumentsTab({
   const [draggingFolder, setDraggingFolder] = useState('');
   const [dragOverFolder, setDragOverFolder] = useState('');
   const [savingOrder, setSavingOrder] = useState(false);
+  // THE ORDER AS IT WAS LAST SAVED, `id -> sort_order`, and the working copy the officer is building against it.
+  //
+  // Reordering is staged: every drop and every Move up / Move down changes `rows` locally, and nothing is written until
+  // Save order. So the tab has to know two things at once - what the library looks like now (in `rows`, and therefore on
+  // screen) and what is actually stored (`savedOrder`) - and the difference between them is both the button's reason to
+  // exist and the exact pairs a save has to write. See `pendingDocumentOrderPairs`.
+  const [savedOrder, setSavedOrder] = useState(() => new Map());
+  // The pending pairs as of the last render, for `refresh` to read: a reload must not throw away an order the officer
+  // has arranged but not saved. A ref rather than the state value because `refresh` is a callback that must not be
+  // rebuilt every time the order changes.
+  const pendingOrderRef = useRef([]);
+  // Whether the stored draft has been looked at. It is read ONCE, on the first load, and applied to the rows that
+  // arrive - reading it again later would resurrect a draft the officer had just discarded.
+  const draftReadRef = useRef(false);
 
   const [removingItem, setRemovingItem] = useState(false);
   // Items typed before the document exists. A checklist's items need a document to belong to, so on a NEW checklist
@@ -205,7 +242,20 @@ export default function AdminDocumentsTab({
     setLoading(true);
     setLoadError('');
     try {
-      setRows(await loadRows());
+      const fresh = await loadRows();
+      // A RELOAD IS NOT A REASON TO LOSE AN UNSAVED ORDER. Any save in this tab reloads the library, and so does the
+      // first mount - and applying the raw answer would put every staged row back where the server has it, silently,
+      // which is the same class of quiet loss the staging exists to avoid. So the working order is laid over the rows
+      // that arrived: they carry the fresh contents, the officer's arrangement sits on top.
+      //
+      // On the FIRST load the pending order comes from sessionStorage instead, because the state is empty then by
+      // definition - that is what makes the draft survive the tab being closed.
+      const draft = draftReadRef.current ? pendingOrderRef.current : readOrderDraft();
+      draftReadRef.current = true;
+      // The snapshot is the rows as the SERVER sent them, taken before the draft is applied - so "what is stored" and
+      // "what is on screen" stay two different, correct answers.
+      setSavedOrder(documentOrderSignature(fresh));
+      setRows(draft.length > 0 ? applyDocumentOrder(fresh, draft) : fresh);
     } catch (err) {
       setLoadError(err?.message || 'Could not load the documents.');
     } finally {
@@ -494,44 +544,100 @@ export default function AdminDocumentsTab({
     }
   };
 
+  // WHAT IS WAITING TO BE SAVED, which is the whole of the staged order: the rows whose number differs from the one
+  // the library was last read with. Everything about the bar reads from this one list - how many changes there are, and
+  // the exact pairs Save order sends - so the count can never disagree with what a save would write.
+  //
+  // DECLARED BEFORE THE DRAG HANDLERS BELOW rather than beside the item card, because they send it: a state value used
+  // by a callback that is defined earlier reads as "accessed while being initialized", which is what the React
+  // compiler's immutability rule means by it.
+  const pendingOrder = useMemo(() => pendingDocumentOrderPairs(rows, savedOrder), [rows, savedOrder]);
+  const orderDirty = pendingOrder.length > 0;
+
+  // Kept in a ref for `refresh` to read, which is a callback and must not be rebuilt whenever the order changes. The
+  // effect is what keeps it current: staging happens in an event handler, and by the time any later save reloads the
+  // library React has long since committed and run this.
+  useEffect(() => {
+    pendingOrderRef.current = pendingOrder;
+  }, [pendingOrder]);
+
+  // The draft follows the pending pairs, so there is one description of "unsaved" rather than two. Writing it on every
+  // change is what makes the order survive the tab being closed - and clearing it the moment the last pair is saved (or
+  // the change is discarded) means a stale draft can never be restored over a library that is already correct.
+  useEffect(() => {
+    try {
+      if (pendingOrder.length > 0) sessionStorage.setItem(ORDER_DRAFT_KEY, JSON.stringify(pendingOrder));
+      else sessionStorage.removeItem(ORDER_DRAFT_KEY);
+    } catch {
+      /* Storage unavailable - a private window, or it is full. The bar still says what is unsaved; only the survival
+         across a tab switch is lost, which is not worth taking the screen down for. */
+    }
+  }, [pendingOrder]);
+
   // ---------------------------------------------------------------------------
   // Dragging to reorder
   // ---------------------------------------------------------------------------
-  //
   // The two ways a member of staff expects to order things: drag a DOCUMENT within its folder, and drag a FOLDER to
   // sit in front of another one. Neither writes anything itself - both ask a pure helper in utils/documents what
-  // the numbers should become, then send that. The helper is where the rules live (dropping up lands above, the
+  // the numbers should become, then stage that. The helper is where the rules live (dropping up lands above, the
   // Unfiled shelf is pinned last, a document is never dragged into another folder by accident) and it is where
   // they are tested; a rule restated here would be a second version of it.
   //
-  // A drag that ends where it started sends nothing at all, which is what makes a fumbled drag harmless.
+  // A drag that ends where it started stages nothing, which is what makes a fumbled drag harmless.
   //
-  // THE ORDER IS APPLIED LOCALLY, FROM THE PAIRS THAT WERE JUST WRITTEN, and this is the fix for a fault that looked
-  // like data loss rather than a bug: a reorder answers with a COUNT (`{ moved }`), not with the library, and this used
-  // to redraw the list from `result.documents` - a field no writer returns. `normalizeDocumentList(undefined)` is `[]`,
-  // so the whole list vanished on every drop, and came back the next time the tab was opened because the write had
-  // succeeded all along. The officer saw an empty library that was in fact correctly ordered.
+  // MAKE ALL THE CHANGES, THEN SAVE ONCE. Every drop and both Move up / Move down change `rows` and stop there; the
+  // write happens when the officer presses Save order, and it is ONE request carrying every row that moved. Ordering a
+  // shelf is a single job - "this goes first, that goes last, the other one in between" - and a request per nudge made
+  // the officer wait on the network between each of them, half-saved if the third one failed, and unable to see how the
+  // finished list looked before committing to it. The staged items on a new checklist already work this way, and so
+  // does the schedule board, so this is the house pattern rather than a new idea.
   //
-  // Applying the pairs is the same answer without a read: `reorderDocuments` and `insertDocumentBefore` number the whole
-  // run, and the writer skips only ids that no longer exist. It happens AFTER the write, so nothing on screen moves
-  // until the save lands - which is what the line above the list promises while `savingOrder` is set.
-  const applyOrder = useCallback(
-    async (pairs, description) => {
+  // WHAT IS STAGED IS THE ORDER, NOT A COPY OF THE LIST. `rows` is the working copy the screen draws, and `savedOrder`
+  // is the last thing the server confirmed; the pairs in between are the save (see `pendingDocumentOrderPairs`). That is
+  // why a second drag builds on the first, and why dragging a row back where it was leaves nothing to save.
+  //
+  // A NOTE ON THE FAULT THIS REPLACED, because it is the reason the list is drawn the way it is: a reorder answers with
+  // a COUNT (`{ moved }`), not with the library, and this used to redraw the list from `result.documents` - a field no
+  // writer returns. `normalizeDocumentList(undefined)` is `[]`, so every drop emptied the list. Then, once that was
+  // fixed by applying the pairs locally, nothing VISIBLY moved, because the list was drawn in the order the array
+  // happened to be in rather than in `sort_order` - so the fix looked like it had not worked. Both halves are needed:
+  // the pairs decide the order, and `documentsInFolder` draws that order.
+  const stageOrder = useCallback(
+    (pairs) => {
       if (pairs.length === 0 || savingOrder) return;
-      setSavingOrder(true);
-      try {
-        const result = await adminReorderDocuments(pairs, token);
-        if (!result?.success) throw new Error(result?.message || 'Could not save the new order.');
-        setRows((current) => applyDocumentOrder(current, pairs));
-        toast.success(description);
-      } catch (err) {
-        toast.error(err?.message || 'Could not save the new order.');
-      } finally {
-        setSavingOrder(false);
-      }
+      setRows((current) => applyDocumentOrder(current, pairs));
     },
-    [savingOrder, token]
+    [savingOrder]
   );
+
+  // ONE REQUEST FOR EVERY ROW THAT MOVED. `pendingOrder` is already the difference between the screen and the server, so
+  // there is nothing to work out here - and after it lands, the snapshot becomes the list the officer is looking at,
+  // which is what makes the bar disappear in the same breath.
+  const saveOrder = useCallback(async () => {
+    const pairs = pendingOrder;
+    if (pairs.length === 0 || savingOrder) return;
+    setSavingOrder(true);
+    try {
+      const result = await adminReorderDocuments(pairs, token);
+      if (!result?.success) throw new Error(result?.message || 'Could not save the new order.');
+      setSavedOrder(documentOrderSignature(rows));
+      toast.success(
+        pairs.length === 1 ? 'Order saved.' : `Order saved, ${pairs.length} positions moved.`
+      );
+    } catch (err) {
+      toast.error(err?.message || 'Could not save the new order.');
+    } finally {
+      setSavingOrder(false);
+    }
+  }, [pendingOrder, rows, savingOrder, token]);
+
+  // Back to the stored order, with the snapshot rather than a read: the numbers that were saved are still in hand, so
+  // undoing a change should not cost a request. Dragging rows around to find a layout and then thinking better of it is
+  // the normal way to use this screen, not a failure to recover from.
+  const discardOrder = useCallback(() => {
+    if (savingOrder) return;
+    setRows((current) => applyDocumentOrder(current, savedDocumentOrderPairs(savedOrder)));
+  }, [savedOrder, savingOrder]);
 
   const startDocumentDrag = (event, row) => {
     if (savingOrder) {
@@ -564,7 +670,7 @@ export default function AdminDocumentsTab({
       }
       return;
     }
-    applyOrder(pairs, `Moved “${moved.title}”.`);
+    stageOrder(pairs);
   };
 
   // Dropping into a GAP - between two documents, or after the last one in a folder.
@@ -596,7 +702,7 @@ export default function AdminDocumentsTab({
       }
       return;
     }
-    applyOrder(pairs, `Moved “${moved.title}”.`);
+    stageOrder(pairs);
   };
 
   const startFolderDrag = (event, folder) => {
@@ -619,7 +725,7 @@ export default function AdminDocumentsTab({
 
     const pairs = reorderFolders(rows, movedFolder, folder);
     if (pairs.length === 0) return;
-    applyOrder(pairs, `Moved the ${movedFolder} folder.`);
+    stageOrder(pairs);
   };
 
   function readDraggedId(event) {
@@ -650,7 +756,7 @@ export default function AdminDocumentsTab({
     if (!neighbour) return;
     const pairs = reorderDocuments(rows, form.id, neighbour.id);
     if (pairs.length === 0) return;
-    applyOrder(pairs, direction < 0 ? 'Moved up.' : 'Moved down.');
+    stageOrder(pairs);
   };
 
   const selectedSiblings = form.id ? orderedFolderDocuments(rows, documentFolder(form)) : [];
@@ -877,20 +983,56 @@ export default function AdminDocumentsTab({
             {/* The list is the drag surface: pick a row up and drop it where it should sit, and pick a folder
                 heading up and drop it in front of another folder. There is no Order box to type into any more -
                 the position is the position you see. */}
-            {/* Letting go is a WRITE, and until it lands the list is frozen: dragging is off and nothing on screen
-                has moved yet. That is the moment this line speaks, in the place the instruction was, because that
-                is where the eye already is. It covers all three drag paths - documents, folders and the checklist
-                items - since they all save through applyOrder. */}
-            <p className="px-1 pb-2 text-xs text-slate-500 dark:text-slate-400">
-              {savingOrder ? (
+            {/* NOTHING IS WRITTEN UNTIL SAVE ORDER, so this is where the screen has to say what is waiting. The bar
+                sits above the rows because it is about them, and it carries the two buttons rather than putting them
+                in the toolbar: "save what I just arranged" belongs next to the arrangement, and the count beside it is
+                the count of pairs a save would send (`pendingOrder`), not a separate tally that could drift from it.
+                A folder drag and the Move up / Move down buttons stage through the same path, so all three are covered
+                by the one bar. */}
+            {savingOrder ? (
+              <p className="px-1 pb-2 text-xs text-slate-500 dark:text-slate-400">
                 <span className="inline-flex items-center gap-1.5 font-medium text-slate-600 dark:text-slate-300">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Saving the new order…
                 </span>
-              ) : (
-                'Drag a document to reorder it, or a folder heading to move the whole folder.'
-              )}
-            </p>
+              </p>
+            ) : orderDirty ? (
+              <div className="mx-1 mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/40">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                    {pendingOrder.length} unsaved change{pendingOrder.length === 1 ? '' : 's'} to the order
+                  </span>
+                  <span className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                    Kept if you switch tabs. Nothing moves in the library until you save.
+                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={discardOrder}
+                      className="rounded-lg px-2.5 py-1 text-xs font-medium text-amber-900 underline-offset-2 hover:underline dark:text-amber-200"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveOrder}
+                      className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-500"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save order
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-300/80">
+                  Keep dragging rows into place — save when the list reads the way you want it.
+                </p>
+              </div>
+            ) : (
+              <p className="px-1 pb-2 text-xs text-slate-500 dark:text-slate-400">
+                Drag a document to reorder it, or a folder heading to move the whole folder — then press{' '}
+                <strong className="font-semibold">Save order</strong>.
+              </p>
+            )}
             {groups.map((group) => (
               <div key={group.folder} className="mt-3 first:mt-0">
                 <div
@@ -1141,11 +1283,11 @@ export default function AdminDocumentsTab({
                       untouched document keeps the position it has. */}
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     Position in the list is set by <strong>dragging the rows</strong> above, and the folder by its place
-                    on a document.
+                    on a document. Moves wait until you press <strong>Save order</strong>.
                   </p>
                   {/* The keyboard-and-tablet path to the same thing: a touch screen fires no drag events. */}
                   {isEditing && (
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => moveSelectedDocument(-1)}
@@ -1164,6 +1306,31 @@ export default function AdminDocumentsTab({
                         <ArrowDown className="w-3.5 h-3.5" />
                         Move down
                       </button>
+                      {/* THE BAR BEHIND THIS MODAL IS NOT VISIBLE FROM IN HERE, and Move up / Move down are inside it -
+                          so without this the one path a touch screen can use would stage a move nobody could save, and
+                          the button being grayed out while `savingOrder` would be the only feedback. Same pending list
+                          as the bar, read from the same place, so the two can never disagree; the count and the button
+                          appear together or not at all. */}
+                      {orderDirty && (
+                        <>
+                          <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                            {pendingOrder.length} move{pendingOrder.length === 1 ? '' : 's'} not saved
+                          </span>
+                          <button
+                            type="button"
+                            onClick={saveOrder}
+                            disabled={savingOrder}
+                            className="flex items-center gap-1.5 rounded-xl bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
+                          >
+                            {savingOrder ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Save className="w-3.5 h-3.5" />
+                            )}
+                            Save order
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1718,6 +1885,20 @@ export default function AdminDocumentsTab({
           its own, at the top of the early return above. */}
       {canVerifyDocuments && (
         <AdminChecklistVerification
+          token={token}
+          documents={rows}
+          users={users}
+          currentUserId={currentUserId}
+          timeFormat={timeFormat}
+        />
+      )}
+
+      {/* Back-filling the paper files, for a role that manages documents - which is also what the write requires, so
+          the panel is only drawn for a role that could use it rather than offering a save the server would refuse. It
+          sits BELOW the verification queue deliberately: filling the history in is the one-off job somebody does when
+          the station arrives, and confirming a member's items is the recurring one. */}
+      {canManageDocuments && (
+        <AdminSignatureBackfill
           token={token}
           documents={rows}
           users={users}

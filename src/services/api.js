@@ -716,6 +716,27 @@ export const setAssessmentScore = async (documentId, userId, score, scoredOn, to
 export const adminRemoveDocumentSignature = async (signatureId, token) =>
   dispatchRequest({ action: 'ADMIN_REMOVE_DOCUMENT_SIGNATURE', token, id: signatureId });
 
+// Recording a member's signatures from the paper file. One call for as many items as the officer ticked, because the
+// whole point is that entering a paper archive should not be forty requests.
+//
+// The RECORDER is deliberately not a parameter: the backend takes it from the session, so a caller cannot attribute a
+// row to somebody else. The member it is for IS a parameter - that is the feature - and the rules require the row to
+// carry the `backfilled` flag that says the member did not tap it themselves.
+export const adminBackfillDocumentSignatures = async (
+  { documentId, userId, itemIds = [], recordedOn = '', note = '', confirmVerified = false },
+  token
+) =>
+  dispatchRequest({
+    action: 'BACKFILL_DOCUMENT_SIGNATURES',
+    token,
+    document_id: documentId,
+    user_id: userId,
+    item_ids: Array.isArray(itemIds) ? itemIds : [],
+    recorded_on: recordedOn,
+    note,
+    confirm_verified: confirmVerified === true,
+  });
+
 // --- Checklist items ---------------------------------------------------------------
 //
 // Signing and verifying a checklist item are two different things and are two different calls. `signChecklistItem`

@@ -461,7 +461,20 @@ service cloud.firestore {
               && permission('can_view_documents'))
             || (permission('can_verify_documents')
               && request.resource.data.get('signed_by_user_id', '') == uid()
-              && request.resource.data.get('signature_role', '') == 'verifier'));
+              && request.resource.data.get('signature_role', '') == 'verifier')
+            // A BACK-FILL, and the `backfilled == true` clause is the whole reason this branch is safe to add. An
+            // administrator may record a signature for SOMEBODY ELSE, which is what grandfathering the paper files
+            // needs - and may only do it while saying so. Without that clause this branch would be a way to write an
+            // ordinary in-app signature in another member's name, which is the one thing the two branches above exist
+            // to prevent; with it, the row cannot pretend to be something a member tapped.
+            //
+            // `get(k, default)` throughout, as above: reading a field that is NOT there makes a rule ERROR, and an
+            // error is indistinguishable from a denial in the log.
+            || (permission('can_manage_documents')
+              && request.resource.data.get('user_id', '') != uid()
+              && request.resource.data.get('signed_by_user_id', '') == uid()
+              && request.resource.data.get('signature_role', '') == 'member'
+              && request.resource.data.get('backfilled', false) == true));
       allow update, delete: if permission('can_manage_documents');
     }
 
