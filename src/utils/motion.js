@@ -62,7 +62,7 @@ export function useDismissAnimation(onDismiss) {
   return { ref, dismiss };
 }
 
-// Which way a month is moving, and the class that animates it.
+// Which way the view is moving, and the class that animates it.
 //
 // A month change is two phases, because the calendar only ever renders one month: the old one slides out of
 // the card, and the SWAP HAPPENS WHILE IT IS OFF THE EDGE, so the new month is already painted where its own
@@ -71,7 +71,23 @@ export function useDismissAnimation(onDismiss) {
 //
 // The phases are advanced by `animationend` rather than by timers - the animation is the clock - with the same
 // escape hatch as above: a member who asked for less movement gets the next month instantly.
-export function useMonthSlide(viewDate, setViewDate) {
+//
+// `unit` IS WHAT THE ARROWS WALK: a month (the default) or a day, which is what a narrow screen shows instead of the
+// month (see utils/viewport). An option on this hook rather than a second hook, because the slide IS the same either
+// way: a day that animated differently from a month would be two calendars wearing one card.
+//
+// THE DAY IS KEPT IN BOTH UNITS, clamped into the month it lands in - so the 31st becomes the 28th or the 30th rather
+// than silently becoming the 1st. That is what lets a window be narrowed and widened again without forgetting the day
+// the member was reading: the month view does not draw the day, so keeping it costs that view nothing. Both callers
+// only ever read the year and month off this date, and the one date-based comparison this hook makes (which way the
+// view is moving) stays correct because clamping can never step past the month it was asked for.
+const addMonthsKeepingDay = (date, months) => {
+  const landing = new Date(date.getFullYear(), date.getMonth() + months, 1);
+  const lastDay = new Date(landing.getFullYear(), landing.getMonth() + 1, 0).getDate();
+  return new Date(landing.getFullYear(), landing.getMonth(), Math.min(date.getDate(), lastDay));
+};
+
+export function useMonthSlide(viewDate, setViewDate, unit = 'month') {
   const [phase, setPhase] = useState(null);
   const [direction, setDirection] = useState(1);
   const pending = useRef(null);
@@ -81,8 +97,8 @@ export function useMonthSlide(viewDate, setViewDate) {
     reduced.current = prefersReducedMotion();
   }, []);
 
-  // A month change asked for while one is in flight is DROPPED rather than queued: catching up on three
-  // months of slides is not what a member who pressed Next three times wants to watch.
+  // A change asked for while one is in flight is DROPPED rather than queued: catching up on three months of slides is
+  // not what a member who pressed Next three times wants to watch.
   const stepTo = useCallback(
     (next) => {
       if (phase) return;
@@ -98,12 +114,19 @@ export function useMonthSlide(viewDate, setViewDate) {
   );
 
   const goBy = useCallback(
-    (months) => stepTo(new Date(viewDate.getFullYear(), viewDate.getMonth() + months, 1)),
-    [stepTo, viewDate]
+    (steps) =>
+      stepTo(
+        unit === 'day'
+          ? new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate() + steps)
+          : addMonthsKeepingDay(viewDate, steps)
+      ),
+    [stepTo, viewDate, unit]
   );
 
+  // `goTo` KEEPS THE TARGET'S OWN DAY, because its one caller is Today: the target IS the answer. Re-deriving the day
+  // from the view date would make the button mean "today's month, on whatever day I happened to be looking at".
   const goTo = useCallback(
-    (target) => stepTo(new Date(target.getFullYear(), target.getMonth(), 1)),
+    (target) => stepTo(new Date(target.getFullYear(), target.getMonth(), target.getDate())),
     [stepTo]
   );
 

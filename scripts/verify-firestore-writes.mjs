@@ -35,6 +35,11 @@ import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
 import { OFFLINE_CLOCK_MESSAGE } from '../src/utils/connectivity.js';
 import { rankFieldsFromForm } from '../src/utils/ranks.js';
+// The document order helper, for the round trip at the documents section below: the reply the drag route really sends,
+// fed through the function the tab really uses, so "what ends up on screen" is asserted rather than described. It loads
+// under plain Node because its own imports carry `.js` specifiers - which is not true of services/api.js, and is why the
+// helper lives in utils at all.
+import { applyDocumentOrder } from '../src/utils/documents.js';
 // The app's OWN badge registry, so the round trip at the badge section below is checked by what it DRAWS rather than
 // by what the reply looks like - "is this the index?" is not a shape a reader can eyeball. Pure and import-free, which
 // is what makes it usable from plain Node at all.
@@ -954,6 +959,32 @@ const main = async () => {
   check('a drag moves the rows it can name', drag.moved, 1);
   const draggedDocument = (await getDoc(doc(firestore(), 'documents', 'doc6'))).data();
   check('writing only the position', [draggedDocument.sort_order, draggedDocument.title], [3, 'New Policy Acknowledgement']);
+
+  // ...AND WHAT THE DRAG ANSWERS WITH, which is the half that made a drop look like it had deleted the library. The reply
+  // is a COUNT, not the library - so the tab, which used to redraw itself from `result.documents`, read a field that does
+  // not exist: `normalizeDocumentList(undefined)` is `[]`, the list went blank, and the documents came back the next time
+  // the tab was opened because the WRITE had succeeded all along. A screen that empties itself looks like data loss, and
+  // the officer's own library was correctly ordered the whole time.
+  //
+  // An assertion of the SHAPE, because that is the fact the caller could not see: every line in the tab reads perfectly
+  // well when it names a field the writer never sends. So this pins what the route really answers with, and then feeds
+  // that reply through the app's OWN helper to show what ends up on screen - the same two-part technique the badge reply
+  // uses above, and for the same reason.
+  check('the drag answers with a count rather than the library', Object.keys(drag).sort(), ['moved', 'success']);
+  check('so there is no `documents` field to build a list from', 'documents' in drag, false);
+
+  const heldRows = [
+    { id: 'doc6', title: 'New Policy Acknowledgement', folder: 'Standing Orders', sort_order: 99 },
+    { id: 'doc1', title: 'Policy Acknowledgement', folder: 'Standing Orders', sort_order: 1 },
+  ];
+  const afterDrag = applyDocumentOrder(heldRows, [{ id: 'doc6', sort_order: 3 }]);
+  check(
+    'and the app applies the order it wrote to the rows it holds',
+    afterDrag.map((row) => [row.id, row.sort_order]),
+    [['doc6', 3], ['doc1', 1]]
+  );
+  check('leaving every other row exactly where it was', afterDrag.length, 2);
+  check('so the list cannot be emptied by a reply that carries no list', applyDocumentOrder(heldRows, drag.order || undefined).length, 2);
 
   // --- training signatures: the same add-only shape, and a lock that means its signatures too ------------------------
   await signIn('jane');

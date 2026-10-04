@@ -15,6 +15,8 @@ Each shift is drawn as a colored pill. The color comes from the **assignment**, 
 
 A pill shows the assignment plus either the shift's **nickname** (such as "Day Shift") or its times. Click one and a popup opens with everything the pill has no room for — see **Reading the details of an item** below.
 
+In the crew view a pill's first line is the **member's name**, and that is where their **rank dot** and their **certification icons** go — a glance across a shift tells you who you are on with and what they hold. On a phone the pill is bigger (see *On a phone* below), so those marks are easier to read, not harder.
+
 Below the calendar, **Schedule Details** lists the shifts in the month with their exact times. Clicking a line there opens the same popup.
 
 ## Events on the calendar
@@ -40,6 +42,21 @@ Click a shift or an event — or tap it on a touch screen — and a popup opens 
 A shift pill shows a nickname when its template has one, so the popup is where you find the real window: a pill reading "Day Shift" tells you there that it runs 8:00 AM – 6:00 PM.
 
 With the crew view on, a colleague's pill names them in the popup. In your own view the popup is about the shift instead, because you already know whose it is.
+
+## On a phone: one day at a time
+
+On a narrow screen — a phone, or a window narrower than a tablet — the calendar shows **one day at a time** rather than a month, opening on **today**. Nothing is read twice for this: the day you are looking at is part of the month already loaded, so moving between days costs nothing.
+
+| | Wide screen | Phone |
+|---|---|---|
+| Shows | The whole month | One day |
+| **◀ ▶** step | A month | **A day** |
+| **Today** | The month today falls in | Today |
+| A shift pill | Two clipped lines | Who is on it and its times, on two lines with room to read |
+
+The **Schedule Details** list below follows the view: a month of shifts under the calendar, or just the day's under a single day. The **Print** button prints a month either way — a printed sheet is a month, and the whole month is already loaded.
+
+Widening the window (or rotating a tablet) switches to the month on the spot, keeping the day you were reading, and costs no read. If you are reading the crew view on a phone, the pills still name each member and still carry their rank dot and certification icons.
 
 ## Moving between months
 

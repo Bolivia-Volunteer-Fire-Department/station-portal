@@ -111,16 +111,17 @@ The folder button beside a heading opens a rename box. Renaming moves **every do
 
 Position is set by **dragging**, not by typing numbers:
 
-- **Drag a document** onto another one in the same folder to put it where you dropped it — above the row if you dragged up, below it if you dragged down.
+- **Drag a document between two others** to put it exactly there. The narrow space between two rows is a drop target: hover it while dragging and a red bar appears between them, showing where the document will land. There is a bar before every document and one after the last one, so you can also drop a document straight to the **end** of a folder.
+- **Drag a document onto another one** to put it beside that document — above the row if you dragged up, below it if you dragged down. Useful when you are aiming at a row rather than at a gap.
 - **Drag a folder heading** to move the whole folder, and every document in it, in front of another folder.
 - **Unfiled is pinned last** and cannot be dragged: it is where documents with no folder are shown, not a shelf you chose.
 
-Both are saved the moment you drop, and the list is redrawn from what was saved — so a row somebody else moved while you were dragging appears where it actually is. A drag that ends where it started writes nothing at all.
+Both are saved the moment you drop, and the list redraws in the order you set immediately. A drag that ends where it started — including dropping a document back into the gap it is already sitting in — writes nothing at all.
 
 > [!NOTE]
 > **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button grayed out. If your crew writes documents on an iPad, that is the way to set a position.
 
-A drag **never changes a document's folder**: the folder is a field on the document, and dragging is about position. Drop a document onto a row from another folder and the app says so instead of moving it silently — change the **Folder** field for that.
+A drag **never changes a document's folder**: the folder is a field on the document, and dragging is about position. Drop a document into another folder's gap, or onto a row from another folder, and the app says so instead of moving it silently — change the **Folder** field for that.
 
 > [!NOTE]
 > A folder only exists as a name carried by the documents in it, so there is no folder order stored anywhere: a folder sits where its first document sits. That is why dragging a folder heading rewrites the order of the documents inside it — it is the only thing there is to write.

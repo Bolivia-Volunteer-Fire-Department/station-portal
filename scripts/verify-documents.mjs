@@ -58,6 +58,8 @@ import {
   normalizeDocumentList,
   normalizeSignatureList,
   outstandingSignatureDocuments,
+  applyDocumentOrder,
+  insertDocumentBefore,
   reorderDocuments,
   reorderFolders,
   signatureDateLabel,
@@ -290,6 +292,89 @@ check(
   true
 );
 check('and a folder with no documents is not a folder', reorderFolders(folderFixtures, 'Ghost', 'Alpha'), []);
+console.log('\n--- dropping into the gap between two documents ---');
+// The position a drop ON a row cannot express. Dropping onto a row lands a document BESIDE it, with the side decided by
+// the direction the drag travelled; a gap names its own position, so "between these two" and "at the end" are both
+// sayable. Both drops number the run through the same helper, so the same visual position cannot save two orders.
+check(
+  'a gap between two documents puts the row exactly there',
+  orderMap(insertDocumentBefore(withinAlpha, 'a3', 'Alpha', 'a2')),
+  { a2: 20, a3: 10 }
+);
+check(
+  'the gap above the first document puts it first',
+  orderMap(insertDocumentBefore(withinAlpha, 'a3', 'Alpha', 'a1')),
+  { a1: 10, a2: 20, a3: 0 }
+);
+check(
+  'and the gap after the last one puts it last',
+  orderMap(insertDocumentBefore(withinAlpha, 'a1', 'Alpha', '')),
+  { a1: 20, a2: 0, a3: 10 }
+);
+// A FUMBLED DRAG: dropping a document back into the gap it is already sitting in. Every number it would be given is the
+// number it already holds, so the pairs come back empty and nothing is written - the same rule that makes a drop onto a
+// row it already touches harmless.
+check('dropping a document into its own gap writes nothing', insertDocumentBefore(withinAlpha, 'a2', 'Alpha', 'a3'), []);
+check('and the gap it already fills is not a move either', insertDocumentBefore(withinAlpha, 'a1', 'Alpha', 'a2'), []);
+check('an unknown document writes nothing', insertDocumentBefore(withinAlpha, 'nope', 'Alpha', 'a1'), []);
+check('and a gap naming no folder writes nothing', insertDocumentBefore(withinAlpha, 'a1', '', 'a2'), []);
+// THE END GAP IS THE REASON THE FOLDER IS PASSED IN. It has no anchor to compare against, so without the folder check a
+// document dragged from another folder would be renumbered inside its OWN folder by a drop that looked like it landed
+// somewhere else entirely.
+const twoFolders = normalizeDocumentList([
+  { id: 'a1', title: 'A one', folder: 'Alpha', sort_order: 0 },
+  { id: 'a2', title: 'A two', folder: 'Alpha', sort_order: 10 },
+  { id: 'b1', title: 'B one', folder: 'Bravo', sort_order: 20 },
+]);
+check(
+  'a document dragged from another folder is never renumbered by the end gap',
+  insertDocumentBefore(twoFolders, 'b1', 'Alpha', ''),
+  []
+);
+check(
+  'nor by a gap in front of another folder document',
+  insertDocumentBefore(twoFolders, 'a1', 'Bravo', 'b1'),
+  []
+);
+
+console.log('\n--- the order that comes back is applied to the rows on screen ---');
+// The other half of a drop: the reply carries a COUNT, so the list is redrawn from the pairs that were just written.
+// Pure, and asserted by the thing that matters - what the officer ends up looking at.
+const held = normalizeDocumentList([
+  { id: 'a1', title: 'A one', folder: 'Alpha', sort_order: 10 },
+  { id: 'a2', title: 'A two', folder: 'Alpha', sort_order: 0 },
+]);
+check(
+  'a saved order moves the rows it names',
+  applyDocumentOrder(held, [{ id: 'a1', sort_order: 0 }, { id: 'a2', sort_order: 10 }]).map((row) => [row.id, row.sort_order]),
+  [['a1', 0], ['a2', 10]]
+);
+check(
+  'and the list then reads that order',
+  groupDocumentsByFolder(applyDocumentOrder(held, [{ id: 'a1', sort_order: 0 }, { id: 'a2', sort_order: 10 }])).flatMap(
+    (group) => group.documents.map((row) => row.id)
+  ),
+  ['a1', 'a2']
+);
+// The input is never mutated, and an order that changes nothing returns the SAME list so React can skip the render -
+// the rule utils/savedRow states for its own merges.
+const heldBefore = JSON.stringify(held);
+applyDocumentOrder(held, [{ id: 'a1', sort_order: 0 }, { id: 'a2', sort_order: 10 }]);
+check('the list it was given is left alone', JSON.stringify(held), heldBefore);
+check('an order that changes nothing hands back the same list', applyDocumentOrder(held, []) === held, true);
+check(
+  'and so does one naming only the rows that did not move',
+  applyDocumentOrder(held, [{ id: 'a1', sort_order: 10 }]) === held,
+  true
+);
+// ...AND IT CANNOT EMPTY THE LIST, which is the fault itself: a reply with no pairs - or an answer for a document that
+// is no longer there - leaves every row exactly where it was.
+check('a reply naming nothing leaves the list as it was', applyDocumentOrder(held, undefined).length, 2);
+check(
+  'and a pair for an unknown document changes no row',
+  applyDocumentOrder(held, [{ id: 'ghost', sort_order: 0 }]) === held,
+  true
+);
 
 console.log('\n--- effective and end dates ---');
 const windowed = normalizeDocument({
@@ -1301,13 +1386,79 @@ checkIs(
   'the drop rule would be re-implemented in the component'
 );
 checkIs('and a folder drop asks the other one', /reorderFolders\(rows, movedFolder, folder\)/.test(tabSource));
+// THE GAPS BETWEEN THE DOCUMENTS - the request that added them: dropping ONTO a row can only put a document beside it,
+// with the side decided by the direction of the drag, so there was no way to say "between these two" and no way at all
+// to say "at the end" except by aiming at the last row from above.
+checkIs(
+  'a gap between two documents asks the insert helper where it goes',
+  /insertDocumentBefore\(rows, movedId, folder, beforeId\)/.test(tabSource),
+  'the gap rule would be re-implemented in the component'
+);
+checkIs(
+  'the gaps are drawn before every document and once after the last one',
+  /insertGap\(group\.folder, row\.id\)/.test(tabSource) && /insertGap\(group\.folder, ''\)/.test(tabSource),
+  'there is no place to drop a document between two others'
+);
+checkIs(
+  'and a gap names itself by the folder and the document it comes before',
+  /const gapKey = \(folder, beforeId\) => `\$\{folder\}\|\$\{beforeId\}`/.test(tabSource),
+  'a blank end-gap in one folder would be the same gap as a blank end-gap in another'
+);
+// ON ONE TARGET AT A TIME. The row ring and the gap bar are two answers to "where is this landing", and both lit would
+// say the document is going to two places at once. Asserted against the GAP'S OWN BODY, so "somewhere in this file the
+// right two setters appear" cannot satisfy it.
+const insertGapBody = (() => {
+  const at = tabSource.indexOf('const insertGap = (folder, beforeId) => {');
+  return at < 0 ? '' : tabSource.slice(at, tabSource.indexOf('\n  };', at));
+})();
+checkIs('the gap is drawn by a function of its own', insertGapBody.length > 0, 'no insertGap to read');
+checkIs(
+  'hovering a gap clears the row highlight, so only one target is ever lit',
+  /setDragOverDocumentId\(''\)/.test(insertGapBody) && /setDragOverInsert\(key\)/.test(insertGapBody),
+  insertGapBody.slice(0, 200)
+);
+checkIs(
+  'and hovering a row clears the gap',
+  /setDragOverInsert\(''\);[\s\S]{0,60}setDragOverDocumentId\(row\.id\)/.test(tabSource),
+  'both highlights can be lit at once'
+);
+// A FOLDER IS NOT DROPPED INTO A GAP. A folder drag's targets are the headings; a gap that answered one would renumber
+// documents by a drop that looked like it was moving a folder. Not calling preventDefault is what makes it not a target
+// at all - a dragover that is not prevented fires no drop.
+checkIs(
+  'and a gap ignores a folder being carried',
+  /if \(!draggingDocumentId\) return;[\s\S]{0,40}event\.preventDefault\(\)/.test(insertGapBody),
+  'a folder drag would be caught by the space between two rows'
+);
 checkIs(
   'the new order is saved as its own action',
   /adminReorderDocuments\(pairs, token\)/.test(tabSource)
 );
+// THE LIST IS NEVER TAKEN FROM THE REORDER'S REPLY, which is the fault this replaced.
+//
+// A reorder answers with a COUNT (`{ moved }`), not with the library - and the tab used to redraw itself from
+// `result.documents`, a field no writer returns. `normalizeDocumentList(undefined)` is `[]`, so EVERY drop emptied the
+// list on screen while the write had already succeeded: the documents came back, correctly ordered, the next time the
+// tab was opened. A source check could not see it, because the line it pinned was the line that had the bug in it and
+// it reads perfectly well - "the list is redrawn from what the sheet holds" was the intent, and the field it named was
+// simply absent.
+//
+// So the assertion is the RULE rather than the shape of the call: the reply is not a list, therefore the list cannot
+// come from it. The order the officer dragged is applied to the rows already held (`applyDocumentOrder`), which is the
+// same answer - the pairs ARE what the writer numbered - without a read.
 checkIs(
-  'the list is redrawn from what the sheet holds',
-  /setRows\(normalizeDocumentList\(result\.documents\)\)/.test(tabSource)
+  'the order is applied to the rows already on screen',
+  /setRows\(\(current\) => applyDocumentOrder\(current, pairs\)\)/.test(tabSource),
+  'the dragged order is not what the list is redrawn from'
+);
+checkIs(
+  'and the list is never rebuilt from the reorder reply, which carries no documents',
+  !/setRows\(normalizeDocumentList\(result\./.test(tabSource),
+  'a reorder reply has no `documents` - reading it empties the list'
+);
+checkIs(
+  'which is a rule in utils/documents rather than a line in the component',
+  /export const applyDocumentOrder = \(documents, pairs\)/.test(readFileSync('src/utils/documents.js', 'utf8'))
 );
 checkIs(
   'Unfiled cannot be dragged',

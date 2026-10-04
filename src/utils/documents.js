@@ -134,6 +134,21 @@ export const orderedFolderDocuments = (documents, folder) =>
     .filter((document) => documentFolder(document) === folder)
     .sort((a, b) => a.sort_order - b.sort_order || a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
 
+// The pairs to save for one folder's documents in their new order: the whole run numbered in steps, with the rows whose
+// number did not move left out.
+//
+// SHARED BY BOTH KINDS OF DROP, deliberately. Dropping onto a row and dropping into the gap beside it are two ways of
+// saying where something goes, and if each numbered the run itself the same visual position could save two different
+// orders. The filter is also what makes a drag that ends where it started save NOTHING: every number matches what the
+// row already holds, so the list comes back empty and the caller sends no request at all.
+const numberedPairs = (list, ordered) =>
+  ordered
+    .map((document, index) => ({ id: document.id, sort_order: index * ORDER_STEP }))
+    .filter((entry) => {
+      const current = list.find((document) => document.id === entry.id);
+      return !current || current.sort_order !== entry.sort_order;
+    });
+
 // Dropping `movedId` onto `targetId` places the moved document where the target was, and pushes the rest down.
 // Dropping onto itself changes nothing, which is what makes a drag that goes nowhere harmless.
 export const reorderDocuments = (documents, movedId, targetId) => {
@@ -162,12 +177,78 @@ export const reorderDocuments = (documents, movedId, targetId) => {
   const next = movingDown ? at + 1 : at;
   const ordered = [...without.slice(0, next), moving, ...without.slice(next)];
 
-  return ordered
-    .map((document, index) => ({ id: document.id, sort_order: index * ORDER_STEP }))
-    .filter((entry) => {
-      const current = list.find((document) => document.id === entry.id);
-      return !current || current.sort_order !== entry.sort_order;
-    });
+  return numberedPairs(list, ordered);
+};
+
+// Dropping a document into the GAP between two others: immediately before `beforeId`, or at the end of the folder when
+// `beforeId` is blank.
+//
+// THE OTHER HALF OF reorderDocuments, and the reason it is a second function rather than a flag on that one. Dropping ON
+// a row can only place a document beside that row, and WHICH side is decided by the direction the drag travelled - right
+// for a drag aimed at a row, and no use at all to an officer aiming at the space between two of them. A gap knows its
+// own position, so this one takes the anchor instead of inferring a side: the gap above a document means exactly
+// "before it", and the gap after the last document means "at the end". One function with a `side` argument would have to
+// read the travel direction for one caller and ignore it for the other, which is how the two ends up disagreeing.
+//
+// `folder` is the folder the GAP BELONGS TO, and it is checked rather than assumed: the gap at the end of a run has no
+// anchor to compare against, so without it a document dragged from another folder would be renumbered inside its own
+// folder by a drop that looked like it landed somewhere else entirely.
+export const insertDocumentBefore = (documents, movedId, folder, beforeId) => {
+  const moved = text(movedId);
+  const landing = text(folder);
+  const anchor = text(beforeId);
+  if (!moved || !landing) return [];
+
+  const list = (Array.isArray(documents) ? documents : []).map(normalizeDocument);
+  const moving = list.find((document) => document.id === moved);
+  if (!moving) return [];
+  // The same rule as dropping onto a row: a drag never moves a document between folders. `documentFolder` is what turns
+  // a blank folder into the Unfiled shelf, which is the name the gap was built with.
+  if (documentFolder(moving) !== landing) return [];
+
+  const without = orderedFolderDocuments(list, moving.folder).filter((document) => document.id !== moved);
+  // A blank anchor is the END of the run: there is no document to stop before, so the end of what is left IS the
+  // position being asked for.
+  const at = anchor === '' ? without.length : without.findIndex((document) => document.id === anchor);
+  // An anchor that is not in this run - a gap belonging to another folder, or a row since deleted - is refused rather
+  // than guessed at, which is the answer reorderDocuments gives for a target it cannot find.
+  if (at === -1) return [];
+
+  const ordered = [...without.slice(0, at), moving, ...without.slice(at)];
+  return numberedPairs(list, ordered);
+};
+
+// A held list with a saved order applied to it: the rows already on screen, with the new `sort_order` on the ones that
+// moved.
+//
+// WHY THE CLIENT APPLIES ITS OWN WRITE. A reorder answers with a COUNT (`{ moved }`), not with the library - and this
+// screen used to redraw itself from `result.documents`, a field no writer returns. Reading a field that is not there is
+// not an error: `normalizeDocumentList(undefined)` is `[]`, so the whole list vanished. The documents came back the
+// moment the tab was left and reopened, because the WRITE had succeeded all along - which is what makes this worse than
+// a failed save. A failed save says so; this looks like the library was emptied.
+//
+// THE PAIRS ARE THE SHEET'S ORDER, which is why applying them here is the same answer without a read: reorderDocuments
+// and insertDocumentBefore number the whole run, and the writer skips nothing it was handed that still exists. The input
+// list is never mutated, and an order that changes nothing returns the SAME list so React can skip the render - the rule
+// utils/savedRow states for its own merges.
+export const applyDocumentOrder = (documents, pairs) => {
+  const list = Array.isArray(documents) ? documents : [];
+  const wanted = new Map(
+    (Array.isArray(pairs) ? pairs : [])
+      .map((pair) => [text(pair && pair.id), Number.parseInt(pair && pair.sort_order, 10)])
+      .filter(([id, order]) => id !== '' && Number.isFinite(order))
+  );
+  if (wanted.size === 0) return list;
+
+  let changed = false;
+  const patched = list.map((document) => {
+    const order = wanted.get(text(document && document.id));
+    if (order === undefined) return document;
+    if (Number.parseInt(document && document.sort_order, 10) === order) return document;
+    changed = true;
+    return { ...document, sort_order: order };
+  });
+  return changed ? patched : list;
 };
 
 // Dragging a folder to another folder's position, as one block of documents. Writes nothing about the folder

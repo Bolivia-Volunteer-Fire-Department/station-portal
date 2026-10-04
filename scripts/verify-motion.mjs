@@ -252,15 +252,25 @@ console.log('\n--- the calendars travel ---');
 });
 checkIs('the hook exists', /export function useMonthSlide/.test(motion));
 checkIs('the phases advance on the animation, not a timer', /onAnimationEnd/.test(motion));
-// Every screen with month arrows slides, so a month change is not a different experience per screen.
+// Every screen with month arrows slides, so a change of view is not a different experience per screen.
 ['ScheduleCalendar', 'AvailabilityCalendar'].forEach((name) => {
   const source = readFileSync(`src/components/${name}.jsx`, 'utf8');
-  checkIs(`${name} slides its days`, /useMonthSlide\(viewDate, setViewDate\)/.test(source) && /onAnimationEnd=\{onAnimationEnd\}/.test(source));
+  checkIs(`${name} slides its days`, /useMonthSlide\(viewDate, setViewDate/.test(source) && /onAnimationEnd=\{onAnimationEnd\}/.test(source));
 });
+// ...AND THE UNIT IT WALKS IS THE VIEW'S. A narrow window shows one day (utils/viewport), so its arrows step a day; the
+// calendar steps a month. Both are the same hook and the same slide - see its `unit` option - and the administrator
+// roster takes the default, which is months.
 checkIs(
-  'and so does the administrator roster',
+  'the member calendar steps whatever unit is on screen',
+  /useMonthSlide\(viewDate, setViewDate, dayView \? 'day' : 'month'\)/.test(
+    readFileSync('src/components/ScheduleCalendar.jsx', 'utf8')
+  )
+);
+checkIs(
+  'and the administrator roster still steps months, by taking the default',
   /useMonthSlide\(viewDate, setViewDate\)/.test(readFileSync('src/components/AvailabilityCalendar.jsx', 'utf8'))
 );
+checkIs('an unknown unit is still months', /export function useMonthSlide\(viewDate, setViewDate, unit = 'month'\)/.test(motion));
 // Reduced motion gets the month, not the wait: the phases are skipped rather than run invisibly.
 checkIs('a member who asked for less movement skips to the month', /if \(reduced\.current\) \{[\s\S]{0,80}setViewDate\(next\)/.test(motion));
 

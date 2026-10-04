@@ -33,6 +33,8 @@ import {
   documentUpdatedLabel,
   documentWindowLabel,
   groupDocumentsByFolder,
+  applyDocumentOrder,
+  insertDocumentBefore,
   normalizeChecklistItemList,
   normalizeDocumentList,
   normalizeSignatureList,
@@ -57,6 +59,15 @@ const SIGNATURE_PAGE_SIZE = 10;
 const EDITOR_FORM_ID = 'document-editor-form';
 
 const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: 0 };
+
+// The name of a GAP in the list - the space between two documents, or the end of a folder's run.
+//
+// A gap has no row to be identified by, so it is named after the two things that decide where it is: the folder it
+// belongs to, and the document it comes BEFORE (blank for the gap after the last one). One string, so the element that
+// shows the insertion bar and the handler that performs the drop cannot disagree about which gap is which - and the
+// folder is part of it because the same document id appears in only one folder, while a blank anchor appears in all of
+// them.
+const gapKey = (folder, beforeId) => `${folder}|${beforeId}`;
 
 // Today, once, for the window badges. The same value the schedule's own tab uses: a lifecycle label that changed
 // while a page was open would be worse than one that is a moment stale.
@@ -140,6 +151,9 @@ export default function AdminDocumentsTab({
   // highlight behind.
   const [draggingDocumentId, setDraggingDocumentId] = useState('');
   const [dragOverDocumentId, setDragOverDocumentId] = useState('');
+  // WHICH GAP a document is hovering over, by `gapKey` - see the note on it. Kept apart from `dragOverDocumentId`
+  // because the two are different answers to "where would this land": one is a row, the other is the space beside it.
+  const [dragOverInsert, setDragOverInsert] = useState('');
   const [draggingFolder, setDraggingFolder] = useState('');
   const [dragOverFolder, setDragOverFolder] = useState('');
   const [savingOrder, setSavingOrder] = useState(false);
@@ -453,6 +467,16 @@ export default function AdminDocumentsTab({
   // they are tested; a rule restated here would be a second version of it.
   //
   // A drag that ends where it started sends nothing at all, which is what makes a fumbled drag harmless.
+  //
+  // THE ORDER IS APPLIED LOCALLY, FROM THE PAIRS THAT WERE JUST WRITTEN, and this is the fix for a fault that looked
+  // like data loss rather than a bug: a reorder answers with a COUNT (`{ moved }`), not with the library, and this used
+  // to redraw the list from `result.documents` - a field no writer returns. `normalizeDocumentList(undefined)` is `[]`,
+  // so the whole list vanished on every drop, and came back the next time the tab was opened because the write had
+  // succeeded all along. The officer saw an empty library that was in fact correctly ordered.
+  //
+  // Applying the pairs is the same answer without a read: `reorderDocuments` and `insertDocumentBefore` number the whole
+  // run, and the writer skips only ids that no longer exist. It happens AFTER the write, so nothing on screen moves
+  // until the save lands - which is what the line above the list promises while `savingOrder` is set.
   const applyOrder = useCallback(
     async (pairs, description) => {
       if (pairs.length === 0 || savingOrder) return;
@@ -460,9 +484,7 @@ export default function AdminDocumentsTab({
       try {
         const result = await adminReorderDocuments(pairs, token);
         if (!result?.success) throw new Error(result?.message || 'Could not save the new order.');
-        // The list is redrawn from what the sheet holds, not from the order that was hoped for, so a row somebody
-        // else moved in the meantime is shown where it actually is.
-        setRows(normalizeDocumentList(result.documents));
+        setRows((current) => applyDocumentOrder(current, pairs));
         toast.success(description);
       } catch (err) {
         toast.error(err?.message || 'Could not save the new order.');
@@ -486,6 +508,7 @@ export default function AdminDocumentsTab({
   const dropOnDocument = (event, row) => {
     event.preventDefault();
     setDragOverDocumentId('');
+    setDragOverInsert('');
     const movedId = draggingDocumentId || readDraggedId(event);
     setDraggingDocumentId('');
     if (!movedId || movedId === row.id) return;
@@ -497,6 +520,38 @@ export default function AdminDocumentsTab({
       // The only way here is a drop across folders, which the helper refuses. Saying so is better than a row that
       // silently refuses to move.
       if (documentFolder(moved) !== documentFolder(row)) {
+        toast.warning('A document cannot be dragged into another folder.', {
+          description: 'Change its Folder field instead - dragging only sets the order.',
+        });
+      }
+      return;
+    }
+    applyOrder(pairs, `Moved “${moved.title}”.`);
+  };
+
+  // Dropping into a GAP - between two documents, or after the last one in a folder.
+  //
+  // This is the position the row drop cannot express, and it is the request that produced it: dropping ON a row lands
+  // the document beside that row with the side chosen by the direction of the drag, so there was no way to say "between
+  // these two" - and none at all to say "at the end" except by aiming at the last row from above. A gap names its own
+  // position, so this asks the helper for the position it names.
+  //
+  // A drop that changes nothing sends nothing, which covers both of the ways this happens: the document is already
+  // sitting in that gap (a fumbled drag, and the pull back is free), or it belongs to another folder - which a drag
+  // never changes, and where the officer is told so rather than watching nothing happen.
+  const dropOnInsert = (event, folder, beforeId) => {
+    event.preventDefault();
+    setDragOverInsert('');
+    setDragOverDocumentId('');
+    const movedId = draggingDocumentId || readDraggedId(event);
+    setDraggingDocumentId('');
+    if (!movedId) return;
+
+    const moved = rows.find((candidate) => candidate.id === movedId);
+    if (!moved) return;
+    const pairs = insertDocumentBefore(rows, movedId, folder, beforeId);
+    if (pairs.length === 0) {
+      if (documentFolder(moved) !== folder) {
         toast.warning('A document cannot be dragged into another folder.', {
           description: 'Change its Folder field instead - dragging only sets the order.',
         });
@@ -562,6 +617,47 @@ export default function AdminDocumentsTab({
 
   const selectedSiblings = form.id ? orderedFolderDocuments(rows, documentFolder(form)) : [];
   const selectedIndex = selectedSiblings.findIndex((row) => row.id === form.id);
+
+  // THE GAPS BETWEEN THE DOCUMENTS, which is where a document goes to land BETWEEN two others.
+  //
+  // A thin element sitting where the two chips would otherwise be 8px apart, so the list looks exactly as it did and
+  // the space between two documents has quietly become a target. It draws a bar only while a document is being carried
+  // and only over itself: `aria-hidden` as well as invisible, because it is a place rather than a thing, and it carries
+  // no text for a screen reader to announce.
+  //
+  // IT ONLY ANSWERS A DOCUMENT DRAG. A folder being carried has the folder HEADINGS as its targets, so the gaps do not
+  // preventDefault for one - a dragover that is not prevented is not a drop target at all, which is what keeps a folder
+  // drag from being caught by the space between two rows.
+  const insertGap = (folder, beforeId) => {
+    const key = gapKey(folder, beforeId);
+    const active = dragOverInsert === key;
+    return (
+      <span
+        key={`gap-${key}`}
+        aria-hidden="true"
+        // Two nested spans: the outer one is the TARGET - a full-height 8px of the list's width, so the gap is easy to
+        // hit - and the inner one is the BAR, which is what makes it read as an insertion point rather than a gap that
+        // happens to turn red.
+        onDragOver={(event) => {
+          if (!draggingDocumentId) return;
+          event.preventDefault();
+          // One highlight at a time: the row ring and the gap bar are two answers to the same question, and both lit
+          // would say the document is landing in two places.
+          setDragOverDocumentId('');
+          setDragOverInsert(key);
+        }}
+        onDragLeave={() => setDragOverInsert((current) => (current === key ? '' : current))}
+        onDrop={(event) => dropOnInsert(event, folder, beforeId)}
+        className="flex h-8 w-2 shrink-0 items-center justify-center"
+      >
+        <span
+          className={`h-full w-0.5 rounded-full transition-colors ${
+            active ? 'bg-red-500' : 'bg-transparent'
+          }`}
+        />
+      </span>
+    );
+  };
 
   const handleDelete = async () => {
     const target = pendingDelete;
@@ -762,6 +858,10 @@ export default function AdminDocumentsTab({
                     onDragEnd={() => {
                       setDraggingFolder('');
                       setDragOverFolder('');
+                      // A folder drag never lights a gap, but a document drag that ENDED over this heading left one
+                      // lit - and the drag can end anywhere on the page, so the tidy-up belongs here rather than only
+                      // on the elements the drag started from.
+                      setDragOverInsert('');
                     }}
                     title={
                       group.folder === UNFILED_LABEL
@@ -788,30 +888,39 @@ export default function AdminDocumentsTab({
                     </button>
                   )}
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-2">
+                {/* The chips close up against each other and the GAPS provide the spacing, so the space between two
+                    documents is a target without the list looking any different from before. `items-center` and the
+                    chip's own `gap-2` are untouched: the gap elements are 8px wide, which is what `gap-2` was. */}
+                <div className="mt-1.5 flex flex-wrap items-center">
                   {group.documents.map((row) => (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => openDocument(row.id)}
-                      draggable={!savingOrder}
-                      onDragStart={(event) => startDocumentDrag(event, row)}
-                      // Only a DOCUMENT drag highlights a document row: a folder being carried has the headings as
-                      // its targets, and marking rows under it would suggest a drop into that folder.
-                      onDragOver={(event) => {
-                        if (!draggingDocumentId || draggingDocumentId === row.id) return;
-                        event.preventDefault();
-                        setDragOverDocumentId(row.id);
-                      }}
-                      onDragLeave={() =>
-                        setDragOverDocumentId((current) => (current === row.id ? '' : current))
-                      }
-                      onDrop={(event) => dropOnDocument(event, row)}
-                      onDragEnd={() => {
-                        setDraggingDocumentId('');
-                        setDragOverDocumentId('');
-                      }}
-                      title={`${row.title} — drag to reorder`}
+                    // A keyed Fragment rather than a key on the gap alone: the gap and the chip it precedes are one
+                    // unit of the list, and React has to be told which unit is which when the order changes.
+                    <React.Fragment key={row.id}>
+                      {insertGap(group.folder, row.id)}
+                      <button
+                        type="button"
+                        onClick={() => openDocument(row.id)}
+                        draggable={!savingOrder}
+                        onDragStart={(event) => startDocumentDrag(event, row)}
+                        // Only a DOCUMENT drag highlights a document row: a folder being carried has the headings as
+                        // its targets, and marking rows under it would suggest a drop into that folder.
+                        onDragOver={(event) => {
+                          if (!draggingDocumentId || draggingDocumentId === row.id) return;
+                          event.preventDefault();
+                          // ...and the gap un-lights, for the same reason the gap lights: one answer at a time.
+                          setDragOverInsert('');
+                          setDragOverDocumentId(row.id);
+                        }}
+                        onDragLeave={() =>
+                          setDragOverDocumentId((current) => (current === row.id ? '' : current))
+                        }
+                        onDrop={(event) => dropOnDocument(event, row)}
+                        onDragEnd={() => {
+                          setDraggingDocumentId('');
+                          setDragOverDocumentId('');
+                          setDragOverInsert('');
+                        }}
+                        title={`${row.title} — drag to reorder, or drop it in a gap to place it between two documents`}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm transition ${
                         form.id === row.id
                           ? 'bg-red-600 text-white'
@@ -838,8 +947,13 @@ export default function AdminDocumentsTab({
                           · scheduled
                         </span>
                       )}
-                    </button>
+                      </button>
+                    </React.Fragment>
                   ))}
+                  {/* ...AND ONE AFTER THE LAST DOCUMENT, which is the end of the run. Without it the only way to put a
+                      document last was to aim at the final chip from above, and a document already at the end could not
+                      be told where it was. */}
+                  {insertGap(group.folder, '')}
                 </div>
               </div>
             ))}
