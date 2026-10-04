@@ -25,6 +25,7 @@ import {
   DOCUMENT_TYPES,
   EMPTY_DOCUMENT_FORM,
   UNFILED_LABEL,
+  checklistItemSortOrder,
   documentFolder,
   documentFolders,
   documentLifecycle,
@@ -32,6 +33,7 @@ import {
   documentToForm,
   documentUpdatedLabel,
   documentWindowLabel,
+  editorChecklistItemRows,
   groupDocumentsByFolder,
   applyDocumentOrder,
   insertDocumentBefore,
@@ -58,7 +60,10 @@ const SIGNATURE_PAGE_SIZE = 10;
 // while the button sits where it can be reached from the bottom of a long checklist.
 const EDITOR_FORM_ID = 'document-editor-form';
 
-const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: 0 };
+// `sort_order` is TEXT here, and blank is a real answer - see `checklistItemSortOrder`. The default is blank, meaning
+// "put it wherever the list says", which is what `EMPTY_ITEM_FORM` always meant; it just could not say so while the
+// field held the number 0.
+const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: '' };
 
 // The name of a GAP in the list - the space between two documents, or the end of a folder's run.
 //
@@ -214,14 +219,45 @@ export default function AdminDocumentsTab({
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
-  const openDocument = async (id) => {
-    setError('');
+  // Everything the editor shows about ONE document, put back to nothing - so the editor never carries a fact about the
+  // last document into the next one.
+  //
+  // THE ITEMS ARE THE HALF THAT WAS MISSING, and they were the reported fault: after saving a checklist, "New document"
+  // kept the items of the one just saved. Two things made that possible, and both are why this is a function rather
+  // than a couple of lines at the call site. `items` is filled by `loadSignatures`, which a new document never calls -
+  // it has no id to read - so nothing was ever going to overwrite them; and the item card draws `items` and
+  // `stagedItems` together, so a leftover in either is drawn, with a count and a "no items yet" line that agree with
+  // the wrong answer. `editorChecklistItemRows` now refuses to draw stored items for a document that has no id, so the
+  // leak can no longer reach the screen - and this is the half that stops the state existing in the first place.
+  //
+  // CLEARED FOR AN EXISTING DOCUMENT TOO, and not only for a new one. The signatures and the items arrive from a
+  // request, so between opening a checklist and its reply the PREVIOUS document's rows are still in state; and if that
+  // request fails, nothing ever overwrites them, which leaves one document showing another's items beside its own
+  // signatures. The pending removals go with them because each holds a whole row of the document being left behind.
+  //
+  // Nothing is written from this state - an item save needs `form.id`, and the create-time flush reads `stagedItems`,
+  // which is exactly what gets emptied - so what is being fixed here is a screen that tells the truth, not a row that
+  // lands in the wrong document.
+  const resetEditorState = () => {
+    setItems([]);
+    setStagedItems([]);
+    setItemForm(EMPTY_ITEM_FORM);
+    setPendingItemRemoval(null);
     setSignatures([]);
     setSignaturesError('');
+    setPendingSignatureRemoval(null);
+    setSignaturePage(1);
+    setError('');
+  };
+
+  const openDocument = async (id) => {
     // Opened before the fetch, so the modal appears immediately and shows its own spinner while the document
     // loads. The alternative - waiting for the request and then opening - is the pause this modal exists to
     // explain.
     setEditorOpen(true);
+    // Before the branch below, deliberately: the new-document path returns from here, so anything reset after it
+    // would never run for the one case that has no request to reset it for us.
+    resetEditorState();
     if (!id) {
       setForm(EMPTY_DOCUMENT_FORM);
       return;
@@ -273,14 +309,14 @@ export default function AdminDocumentsTab({
       return;
     }
 
-    // Staging: no document yet, so this is local. The order follows the list, ten apart, so an author who never
-    // touches the Order field still gets the items in the order they typed them.
+    // Staging: no document yet, so this is local. Left blank the order follows the list, ten apart, so an author who never
+    // touches the Order field still gets the items in the order they typed them - but a 0 they typed is stored as 0.
     if (!form.id) {
       const entry = {
         id: itemForm.id,
         label: itemForm.label,
         section: itemForm.section,
-        sort_order: Number(itemForm.sort_order) || (stagedItems.length + 1) * 10,
+        sort_order: checklistItemSortOrder(itemForm.sort_order, (stagedItems.length + 1) * 10),
       };
       setStagedItems((current) =>
         entry.id
@@ -299,7 +335,7 @@ export default function AdminDocumentsTab({
           document_id: form.id,
           label: itemForm.label,
           section: itemForm.section,
-          sort_order: Number(itemForm.sort_order) || 0,
+          sort_order: checklistItemSortOrder(itemForm.sort_order),
         },
         token
       );
@@ -386,7 +422,9 @@ export default function AdminDocumentsTab({
             document_id: documentId,
             label: item.label,
             section: item.section,
-            sort_order: Number(item.sort_order) || 0,
+            // The staged entry already holds a number - `checklistItemSortOrder` resolved it when the item was typed - so
+            // this only has to state it again, and it does so without reintroducing the blank-or-zero ambiguity.
+            sort_order: checklistItemSortOrder(item.sort_order),
           },
           token
         );
@@ -667,7 +705,13 @@ export default function AdminDocumentsTab({
       const result = await adminDeleteDocument(target.id, token);
       if (!result?.success) throw new Error(result?.message || 'Could not delete the document.');
       toast.success('Document deleted.');
-      if (form.id === target.id) setForm(EMPTY_DOCUMENT_FORM);
+      // The editor becomes a blank new-document form when the document it was showing is deleted, so it blanks
+      // everything else the way opening a document does - otherwise the item card would still be drawing the rows of
+      // the document that was just removed. See `resetEditorState`.
+      if (form.id === target.id) {
+        setForm(EMPTY_DOCUMENT_FORM);
+        resetEditorState();
+      }
       await refresh();
     } catch (err) {
       // The refusal for a SIGNED document arrives here, and it is the useful case: it names the signature count
@@ -701,6 +745,17 @@ export default function AdminDocumentsTab({
   };
 
   const isEditing = Boolean(form.id);
+
+  // The item card's rows, and the two counts in its heading - all three from ONE answer, so they cannot disagree about
+  // what the list holds. See `editorChecklistItemRows` for the rule, and for the reported fault that made stating it
+  // in one place worth doing: the count, the "no items yet" line and the rows were each worked out separately from
+  // `items.length + stagedItems.length`, so a leftover in `items` was wrong in all three at once.
+  const itemRows = useMemo(
+    () => editorChecklistItemRows(items, stagedItems, isEditing),
+    [items, stagedItems, isEditing]
+  );
+  const stagedItemCount = itemRows.filter((row) => row.staged).length;
+  const storedItemCount = itemRows.length - stagedItemCount;
 
   // Item id -> label, so a signature row on a checklist names the item it is about instead of showing a bare id.
   const itemLabels = useMemo(() => {
@@ -1252,8 +1307,8 @@ export default function AdminDocumentsTab({
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Checklist items</h3>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {items.length} item{items.length === 1 ? '' : 's'}
-                  {stagedItems.length > 0 ? ` · ${stagedItems.length} not saved yet` : ''}
+                  {storedItemCount} item{storedItemCount === 1 ? '' : 's'}
+                  {stagedItemCount > 0 ? ` · ${stagedItemCount} not saved yet` : ''}
                 </span>
               </div>
 
@@ -1274,12 +1329,11 @@ export default function AdminDocumentsTab({
                 &ldquo;before the last edit&rdquo;.
               </p>
 
-              {items.length + stagedItems.length === 0 ? (
+              {itemRows.length === 0 ? (
                 <p className="text-sm text-slate-500 dark:text-slate-400">This checklist has no items yet.</p>
               ) : (
                 <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-                  {[...items, ...stagedItems].map((item) => {
-                    const staged = !isEditing || String(item.id).startsWith('staged-');
+                  {itemRows.map(({ item, staged }) => {
                     return (
                       <li key={item.id} className="flex flex-wrap items-center gap-3 py-2">
                         {item.section && (
@@ -1301,7 +1355,9 @@ export default function AdminDocumentsTab({
                               id: item.id,
                               label: item.label,
                               section: item.section,
-                              sort_order: item.sort_order,
+                              // As TEXT, so the box shows the number it is and re-saving it keeps it: a 0 here used to
+                              // be indistinguishable from an empty box and was renumbered on the next save.
+                              sort_order: String(item.sort_order ?? ''),
                             })
                           }
                           className="ml-auto text-xs font-medium text-slate-600 dark:text-slate-300 hover:underline"
@@ -1356,10 +1412,14 @@ export default function AdminDocumentsTab({
                     <input
                       id="item-order"
                       type="number"
+                      // Kept as the TEXT that was typed. Parsing on every keystroke is what made `0` and blank the same
+                      // value - and it also fought the author, turning a half-typed number into a different one under
+                      // the cursor. `checklistItemSortOrder` reads it once, at the save, where the difference matters.
                       value={itemForm.sort_order}
                       onChange={(event) =>
-                        setItemForm((current) => ({ ...current, sort_order: Number(event.target.value) || 0 }))
+                        setItemForm((current) => ({ ...current, sort_order: event.target.value }))
                       }
+                      placeholder="Blank: after the last item"
                       className={fieldClass}
                     />
                   </div>

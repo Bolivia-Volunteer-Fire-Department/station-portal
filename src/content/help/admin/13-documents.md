@@ -186,12 +186,17 @@ Set the **Type** to *Checklist* and the **Checklist items** card appears below t
 |---|---|
 | **Item** | The line the member ticks. Required |
 | **Section** | Groups items under a heading in both the member's view and the verification panel. Items with no section are shown last, under *Items* |
-| **Order** | Position within the list; lower first, with the label breaking ties. Left blank, items keep the order you typed them in |
+| **Order** | Position within the list; lower first, with the label breaking ties. **Left blank**, the item goes after the last one, so items keep the order you typed them in. A number you type — **including 0** — is used exactly as typed, and is never rounded up or renumbered |
 
 Add each line with **Add item**, and use **edit** on a row to change it.
 
+The list shows each item's order as `#0`, `#1` and so on, so you can see what a save actually stored. Those numbers are spaced ten apart by default, which is what leaves room to drop an item between two others later without renumbering anything; **0** is a real position at the top of the list, not an empty box.
+
 > [!NOTE]
 > **On a new checklist, items are held until you save it.** They are marked *not saved* so you can see the difference, and they are written the moment the checklist is created — you do not have to save, reopen and start again. A checklist that arrives with nine items instead of ten tells you so rather than pretending. Once the document exists, every change to an item is stored immediately.
+
+> [!NOTE]
+> **Every document opens as itself.** **New document** starts with an empty title, no text and **no items at all**, even straight after you have saved another checklist — the lines you just wrote belong to the checklist that was saved, and opening it again is how you get back to them. The same is true of the count beside *Checklist items*: it counts the items of the document you are looking at.
 
 > [!IMPORTANT]
 > Editing an item **keeps its signatures attached to it** — a signature points at the item's identity, not at its wording, so fixing a typo does not throw away somebody's work. Changing any item does mark signatures taken earlier as **before the last edit**, exactly as editing a document's text does.

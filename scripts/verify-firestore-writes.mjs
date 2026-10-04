@@ -39,7 +39,7 @@ import { rankFieldsFromForm } from '../src/utils/ranks.js';
 // fed through the function the tab really uses, so "what ends up on screen" is asserted rather than described. It loads
 // under plain Node because its own imports carry `.js` specifiers - which is not true of services/api.js, and is why the
 // helper lives in utils at all.
-import { applyDocumentOrder } from '../src/utils/documents.js';
+import { applyDocumentOrder, checklistItemSortOrder, normalizeChecklistItemList } from '../src/utils/documents.js';
 // The app's OWN badge registry, so the round trip at the badge section below is checked by what it DRAWS rather than
 // by what the reply looks like - "is this the index?" is not a shape a reader can eyeball. Pure and import-free, which
 // is what makes it usable from plain Node at all.
@@ -985,6 +985,67 @@ const main = async () => {
   );
   check('leaving every other row exactly where it was', afterDrag.length, 2);
   check('so the list cannot be emptied by a reply that carries no list', applyDocumentOrder(heldRows, drag.order || undefined).length, 2);
+
+  // --- a checklist item's order, and the 0 that used to become a 10 --------------------------------------------------
+  //
+  // The other reported fault, and it has the same shape as the drag above: nothing is wrong with the write path, which
+  // stores exactly what it is handed - so no reading of the writer would ever find it. The 0 never arrived. The tab's
+  // Order box held a NUMBER whose empty state was also 0, so the save separated "left blank" from "typed 0" with
+  // `Number(value) || next-slot` - and `Number('0')` is falsy, so an item deliberately put at 0 fell through and was
+  // renumbered to 10, 20, ...
+  //
+  // So the 0 is taken through the app's OWN reading of that field and written through the real route, then read BACK -
+  // because "the order an author typed is the order stored" is a fact about the round trip, not about either half.
+  // The reading that was replaced is exhibited beside it, so the fault is on the record rather than only described.
+  const itemOrder = await routeWrite('ADMIN_SAVE_CHECKLIST_ITEM', {
+    id: '',
+    document_id: 'doc5',
+    label: 'Radio check',
+    section: 'Engine',
+    sort_order: checklistItemSortOrder('0', 10),
+  });
+  checkIs('an item created with a typed 0 is written', typeof itemOrder.id === 'string' && itemOrder.id !== '', JSON.stringify(itemOrder).slice(0, 140));
+  const storedItem = (await getDoc(doc(firestore(), 'document_checklist_items', itemOrder.id))).data();
+  check('and the order STORED is the 0 that was typed', storedItem.sort_order, 0);
+  check('not the next vacant slot, which is what it used to get', storedItem.sort_order === 10, false);
+  // The expression this replaced, evaluated: what the tab used to save when the author typed 0 on the second item.
+  check('the reading this replaced would have moved it', Number('0') || (1 + 1) * 10, 20);
+
+  const orderedItems = normalizeChecklistItemList(
+    await rowsOf(query(collection(firestore(), 'document_checklist_items'), where('document_id', '==', 'doc5')))
+  );
+  check('so it sorts to the front of the checklist, where 0 belongs', orderedItems[0].label, 'Radio check');
+  check('ahead of the items already at 1 and 2', orderedItems.map((item) => item.sort_order), [0, 1, 2]);
+
+  // Re-opening it and saving again is the other half. The tab fills the box from the stored number as TEXT, so the
+  // second save sends the same 0 rather than an empty box - which is the difference that would otherwise renumber it.
+  const reopenedItem = await routeWrite('ADMIN_SAVE_CHECKLIST_ITEM', {
+    id: itemOrder.id,
+    document_id: 'doc5',
+    label: 'Radio check',
+    section: 'Engine',
+    sort_order: checklistItemSortOrder(String(storedItem.sort_order)),
+  });
+  checkIs('re-saving an item at 0 needs no new row', reopenedItem.id === itemOrder.id, JSON.stringify(reopenedItem).slice(0, 140));
+  check(
+    'and leaves it at 0 rather than renumbering it',
+    (await getDoc(doc(firestore(), 'document_checklist_items', itemOrder.id))).data().sort_order,
+    0
+  );
+
+  // A blank box is the other answer, and it still has to work: the author who never touches Order gets the next slot.
+  const blankOrder = await routeWrite('ADMIN_SAVE_CHECKLIST_ITEM', {
+    id: '',
+    document_id: 'doc5',
+    label: 'Beacon check',
+    section: 'Engine',
+    sort_order: checklistItemSortOrder('', (3 + 1) * 10),
+  });
+  check(
+    'while an item left blank takes the next slot as before',
+    (await getDoc(doc(firestore(), 'document_checklist_items', blankOrder.id))).data().sort_order,
+    40
+  );
 
   // --- training signatures: the same add-only shape, and a lock that means its signatures too ------------------------
   await signIn('jane');

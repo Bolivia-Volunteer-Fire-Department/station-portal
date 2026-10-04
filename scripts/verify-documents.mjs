@@ -33,6 +33,8 @@ import {
   assessmentScoreId,
   assessmentScoreLimit,
   assessmentScoreProblem,
+  checklistItemSortOrder,
+  editorChecklistItemRows,
   documentCharactersLeft,
   documentFolders,
   documentIsLive,
@@ -584,6 +586,93 @@ check(
 check('an item belonging to another document is not here', screenItems.length, 4);
 
 // ---------------------------------------------------------------------------
+// The Order box on a checklist item.
+//
+// The reported bug: an item given order 0 came back as 10. The box held a NUMBER whose empty state was also 0, so the
+// save could only tell "left blank" from "typed 0" with `Number(value) || auto` - and `Number('0')` is falsy, so a
+// deliberate 0 fell through to the auto-numbering and was moved to the next slot. The field holds TEXT now, and this
+// is what turns it into the number to store.
+console.log('\n--- what an author typed for the order ---');
+check('a typed 0 is the number 0, not a blank box', checklistItemSortOrder('0', 999), 0);
+check('and a blank box is the fallback', checklistItemSortOrder('', 999), 999);
+check('nor is a box of spaces a zero', checklistItemSortOrder('   ', 999), 999);
+check('nor is one nobody has touched', checklistItemSortOrder(undefined, 999), 999);
+check('a 10 is a 10', checklistItemSortOrder('10', 999), 10);
+check('and a 0 with spaces round it is still a 0', checklistItemSortOrder(' 0 ', 999), 0);
+check('text that is not a number takes the fallback rather than becoming a 0', checklistItemSortOrder('later', 999), 999);
+// The fallback is how the two saves differ: a new checklist numbers from its place in the list, an existing one has no
+// sensible invented number at all - but NEITHER may override a number the author typed.
+check('a new item left blank follows the list, ten apart', checklistItemSortOrder('', (3 + 1) * 10), 40);
+check('an existing item left blank does not invent an order', checklistItemSortOrder('', 0), 0);
+// The staged entry holds a resolved NUMBER by the time it is flushed to the server, so the flush has to pass a real 0
+// through unchanged - this is the half of the bug that would survive fixing only the input.
+check('a staged item at 0 is written as 0 when the document is created', checklistItemSortOrder(0, 0), 0);
+check('and a staged item at 10 stays at 10', checklistItemSortOrder(10, 0), 10);
+
+// ---------------------------------------------------------------------------
+// The rows the item card draws.
+//
+// The reported fault: after saving a checklist, "New document" drew the saved checklist's items under the new one. This
+// is the rule that decides what that card holds, and the case that was wrong is the third check below - a document
+// with no id has no stored rows, whatever the tab is still holding.
+console.log('\n--- what the checklist item card draws ---');
+const savedItemRows = [
+  { id: 'it1', document_id: 'doc-checklist', sort_order: 1, label: 'Fluids topped up' },
+  { id: 'it2', document_id: 'doc-checklist', sort_order: 2, label: 'Lights tested' },
+];
+const stagedItemRows = [
+  { id: 'staged-1-1', label: 'Radio check', section: '', sort_order: 10 },
+  { id: 'staged-2-2', label: 'Beacon check', section: '', sort_order: 20 },
+];
+
+check(
+  'an existing checklist draws its stored rows',
+  editorChecklistItemRows(savedItemRows, [], true).map(({ item }) => item.id),
+  ['it1', 'it2']
+);
+check(
+  'and marks every one of them stored',
+  editorChecklistItemRows(savedItemRows, [], true).map(({ staged }) => staged),
+  [false, false]
+);
+check(
+  'a NEW document draws none of the stored rows, whatever the tab still holds',
+  editorChecklistItemRows(savedItemRows, [], false),
+  []
+);
+check(
+  'so a new checklist with nothing typed yet has no rows at all',
+  editorChecklistItemRows(savedItemRows, [], false).length,
+  0
+);
+check(
+  'and it draws only what the author has typed into it, marked not saved yet',
+  editorChecklistItemRows(savedItemRows, stagedItemRows, false).map(({ item, staged }) => [item.id, staged]),
+  [['staged-1-1', true], ['staged-2-2', true]]
+);
+check(
+  'an existing checklist shows stored rows first, then anything not yet written',
+  editorChecklistItemRows(savedItemRows, stagedItemRows, true).map(({ item, staged }) => [item.id, staged]),
+  [['it1', false], ['it2', false], ['staged-1-1', true], ['staged-2-2', true]]
+);
+// Typed with the LARGER order first, so a helper that sorted by `sort_order` would answer in the other sequence. The
+// author's order of typing is what the card has always shown, and it is what makes staging readable.
+check(
+  'staged rows keep the order they were typed in rather than their order numbers',
+  editorChecklistItemRows(
+    [],
+    [
+      { id: 'typed-first', label: 'Typed first', sort_order: 99 },
+      { id: 'typed-second', label: 'Typed second', sort_order: 0 },
+    ],
+    false
+  ).map(({ item }) => item.id),
+  ['typed-first', 'typed-second']
+);
+check('a list that never arrived is an empty list, not a crash', editorChecklistItemRows(undefined, undefined, true), []);
+check('and neither is one holding something other than rows', editorChecklistItemRows(null, 'nonsense', false), []);
+
+// ---------------------------------------------------------------------------
 // One row per member per item on the administrator's signatures card.
 //
 // The reported bug: a checklist listed every signed item TWICE - once for the member's signature, once for the
@@ -679,7 +768,16 @@ console.log('\n--- the editor modal ---');
 const viewportModal = readFileSync('src/components/ViewportModal.jsx', 'utf8');
 check('the toolbar button opens it', /onClick=\{\(\) => openDocument\(''\)\}/.test(documentsTab), true);
 check('and choosing a document opens it too', /onClick=\{\(\) => openDocument\(row\.id\)\}/.test(documentsTab), true);
-check('it opens before the fetch, so the wait is the modal\'s own', /setEditorOpen\(true\)[\s\S]{0,200}adminFetchDocument/.test(documentsTab), true);
+// ORDER, not a character budget. This check used to allow a fixed 200-character window between the open and the
+// request, and the window closed when a comment was added in between: the ordering was right the whole time and
+// the check went red only because the distance had grown. What it means to assert is that the open comes BEFORE
+// the request is made, so this compares their positions - which no comment, call or blank line can falsify.
+check(
+  'it opens before the fetch, so the wait belongs to the modal',
+  documentsTab.indexOf('setEditorOpen(true)') > -1 &&
+    documentsTab.indexOf('setEditorOpen(true)') < documentsTab.indexOf('adminFetchDocument(id, token)'),
+  true
+);
 check('it is mounted only while it is open', /\{editorOpen && \(/.test(documentsTab), true);
 check('with a Save that knows its label', /saveLabel=\{isEditing \? 'Save changes' : 'Create document'\}/.test(documentsTab), true);
 check('and the form it belongs to', /formId=\{EDITOR_FORM_ID\}/.test(documentsTab), true);
@@ -1059,6 +1157,98 @@ checkIs(
   'and it keeps the editor in step with the document it just changed',
   /advanceRowVersion\(current\.row_version\)/.test(itemEditorSource),
   'the next document save would be refused as a concurrent edit'
+);
+
+// The Order box, which is the other half of the order bug: the pure helper above is only correct if the screen actually
+// holds the TEXT and reads it through the helper. A source check is what it takes, because the fault left no trace -
+// the form held a number, every line read correctly, and the only way to see it was to type a 0.
+checkIs(
+  'the Item Order box holds what was typed rather than a parsed number',
+  /value=\{itemForm\.sort_order\}[\s\S]{0,200}sort_order: event\.target\.value/.test(itemEditorSource),
+  'parsing on each keystroke is what made a 0 and a blank box the same value'
+);
+checkIs(
+  'and the empty form is blank rather than a zero',
+  /EMPTY_ITEM_FORM = \{[^}]*sort_order: ''/.test(itemEditorSource),
+  'a new item would start with a 0 that means the same as an empty box'
+);
+checkIs(
+  'so the order the author typed is what is read at the save',
+  /checklistItemSortOrder\(itemForm\.sort_order/.test(itemEditorSource),
+  'the save would go back to turning a typed 0 into the next slot'
+);
+checkIs(
+  'with a blank new item following the list and a blank existing one inventing nothing',
+  /checklistItemSortOrder\(itemForm\.sort_order, \(stagedItems\.length \+ 1\) \* 10\)/.test(itemEditorSource) &&
+    /checklistItemSortOrder\(itemForm\.sort_order\)/.test(itemEditorSource),
+  'one of the two saves would substitute an order of its own'
+);
+// The flush reads the order through the same helper rather than a second reading of the field. Same reason as the check
+// above: a staged entry already holds a resolved number, so both readings agree today - what is being pinned is that one
+// field has ONE reader, which is what stops the next change from reintroducing a second, subtly different rule.
+checkIs(
+  'the staged items are written through the same reading of the order, not a second one',
+  /checklistItemSortOrder\(item\.sort_order\)/.test(itemEditorSource),
+  'the order field would have two readers that could drift apart'
+);
+// This one is a CONTRACT check rather than a bug: the save tolerates a number here (it stringifies before parsing), so
+// filling the box with the raw number works today. It is still worth pinning, because a form field that holds text
+// everywhere except one path is precisely the shape that let a blank box and a typed 0 become the same value.
+checkIs(
+  'and reopening an item fills the box as text, like every other path in this form',
+  /sort_order: String\(item\.sort_order/.test(itemEditorSource),
+  'one path would hold a number in a field the rest of the form treats as text'
+);
+checkIs(
+  'the old `|| a default` reading is gone from the item save',
+  !/sort_order: Number\(/.test(itemEditorSource),
+  'a 0 would be treated as absent again'
+);
+
+// The editor holds facts about ONE document, and it has to blank them as it opens the next one. The reported fault was
+// the item list: "New document" after saving a checklist kept the saved one's rows, because `items` is filled by the
+// signatures read - which a document with no id never makes - so nothing was ever going to overwrite them.
+checkIs(
+  'opening a document blanks what the last one left behind',
+  /const resetEditorState = \(\) => \{[\s\S]{0,700}setItems\(\[\]\)[\s\S]{0,300}setStagedItems\(\[\]\)/.test(
+    itemEditorSource
+  ),
+  'the item list and the staged items would carry over from the document opened last'
+);
+checkIs(
+  'and the item form and both pending removals with it',
+  /resetEditorState = \(\) => \{[\s\S]{0,900}setItemForm\(EMPTY_ITEM_FORM\)[\s\S]{0,300}setPendingItemRemoval\(null\)[\s\S]{0,300}setPendingSignatureRemoval\(null\)/.test(
+    itemEditorSource
+  ),
+  'a half-typed item or a row about to be removed would be left over from the previous document'
+);
+// WHERE it is blanked is the part that has to be pinned, because the new-document path RETURNS before the request: a
+// reset placed after that branch would run for every case except the one that has no request to reset it for us.
+checkIs(
+  'and that happens before the new-document branch, which returns early',
+  /resetEditorState\(\);[\s\S]{0,300}if \(!id\) \{[\s\S]{0,80}setForm\(EMPTY_DOCUMENT_FORM\);/.test(itemEditorSource),
+  'a new document would open on the previous one items, which is the reported fault'
+);
+checkIs(
+  'the editor blanks them when the document it is showing is deleted too',
+  /setForm\(EMPTY_DOCUMENT_FORM\);[\s\S]{0,80}resetEditorState\(\);/.test(itemEditorSource),
+  'the item card would still draw the rows of the document just removed'
+);
+// And the card is prevented from showing a leak even if one ever reaches the state again: it asks one helper what it
+// holds, so the rows, the count and the empty message cannot disagree - and that helper refuses stored rows for a
+// document with no id. See `editorChecklistItemRows`, whose rule is exercised above.
+checkIs(
+  'the item card asks one helper what it holds',
+  /editorChecklistItemRows\(items, stagedItems, isEditing\)/.test(itemEditorSource) &&
+    /itemRows\.map\(\(\{ item, staged \}\)/.test(itemEditorSource),
+  'the card would go back to reading items and staged items separately'
+);
+checkIs(
+  'with the heading count and the empty message from that same answer',
+  /storedItemCount/.test(itemEditorSource) &&
+    /itemRows\.length === 0/.test(itemEditorSource) &&
+    !/\[\.\.\.items, \.\.\.stagedItems\]/.test(itemEditorSource),
+  'the count could disagree with the rows drawn under it'
 );
 const moduleSource = readFileSync(path.resolve(process.cwd(), 'src/components/DocumentsModule.jsx'), 'utf8');
 

@@ -53,6 +53,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue with Clock History not working correctly.
 * Modified some visual things on Schedule Management.
 * Added assessments.
+* Made some corrections to document configuration.
 
 **Version 1.06x**
 * Added Documents - used for creating and viewing things like SOP's. This included creating both a parser/viewer and an in-app editor, allowing administrators or roles with the proper permissions to create new documents. The same goes for...

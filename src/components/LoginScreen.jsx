@@ -71,7 +71,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
           >
             Sign In
           </button>
-          <span className="text-xs text-slate-500 dark:text-slate-400">v1.134</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">v1.14</span>
         </form>
       </div>
     </div>

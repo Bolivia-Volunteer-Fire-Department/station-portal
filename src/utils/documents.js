@@ -392,11 +392,63 @@ export const normalizeChecklistItem = (row) => {
   };
 };
 
+// The Order box on a checklist item, as the number to store.
+//
+// WHY THIS EXISTS AT ALL: the box used to hold a NUMBER whose empty state was `0`, so "left blank" and "typed 0" were
+// the same value and the save could only separate them with `Number(value) || auto`. `Number('0')` IS 0 - falsy - so an
+// item an author deliberately put at order 0 fell through and was silently renumbered into the next vacant slot (10, 20,
+// ...). The order an author types is the one thing this field is for, so it is not a value the app may substitute its
+// own for. The box therefore holds TEXT, where blank and '0' are different answers, and this is where that difference is
+// turned into a number: a blank box takes the fallback, and anything else is the number it says.
+//
+// The widget may hold an empty string, a partially typed number, or a real one; what it must never do is invent a
+// value for a box somebody filled in.
+export const checklistItemSortOrder = (rawValue, fallback = 0) => {
+  const raw = text(rawValue);
+  if (raw === '') return fallback;
+  // PARSED THE WAY IT IS READ BACK. `normalizeChecklistItem` uses parseInt, so parsing the same text as a decimal here
+  // is what keeps the number saved equal to the number shown after the save - a typed '1e3' would otherwise write 1000
+  // and read back as 1, and the row would change the moment it was reloaded.
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) ? value : fallback;
+};
+
 export const normalizeChecklistItemList = (rows) =>
   (Array.isArray(rows) ? rows : [])
     .map(normalizeChecklistItem)
     .filter((item) => item.id !== '')
     .sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label));
+
+// The rows the administrator's item card draws, each with whether it is stored yet.
+//
+// ONE ANSWER, IN ONE PLACE. Three things on that card have to agree about what the list holds - the count beside the
+// heading, the "no items yet" line, and the rows themselves - and they each worked it out separately from
+// `items.length + stagedItems.length`. That is why the fault this rule exists for reached the screen in all three at
+// once, and it is why the rule is stated here rather than inline at each of them.
+//
+// The rule: `items` are the rows OF THE DOCUMENT BEING EDITED, read from the server, so a document that does not exist
+// yet has none - a new checklist shows only what the author has typed into it. That is true by construction once the
+// editor blanks its own state as it opens (see `AdminDocumentsTab#resetEditorState`), and it is asserted here as well,
+// because THIS is the line a leak shows through rather than a line that causes one.
+//
+// The reported fault, to be exact about what changed: the tab kept the previous checklist's `items` through "New
+// document", whose form has no id and therefore never re-reads them. A saved checklist's rows were drawn under the new
+// one - and marked "not saved yet", because a document with no id has no stored rows. Nothing was written from them
+// (an item save needs `form.id`, and the create-time flush reads only the staged list), so this was a screen that
+// lied rather than a row that landed in the wrong document - but the screen is what the officer is deciding from.
+//
+// Staged items keep the order they were typed in; they are not re-sorted by `sort_order`. The stored ones arrive
+// already in screen order from the server, and the two runs are drawn one after the other, so sorting the second would
+// order it by a number the author has not necessarily seen yet - and would break the one thing staging is for, which
+// is that the list looks like what was just typed.
+export const editorChecklistItemRows = (items, stagedItems, isEditing) => {
+  const stored = isEditing && Array.isArray(items) ? items : [];
+  const staged = Array.isArray(stagedItems) ? stagedItems : [];
+  return [
+    ...stored.map((item) => ({ item, staged: false })),
+    ...staged.map((item) => ({ item, staged: true })),
+  ];
+};
 
 export const EMPTY_DOCUMENT_FORM = {
   id: '',
