@@ -22,6 +22,7 @@ import {
   fetchAdminSections,
   fetchAvailabilityWindows,
   fetchEvents,
+  fetchCertificationBadges,
   fetchRoster,
   fetchScheduleSetup,
   fetchScheduleWindow,
@@ -81,7 +82,11 @@ import {
 } from './utils/deferredModules';
 import { pageBarLabel } from './utils/pageLabels';
 import CertificationNotice from './components/CertificationNotice';
-import { setCertificationBadges } from './utils/certifications';
+import {
+  certificationBadgesLoaded,
+  mergeCertificationBadges,
+  setCertificationBadges,
+} from './utils/certifications';
 import DigitalClock from './components/DigitalClock';
 import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
@@ -839,7 +844,19 @@ const getLoadingMessage = () => {
   // The board counts because it is the only OFFICER screen with a calendar on it: opening Administration for the Users tab should
   // no more attach this listener than it should read the schedule.
   const onScheduleBoard = activeTab === 'admin' && adminSubTab === 'schedule';
-  const wantsEvents = activeTab === 'schedule' || activeTab === 'availability' || onScheduleBoard;
+  // ...and so does Administration > Member Availability, which draws the member's own month grid - events and all - from the
+  // member picker.
+  //
+  // ITS ABSENCE HERE WAS A REGRESSION, and the fix is one clause. Until 1.12 this needed no listing at all: the sign-in
+  // payload carried the events, so EVERY officer had them from sign-in and this tab drew its month with them on it. 1.12
+  // took the events out of both payloads - correctly, they belong to the calendars, which read them when one is opened -
+  // and this gate is what replaced that. It listed the member's own schedule and availability screens and the officer's
+  // board, and forgot this one. So Administration > Member Availability drew a month with no events on it, silently, unless
+  // the officer had happened to open a MEMBER screen first. (The administration Events tab does not cover it either: that
+  // tab fetches its own list and keeps it, so opening it never made the difference either.)
+  const onMemberAvailabilityTab = activeTab === 'admin' && adminSubTab === 'availability';
+  const wantsEvents =
+    activeTab === 'schedule' || activeTab === 'availability' || onScheduleBoard || onMemberAvailabilityTab;
   useEffect(() => {
     if (!authToken || !currentUser?.id || !wantsEvents) return;
     let cancelled = false;
@@ -1346,6 +1363,62 @@ const getLoadingMessage = () => {
       cancelled = true;
     };
   }, [authToken, activeTab, rosterLoaded]);
+
+  // THE BADGE INDEX FOR THE NAMES ON THIS SCREEN - and only those.
+  //
+  // This is the regression, and it is the same one the events were. The badge index left the sign-in payload in 1.12 and
+  // rode onto GET_ROSTER above, which is read for `schedule` and `admin` only. So the two screens that draw names WITHOUT
+  // being either of those were left with an empty index and drew bare names: the dashboard's "On duty" card, and the
+  // sidebar's own badges - which are on every screen. Nothing about those two screens was wrong; nothing was filling the
+  // map they read from.
+  //
+  // WIDENING THE ROSTER GATE WOULD HAVE BEEN THE ONE-LINE VERSION, and it is the wrong one: it would make every screen
+  // that opens pay a read per member at the station - thirty documents to put two icons beside two names, on the screens
+  // that draw the fewest. So the ids are collected here and asked for by name.
+  //
+  // AND THE READ WAS ONLY HALF OF IT. Giving the index its own read moved the answer to AFTER the first paint, and the
+  // registry was a plain module variable - so the names drawn in the meantime kept the empty index they were rendered
+  // with and still showed nothing. The other half is the subscription in utils/certifications, and
+  // scripts/verify-badge-render.mjs is the harness that proves a name repaints when this merge lands.
+  const badgeTargets = useMemo(() => {
+    const ids = new Set();
+    // The sidebar shows the signed-in member's own badges on EVERY screen, so this one is always wanted.
+    if (currentUser?.id) ids.add(String(currentUser.id));
+    // The dashboard draws whoever is on duty, which is a live list that changes as shifts are worked.
+    if (activeTab === 'dashboard') onDutyUsers.forEach((user) => user?.id && ids.add(String(user.id)));
+    return [...ids];
+  }, [currentUser?.id, activeTab, onDutyUsers]);
+
+  useEffect(() => {
+    if (!authToken || !badgeTargets.length) return;
+    // Only the ones with no answer yet. `certificationBadgesLoaded` is what tells "holds nothing" apart from "nobody has
+    // asked", so a member who genuinely has no badges is not re-read on every render of a live on-duty list.
+    const wanted = badgeTargets.filter((id) => !certificationBadgesLoaded(id));
+    if (!wanted.length) return;
+
+    let cancelled = false;
+    fetchCertificationBadges(wanted, authToken)
+      .then((data) => {
+        if (cancelled || !data?.success) return;
+        // Merged, never replaced - see utils/certifications. These two members must not blank the thirty the roster read
+        // already put in, and the other way round when the roster read arrives second.
+        const badges = { ...(data.badges || {}) };
+        // The members ASKED ABOUT are known even when they have no document, which is how the two states stay distinct.
+        (data.asked || wanted).forEach((id) => {
+          if (!badges[id]) badges[id] = [];
+        });
+        mergeCertificationBadges(badges);
+        // STILL not React state here - the index is a module registry read through a subscription (utils/certifications),
+        // so this file does not have to hold it or pass it down. But "not state" must not be read as "no re-render":
+        // this answer lands AFTER the names are already on screen, and until components/CertificationBadges subscribed
+        // to the registry they kept the empty index they were first rendered with and drew no icons at all. The merge
+        // now wakes those subscribers, which is what puts the icon beside a name that was painted before the read.
+      })
+      .catch((error) => console.error('[badges] could not read the certification badges', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, badgeTargets]);
 
   // the windows tab beside it - and scoped to the months around today, which is what those screens show. It is not in
   // the payload: a member's session would be paying for the whole crew's claims.
@@ -2348,6 +2421,16 @@ const getLoadingMessage = () => {
                 onAvailabilityChanged={refreshAvailability}
                 onLogsChanged={refreshLogs}
                 onAdminDataChanged={refreshAdminCollections}
+                // A certification or setup save returns the rebuilt badge index. `setCertificationBadges` REPLACES rather
+                // than merges, which is right here: this is the whole index, freshly computed, so it supersedes anything
+                // the targeted reads above have merged in rather than leaving stale members behind.
+                //
+                // WHICH MAKES THE REPLY'S SHAPE LOAD-BEARING - this line is the whole screen. While the route answered
+                // with a summary of the rebuild (`{ members, cleared }`) under this same `badges` name, a single
+                // certification save replaced the index with two numbers and every badge vanished, everywhere, for the
+                // rest of the session. See the note on the reply in firestoreRouting#BADGE_REFRESHING_SAVES, and the
+                // round trip in scripts/verify-firestore-writes.mjs that feeds a reply through THIS setter.
+                onBadgesChanged={setCertificationBadges}
                 // Non-shift entries, for the board and the availability grid this module hosts.
                 events={events}
                 offers={adminOffers}

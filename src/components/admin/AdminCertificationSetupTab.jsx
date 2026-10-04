@@ -60,7 +60,7 @@ const EMPTY_FORM = {
 //   * how many days before the end to warn the member. BLANK means do not warn, which is not the same as zero:
 //     it is how the station says "we track this, but nobody needs nagging about it".
 //   * whether it shows beside the name at all, and only while the certification is current.
-export default function AdminCertificationSetupTab({ token, setup = [], onDataChanged }) {
+export default function AdminCertificationSetupTab({ token, setup = [], onDataChanged, onBadgesChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Whether the editor modal is open: "a new type" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
@@ -118,6 +118,10 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
       // Saved, so the editor closes - the same close the Cancel path uses, which is what makes "the modal closes
       // when the save lands" true rather than nearly true.
       closeEditor();
+      // Toggling "show as badge" changes the icons beside EVERY name on screen, and the server rebuilds the index for
+      // exactly this reason and returns it with the reply. Handing it up makes the badges update as the officer watches,
+      // instead of only after the next sign-in - and costs no extra read, because the answer was already paid for.
+      onBadgesChanged?.(response.badges);
       // Not awaited: the save is already confirmed, and the refresh is a background reload. Awaiting it would
       // hold the button for the whole request when nothing depends on the answer. It IS told, though - written
       // as `void` so this call is greppable, which is how verify-refresh-wiring checks that every saving screen

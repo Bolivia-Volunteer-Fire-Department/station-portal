@@ -369,10 +369,20 @@ checkIs(
   'the sign-in listener watches three collections, and events is not one of them',
   /onDuty: setOnDutyUsers,\s*\n\s*announcements: setAnnouncements,\s*\n\s*systemSettings: setSystemSettings,/.test(appSource)
 );
+// Whitespace-TOLERANT on purpose. This said `/const wantsEvents = activeTab === 'schedule' \|\|/`, which is a statement about
+// how one line was wrapped: adding the Administration > Member Availability tab made the expression run onto a second
+// line, the regex stopped matching, and this failed for a formatting reason while saying something about reads. The claim
+// worth making is WHICH SCREENS read the events, so that is what it asserts.
+const wantsEventsClause = /const wantsEvents =([\s\S]*?);/.exec(appSource)?.[1] || '';
 checkIs(
   'while the calendar screens attach the events one themselves',
   /handlers: \{ events: \(rows\) => setEvents\(normalizeEventList\(rows\)\) \}/.test(appSource) &&
-    /const wantsEvents = activeTab === 'schedule' \|\|/.test(appSource)
+    /activeTab === 'schedule'/.test(wantsEventsClause) &&
+    /activeTab === 'availability'/.test(wantsEventsClause) &&
+    // The officer's screens count too - the board, and Administration > Member Availability, which draws a member's month
+    // grid and so needs the same list. Dropping this one is a regression the other check here will not see.
+    /onMemberAvailabilityTab/.test(wantsEventsClause),
+  `wantsEvents is: ${wantsEventsClause.replace(/\s+/g, ' ').trim()}`
 );
 
 // THE DETAIL THAT DECIDES WHETHER THE LIVE READS COST ANYTHING: the effect is keyed on the member's ID, not on the auth

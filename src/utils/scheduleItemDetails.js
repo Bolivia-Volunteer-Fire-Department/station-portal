@@ -57,7 +57,11 @@ export const shiftItemDetails = (assignment, { crewMember = false, offerState = 
   ];
 
   if (crewMember) {
-    rows.push({ label: 'Member', value: text(a.name) || 'Open' });
+    // The id rides along on the row so the popup can draw this member's certification icons beside the name: the
+    // `value` stays a plain STRING - this builder is pure, and what it says is asserted as text - while the id is
+    // what the badge index is keyed by (see components/CertificationBadges). Blank on an open shift, where there is
+    // nobody to badge.
+    rows.push({ label: 'Member', value: text(a.name) || 'Open', userId: text(a.userId) });
   }
 
   // The nickname and the window are different facts: a pill reading "Day Shift" still has to be able to

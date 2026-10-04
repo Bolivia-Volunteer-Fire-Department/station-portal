@@ -138,20 +138,88 @@ export const certificationCountdown = (days) => {
 //
 // The reason is that names are rendered as plain strings in about twenty components (`userLabel(user)`), and the
 // request was for the icon to appear "wherever the user's name appears". Threading a map through every one of
-// them would be twenty edits that each have to be remembered for the next screen; one map, filled once from the
-// bootstrap, means a name rendered anywhere can ask for its icons. The cost is that this is set-once global
-// state - so it is written in exactly one place (App, from the bootstrap payload) and read through the accessor.
+// them would be twenty edits that each have to be remembered for the next screen; one map means a name rendered
+// anywhere can ask for its icons. The cost is module-level global state, written by App through the setters below
+// and read by member id - and it has to be SUBSCRIBED to, because those answers arrive after the first paint. See
+// the listeners below: without them this map is correct and changes nothing on screen.
+//
+// THAT "WRITTEN IN EXACTLY ONE PLACE" IS NO LONGER TRUE, and the comment was left saying so after the shape changed
+// underneath it. The index now arrives by two roads, because the screens that draw a FEW names must not pay to read
+// one document per member for them:
+//
+//   - the WHOLE index, on the roster read, for Schedule and Administration, which draw names all over the place;
+//   - a TARGETED read for the handful of ids a screen actually draws - see GET_CERTIFICATION_BADGES - for the dashboard
+//     (whoever is on duty) and the sidebar (the signed-in member, on every screen).
+//
+// So there is a MERGE as well as a set. Replacing would be wrong in the one order that matters: the dashboard's two
+// badges arriving after the roster's thirty would leave every other member blank.
 let badgeIndex = {};
+
+// WHICH MEMBERS THE INDEX HAS AN ANSWER FOR. Needed because `certificationBadgesFor` returns [] for two quite
+// different states - "this member holds no badges" and "nobody has asked about this member yet" - and only the
+// second is worth another read. Without this the dashboard would re-read on every render of every person on duty.
+let badgeKnown = new Set();
+
+// WHO IS LISTENING. Without this the icons cannot appear at all, however correct the read is.
+//
+// A module-level variable read during render is INVISIBLE to React: nothing tells it the value changed, so the
+// name that was drawn with an empty index is never drawn again. That was survivable while the index rode on the
+// bootstrap, because it was in hand before the first render. Moving it to its own read is what turned the
+// non-issue into the bug: the answer lands after the first paint, and a name already on screen keeps the empty
+// index it was rendered with. Every screen is affected, which is why this looked like "the badges are gone
+// everywhere" rather than a missing read.
+//
+// `CertificationBadges` subscribes through React's useSyncExternalStore, so a member's name redraws the moment
+// their icons are merged in - including the dashboard and the sidebar, which are the screens whose names were
+// already painted when the targeted read resolved.
+const listeners = new Set();
+
+// The one array returned for "no badges to draw", shared by both a member who holds none and a member nobody
+// has asked about. useSyncExternalStore compares snapshots by identity, so a fresh [] per render would make it
+// re-render forever.
+const NO_BADGES = Object.freeze([]);
+
+export const subscribeCertificationBadges = (listener) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+const notifyBadgeListeners = () => {
+  listeners.forEach((listener) => listener());
+};
 
 export const setCertificationBadges = (index) => {
   badgeIndex = index && typeof index === 'object' ? index : {};
+  badgeKnown = new Set(Object.keys(badgeIndex));
+  notifyBadgeListeners();
+};
+
+// Add to the index rather than replace it. The keys are member ids and the values are whole badge arrays, so a member
+// present in `index` is authoritative for that member and a member absent from it keeps what was already known.
+export const mergeCertificationBadges = (index) => {
+  if (!index || typeof index !== 'object') return;
+  let changed = false;
+  Object.keys(index).forEach((userId) => {
+    // Only a member whose answer actually MOVED counts as a change. A merge that re-delivers the same array must
+    // not wake the listeners, or a screen that re-reads on every render would re-render on every read.
+    if (badgeIndex[userId] !== index[userId]) changed = true;
+    badgeIndex[userId] = index[userId];
+    if (!badgeKnown.has(userId)) changed = true;
+    badgeKnown.add(userId);
+  });
+  if (changed) notifyBadgeListeners();
 };
 
 export const certificationBadgesFor = (userId) => {
   const key = String(userId === undefined || userId === null ? '' : userId).trim();
-  if (!key) return [];
-  return badgeIndex[key] || [];
+  if (!key) return NO_BADGES;
+  return badgeIndex[key] || NO_BADGES;
 };
+
+// Whether the index has been FILLED for this member - which is not the same as whether they hold anything. This is what
+// stops a second read for a member who legitimately has none.
+export const certificationBadgesLoaded = (userId) =>
+  badgeKnown.has(String(userId === undefined || userId === null ? '' : userId).trim());
 
 // The badge tooltip: which certifications the icons stand for, since two small glyphs beside a name do not say
 // much on their own.

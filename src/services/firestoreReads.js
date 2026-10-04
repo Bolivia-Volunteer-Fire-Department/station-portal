@@ -680,6 +680,43 @@ export const READERS = {
     return { success: true, score: await assessmentScoreRow(documentId, memberId) };
   },
 
+  // ONE MEMBER'S BADGES, for the screens that draw a few names.
+  //
+  // WHY NOT THE ROSTER'S WHOLE INDEX. `GET_ROSTER` reads every member's badge document, which is right for Schedule and
+  // Administration - they draw names all over the place and a station of thirty is thirty documents. But the dashboard
+  // draws the handful of people currently on duty, and the sidebar draws the signed-in member on EVERY screen. Reading
+  // thirty documents to put two icons beside two names is the cost the sign-in payload change was made to avoid, and
+  // spreading it back would undo that for the screens that draw least.
+  //
+  // SO THIS ASKS FOR THE IDS AND ONLY THOSE. A `getDoc` per id, not a query: the rule on this collection is
+  // `allow read: if signedIn()` with no audience, so a query would need nothing special - but a query on a collection of
+  // one document per member is the thing that costs a full collection read the moment a second member is named, and the
+  // whole point of asking for ids is to keep the bill proportional to what is on screen.
+  //
+  // A member with NO badges has no document at all, so they are simply absent from the answer. That is not "unknown" -
+  // `mergeCertificationBadges` is told which ids were asked about by the keys the caller passed, so the app can tell the
+  // two apart and not ask again.
+  // ONE MEMBER'S BADGES, for the screens that draw a few names - the dashboard's on-duty card and the sidebar's own
+  // badges. Sits beside GET_ROSTER rather than replacing it: the roster read is the WHOLE index for the screens that draw
+  // many names, and this is the same data for the screens that draw two.
+  GET_CERTIFICATION_BADGES: async (uid, body) => {
+    const wanted = Array.isArray(body && body.user_ids) ? body.user_ids : [];
+    const ids = [...new Set(wanted.map((id) => String(id || '').trim()).filter(Boolean))];
+    if (!ids.length) return { badges: {}, asked: [] };
+
+    const snapshots = await Promise.all(
+      ids.map((id) => getDoc(doc(firestore(), 'certification_badges', id)).then((snap) => [id, snap]))
+    );
+    // `.exists()` is a METHOD in the client SDK - the Admin SDK is where it is a property, and a function reference is
+    // truthy, so this would otherwise report every member as holding a (blank) badge.
+    const badges = Object.fromEntries(
+      snapshots
+        .filter(([, snap]) => snap.exists())
+        .map(([id, snap]) => [id, (snap.data() || {}).badges || []])
+    );
+    return { badges, asked: ids };
+  },
+
   // A document's checklist items and the signatures taken on it: the one read the Documents tab makes per document.
   //
   // It was NOT ROUTED until an officer opened the tab and got "GET_DOCUMENT_SIGNATURES was not routed". The collections,

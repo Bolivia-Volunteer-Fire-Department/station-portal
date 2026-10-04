@@ -16,7 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { replaceRowsInRange } from '../src/utils/savedRow.js';
+import { replaceRowsInRange, mergeSavedRow } from '../src/utils/savedRow.js';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from '../src/utils/refreshWave.js';
 import { isReadAction } from '../src/utils/readCoalescing.js';
 
@@ -641,6 +641,32 @@ for (const name of ['AdminRolesTab', 'AdminRanksTab', 'AdminAssignmentsTab', 'Ad
 // The rule that matters for members: a save must never put a password into a list that holds none.
 const userRowSource = read('src/utils/userRow.js');
 check('a saved user can never carry a password', userRowSource.includes("omit: ['password']"), 'the omit list is gone');
+
+// THE OTHER HALF OF "my save did not take", and the half that looks identical from the screen.
+//
+// A save applies its own row to the list it is drawn from (so the officer sees the result without waiting for the
+// refresh wave), and only THEN asks for the month to be re-read. The Ranks tab's order was not being SENT, and this is
+// what made that so hard to see: the merge had no whitelist, so the number the officer typed DID appear in the table -
+// for as long as it took the refresh wave to land Firestore's older value on top of it. The screen therefore showed the
+// new order, then the old one, with no error anywhere, which reads as "the save was rejected" rather than "the save did
+// not carry the field".
+//
+// So this asserts the two halves agree: whatever the save applied is what the list that draws it holds. It is the
+// runtime counterpart to the payload comparison in scripts/verify-write-safety.mjs - that one proves the order is SENT,
+// this proves it is not quietly dropped on the way in.
+{
+  const before = [{ id: 'k1', description: 'Officer', rank_order: '1' }];
+  const after = mergeSavedRow(before, { id: 'k1', description: 'Officer', color: '#c3223b', rank_order: '3' });
+  check('a saved rank carries its order into the list that draws it', after[0].rank_order === '3', `got ${JSON.stringify(after[0].rank_order)}`);
+  check('and keeps the columns it did not send', after[0].description === 'Officer', `got ${JSON.stringify(after[0].description)}`);
+  // The blank case, because a CLEARED order has to reach the list as a blank too - otherwise the officer's screen shows
+  // the old number until the refresh lands, which is the same flicker with the opposite cause.
+  const cleared = mergeSavedRow(after, { id: 'k1', rank_order: '' });
+  // Strictly `=== ''`, and not "falsy" or "not the old number": a cleared order arriving as 0 is a real rank at the
+  // bottom of the list, so a loose assertion here would pass on exactly the value that must never be written.
+  check('and a cleared order reaches the list as a blank, not a zero', cleared[0].rank_order === '', `got ${JSON.stringify(cleared[0].rank_order)}`);
+  check('and the clear still counts as a change, so the list is not left untouched', after !== cleared, 'the same array came back, so the table would not re-render');
+}
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

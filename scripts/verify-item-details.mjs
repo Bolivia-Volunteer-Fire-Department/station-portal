@@ -15,6 +15,7 @@ import { eventSegmentsByDay, normalizeEvent } from '../src/utils/events.js';
 import ScheduleItemModal from '../src/components/ScheduleItemModal.jsx';
 import EventPill from '../src/components/EventPill.jsx';
 import ScheduleCalendar from '../src/components/ScheduleCalendar.jsx';
+import { setCertificationBadges } from '../src/utils/certifications.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -64,11 +65,26 @@ check('the assignment icon rides along', mineDetails.rows[2].icon, 'truck');
 check('the assignment color rides along', mineDetails.color, '#dc2626');
 
 console.log('--- somebody else, in the crew view ---');
-const theirs = { ...mine, isMine: false, name: 'Ana', label: 'Rescue' };
+const theirs = { ...mine, isMine: false, name: 'Ana', label: 'Rescue', userId: 'u2' };
 const theirsDetails = shiftItemDetails(theirs, { crewMember: true });
 check('the title becomes the member', theirsDetails.title, 'Ana');
 check('the subtitle does not claim it is yours', theirsDetails.subtitle, 'Shift');
 check('the member is named in a row', rowValue(theirsDetails, 'Member'), 'Ana');
+// The id travels with that row so the popup can draw the member's certification icons beside the name (see
+// components/CertificationBadges). A crew popup that names somebody with no way to say what they hold leaves
+// "is the person I am on with an EMT?" unanswered, which is the question it is opened to answer.
+check(
+  'and the row carries the id the badge index is keyed by',
+  theirsDetails.rows.find((row) => row.label === 'Member').userId,
+  'u2'
+);
+check(
+  'an open shift carries no id, because there is nobody to badge',
+  shiftItemDetails({ ...mine, isMine: false, isOpen: true, name: 'Open' }, { crewMember: true }).rows.find(
+    (row) => row.label === 'Member'
+  ).userId,
+  ''
+);
 check(
   'and the assignment, not the member, is the title in the personal view',
   shiftItemDetails(theirs, { crewMember: false }).title,
@@ -274,6 +290,24 @@ check(
   ),
   true
 );
+
+console.log('--- rendered: the crew popup says what the member holds ---');
+// The index is filled the way the app fills it (App declares it, utils/certifications holds it), then the popup is
+// rendered for the OTHER member on the shift. This is the screen the question "who am I on with, and are they an
+// EMT?" is actually asked on, so the icon has to be beside the name in the row that names them.
+setCertificationBadges({ u2: [{ id: 'c1', name: 'EMT', icon: 'heart-pulse' }] });
+const crewHtml = renderToString(
+  React.createElement(ScheduleItemModal, { details: theirsDetails, icon: 'shift', onClose: () => {} })
+);
+check('the member row draws their certification icon', crewHtml.includes('lucide-heart-pulse'), true);
+check('beside the name rather than instead of it', crewHtml.includes('Ana'), true);
+check('and the tooltip names the certification', crewHtml.includes('title="EMT"'), true);
+// Your OWN shift in the personal view has no member row, so there is no id to badge and nothing is drawn - which is
+// what keeps this free on the other 90% of popups.
+const ownHtml = renderToString(
+  React.createElement(ScheduleItemModal, { details: mineDetails, icon: 'shift', onClose: () => {} })
+);
+check('and your own shift draws no badge, having no member row', ownHtml.includes('lucide-heart-pulse'), false);
 
 console.log('--- rendered: the pill that opens it ---');
 const segment = timed.segments[0];

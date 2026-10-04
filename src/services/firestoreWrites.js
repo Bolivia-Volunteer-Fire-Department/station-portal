@@ -12,6 +12,8 @@ import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, runTransact
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
 import { rowsFor, rowsOf } from './firestorePayload.js';
+// The badge rule, shared with the repair script that rebuilds the index (scripts/normalize-certification-badges.mjs).
+import { badgeForRecord, badgeIndexFor, badgeToday } from '../utils/certificationBadges.js';
 // The SAME visibility test the readers apply, imported rather than copied: this is what decides whether a document
 // exists as far as a member is concerned, and two implementations of that would drift.
 import { visibleDocumentFor } from './firestoreReads.js';
@@ -899,37 +901,33 @@ export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
 // the types and today, so editing a TYPE changes other people's badges, and a record quietly ageing past its end date
 // changes its own. At station scale that is a few dozen small writes per save, and it is the only way the roster
 // cannot end up showing a stale claim it cannot back.
-// Whether ONE record earns a badge today, extracted because it is the only part of the index with a claim in it -
-// "this member is a paramedic" - and therefore the only part worth testing on its own. A type that does not ask to be
-// shown, or has no icon, earns nothing however current the record is.
-export const badgeForRecord = (record = {}, type = {}, today = '') => {
-  if (!type || type.show_next_to_name !== true || !type.icon) return null;
-  const from = String(record.effective_date || '');
-  const to = String(record.end_date || '');
-  if (from && from > today) return null; // not started yet
-  if (to && to < today) return null; // lapsed - the badge would be a claim the station cannot back
-  return { id: type.id, name: type.name, icon: type.icon };
-};
+//
+// THE RULE ITSELF LIVES IN utils/certificationBadges.js, shared with scripts/normalize-certification-badges.mjs - the
+// repair script that rebuilds this index for a station that has none. It used to sit here, where a browser module
+// importing the Firebase SDK cannot be reached from a script, so the one function that knew the rule was the one function
+// no operator could run: a rebuild was only ever a side effect of a save. It is re-exported below because harnesses have
+// always imported it from here and that is the address a reader of this file expects.
+export { badgeForRecord };
 
+// IT RETURNS THE INDEX IT WROTE - the same `member id -> [{ id, name, icon }]` map the roster read hands the app, so a
+// caller can put it straight into the registry. What that reply shape is NOT is a summary of the rebuild: see the
+// return statement at the foot of this function for the day it was one, and what it cost.
 export const refreshCertificationBadges = async () => {
   const db = firestore();
-  const today = stationTimestamp().slice(0, 10);
+  const today = badgeToday();
   const [records, types] = await Promise.all([rowsOf(collection(db, 'certifications')), rowsOf(collection(db, 'certification_setup'))]);
-  const typeById = Object.fromEntries(types.map((type) => [String(type.id), type]));
 
-  const index = {};
-  records.forEach((record) => {
-    const owner = String(record.user_id || '');
-    const badge = owner ? badgeForRecord(record, typeById[String(record.certification_id || '')], today) : null;
-    if (!badge) return;
-    index[owner] = index[owner] || [];
-    // One badge per type, however many periods a member has of it.
-    if (index[owner].some((existing) => existing.id === badge.id)) return;
-    index[owner].push(badge);
-  });
+  // The whole index, from the shared rule rather than from a loop of our own that could drift from the script's.
+  const index = badgeIndexFor(records, types, today);
 
   // A member whose last badge lapsed loses the document, rather than keeping an empty one: the roster draws whatever
   // this returns, and an empty list and a missing document have to mean the same thing.
+  //
+  // WHICH IS ALSO WHY ONE REBUILD CAN EMPTY THE COLLECTION, and it is worth stating plainly because that is what has been
+  // happening to this station: if a run cannot see the records - a narrower role, a read refused, a `certifications`
+  // collection that was never migrated - the index comes out empty and every badge document is deleted. The badges are not
+  // corrupted, they are REMOVED, and they come back the moment a rebuild can see the records again. That is what
+  // scripts/normalize-certification-badges.mjs is for, and why it reports before it writes anything.
   const existing = await rowsOf(collection(db, 'certification_badges'));
   const batch = writeBatch(db);
   Object.entries(index).forEach(([userId, badges]) => {
@@ -940,7 +938,16 @@ export const refreshCertificationBadges = async () => {
     .forEach((row) => batch.delete(doc(db, 'certification_badges', String(row.id))));
   await batch.commit();
 
-  return { members: Object.keys(index).length, cleared: existing.filter((row) => !index[String(row.id)]).length };
+  // THE INDEX, AND NOTHING ELSE - one shape, so no caller can pick the wrong one.
+  //
+  // This used to return a SUMMARY of the rebuild (`{ members, cleared }`) while the caller needed the INDEX, and the
+  // route reply carried that summary under the name `badges`. App hands the reply straight to
+  // `setCertificationBadges`, which REPLACES the registry rather than merging it, so saving ONE certification replaced
+  // every member's icons with `{ members: 3, cleared: 0 }`: every name on every screen went bare - the Schedule
+  // module's pills, the board, the sidebar, the dashboard's on-duty card - for the rest of the session, because the
+  // roster that would refill the registry is read once and the summary looks exactly like an answer. The counts were
+  // never wrong, they were just not what the name said, and a reply cannot be checked by reading its caller.
+  return index;
 };
 
 // Settings are one document per SIDE - `settings/public` and `settings/private` - rather than one per key, because a

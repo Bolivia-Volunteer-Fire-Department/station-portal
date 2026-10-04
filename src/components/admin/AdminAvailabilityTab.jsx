@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Users } from 'lucide-react';
+import { CalendarRange, Users } from 'lucide-react';
 import { adminSetAvailability } from '../../services/api';
 import AvailabilityCalendar, { MonthNav } from '../AvailabilityCalendar';
 import CenteredContent from '../CenteredContent';
@@ -7,6 +7,7 @@ import MemberName from '../MemberName';
 import RankIcon from '../RankIcon';
 import { MONTHS } from '../../utils/calendarConstants';
 import { windowDaysForMonth } from '../../utils/availability';
+import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { toDateKey } from '../../utils/scheduleDate';
 
 // The value that means "show everyone" in the member picker. Deliberately not a user id,
@@ -34,8 +35,10 @@ export default function AdminAvailabilityTab({
   onLoadMonth,
   ranks = [],
   timeFormat = '12',
-  // Non-shift entries, drawn on the single-member grid so an administrator sees the same month the member does. The All
-  // Members list is windows and names, so events have no place in it.
+  // Non-shift entries, drawn on BOTH views: on the single-member grid so an administrator sees the same month the member
+  // does, and in each day's heading of the All Members list, which is where they were before the availability model moved
+  // to windows. The audience filter is the grid's alone: the list is an administrator's view of the whole crew, so an event
+  // aimed at one rank still belongs in it.
   events = [],
   _eventAudience = {},
   onDataChanged,
@@ -105,6 +108,10 @@ export default function AdminAvailabilityTab({
             loadedFrom={loadedFrom}
             loadedTo={loadedTo}
             onLoadMonth={onLoadMonth}
+            // The events, in each day's heading. The All Members list names WHO is free, and an event is very often why
+            // fewer of them are - so it belongs beside the day, not only on the single-member grid below.
+            events={events}
+            timeFormat={timeFormat}
           />
         </CenteredContent>
       ) : selectedMember ? (
@@ -144,6 +151,14 @@ function AvailabilityRoster({
   loadedFrom = '',
   loadedTo = '',
   onLoadMonth,
+  // The month's events, in the day heading. This is the shape `AdminAvailabilityRoster` drew before the availability
+  // model was rebuilt around windows (see commit 3edde4a, src/components/admin/AdminAvailabilityRoster.jsx) - it was lost
+  // with the split of that file, and this is it put back rather than a new idea about it.
+  //
+  // SHOWN ONCE PER DATE RATHER THAN PER WINDOW, for the reason the original gave and it is still the right one: an event
+  // belongs to the DAY, and repeating it down every window under it would bury the names this view exists to show.
+  events = [],
+  timeFormat = '12',
 }) {
   const now = new Date();
   const [viewDate, setViewDate] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
@@ -158,6 +173,18 @@ function AvailabilityRoster({
   const monthStart = toDateKey(new Date(year, month, 1));
   const monthEnd = toDateKey(new Date(year, month + 1, 0));
   const loaded = (!loadedFrom || monthStart >= loadedFrom) && (!loadedTo || monthEnd <= loadedTo);
+
+  // The month's events, keyed by date - expanded for RECURRING ones, because `eventSegmentsByDay` is what turns a weekly
+  // drill night into an entry on each Tuesday it falls on. Normalised defensively, as the original was, so a row that
+  // arrives half-built cannot silently disappear from a heading.
+  //
+  // NOT WRAPPED IN useMemo, and that is a change from the original. The React Compiler memoizes this itself, and when a
+  // manual `useMemo` is written here it reports `react(preserve-manual-memoization)` - four warnings saying the memo it
+  // cannot keep is being thrown away, which is the opposite of what writing one was for. The derivation is a single pass
+  // over the month's events, so there is nothing to be clever about either way.
+  const eventsByDay = eventSegmentsByDay(normalizeEventList(events), monthStart, monthEnd, { ranks });
+  // Counted as well as shown, because an event is very often WHY fewer people are free that night.
+  const eventCount = days.reduce((sum, day) => sum + (eventsByDay.get(day.dateKey) || []).length, 0);
 
   const rankOf = (rankId) =>
     ranks.find((rank) => String(rank?.id ?? '').trim() === String(rankId ?? '').trim()) || null;
@@ -174,6 +201,16 @@ function AvailabilityRoster({
       />
 
       <div className="px-4 py-3 space-y-4">
+        {/* The month's events, counted as well as listed per day - an officer reading "3 members available" wants to know
+            whether that is because nobody claimed it or because the drill night took them. Counted over the days this
+            list actually draws, so a recurring event is counted once per occurrence it puts on the calendar. */}
+        {eventCount > 0 && (
+          <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <CalendarRange className="w-3.5 h-3.5 shrink-0" />
+            {eventCount} event{eventCount === 1 ? '' : 's'} this month
+          </p>
+        )}
+
         {!loaded && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
             <span>Nobody&rsquo;s claims for {MONTHS[month]} {year} are loaded, so every window below looks uncovered.</span>
@@ -196,12 +233,36 @@ function AvailabilityRoster({
 
         {days.map((day) => (
           <div key={day.dateKey} className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+            {/* THE DAY HEADING, and the events that fall on it - restored from `AdminAvailabilityRoster` (3edde4a), which
+                drew them here before the file was split. A coloured DOT rather than a filled chip, for the reason the
+                original gave: a pale event colour must not swallow the date, and these should not read as shift pills. */}
+            <h4 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+              <CalendarRange className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               {new Date(`${day.dateKey}T12:00:00`).toLocaleDateString(undefined, {
                 weekday: 'short',
                 month: 'short',
                 day: 'numeric',
               })}
+              {(eventsByDay.get(day.dateKey) || []).length > 0 && (
+                <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 normal-case">
+                  {(eventsByDay.get(day.dateKey) || []).map((segment) => (
+                    <span
+                      key={`event-${segment.eventId}-${segment.dateKey}`}
+                      title={`${eventSegmentTitle(segment)} · ${eventSegmentTimeLabel(segment, timeFormat)}`}
+                      className="flex items-center gap-1.5 font-normal text-slate-600 dark:text-slate-300"
+                    >
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-black/10"
+                        style={{ backgroundColor: segment.color }}
+                      />
+                      <span className="truncate max-w-[16rem]">{eventSegmentTitle(segment)}</span>
+                      <span className="text-slate-400 dark:text-slate-500">
+                        {eventSegmentTimeLabel(segment, timeFormat)}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              )}
             </h4>
             {day.windows.map((window) => (
               <div

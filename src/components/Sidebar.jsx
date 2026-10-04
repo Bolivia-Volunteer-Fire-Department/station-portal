@@ -171,7 +171,7 @@ export default function Sidebar({
                     >
                         <BadgeCheck className="w-5 h-5" />
                         <span>Certifications</span>
-                        <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5 text-current opacity-80" />
+                        <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5" iconClassName="text-current opacity-80" />
                     </button>
 
                     {/* Documents is gated on can_view_documents - the permission that means "may read documents at

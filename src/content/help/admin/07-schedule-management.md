@@ -15,7 +15,26 @@ Each day shows its shifts, ordered by start time. A shift is one of:
 | **Vacant pill** | Nobody is on it. It is drawn in muted styling and labeled with the **assignment** rather than the word "Open" |
 | **Empty slot** | A template slot with no row at all. Click it to assign somebody |
 
+A member's name carries two marks on the pill, both set in *Scheduling → Ranks* and *Certifications*: a **rank dot** in the rank's color before the name, and any **certification icons** they currently hold after it. They are the answer to "who is on with me" without opening anything — hover the dots and icons to see what they stand for.
+
 Vacant shifts also carry a warning icon, and an orange count appears in the header, when nobody on the shift has marked themselves available for it — see *Member availability* below.
+
+## On a phone: one day at a time
+
+The board reads the **month today falls in** and shows you **today**, one day to a card, rather than the whole month on a screen too narrow to read it. Nothing is read twice for this: the day you are looking at is part of the month already loaded, so moving between days costs nothing.
+
+| | Wide screen | Phone |
+|---|---|---|
+| Shows | The whole month | One day |
+| **◀ ▶** step | A month | **A day** |
+| **Today** | The month today falls in | Today |
+
+Because a day has the whole card to itself, its pills are **not clipped**: a shift shows who is on it and its times on two lines, where the month view has to fit the same facts onto one line and leave the rest to the tooltip.
+
+Walking past the last day of a month moves into the next one and reads it, exactly as the calendar does — one month of shifts at a time, whichever view you are in. Resizing the window (or rotating a tablet) switches between the two views on the spot, keeping the day you were reading, and costs no read.
+
+> [!NOTE]
+> The switch happens at the same width the sidebar changes shape at, so the board and the layout around it always agree about whether this is a phone-shaped window or a wide one.
 
 ## Assigning somebody
 

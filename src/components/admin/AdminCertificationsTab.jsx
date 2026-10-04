@@ -42,7 +42,7 @@ const STATE_ORDER = { expiring: 0, expired: 1, active: 2, upcoming: 3 };
 //     new period, which is what leaves the station a history instead of a single current answer.
 //   * the end date is DISABLED for a certification whose setup says it cannot be renewed. One-off achievements
 //     have no expiry, and the server blanks the field too, so the rule survives somebody editing the sheet.
-export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], onDataChanged }) {
+export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], onDataChanged, onBadgesChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Whether the editor modal is open: "a new record" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
@@ -111,6 +111,11 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
       }
       // Saved, so the editor closes - the same close the Cancel path uses.
       closeEditor();
+      // THE BADGE INDEX COMES BACK WITH THE REPLY. The server rebuilds it after the write - the badges beside a name
+      // are derived from these records, so a save here can change every member's icons - and the reply carries the
+      // result. Handing it up is what makes a badge appear or vanish the moment an officer saves, instead of on the next
+      // sign-in. Free: the work is already done, and this is the only way to get it without reading it again.
+      onBadgesChanged?.(response.badges);
       // Not awaited: the save is confirmed and the refresh is a background reload. Written as `void` so the call
       // is greppable - see verify-refresh-wiring, which checks every saving screen still asks for its refresh.
       void onDataChanged?.('certificationRecords');
@@ -135,6 +140,8 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         return;
       }
       if (formData.id === target.id) closeEditor();
+      // Deleting a record can remove a badge too, and the reply carries the rebuilt index - see the save path above.
+      onBadgesChanged?.(response.badges);
       void onDataChanged?.('certificationRecords');
     } catch (err) {
       setError(err.message || 'Could not delete this record.');

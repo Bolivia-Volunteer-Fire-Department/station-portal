@@ -20,12 +20,25 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_PASSWORD, seed } from './seed-emulator.mjs';
 import { firebaseAuth, firebaseFunctions, firestore } from '../src/services/firebase.js';
 import { routeRead, routeWrite } from '../src/services/firestoreRouting.js';
+// The app's OWN payload builder, rather than a body assembled in this file. That distinction is the whole reason the
+// ranks section below exists: with `routeWrite` called directly the request body is written HERE, so it carries
+// whatever this harness puts in it - and a column `adminSaveRank` forgot to send sails straight through to the
+// emulator. Reintroducing that fault left the section green, which is how the gap was found.
+//
+// The builder is imported from utils rather than from services/api.js because api.js is a browser module: it pulls in
+// the Firebase SDK through extensionless specifiers, which plain Node ESM does not resolve, so it cannot be imported
+// here at all. The helper is pure and has no imports beyond the eligibility rule it shares a definition with.
 // The board's own swap helper: the entries below are built with the code the client runs, so this cannot drift from
 // what a swap really sends. It has no imports of its own, which is what makes it usable from here at all.
 import { swapSlotFields } from '../src/utils/scheduleDrop.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
 import { OFFLINE_CLOCK_MESSAGE } from '../src/utils/connectivity.js';
+import { rankFieldsFromForm } from '../src/utils/ranks.js';
+// The app's OWN badge registry, so the round trip at the badge section below is checked by what it DRAWS rather than
+// by what the reply looks like - "is this the index?" is not a shape a reader can eyeball. Pure and import-free, which
+// is what makes it usable from plain Node at all.
+import { certificationBadgesFor, setCertificationBadges } from '../src/utils/certifications.js';
 import {
   approveOffer,
   audienceKeysForWrite,
@@ -260,6 +273,117 @@ const main = async () => {
   const listedWindow = (listed.availabilityWindows || []).find((row) => row.nickname === 'Sunday day');
   check('and the officer list hands back the id the server minted', listedWindow?.id, created.id);
   // Put the session back where this section found it, so the offers below are raised by the member they are about.
+  await signIn('bo');
+
+  // --- ranks: the save carries the order, and the rules do not refuse it ---
+  //
+  // THE ROUND TRIP, against the emulator. The Ranks tab collected a rank's order and `adminSaveRank` never sent it, so
+  // the number never reached Firestore while the save reported SUCCESS - which no rule, no source check and no server
+  // render can see, because every one of those was looking at a save that was never asked to carry the field.
+  //
+  // So this writes through the SAME route the tab uses and reads the document back, because the claim being made is
+  // "the number is in Firestore", and only a database can make that claim. The two halves that could have hidden it are
+  // both covered: the payload carrying it (scripts/verify-write-safety.mjs) and the document holding it (here).
+  console.log('\n--- ranks: the order reaches the document ---');
+  await signIn('jane');
+  // THROUGH THE APP'S OWN PAYLOAD BUILDER, which is the whole point and the first version of this case got wrong.
+  // Calling `routeWrite` directly - as the sections above do - builds the request body HERE, in the harness, so it
+  // passes whatever the test bothers to write and proves nothing about the app: reintroducing the fault (dropping
+  // `rank_order` from the rank payload) left this section green, because the body the harness sent still had it.
+  //
+  // `rankFieldsFromForm` is what `adminSaveRank` spreads into its request, so the columns under test are the app's. The
+  // envelope is assembled here for the same reason every other section assembles one: `id` and `row_version` are the
+  // save's to carry, and the write strips them before it reaches Firestore (`withoutEnvelope` in firestoreWrites.js).
+  const rankPayload = (form) => ({
+    action: 'ADMIN_SAVE_RANK',
+    id: form.id || '',
+    ...rankFieldsFromForm(form),
+  });
+
+  await signIn('jane');
+  const rankAttempt = await routeWrite(
+    'ADMIN_SAVE_RANK',
+    rankPayload({
+      id: '',
+      description: 'Rescue Tender',
+      color: '#c2410c',
+      icon: 'truck',
+      rank_order: '4',
+    })
+  );
+  checkIs(
+    'an officer with the ranks permission saves one',
+    rankAttempt && rankAttempt.success === true,
+    JSON.stringify(rankAttempt).slice(0, 160)
+  );
+  const savedRank = (await getDoc(doc(db, 'ranks', rankAttempt.id))).data();
+  // THE CLAIM. A rank document with no `rank_order` is not a rank the eligibility rule can use: an assignment's
+  // `rank_order_required` has nothing to compare against, so every member's eligibility for it becomes unverifiable.
+  check('and the order it was saved with is on the document', savedRank?.rank_order, '4');
+  check('along with the rest of the rank', savedRank?.description, 'Rescue Tender');
+
+  // EDITING IT, which is the other half of the report - and the same payload, so a fix that only covered the create
+  // would still leave this broken.
+  const reordered = await routeWrite(
+    'ADMIN_SAVE_RANK',
+    rankPayload({
+      id: rankAttempt.id,
+      description: 'Rescue Tender',
+      color: '#c2410c',
+      icon: 'truck',
+      rank_order: '7',
+    })
+  );
+  checkIs('and the same save edits it', reordered && reordered.success === true, JSON.stringify(reordered).slice(0, 160));
+  check(
+    'with the new order on the document',
+    (await getDoc(doc(db, 'ranks', rankAttempt.id))).data()?.rank_order,
+    '7'
+  );
+
+  // CLEARING IT. The blank is the case worth pinning: `Number('')` is 0, and an order of 0 is a real rank at the
+  // bottom of the list, so a "helpful" coercion here would quietly change who may fill what rather than clearing
+  // anything. What the tab writes is what the document must hold.
+  // The FULL form, as the tab always sends it, and the result asserted - both because `setDoc` rejects an undefined
+  // field (so a partial body would fail the write outright) and because `routeWrite` swallows a thrown write into a
+  // failure object rather than raising, which is how a save that changed nothing can look like one that worked.
+  const clearAttempt = await routeWrite(
+    'ADMIN_SAVE_RANK',
+    rankPayload({
+      id: rankAttempt.id,
+      description: 'Rescue Tender',
+      color: '#c2410c',
+      icon: 'truck',
+      rank_order: '',
+    })
+  );
+  checkIs('and clearing it is itself a successful save', clearAttempt?.success === true, JSON.stringify(clearAttempt).slice(0, 160));
+  const clearedRank = (await getDoc(doc(db, 'ranks', rankAttempt.id))).data();
+  check('and clearing it writes a blank rather than a zero', clearedRank?.rank_order, '');
+  checkIs(
+    'so it is unset rather than the lowest rank in the station',
+    parseInt(clearedRank?.rank_order, 10) !== 0,
+    `got ${JSON.stringify(clearedRank?.rank_order)}`
+  );
+
+  // The rules end: a rank is station data, so writing one is `can_edit_ranks` and nothing else. A member must be
+  // refused - otherwise the permission this document sits behind is decoration.
+  await signIn('bo');
+  const memberAttempt = await routeWrite(
+    'ADMIN_SAVE_RANK',
+    rankPayload({ id: rankAttempt.id, description: 'Rescue Tender', rank_order: '9' })
+  );
+  checkIs(
+    'and a member without that permission cannot save one',
+    memberAttempt && memberAttempt.success === false,
+    JSON.stringify(memberAttempt).slice(0, 160)
+  );
+  check(
+    'so the order they tried to write is not on the document',
+    (await getDoc(doc(db, 'ranks', rankAttempt.id))).data()?.rank_order,
+    ''
+  );
+
   await signIn('bo');
 
   // --- offers: raise one, and the hole that is not there ---
@@ -600,6 +724,73 @@ const main = async () => {
     null
   );
   check('and neither does one with no icon to draw', badgeForRecord({ effective_date: '2024-01-01' }, { ...badgeType, icon: '' }, today), null);
+
+  // THE REPLY A SAVE HANDS THE SCREENS - asserted by USING it, because the shape is the whole subject.
+  //
+  // A certification save rebuilds the index and returns it, and App puts that reply STRAIGHT into the registry
+  // (`onBadgesChanged={setCertificationBadges}`, which REPLACES rather than merges) - so whatever the reply's `badges`
+  // field holds becomes every icon on screen. It held a SUMMARY of the rebuild (`{ members, cleared }`) while being
+  // called `badges`, so saving one certification blanked every name on every screen until the next sign-in: the
+  // Schedule module's pills, the board, the sidebar. Every layer looked right on its own - the field was named
+  // `badges`, the value was about badges, and the setter was handed exactly what the route replied.
+  //
+  // SO THIS FEEDS THE REPLY TO THE APP AND CHECKS WHAT IT DRAWS. "Is this the index?" is not a question a source check
+  // can answer: the count of call sites, the field's name and the setter are all identical either way. Only a summary
+  // actually travelling through the registry can be seen to be one - it leaves every member with no icons at all.
+  console.log('\n--- the badge index a save hands back ---');
+  // The type is saved FIRST, because the seed's catalog deliberately does not ask to be drawn beside a name - so
+  // without this the index would come back empty and the case would prove nothing. It goes through the route the Setup
+  // tab uses, which is what makes the rebuild non-empty. THE BODY IS ASSEMBLED HERE, unlike the ranks section above:
+  // what is under test is the REPLY, which the route produces, so a body written by this file cannot fake it.
+  await signIn('jane');
+  const setupAttempt = await routeWrite('ADMIN_SAVE_CERTIFICATION_SETUP', {
+    action: 'ADMIN_SAVE_CERTIFICATION_SETUP',
+    id: 'c9',
+    name: 'Swiftwater',
+    icon: 'sailboat',
+    is_renewable: true,
+    show_next_to_name: true,
+  });
+  checkIs(
+    'an officer saves a type that asks to be drawn beside a name',
+    setupAttempt && setupAttempt.success === true,
+    JSON.stringify(setupAttempt).slice(0, 160)
+  );
+
+  const badgeSave = await routeWrite('ADMIN_SAVE_CERTIFICATION', {
+    action: 'ADMIN_SAVE_CERTIFICATION',
+    id: '',
+    user_id: 'u2',
+    certification_id: 'c9',
+    effective_date: '2025-01-01',
+    end_date: '2099-01-01',
+  });
+  checkIs('and a current record for a member saves', badgeSave && badgeSave.success === true, JSON.stringify(badgeSave).slice(0, 160));
+
+  const repliedBadges = badgeSave && badgeSave.badges;
+  // A summary would have two NUMBERS here and no arrays, which is what this shape test says.
+  checkIs(
+    'the reply is the index - member id to their badges - rather than a summary of the rebuild',
+    Boolean(repliedBadges) &&
+      Array.isArray(repliedBadges.u2) &&
+      Object.values(repliedBadges).every((list) => Array.isArray(list)),
+    JSON.stringify(repliedBadges).slice(0, 160)
+  );
+  check(
+    "and it carries the member's badge, not just their id",
+    (repliedBadges && repliedBadges.u2 ? repliedBadges.u2 : []).map((badge) => badge.icon),
+    ['sailboat']
+  );
+
+  // USED THE WAY THE APP USES IT. This is the assertion the summary could not survive: the registry is replaced with
+  // whatever it is handed, so a summary leaves every member drawing nothing.
+  setCertificationBadges(repliedBadges);
+  check(
+    'and the app draws it once the reply goes through its own setter',
+    certificationBadgesFor('u2').map((badge) => badge.icon),
+    ['sailboat']
+  );
+  checkIs('while a member with no badges still draws none', certificationBadgesFor('u1').length === 0);
 
   // --- the side a setting belongs on, decided in one place for the app AND the migration ---
   console.log('\n--- which side a setting belongs on ---');

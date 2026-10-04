@@ -151,6 +151,10 @@ export default function AdminPanel({
   onAvailabilityChanged,
   onLogsChanged,
   onAdminDataChanged,
+  // A certification or setup save rebuilds the badge index on the server and returns it with the reply. This carries it
+  // to App, which owns the module registry the badge icons read from - so a badge appears or vanishes as the officer
+  // saves, instead of only on the next sign-in. The data is already paid for; this just stops it being thrown away.
+  onBadgesChanged,
   // Reports the sub-tab that ACTUALLY rendered upward, so the app bar can name it ("Admin: Schedule
   // Mgt"). This is not always the requested one: the menu page reports '' (which is what makes the
   // label fall back to the bare "Administration"), and a mid-session role edit reports '' too.
@@ -413,6 +417,7 @@ export default function AdminPanel({
           setup={certificationSetup}
           records={certificationRecords}
           onDataChanged={onAdminDataChanged}
+          onBadgesChanged={onBadgesChanged}
         />
       )}
 
@@ -421,6 +426,7 @@ export default function AdminPanel({
           token={token}
           setup={certificationSetup}
           onDataChanged={onAdminDataChanged}
+          onBadgesChanged={onBadgesChanged}
         />
       )}
 

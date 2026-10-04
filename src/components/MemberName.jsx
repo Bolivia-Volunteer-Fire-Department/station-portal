@@ -11,11 +11,20 @@ import { userLabel } from '../utils/displayLabel';
 //
 // The name itself is `userLabel`, the same helper every other screen uses, so a half-filled row reads the same
 // way here as anywhere else.
-export default function MemberName({ user, className = 'w-3.5 h-3.5', nameClassName = '' }) {
+//
+// `className` sizes the icons and `iconClassName` tones them (see CertificationBadges): a caller drawing a name on a
+// surface whose color it does not control - the schedule's assignment-colored pills - passes a tone of '' so each
+// glyph inherits that surface's text color instead of fighting it.
+export default function MemberName({
+  user,
+  className = 'w-3.5 h-3.5',
+  iconClassName,
+  nameClassName = '',
+}) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5 align-middle">
       <span className={`truncate ${nameClassName}`}>{userLabel(user)}</span>
-      <CertificationBadges userId={user?.id} className={className} />
+      <CertificationBadges userId={user?.id} className={className} iconClassName={iconClassName} />
     </span>
   );
 }

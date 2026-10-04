@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { CalendarDays, CalendarClock, X } from 'lucide-react';
 import RankIcon from './RankIcon';
+import CertificationBadges from './CertificationBadges';
 // Which tone a modal opens with is decided in one table - see MODAL_SOUNDS in utils/uiSounds.
 import { playSound, modalSoundFor } from '../utils/uiSounds';
 import { useDismissAnimation } from '../utils/motion';
@@ -77,6 +78,10 @@ export default function ScheduleItemModal({ details, icon, onClose }) {
               <span className="flex items-center gap-1.5 min-w-0 text-sm font-medium text-slate-900 dark:text-white text-right">
                 {row.icon && <RankIcon name={row.icon} className="w-3.5 h-3.5 shrink-0 text-slate-400" />}
                 <span className="truncate">{row.value}</span>
+                {/* A row that NAMES a member carries their id, which is what this draws the certification icons
+                    from - the popup a crew member opens is where "who am I on with" is answered. Assignment and
+                    date rows have no id and draw nothing. */}
+                <CertificationBadges userId={row.userId} />
               </span>
             </div>
           ))}

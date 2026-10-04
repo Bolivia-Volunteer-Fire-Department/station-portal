@@ -165,6 +165,9 @@ export const ROUTED_FEATURES = {
       // the screens that list people ask for it when they open (App#loadRoster), and a caller is the only thing that makes a
       // route worth keeping.
       'GET_ROSTER',
+      // The badge index for the handful of names a screen actually draws. GET_ROSTER carries the WHOLE index, which is
+      // right for the screens that draw many names and wrong for the ones that draw two - see the reader.
+      'GET_CERTIFICATION_BADGES',
       'GET_TIMECLOCK_LOGS',
       'GET_SCHEDULE',
       'GET_SCHEDULE_SETUP',
@@ -822,7 +825,14 @@ Object.entries(AUDIENCE_SAVES).forEach(([action, { collection, rankAndAbove, liv
 });
 
 // Save the document, then rebuild the badge index - in that order, because the index is derived from what was just
-// written. The reply carries how many members have badges now, which is the visible proof it ran.
+// written.
+//
+// THE REPLY CARRIES THE REBUILT INDEX, and it is worth saying which shape that is, because `badges` used to hold a
+// SUMMARY of the rebuild (`{ members, cleared }`) instead. App hands this straight to `setCertificationBadges`, which
+// REPLACES the registry rather than merging, so one certification save blanked every member's icons on every screen
+// until the next sign-in - and the naming made it look correct at every layer: the field really was called `badges`,
+// and the value really was about badges. `refreshCertificationBadges` now returns the index and returns nothing else,
+// so there is no second shape to reach for.
 Object.entries(BADGE_REFRESHING_SAVES).forEach(([action, { collection, kind }]) => {
   DISPATCH[action] = async (body) => {
     const { saveDocument, deleteDocument, refreshCertificationBadges } = await writes();

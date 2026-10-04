@@ -23,6 +23,8 @@ import ShiftOfferModal from './ShiftOfferModal';
 import ScheduleItemModal from './ScheduleItemModal';
 import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
 import PrintableSchedule from './PrintableSchedule';
+import MemberName from './MemberName';
+import RankDot from './RankDot';
 import { unnamedLabel } from '../utils/displayLabel';
 
 // Identity used for an unfilled shift wherever a member's name would go.
@@ -113,6 +115,16 @@ export default function ScheduleCalendar({
     const found = users.find((u) => String(u.id) === String(userId));
     return found?.name || unnamedLabel('member');
   };
+
+  // The ROW behind a member's name, for the fact a name alone cannot carry - their rank, which the pill draws as a
+  // coloured dot before the name (see components/RankDot). `memberName` above reads the same two sources and returns the
+  // string; this returns the row, because a rank is not a name.
+  //
+  // The signed-in member's own row is not necessarily in the directory the calendar was handed, and their OWN document is
+  // the authoritative one for their rank - the sidebar resolves theirs the same way.
+  const memberRow = (userId) =>
+    users.find((u) => String(u.id) === String(userId)) ||
+    (String(userId ?? '') === String(currentUser?.id ?? '') ? currentUser : null);
 
   // Rank order of the ASSIGNMENT a pill belongs to - the shift's own minimum
   // rank, not the member's rank. This is what orders a day's crew (see
@@ -624,15 +636,47 @@ export default function ScheduleCalendar({
                     // assignment; once the member offers they turn amber while
                     // pending, or rose when declined - which closes the shift to
                     // them, so the pill is not a button any more.
-                    const line1 = a.isOpen
-                      ? offerState === 'pending'
+                    // IN THE CREW VIEW THE FIRST LINE IS A MEMBER'S NAME, and that is the one line on the calendar
+                    // that carries certification icons - the answer to "who am I on with", read at the moment the
+                    // pill is, which is the whole point of the icons. So the name goes through MemberName rather than
+                    // being a bare string. Nothing else on a pill is a person: an assignment label is not, and an
+                    // open shift has no member yet.
+                    //
+                    // `iconClassName` is empty on purpose: each glyph then inherits the pill's own text color,
+                    // which is the same rule the assignment icon on line 2 follows - a pill's background is an
+                    // arbitrary assignment color, so a fixed icon color can end up unreadable on it.
+                    // `rank_id` rides along so the pill can draw the member's rank as a dot, the same way the row it
+                    // came from does everywhere else. The dot is part of THIS branch on purpose: it belongs to a
+                    // member's name, so it can never be drawn beside an assignment label or an open shift.
+                    const crewUser = showEveryone && !a.isOpen
+                      ? { id: a.userId, name: a.name, rank_id: memberRow(a.userId)?.rank_id ?? '' }
+                      : null;
+                    const line1 = crewUser ? (
+                      // A flex row rather than plain inline content: the dot must not be able to push the name out of
+                      // the pill, and `min-w-0` is what lets the name truncate instead (MemberName has it too).
+                      <span className="flex min-w-0 items-center gap-1">
+                        {/* The member's rank, in the colour Administration → Ranks gives it. `ml-px` is a nudge off
+                            the pill's own padding; it is `px` rather than the `ml-0.25` this line first carried, which
+                            is not a Tailwind class at all - it generated no rule, so the margin it looked like was
+                            never there. A class that does nothing is worse than no class, because the next reader
+                            believes it. */}
+                        <RankDot user={crewUser} ranks={ranks} className="w-2 h-2 shrink-0 ml-px" />
+                        <MemberName
+                          user={crewUser}
+                          className="w-2.5 h-2.5"
+                          iconClassName=""
+                          nameClassName="truncate"
+                        />
+                      </span>
+                    ) : a.isOpen ? (
+                      offerState === 'pending'
                         ? 'Pending'
                         : offerState === 'declined'
                           ? 'Declined'
                           : OPEN_SHIFT_LABEL
-                      : showEveryone
-                        ? a.name
-                        : a.label || 'Scheduled';
+                    ) : (
+                      a.label || 'Scheduled'
+                    );
                     const line2 =
                       a.isOpen || showEveryone
                         ? a.timeLabel

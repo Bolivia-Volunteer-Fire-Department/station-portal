@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { renderInViewport } from '../../utils/viewportLayer';
 import {
   AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight,
@@ -13,6 +13,8 @@ import { assignmentColor } from '../../utils/assignmentColor';
 import { toTimeInputValue } from '../../utils/timeInputValue';
 import { shiftTimeLabel } from '../../utils/shiftTime';
 import RankIcon from '../RankIcon';
+import RankDot from '../RankDot';
+import CertificationBadges from '../CertificationBadges';
 import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
@@ -32,6 +34,7 @@ import {
   rankLabel,
 } from '../../utils/rankEligibility';
 import { WEEKDAYS, MONTHS, DAY_ORDER } from '../../utils/calendarConstants';
+import { desktopViewport, subscribeViewport } from '../../utils/viewport';
 import { unnamedLabel } from '../../utils/displayLabel';
 import PrintableSchedule from '../PrintableSchedule';
 
@@ -85,12 +88,41 @@ const normalizeRows = (rows) =>
 
 const FIELD_LIST = ['schedule_template_id', 'date_from', 'date_to', 'start_time', 'end_time', 'apparatus_id', 'assignment_id', 'user_id'];
 
-// Pill shapes for the calendar. A STAFFED shift is a solid, color-filled pill; an
-// UNFILLED one is drawn like an empty template slot - thin muted border, muted
-// text, no fill - so a vacancy never reads as a staffed shift at a glance.
+// Pill shapes for the calendar's MONTH view, where a day cell is 124px tall and holds a whole day's shifts - so a
+// pill is ONE clipped line. A STAFFED shift is a solid, color-filled pill; an UNFILLED one is drawn like an empty
+// template slot - thin muted border, muted text, no fill - so a vacancy never reads as a staffed shift at a glance.
 const FILLED_PILL_CLASS = 'rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white truncate';
 const VACANT_PILL_CLASS =
   'rounded-full px-1.5 py-0.5 text-[10px] font-semibold truncate border border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500';
+
+// ...AND THE DAY VIEW'S SHAPES, where one day fills the card and there is room for what the tooltip was carrying.
+//
+// The same two states, so the board still reads the same way - solid for a staffed shift, a muted outline for a
+// vacancy - but at a readable size, rounded as a block rather than as a pill, and with NO `truncate`: the whole point
+// of the extra room is that a name and its window are not clipped to fit a 124px cell. `w-full` so a short name does
+// not leave a ragged column of different-width blocks.
+const FILLED_PILL_ROOMY_CLASS = 'w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold text-white text-left';
+const VACANT_PILL_ROOMY_CLASS =
+  'w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold text-left border border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500';
+
+// AN EMPTY SLOT has a third shape of its own - a border, a hover state, and a `relative` for the badge a pending offer
+// hangs off - because it is also a CONTROL: it opens the assignment popover. Kept beside the two above so all of the
+// board's pill shapes are read in one place.
+const EMPTY_SLOT_CLASS = 'rounded-md border px-1 py-0.5 text-[10px] leading-tight truncate transition-colors relative';
+const EMPTY_SLOT_ROOMY_CLASS = 'rounded-xl border px-2.5 py-1.5 text-xs transition-colors relative';
+
+// The one place each shape is chosen between, so a pill cannot be drawn in a shape the view has no room for - and so a
+// third view later means one line here rather than one per call site.
+const pillShapeClass = (vacant, roomy) =>
+  roomy
+    ? vacant
+      ? VACANT_PILL_ROOMY_CLASS
+      : FILLED_PILL_ROOMY_CLASS
+    : vacant
+      ? VACANT_PILL_CLASS
+      : FILLED_PILL_CLASS;
+const emptySlotShapeClass = (roomy) => (roomy ? EMPTY_SLOT_ROOMY_CLASS : EMPTY_SLOT_CLASS);
+
 const fieldsOf = (r) => ({
   id: r.id || '',
   schedule_template_id: r.schedule_template_id || '',
@@ -158,7 +190,27 @@ export default function AdminScheduleManagementTab({
   departmentName = '',
 }) {
   const now = new Date();
-  const [viewDate, setViewDate] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
+
+  // WHICH SHAPE THIS BOARD IS IN: the month's calendar, or one day of it. Read from the VIEWPORT (utils/viewport) at
+  // the same 768px the shell's own layout switches at, so the board's behaviour and its layout cannot disagree.
+  //
+  // A JAVASCRIPT DECISION RATHER THAN A CSS ONE, and that is the point of it rather than a preference: the arrows walk
+  // DAYS in this view and MONTHS in the other, the title says which unit is on screen, and the month on screen is what
+  // the reader is asked for. Hiding six columns with `hidden md:block` would give a single-day LAYOUT while the arrows
+  // still walked months, the title still named a month, and a day's shifts arrived as a month's read - a screen whose
+  // controls disagree with what is on it. So ONE flag decides all of it, and the breakpoint it reads is Tailwind's `md`
+  // - the number the sidebar already switches on (Sidebar.jsx) - rather than a second threshold to keep in step.
+  const isDesktop = useSyncExternalStore(subscribeViewport, desktopViewport, desktopViewport);
+  const dayView = !isDesktop;
+
+  // THE DAY AND THE MONTH ARE ONE PIECE OF STATE, deliberately: `viewDate` carries both, so the day on screen in the
+  // day view and the month in the calendar can never drift apart, and resizing between the two keeps the officer on
+  // the day they were reading.
+  //
+  // IT OPENS ON TODAY rather than on the 1st. That is invisible on a wide screen - the calendar draws the whole month
+  // whichever day this is - and it is the entire request for the narrow one: a phone opens on today's shifts, and the
+  // arrows walk to the other days from there.
+  const [viewDate, setViewDate] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
   // The visible month's bounds, computed before the row state below because that state is scoped BY them.
   const monthStartKey = toDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth(), 1));
   const monthEndKey = toDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0));
@@ -233,6 +285,10 @@ export default function AdminScheduleManagementTab({
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const monthLabel = `${MONTHS[month]} ${year}`;
+  // THE DAY ON SCREEN, as a key and as the toolbar's own label. In the day view the day IS the unit, so the title has
+  // to name it - and the same key is what the single cell is drawn for, so the title and the grid cannot disagree.
+  const viewDayKey = toDateKey(viewDate);
+  const dayLabel = displayDate(viewDayKey);
   const todayKey = toDateKey(now);
   // Events are visible by default. Not persisted: a temporary view choice, like "Show everyone".
   const [showEvents, setShowEvents] = useState(true);
@@ -396,9 +452,108 @@ export default function AdminScheduleManagementTab({
     return assignmentById(assignmentId)?.description || 'Open';
   };
 
+  // The MEMBER behind a pill, for the rank dot drawn before their name (components/RankDot) and for the certification
+  // badges drawn after it. A VACANCY has no member, so there is no rank and no badge to draw - which is why this
+  // returns null rather than a placeholder row. `occupantLabel` answers the same question with a string, and the dot
+  // and the badges are drawn by `pillBody` below, which is the one place a pill is assembled.
+  const occupantUser = (entry) =>
+    String(entry?.user_id ?? '').trim() !== '' ? userById(entry.user_id) : null;
+
   // Icon name configured for an assignment (Administration → Assignments). Blank means
   // "no icon", so callers render nothing rather than the fallback glyph.
   const assignmentIcon = (id) => String(assignmentById(id)?.icon ?? '').trim();
+
+  // WHAT A PILL SAYS: the assignment's icon, the member's rank as a dot, their certification badges, the name or the
+  // assignment label, and the shift's window.
+  //
+  // ONE FUNCTION FOR ALL THREE KINDS OF PILL - a template slot's occupant, a custom-shift row, and an unfilled slot -
+  // because the alternative is what this file had: those five facts written out per branch, so the rank dot reached two
+  // of the three and the certification badges reached none. A fact added to a pill now has exactly one home, and one
+  // place to be missing from.
+  //
+  // IT RETURNS ELEMENTS RATHER THAN BEING A COMPONENT OF ITS OWN. A component declared inside this one is a NEW
+  // component TYPE on every render, so React would unmount and remount every pill on the board whenever anything
+  // changed - throwing away the focus inside a popover a pill had opened, and remounting the badge components, which
+  // resubscribe to the badge index. A plain function is called during the render already happening and introduces no
+  // type at all.
+  //
+  // `roomy` IS THE DAY VIEW, where one day fills the card and there is vertical room the month view does not have: the
+  // pill becomes two lines at a readable size and shows the shift's WINDOW, rather than clipping it onto one line and
+  // leaving it to the tooltip. The order of the facts is identical in both, so the two views read as the same pill.
+  //
+  // `memberId` AND `user` ARE TWO KEYS TO ONE PERSON, and both are needed: the badge index is keyed by MEMBER ID - which
+  // the schedule row carries even when the directory cannot resolve them - while the rank dot needs the ROW itself for
+  // its `rank_id`. A vacancy has neither, which is why both default to nothing and why a vacancy draws no dot and no
+  // badge.
+  const pillBody = ({
+    label,
+    icon,
+    memberId = '',
+    user = null,
+    time = '',
+    pending = false,
+    labelClassName = '',
+    roomy,
+  }) => {
+    const iconNode = icon ? (
+      <RankIcon
+        name={icon}
+        className={roomy ? 'w-3.5 h-3.5 shrink-0' : 'inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]'}
+      />
+    ) : null;
+    // THE CERTIFICATION ICONS GO BESIDE THE NAME, because that is whose they are - the answer to "who am I on with",
+    // read at the moment an officer is looking at the shift. Only for a MEMBER: an unfilled slot has nobody to badge.
+    //
+    // `iconClassName=""` so each glyph INHERITS the pill's own text colour. A staffed pill is the assignment's colour
+    // with white text over it, and that colour is arbitrary, so the fixed sky blue a badge carries on a white card can
+    // be unreadable on it. Same rule as the assignment icon beside it, and the member calendar's crew pill.
+    const badges = memberId ? (
+      <CertificationBadges userId={memberId} className={roomy ? 'w-3.5 h-3.5' : 'w-2.5 h-2.5'} iconClassName="" />
+    ) : null;
+    const dot = (
+      <RankDot
+        user={user}
+        ranks={ranks}
+        className={roomy ? 'w-2.5 h-2.5 shrink-0' : 'inline-block w-2 h-2 mr-0.5 -mt-px align-[-1px] shrink-0'}
+      />
+    );
+    // The pending-approval marker is an EMPTY SLOT's, for a vacancy somebody has offered to fill - so it leads, and it
+    // is the one fact on a pill that is not about the shift itself.
+    const marker = pending ? (
+      <span className="inline-flex items-center justify-center w-3 h-3 rounded-full bg-amber-400 shrink-0" title="Pending approval" />
+    ) : null;
+
+    if (!roomy) {
+      return (
+        <>
+          {marker}
+          {iconNode}
+          {dot}
+          <span className={labelClassName}>{label}</span>
+          {badges}
+          {time ? ` · ${time}` : ''}
+        </>
+      );
+    }
+
+    return (
+      <>
+        {/* WHO is on the shift, and which shift it is - the line that has to survive a narrow screen. */}
+        <span className="flex min-w-0 items-center gap-1.5">
+          {marker}
+          {iconNode}
+          {dot}
+          <span className={`truncate ${labelClassName}`}>{label}</span>
+          {badges}
+        </span>
+        {/* WHEN it runs, on its own line: the fact the month view has to leave to the tooltip. `whitespace-nowrap`
+            because a window that breaks mid-way ("8:00 AM –" / "6:00 PM") reads as two times rather than one. */}
+        {time ? (
+          <span className="mt-0.5 block text-[11px] font-normal opacity-90 whitespace-nowrap">{time}</span>
+        ) : null}
+      </>
+    );
+  };
 
   // Eligibility classification for an assignment, sharing one implementation
   // with the Assignments admin tab so the counts always agree.
@@ -570,6 +725,14 @@ export default function AdminScheduleManagementTab({
     while (arr.length % 7 !== 0) arr.push(null);
     return arr;
   }, [year, month]);
+
+  // WHICH DAYS THE CELLS ARE DRAWN FOR: every day of the month on a wide screen, the one day on screen on a narrow
+  // one. Both draw the SAME cell through the same closure below - the day view is one entry of this list, not a second
+  // renderer - so a change to how a day is drawn cannot reach one view and miss the other.
+  //
+  // `viewDate` rather than a leading-blank cell: it is a real date (see the viewDate note), so the day view never has a
+  // blank to draw and the day it shows is the day the read is scoped to.
+  const daysOnBoard = dayView ? [viewDate] : monthGrid;
 
   // Non-shift entries for the visible month, grouped by day. Normalized defensively so a raw sheet row
   // cannot silently render nothing: the engine reads `isAllDay`/`startsAt`, not `is_all_day`/`date_from`.
@@ -1447,8 +1610,27 @@ export default function AdminScheduleManagementTab({
     return groups;
   })();
 
-  const goMonth = (delta) => setViewDate(new Date(year, month + delta, 1));
-  const goToday = () => setViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  // THE ARROWS WALK WHATEVER IS ON SCREEN: a day in the day view, a month in the calendar. One function, so the two
+  // buttons cannot step a different unit from each other or from the title.
+  const stepView = (delta) => {
+    if (dayView) {
+      // Day arithmetic by day-of-month overflow, which `Date` normalizes - so this walks across month and year ends
+      // with no special case. THE READ IS UNAFFECTED: the month bounds are derived from this date, so stepping a day
+      // INSIDE the month asks the reader for nothing new, and stepping off the month's end asks for the month arrived
+      // at - one month's read, exactly as before.
+      setViewDate(new Date(year, month, viewDate.getDate() + delta));
+      return;
+    }
+    // A MONTH STEP KEEPS THE DAY, clamped into the month it lands in (the 31st becomes the 28th or 30th). Pinning it to
+    // the 1st - which is what this did while a month was the only unit - silently moved the officer to the start of the
+    // month, so a window narrowed and widened again came back on the 1st instead of the day they were reading.
+    const landing = new Date(year, month + delta, 1);
+    const lastDay = new Date(landing.getFullYear(), landing.getMonth() + 1, 0).getDate();
+    setViewDate(new Date(landing.getFullYear(), landing.getMonth(), Math.min(viewDate.getDate(), lastDay)));
+  };
+
+  // Today, in BOTH views: the date whose month is read, and the day the day view draws.
+  const goToday = () => setViewDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
 
   return (
     <div className="space-y-6">
@@ -1464,11 +1646,14 @@ export default function AdminScheduleManagementTab({
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => goMonth(-1)} aria-label="Previous month" className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
+            {/* THE ARROWS STEP THE UNIT ON SCREEN - a day in the day view, a month in the calendar - and their labels
+                say which, because a screen reader has no title bar to read it from. `aria-label` is also what the
+                board's own harness looks the buttons up by, so the two units' buttons stay distinguishable. */}
+            <button type="button" onClick={() => stepView(-1)} aria-label={dayView ? 'Previous day' : 'Previous month'} className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <span className="min-w-[150px] text-center text-base font-semibold text-slate-900 dark:text-white">{monthLabel}</span>
-            <button type="button" onClick={() => goMonth(1)} aria-label="Next month" className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
+            <span className="min-w-[150px] text-center text-base font-semibold text-slate-900 dark:text-white">{dayView ? dayLabel : monthLabel}</span>
+            <button type="button" onClick={() => stepView(1)} aria-label={dayView ? 'Next day' : 'Next month'} className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
               <ChevronRight className="w-5 h-5" />
             </button>
             <button type="button" onClick={goToday} className="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600">
@@ -2155,22 +2340,36 @@ export default function AdminScheduleManagementTab({
         })()}
       </div>
 
-      {/* Monthly calendar */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 grid grid-cols-7 gap-1">
-          {WEEKDAYS.map((d) => (
-            <div key={d} className="text-center text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
-              {d}
-            </div>
-          ))}
-        </div>
+      {/* THE MONTH ON A WIDE SCREEN, ONE DAY OF IT ON A NARROW ONE.
 
-        <div className="p-2 grid grid-cols-7 gap-1">
-{monthGrid.map((day, i) => {
+          The unit changes, the DATA does not: the month is read and grouped exactly as before (visibleSlots, pillsByDay
+          and eventSegmentsByDate are all per-MONTH), and the day view simply draws one of those groups in full width.
+          That is why widening the window never costs a read - everything the day needs is already in hand - and why
+          walking to another day inside the month asks the reader for nothing either.
+
+          The weekday header is the calendar's, so it goes with the calendar: the day view's single cell names its own
+          weekday and date instead, which is more useful than a row of seven abbreviations over one column. */}
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+        {!dayView && (
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 grid grid-cols-7 gap-1">
+            {WEEKDAYS.map((d) => (
+              <div key={d} className="text-center text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
+                {d}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className={dayView ? 'p-2' : 'p-2 grid grid-cols-7 gap-1'}>
+{daysOnBoard.map((day, i) => {
             if (!day) {
               return <div key={`blank-${i}`} className="min-h-[124px] rounded-lg bg-slate-50/50 dark:bg-slate-900/40" />;
             }
             const dateKey = toDateKey(day);
+            // THE SHAPE THIS CELL IS DRAWN IN. In the day view one day fills the card, so the cell is tall and its
+            // pills carry two lines of facts (see pillBody); in the calendar it is one of thirty-five and holds only
+            // what fits.
+            const roomy = dayView;
             const isToday = dateKey === todayKey;
             const isPast = dateKey < todayKey;
             const daySlots = (slotsByDay[dateKey] || []).slice().sort((a, b) => a.startMin - b.startMin);
@@ -2208,14 +2407,21 @@ export default function AdminScheduleManagementTab({
                 // broken. See handleDayDrop.
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => handleDayDrop(e, dateKey)}
-                className={`min-h-[124px] rounded-lg border p-1.5 flex flex-col gap-1 ${
+                // THE HEIGHT IS THE VIEW'S, and it is the whole reason the day view exists on a phone: 124px is what a
+                // month cell can afford, and one day gets the window. The calendar's string is kept contiguous and
+                // unchanged on purpose - the server-rendered harness finds a day cell by it (verify-admin-render).
+                className={`${roomy ? 'min-h-[60vh]' : 'min-h-[124px]'} rounded-lg border p-1.5 flex flex-col gap-1 ${
                   isToday
                     ? 'border-red-300 dark:border-red-800 bg-red-50/30 dark:bg-red-950/20'
                     : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700/40'
                 }`}
               >
-                <div className={`text-[10px] leading-none font-semibold ${isToday ? 'text-red-600' : 'text-slate-500 dark:text-slate-400'}`}>
-                  {day.getDate()}
+                {/* The date, which the day view has to state in full: the weekday header above it belongs to the
+                    calendar, so on its own the cell would be a bare day number with no weekday or month anywhere. */}
+                <div className={`leading-none font-semibold ${roomy ? 'text-xs' : 'text-[10px]'} ${isToday ? 'text-red-600' : 'text-slate-500 dark:text-slate-400'}`}>
+                  {roomy
+                    ? day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+                    : day.getDate()}
                 </div>
 
                 {/* Chronological, with the day's events placed among its shifts rather than above them all - see
@@ -2260,16 +2466,19 @@ export default function AdminScheduleManagementTab({
                         onDragOver={(e2) => e2.preventDefault()}
                         onDrop={(e2) => handlePillDrop(e2, e)}
                         title={`${occupantLabel(e, entryTemplate(e))} · ${assignmentById(e.assignment_id)?.description || 'No assignment'}${entryTimeRangeOf(e) ? ` · ${entryTimeRangeOf(e)}` : ''}${isOccurred(e) ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'}`}
-                        className={`${vacant ? VACANT_PILL_CLASS : FILLED_PILL_CLASS} cursor-grab active:cursor-grabbing ${
+                        className={`${pillShapeClass(vacant, roomy)} cursor-grab active:cursor-grabbing ${
                           isOccurred(e) ? 'opacity-40 saturate-50' : ''
                         } ${selectedKey === e._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''}`}
                         style={vacant ? undefined : { backgroundColor: assignmentColor(e.assignment_id, assignments) }}
                       >
-                        {assignmentIcon(e.assignment_id) && (
-                          <RankIcon name={assignmentIcon(e.assignment_id)} className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]" />
-                        )}
-                        {occupantLabel(e, entryTemplate(e))}
-                        {pillTime ? ` · ${pillTime}` : ''}
+                        {pillBody({
+                          label: occupantLabel(e, entryTemplate(e)),
+                          icon: assignmentIcon(e.assignment_id),
+                          memberId: e.user_id,
+                          user: occupantUser(e),
+                          time: pillTime,
+                          roomy,
+                        })}
                       </div>
                     );
                   }
@@ -2321,20 +2530,21 @@ export default function AdminScheduleManagementTab({
                                 ? ' — click to assign a member'
                                 : ' — click to change member, or hold to swap'
                         }`}
-                        className={`${vacant ? VACANT_PILL_CLASS : FILLED_PILL_CLASS} cursor-grab active:cursor-grabbing transition ${
+                        className={`${pillShapeClass(vacant, roomy)} cursor-grab active:cursor-grabbing transition ${
                           occurred ? 'opacity-40 saturate-50' : ''
                         } ${dwelling ? 'animate-swapDwell' : ''} ${exchanged ? 'animate-swapPop' : ''} ${
                           selectedKey === occupant._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''
                         }`}
                         style={vacant ? undefined : { backgroundColor: assignmentColor(occupant.assignment_id, assignments) }}
                       >
-                        {/* Assignment icon, inheriting the pill's text color so an
-                            arbitrary assignment color can't make it unreadable. */}
-                        {assignmentIcon(occupant.assignment_id) && (
-                          <RankIcon name={assignmentIcon(occupant.assignment_id)} className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px align-[-1px]" />
-                        )}
-                        {occupantLabel(occupant, slot.template)}
-                        {pillTime ? ` · ${pillTime}` : ''}
+                        {pillBody({
+                          label: occupantLabel(occupant, slot.template),
+                          icon: assignmentIcon(occupant.assignment_id),
+                          memberId: occupant.user_id,
+                          user: occupantUser(occupant),
+                          time: pillTime,
+                          roomy,
+                        })}
                       </div>
                     );
                   }
@@ -2360,7 +2570,7 @@ export default function AdminScheduleManagementTab({
                       onDragOver={(e) => handleSlotDragOver(e, slot)}
                       onDragLeave={() => handleSlotDragLeave(slot)}
                       onDrop={(e) => handleSlotDrop(e, slot)}
-                      className={`rounded-md border px-1 py-0.5 text-[10px] leading-tight truncate transition-colors relative ${
+                      className={`${emptySlotShapeClass(roomy)} ${
                         hoverSlot === slot.slotKey
                           ? 'bg-red-100 dark:bg-red-900/40 border-red-400 ring-1 ring-red-400 text-red-700 dark:text-red-300'
                           : 'border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500'
@@ -2372,17 +2582,23 @@ export default function AdminScheduleManagementTab({
                             : 'cursor-pointer hover:border-red-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50/60 dark:hover:bg-red-950/30'
                       }`}
                     >
-                      <div className="flex items-center gap-1">
-                        {slotPending.length > 0 && (
-                          <span className="inline-flex items-center justify-center w-3 h-3 rounded-full bg-amber-400 shrink-0" title="Pending approval" />
-                        )}
-                        {assignmentIcon(slot.template.assignment_id) && (
-                          <RankIcon name={assignmentIcon(slot.template.assignment_id)} className="w-2.5 h-2.5 shrink-0" />
-                        )}
-                        <span className={slotPending.length ? 'text-amber-700 dark:text-amber-300 font-semibold' : ''}>
-                          {slotLabelText(slot)}
-                        </span>
-                      </div>
+                      {/* A vacancy has NO MEMBER, so this passes no `memberId` and no `user` - which is what keeps a
+                          rank dot and a certification badge off the assignment's name. It is the same call a filled
+                          pill makes, with the facts a vacant slot actually has.
+                          
+                          AND NO `time`, which is worth saying because passing one is the obvious mistake: the
+                          empty slot's LABEL is already the window and the assignment joined (`slotLabelText`, shared
+                          with the popover and the tooltips), so handing the body the window as well drew it twice -
+                          the window joined to itself after the assignment name, in the calendar and again on two lines
+                          in the day view. The month view has to stay exactly as it was, and the day view gets the window
+                          from the same place. Found by reading the rendered markup, which is why the harness now counts. */}
+                      {pillBody({
+                        label: slotLabelText(slot),
+                        icon: assignmentIcon(slot.template.assignment_id),
+                        pending: slotPending.length > 0,
+                        labelClassName: slotPending.length ? 'text-amber-700 dark:text-amber-300 font-semibold' : '',
+                        roomy,
+                      })}
                     </div>
                   );
                 })}

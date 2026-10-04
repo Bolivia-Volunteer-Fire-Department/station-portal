@@ -11,7 +11,7 @@ Press **New rank** at the right of the list to add one, or **Edit** on a row. Ei
 |---|---|
 | **Description** | The rank name, such as Firefighter, Driver/Operator, Lieutenant |
 | **Rank Order** | A number. **A higher number is a higher rank** |
-| **Color** | The color used for rank badges and the icon beside a member's name |
+| **Color** | The color used for rank badges, the dot before a member's name on a schedule pill, and the icon beside their name |
 | **Icon** | An icon drawn beside the member's name and rank |
 
 ## Rank order is the important one
@@ -29,11 +29,13 @@ A higher number means more senior, so a Chief is a larger number than a Firefigh
 
 Both are cosmetic but they are used consistently:
 
-- The **color** appears on rank badges and beside the member's name.
+- The **color** appears on rank badges, on the **dot drawn before a member's name** on a Schedule pill, and beside the member's name.
 - The **icon** is drawn from the same catalog as assignment icons, so ranks and assignments look like part of the same system.
 
 > [!NOTE]
-> Leaving the color blank gives that rank an automatic color derived from its id, which is perfectly usable — set a color only when you want a specific one.
+> **A blank color means no color, so leave nothing blank.** A rank with no color is drawn as a rank badge with no fill and a name with no dot on it — visibly plainer than the other ranks rather than given a color of its own. The editor starts a new rank at red and remembers what you set, so overwrite it rather than clearing it.
+
+Members with no rank at all, or whose rank has no color, keep a plain chip on the *Member Availability* roster — that screen is the one place a fallback color is invented, because the list is read for who is available rather than for how senior they are.
 
 ## Editing ranks safely
 

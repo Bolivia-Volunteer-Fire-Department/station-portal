@@ -726,6 +726,161 @@ const withoutWindowsHtml = rosterFor([]);
 check('a claim whose window is loaded is drawn', /Tuesday night/.test(withWindowsHtml) && !/No availability windows fall in/.test(withWindowsHtml));
 // The bug's exact symptom, and the reason it read as "the data is not loading" rather than "the windows are missing".
 check('the same claim with no windows says there are none', /No availability windows fall in/.test(withoutWindowsHtml));
+
+// -----------------------------------------------------------------------------------------------------------
+// THE EVENTS, IN EACH DAY'S HEADING OF THE "ALL MEMBERS" LIST.
+// -----------------------------------------------------------------------------------------------------------
+// Restored, not invented. `src/components/admin/AdminAvailabilityRoster.jsx` drew exactly this - a coloured dot, the
+// title and the time, once per DAY beside the date - until the availability model was rebuilt around windows and that file
+// was folded into AdminAvailabilityTab, taking the events with it. The prop comment here used to say "The All Members list
+// is windows and names, so events have no place in it", which is the sentence that lost it.
+//
+// It has a place: this list answers "who can cover Tuesday night?", and an event on that Tuesday is very often why fewer
+// of them can. The member's own grid already drew them, which is why the gap was easy to miss.
+const availabilityTabFile = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
+// ONE event on ONE day, on a Tuesday night window with a member on it. The columns are `date_from`/`date_to` with the time
+// inside the value - a first fixture here used `start_date`, and normalizeEvent dropped it as unreadable, so the heading
+// came out empty and the probe blamed the feature instead of the fixture.
+const oneEvent = [
+  { id: 'ev1', title: 'Drill night', date_from: '2026-10-06 19:00:00', date_to: '2026-10-06 21:00:00', color: '#2563eb' },
+];
+const rosterWithEvent = (events) =>
+  renderToStaticMarkup(
+    React.createElement(AdminAvailabilityTab, {
+      token: 'test-token',
+      users: rosterUsers,
+      windows: octoberWindows,
+      rosterAvailability: [claimRow],
+      events,
+      loadedFrom: '2026-10-01',
+      loadedTo: '2026-10-31',
+    })
+  );
+const eventHtml = rosterWithEvent(oneEvent);
+
+check('an event on a day is named in that day\'s heading', /Drill night/.test(eventHtml));
+// The coloured dot, so a pale event colour cannot swallow the date - the reason the original used a dot rather than a chip.
+check('and carries its colour', /#2563eb/.test(eventHtml));
+// The list's actual job is untouched: the window and WHO claimed it are still there.
+check('with the window and its claimants still drawn', /Tuesday night/.test(eventHtml) && /Bo Jones/.test(eventHtml));
+check('and the month counts its events', /1 event this month/.test(eventHtml));
+// ONCE PER DAY, not per window. This is the original's reason and it is the right one: an event belongs to the day, and
+// repeating it down every window would bury the names this view exists to show.
+//
+// THE SECOND WINDOW IS THE POINT of this check, AND IT MUST BE ON THE SAME DAY. With one window under the day, "once per
+// day" and "once per window" draw exactly the same pixels, so the first version of this assertion passed on a build that
+// repeated the event under every window. A second window on a DIFFERENT day does not help either - the event would only
+// appear under the one day it falls on, and the count would be unchanged. So both windows are on the SAME Tuesday, which
+// is what makes the difference visible: the event must appear twice (its title attribute and its visible label) and not
+// four times.
+const twoWindowDay = [...octoberWindows, { ...octoberWindows[0], id: 'aw2', nickname: 'Extra cover', is_saturday: false }];
+const twoWindowHtml = renderToStaticMarkup(
+  React.createElement(AdminAvailabilityTab, {
+    token: 'test-token',
+    users: rosterUsers,
+    windows: twoWindowDay,
+    rosterAvailability: [claimRow],
+    events: oneEvent,
+    loadedFrom: '2026-10-01',
+    loadedTo: '2026-10-31',
+  })
+);
+// `check` IN THIS FILE IS A TRUTHINESS TEST, `(label, condition, detail)` - it is NOT the equality helper the other
+// harnesses use. The first version of this passed the COUNT as the condition, and a count of 4 is truthy, so it reported
+// "ok" on a build that repeated the event under every window. Two separate ways this check could not fail; the counts are
+// compared explicitly here.
+check('once per day rather than once per window', (twoWindowHtml.match(/Drill night/g) || []).length === 2, `found ${(twoWindowHtml.match(/Drill night/g) || []).length} occurrences of the event title`);
+// ...and every window is still drawn, so the count above is not achieved by dropping one.
+check('with every window still listed', /Tuesday night/.test(twoWindowHtml) && /Extra cover/.test(twoWindowHtml));
+
+// A RECURRING event must expand. This is `eventSegmentsByDay` doing the work, and the reason the roster calls it rather
+// than grouping the events by date itself.
+const weeklyEvent = [
+  {
+    id: 'ev2',
+    title: 'Weekly drill',
+    is_recurring: true,
+    recurring_start: '2026-10-06',
+    recurring_end: '2026-10-31',
+    recurring_frequency: 'weekly',
+    recurring_amount: '1',
+    is_tuesday: true,
+    date_from: '2026-10-06 19:00:00',
+    date_to: '2026-10-06 21:00:00',
+  },
+];
+const weeklyHtml = rosterWithEvent(weeklyEvent);
+const dayHeadings = (weeklyHtml.match(/<h4[\s\S]*?<\/h4>/g) || []).length;
+const headingsWithDrill = (weeklyHtml.match(/<h4[\s\S]*?Weekly drill[\s\S]*?<\/h4>/g) || []).length;
+// Compared explicitly, for the reason above: a count is truthy whatever it is.
+check(
+  'a recurring event reaches every day it falls on',
+  dayHeadings > 0 && headingsWithDrill === dayHeadings,
+  `${headingsWithDrill} of ${dayHeadings} day headings carry it`
+);
+
+// The wiring, read as source: the roster has to be HANDED the events. A tab that renders them and a tab that is given them
+// are two different bugs, and this was the second one - `events` was already a prop here, and simply not passed down.
+// AdminPanel is read again rather than reusing the `adminAvailabilitySource` further down this file: that one is declared
+// after this block, and reading a `const` before its declaration is a dead-zone error.
+check(
+  'and the tab is handed its events for the list as well as the grid',
+  /events=\{events\}/.test(readFileSync('src/components/admin/AdminPanel.jsx', 'utf8')) &&
+    /events=\{events\}/.test(availabilityTabFile),
+  'the roster is not given the events'
+);
+
+// -----------------------------------------------------------------------------------------------------------
+// AND THE EVENTS ON THAT GRID.
+// -----------------------------------------------------------------------------------------------------------
+// The second regression on this tab, and the same shape as the first: a screen that is handed a prop nothing ever fills
+// for it. `AdminAvailabilityTab` passes `events` down to the member's month grid, and the tab below asserts it really
+// does - so the prop is live, and the only question is where the list comes from.
+//
+// THE ANSWER IS THIS GATE, AND ONLY THIS GATE. The events left the sign-in payload in 1.12 (correctly - they belong to the
+// calendars, which read them when one opens), so before that an officer had them from sign-in and this tab just worked.
+// 1.12 replaced that with a per-screen read and listed the member's schedule, the member's availability and the officer's
+// board - but not Administration > Member Availability. Nothing else fills the shared state either: the administration
+// Events tab fetches its own list and keeps it to itself.
+const eventsGate = /const wantsEvents =([\s\S]*?);/.exec(rosterAppSource)?.[1] || '';
+check(
+  'the Administration Member Availability tab is one of the screens that reads the events',
+  /onMemberAvailabilityTab/.test(rosterAppSource) && /onMemberAvailabilityTab/.test(eventsGate),
+  'the tab is not in the events gate, so it draws a month with no events on it'
+);
+// ...and the clause is bound to THAT tab, not merely to something called "availability". A first version of this check only
+// asked whether the name appeared, and it passed happily when the clause pointed at `availability-windows` - which draws
+// no month and reads no events, so it would have left the bug in place under a green suite. The id is tied to the nav's own
+// entry below, so renaming the tab breaks this rather than silently disabling it.
+check(
+  'and that clause names the member availability tab, not a neighbour',
+  /const onMemberAvailabilityTab = activeTab === 'admin' && adminSubTab === 'availability';/.test(rosterAppSource)
+);
+// The nav's own entry for that id - the two must agree, or the clause is gating a tab that does not exist.
+const adminAvailabilitySource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
+check(
+  'which is the tab the nav calls Member Availability',
+  /\{ id: 'availability', label: 'Member Availability'/.test(adminAvailabilitySource)
+);
+// The events prop is not decoration: it reaches the calendar, the only place it can be seen. AdminPanel hands the list to
+// the tab and the tab hands it to the grid, and the panel hop is scoped to THIS tab's block - AdminPanel passes `events` to
+// the schedule board as well, so a whole-file search passed even after the prop was removed from here. That is the same bug
+// wearing a different hat.
+const availabilityTabSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
+const availabilityPanelBlock = /activeSubTab === 'availability' && \(([\s\S]*?)\n      \)\}/.exec(adminAvailabilitySource)?.[1] || '';
+check(
+  'and it reaches the month grid, through this tab only',
+  /events=\{events\}/.test(availabilityPanelBlock) && /events=\{events\}/.test(availabilityTabSource),
+  'the events prop does not reach the availability tab'
+);
+// The gate is load-bearing, so nobody may "tidy" it away on the assumption the payload has them back. This is the
+// regression's own shape stated as a check: the payload carries no events, therefore this gate is the only source.
+check(
+  'and the sign-in payload does not carry events, so this gate is the only source',
+  !/\n\s*events,\n/.test(readFileSync('src/services/firestorePayload.js', 'utf8')) ||
+    /events is NOT here/.test(readFileSync('src/services/firestorePayload.js', 'utf8')),
+  'the payload carries events again, so the gate no longer decides'
+);
 // And the source, because the render above cannot reach the settled empty state: the button must sit ABOVE the
 // empty-list branch rather than inside it, which is precisely how the dead end was built.
 const windowsTabSource = readFileSync('src/components/admin/AdminAvailabilityWindowsTab.jsx', 'utf8');
@@ -2560,6 +2715,42 @@ Object.entries(editorModalTabs).forEach(([file, source]) => {
   check(`${file} says it is saving`, /saving=\{saving\}/.test(source) && /saveLabel=/.test(source), true);
   check(`${file} has a New button in the list header`, /New (rank|shift)/.test(source), true);
 });
+
+// The Ranks tab's order is the one column in this app that a save can silently leave behind, because it drives a rule
+// rather than being read back as text: `rank_order` decides an assignment's minimum rank, an event's "this rank and
+// above" audience, and the order a day's crew draws in. It was collected by the form, sent by nothing, and the save
+// still reported success - so the table showed the number for the length of a refresh wave and then the old one back.
+//
+// The write half of that is pinned in scripts/verify-write-safety.mjs (the payload carries every column the form
+// collects). These are the two display halves of the same round trip, because either one alone leaves an officer
+// looking at a stale number and no way to tell a refused save from one that was never sent.
+console.log('\n--- a rank\'s order survives the round trip ---');
+const ranksTabSource = readFileSync('src/components/admin/AdminRanksTab.jsx', 'utf8');
+check(
+  'the editor opens with the rank\'s own order in the field',
+  /rank_order:\s*rank\.rank_order === undefined \|\| rank\.rank_order === null \? '' : String\(rank\.rank_order\)/.test(
+    ranksTabSource
+  ),
+  'opening the editor does not carry the stored order, so saving overwrites it with a blank'
+);
+check('and the field is bound to that form state', /formData\.rank_order/.test(ranksTabSource), 'the input is not the form state');
+// A number the officer typed has to reach the table, and a blank has to read as absent rather than as zero.
+check(
+  'the list reads the order back off the row',
+  /Number\.isFinite\(parseInt\(rank\.rank_order, 10\)\) \? parseInt\(rank\.rank_order, 10\)/.test(ranksTabSource),
+  'the list does not draw the stored order'
+);
+check(
+  'and says so when there is none',
+  /Not set/.test(ranksTabSource),
+  'an unset order is indistinguishable from a real one'
+);
+// The table is sorted BY that column, which is why losing it also reorders the page under the officer.
+check(
+  'the list is sorted by it, so a lost order is visible as a list that will not keep its order',
+  /bo - ao/.test(ranksTabSource) && /parseInt\(a\.rank_order, 10\)/.test(ranksTabSource),
+  'the table is not sorted by rank order'
+);
 
 console.log('\n--- every editor closes when it is asked to ---');
 // The bug this exists for: AdminCertificationSetupTab wired onClose={startNew}, which looked right and was not.

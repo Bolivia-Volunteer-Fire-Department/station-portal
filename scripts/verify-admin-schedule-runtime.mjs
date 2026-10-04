@@ -24,7 +24,12 @@
 // because "pending" was defined as "no rows loaded for this month" and a failed read never loads any. Reads do fail - a
 // permission, a dropped channel - so on a bad network the board spun for as long as it was open. No server render can see
 // that, and no source check was looking for it. See case 4.
-import './dom-env.mjs';
+//
+// THE VIEWPORT IS THE HARNESS'S OWN since case 6: jsdom has no matchMedia, scripts/dom-env.mjs now answers width
+// queries from `window.innerWidth`, and `setViewportWidth` resizes it. Its default is 1024px, so every case above is a
+// DESKTOP window - which is what makes them cases about the calendar. Without that, the board would take its narrow
+// branch in every one of them and quietly stop being tested.
+import { setViewportWidth } from './dom-env.mjs';
 import React from 'react';
 import { render, fireEvent, act, cleanup } from '@testing-library/react';
 import AdminScheduleManagementTab from '../src/components/admin/AdminScheduleManagementTab.jsx';
@@ -393,6 +398,353 @@ console.log('\n--- a late answer from a month already left ---');
   );
 
   cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// 6. A NARROW WINDOW: one day, and arrows that walk days
+// ---------------------------------------------------------------------------
+// The board is two screens in one. Below Tailwind's `md` (768px - the same threshold the sidebar switches at) it draws
+// TODAY rather than the month, and its arrows walk DAYS; at or above it, the calendar, as before. What makes this worth
+// a runtime case rather than a source check is the thing it must NOT do: change how the data is read. The month is still
+// read once, and one day of it is drawn - so a phone costs no extra read, and widening the window costs none at all.
+console.log('\n--- a narrow window: one day, and arrows that walk days ---');
+
+const TODAY_DAY = now.getDate();
+const LAST_DAY = new Date(THIS_YEAR, THIS_MONTH + 1, 0).getDate();
+// A day label exactly as the board renders it (displayDate): "Sun, Oct 5". `SHORT_DAYS` rather than the harness's own
+// WEEKDAYS, which is the lowercase list the TEMPLATES are matched by - a different thing that would make this expect
+// "sunday, Oct 5".
+const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayLabelFor = (year, month, day) =>
+  `${SHORT_DAYS[new Date(year, month, day).getDay()]}, ${MONTHS[month].slice(0, 3)} ${day}`;
+// One member on ONE day of a month, so "which day is on screen" is a question about which name is in the DOM. The month
+// is a parameter because the boundary case below needs a row in the month AFTER this one.
+const rowsOn = (member, dayOfMonth, year = THIS_YEAR, month = THIS_MONTH) => [
+  filledRow(`s-${member.id}-${year}-${month}-${dayOfMonth}`, member, year, month, dayOfMonth),
+];
+// The draggable pills - a staffed shift or an unfilled row. Used to read their SHAPE, which is what the two views
+// differ in; an empty slot is a control rather than a pill and is not draggable.
+const shiftPills = (scope) =>
+  [...scope.querySelectorAll('div')].filter((el) => /cursor-grab/.test(String(el.className)));
+// EVERY pill on the board, staffed or empty - for the facts that must appear once on each of them, whatever kind it is.
+// A staffed pill is draggable; an empty slot carries the transition its hover states animate.
+const boardPills = (scope) =>
+  [...scope.querySelectorAll('div')].filter((el) => /cursor-grab|transition-colors/.test(String(el.className)));
+// THE DAY CELLS THEMSELVES, by the layout class they all share - the one thing that says how many days are on screen.
+// Counted rather than looked for by date, because the day view's cell states its own date in a long form the toolbar
+// does not use, so a text search for another day's label finds nothing whether that day is drawn or not.
+const dayCells = (scope) =>
+  [...scope.querySelectorAll('div')].filter((el) => /flex flex-col gap-1/.test(String(el.className)));
+
+{
+  setViewportWidth(375);
+  const rowsByMonth = { [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: rowsOn(MEMBERS.thisMonth, TODAY_DAY) };
+  const { read, calls } = makeReader(rowsByMonth);
+  const { container } = render(
+    React.createElement(AdminScheduleManagementTab, boardProps({ onNeedSchedule: read }))
+  );
+  await flush();
+
+  // THE MONTH IS STILL READ, AND READ ONCE - the whole claim of this shape. A narrow screen draws one day of the
+  // month's rows, so it wants the month that day falls in and nothing else.
+  check(
+    'a phone reads the month today falls in, once',
+    calls.length > 0 &&
+      calls.every((c) => c.from === monthStart(THIS_YEAR, THIS_MONTH) && c.to === monthEnd(THIS_YEAR, THIS_MONTH)) &&
+      calls.length <= 2,
+    calls.map((c) => `${c.from}..${c.to}`).join(' | ') || 'no read at all'
+  );
+  check(
+    'and opens on TODAY rather than on the 1st',
+    text(container).includes(dayLabelFor(THIS_YEAR, THIS_MONTH, TODAY_DAY)),
+    text(container).slice(0, 120)
+  );
+  check(
+    "so today's shift is on screen",
+    text(container).includes(MEMBERS.thisMonth.name),
+    text(container).slice(0, 200)
+  );
+  // ONE day, not thirty-five - counted, because a text search cannot tell the two apart (see dayCells): the other days
+  // would be drawn with their own dates in the long form, and the toolbar's short label for them is not on screen
+  // either way. The seven-column weekday header goes with the calendar, since a single cell states its own weekday.
+  check(
+    'with exactly one day cell drawn, not thirty-five',
+    dayCells(container).length === 1,
+    `${dayCells(container).length} day cell(s)`
+  );
+  check(
+    'with no seven-column header over it',
+    !container.innerHTML.includes('grid-cols-7'),
+    'the calendar weekday header is drawn over the day view'
+  );
+  check(
+    'and its arrows are labelled for days',
+    Boolean(container.querySelector('button[aria-label="Next day"]')) &&
+      Boolean(container.querySelector('button[aria-label="Previous day"]')),
+    [...container.querySelectorAll('button[aria-label]')].map((b) => b.getAttribute('aria-label')).join(', ')
+  );
+
+  // THE REGULAR INFORMATION IS ON THE PILL, which is the point of the extra room: the month view clips a pill to one
+  // line and leaves the shift's window to the tooltip, and this is where it fits.
+  const pills = shiftPills(container);
+  check('the day draws its staffed shift as a pill', pills.length > 0, `${pills.length} pill(s)`);
+  check(
+    'and the pill is not clipped to one line',
+    pills.every((pill) => !/truncate/.test(String(pill.className))),
+    pills.map((p) => p.className).join(' || ')
+  );
+  check(
+    "so the shift's window is on it",
+    /08:00/.test(text(container)) && /18:00/.test(text(container)),
+    text(container).slice(0, 240)
+  );
+  // ...ON ITS OWN LINE, which is the shape claim: the month view has the window in the same line as the name, and this
+  // is the fact the extra height bought. Asserted structurally, because the text alone cannot tell the two apart.
+  check(
+    'on a line of its own, rather than appended to the name',
+    /class="mt-0\.5 block text-\[11px\]/.test(container.innerHTML),
+    'the window is not drawn as its own line'
+  );
+  // EACH FACT ONCE. An empty slot's LABEL is already the window joined to the assignment - that is `slotLabelText`, and
+  // it is what the tooltips and the popover use - so handing the pill body the window as a separate fact as well drew it
+  // twice, on every vacancy in both views. Nothing about the shape of the markup could see that (the second copy is in
+  // the right place, in the right style, saying the right thing twice), which is why this counts instead.
+  check(
+    'and no pill says the shift window twice',
+    boardPills(container).every((pill) => (String(pill.textContent).match(/08:00/g) || []).length <= 1),
+    boardPills(container).map((pill) => pill.textContent).join(' | ')
+  );
+  check(
+    'and the cell has the height a month cell cannot give it',
+    /min-h-\[60vh\]/.test(container.innerHTML),
+    'the day is drawn in a month cell'
+  );
+
+  // WALKING A DAY INSIDE THE MONTH COSTS NO READ: the day is a slice of rows already in hand, so the reader is not asked
+  // again. Stepping TOWARD the middle of the month, because stepping off either end is the next case.
+  const stepDelta = TODAY_DAY > 1 ? -1 : 1;
+  const steppedDay = TODAY_DAY + stepDelta;
+  const readsBefore = calls.length;
+  fireEvent.click(container.querySelector(`button[aria-label="${stepDelta < 0 ? 'Previous day' : 'Next day'}"]`));
+  await flush();
+  check(
+    'the arrows walk a day, not a month',
+    text(container).includes(dayLabelFor(THIS_YEAR, THIS_MONTH, steppedDay)),
+    text(container).slice(0, 120)
+  );
+  check(
+    'and walking inside the month asks the reader for nothing',
+    calls.length === readsBefore,
+    `${calls.length - readsBefore} extra read(s) for a day already held`
+  );
+
+  // RESIZING. One component, one piece of state, so widening the window has to turn the SAME reading into the calendar:
+  // the day is kept, the month is kept, and nothing is read to do it.
+  const readsBeforeResize = calls.length;
+  await act(async () => {
+    setViewportWidth(1024);
+  });
+  await flush();
+  check(
+    "widening the window turns the same day into the month's calendar",
+    text(container).includes(MEMBERS.thisMonth.name) && text(container).includes(monthLabel(THIS_YEAR, THIS_MONTH)),
+    text(container).slice(0, 200)
+  );
+  check(
+    'without reading anything again',
+    calls.length === readsBeforeResize,
+    `${calls.length - readsBeforeResize} read(s) for a resize`
+  );
+  // ...AND THE CALENDAR IS THE WHOLE MONTH AGAIN - the other half of the day-cell count above, so "one cell" cannot be
+  // satisfied by a board that only ever draws one.
+  check(
+    "and the calendar draws the month's cells again",
+    dayCells(container).length > 27,
+    `${dayCells(container).length} day cell(s)`
+  );
+  check(
+    'and the calendar clips its pills to the cell again',
+    shiftPills(container).some((pill) => /truncate/.test(String(pill.className))),
+    'the month pills are drawn in the day view shape'
+  );
+  check(
+    'with arrows that walk months again',
+    Boolean(container.querySelector('button[aria-label="Next month"]')),
+    [...container.querySelectorAll('button[aria-label]')].map((b) => b.getAttribute('aria-label')).join(', ')
+  );
+
+  // ...AND BACK, which is the half that proves the two views share ONE day: the board returns to the day stepped to,
+  // not to today and not to the 1st.
+  await act(async () => {
+    setViewportWidth(375);
+  });
+  await flush();
+  check(
+    'narrowing it again comes back to the day that was on screen',
+    text(container).includes(dayLabelFor(THIS_YEAR, THIS_MONTH, steppedDay)),
+    text(container).slice(0, 120)
+  );
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
+// ---------------------------------------------------------------------------
+// 6b. A day nobody is on: the vacancy's own shape, and the facts said once
+// ---------------------------------------------------------------------------
+// The day view's vacancy is a third shape (see emptySlotShapeClass) and the only one whose LABEL already carries the
+// shift's window - `slotLabelText` joins the window to the assignment for the tooltips and the popover. So this is the
+// case that catches a pill body being handed both the label and the window: the duplication is in the right place, in
+// the right style, saying the right thing twice, and nothing about the markup shape can see it.
+console.log('\n--- a day with nobody on it ---');
+{
+  setViewportWidth(375);
+  const { read } = makeReader({});
+  const { container } = render(
+    React.createElement(
+      AdminScheduleManagementTab,
+      // The assignment carries an ICON here, so "nothing personal on a vacancy" can be asserted as an exact count: the
+      // slot draws its assignment's icon and nothing else. With no icon configured the count would be zero either way,
+      // and the check would pass whether or not a badge or a dot had leaked onto it.
+      boardProps({
+        onNeedSchedule: read,
+        assignments: [{ id: 'a1', description: 'Firefighter 3', icon: 'flame' }],
+      })
+    )
+  );
+  await flush();
+
+  const vacancy = container.querySelector('div[class*="transition-colors"]');
+  check('the empty day still draws the slot itself', Boolean(vacancy), 'no slot at all');
+  check(
+    'in the day view shape, not the calendar clipped one',
+    /text-xs/.test(String(vacancy?.className)) && !/truncate/.test(String(vacancy?.className)),
+    String(vacancy?.className)
+  );
+  check(
+    'naming the shift once',
+    (String(vacancy?.textContent).match(/Firefighter 3/g) || []).length === 1,
+    vacancy?.textContent
+  );
+  check(
+    'and its window once',
+    (String(vacancy?.textContent).match(/08:00/g) || []).length === 1,
+    vacancy?.textContent
+  );
+  check(
+    'while carrying its assignment icon and nothing personal',
+    vacancy?.querySelectorAll('svg').length === 1,
+    `${vacancy?.querySelectorAll('svg').length} icon(s)`
+  );
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
+// ---------------------------------------------------------------------------
+// 7. Walking off the end of the month, and the util behind all of it
+// ---------------------------------------------------------------------------
+console.log('\n--- walking off the end of the month ---');
+{
+  setViewportWidth(375);
+  const nextYear = THIS_MONTH === 11 ? THIS_YEAR + 1 : THIS_YEAR;
+  const nextMonth = (THIS_MONTH + 1) % 12;
+  const rowsByMonth = {
+    [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: rowsOn(MEMBERS.thisMonth, TODAY_DAY),
+    [`${nextYear}-${pad(nextMonth + 1)}`]: rowsOn(MEMBERS.nextMonth, 1, nextYear, nextMonth),
+  };
+  const { read, calls } = makeReader(rowsByMonth);
+  const { container } = render(
+    React.createElement(AdminScheduleManagementTab, boardProps({ onNeedSchedule: read }))
+  );
+  await flush();
+
+  // Every press from today to the last day of the month, then one more to leave it. The board has no special case for
+  // the wrap - `Date` normalizes the day overflow - so this is what proves the boundary is the calendar's rather than a
+  // second implementation of one.
+  const presses = LAST_DAY - TODAY_DAY + 1;
+  for (let i = 0; i < presses; i++) fireEvent.click(container.querySelector('button[aria-label="Next day"]'));
+  await flush();
+
+  check(
+    'walking past the last day of the month reads the month it walked into',
+    calls.length > 1 &&
+      calls[calls.length - 1].from === monthStart(nextYear, nextMonth) &&
+      calls[calls.length - 1].to === monthEnd(nextYear, nextMonth),
+    calls.map((c) => `${c.from}..${c.to}`).join(' | ')
+  );
+  check(
+    'and lands on the 1st of it',
+    text(container).includes(dayLabelFor(nextYear, nextMonth, 1)),
+    text(container).slice(0, 140)
+  );
+  check(
+    "and draws that month's day, naming its member",
+    text(container).includes(MEMBERS.nextMonth.name),
+    text(container).slice(0, 200)
+  );
+  // ONE month at a time, whatever unit the board is showing: the rows of the month walked out of are not on the board.
+  check(
+    'and no longer draws the month it walked out of',
+    !text(container).includes(MEMBERS.thisMonth.name),
+    'both months are on the board at once'
+  );
+  check(
+    'having read the new month a bounded number of times',
+    calls.length <= 3,
+    `${calls.length} reads across one month boundary`
+  );
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
+console.log('\n--- the viewport question, and who is listening ---');
+{
+  const { DESKTOP_MEDIA_QUERY, desktopViewport: isDesktopNow, subscribeViewport } = await import(
+    '../src/utils/viewport.js'
+  );
+
+  setViewportWidth(500);
+  check('below the breakpoint is not the desktop shape', isDesktopNow() === false, String(isDesktopNow()));
+  setViewportWidth(1024);
+  check('at or above it is', isDesktopNow() === true, String(isDesktopNow()));
+
+  // THE SUBSCRIPTION, which is what makes a resize redraw anything at all: a store whose value changes and wakes nobody
+  // leaves the screen in the shape it was born with. Counted rather than described - one call per CROSSING and none for
+  // a resize that stays on the same side, which is what a media query does and what stops dragging a window edge from
+  // re-rendering the board on every pixel.
+  let woken = 0;
+  const unsubscribe = subscribeViewport(() => {
+    woken++;
+  });
+  setViewportWidth(900);
+  check('a resize on the same side of the breakpoint wakes nobody', woken === 0, `${woken} wake-up(s)`);
+  setViewportWidth(400);
+  check('crossing it wakes the subscriber once', woken === 1, `${woken} wake-up(s)`);
+  setViewportWidth(1200);
+  check('and crossing back wakes it once more', woken === 2, `${woken} wake-up(s)`);
+  unsubscribe();
+  setViewportWidth(400);
+  check('while an unsubscribed listener is not woken again', woken === 2, `${woken} wake-up(s)`);
+  setViewportWidth(1024);
+
+  // THE THRESHOLD IS THE SHELL'S, which is why the module holds it rather than each screen writing its own number: the
+  // sidebar is a drawer below `md` and a column at `md`, so a board that switched at a different width would rearrange
+  // out of step with the layout around it.
+  const { readFileSync } = await import('node:fs');
+  const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
+  check(
+    'the breakpoint is the md the sidebar switches at',
+    DESKTOP_MEDIA_QUERY === '(min-width: 768px)' && /fixed md:static/.test(sidebar),
+    `${DESKTOP_MEDIA_QUERY} against the sidebar's md`
+  );
+  check(
+    'and the board asks it through the shared module rather than a number of its own',
+    /desktopViewport, subscribeViewport/.test(
+      readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8')
+    )
+  );
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

@@ -2,6 +2,7 @@ import { NOTIFICATION_TYPES } from '../utils/notificationPrefs';
 import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { systemLogRequest } from '../utils/systemLog';
+import { rankFieldsFromForm } from '../utils/ranks';
 import { isReadAction } from '../utils/readCoalescing';
 import { routeRead, routeWrite, routingBlocker } from './firestoreRouting.js';
 // The payload's section readers, so the refresh after a save reads the same shapes a sign-in does.
@@ -197,6 +198,14 @@ export const fetchScheduleWindow = async (from, to, token) =>
 // THE CREW DIRECTORY, for a screen that lists people - the calendar's pill names, the availability roster, the Users tab. Read
 // when such a screen opens rather than at sign-in: see firestorePayload#readStationRows and App#loadRoster.
 export const fetchRoster = async (token) => dispatchRequest({ action: 'GET_ROSTER', token });
+
+// --- Certification badges ---------------------------------------------------------------------------------------
+
+// The badge index for NAMED members only. The roster read carries the whole index for the screens that draw many names;
+// this is the same data for the screens that draw a few - the dashboard's on-duty card and the sidebar's own badges - so
+// neither of them pays a read per member at the station to put an icon beside two names.
+export const fetchCertificationBadges = async (userIds, token) =>
+  dispatchRequest({ action: 'GET_CERTIFICATION_BADGES', token, user_ids: Array.isArray(userIds) ? userIds : [] });
 
 // THE AVAILABILITY OPTIONS LIST, for the member's own grid - read when that screen is opened, not at sign-in: see
 // GET_AVAILABILITY_WINDOWS and firestorePayload#readStationRows.
@@ -453,9 +462,15 @@ export const adminSaveRank = async (rankData, token) =>
     token,
     id: rankData.id || '',
     row_version: rowVersionField(rankData),
-    description: rankData.description,
-    color: rankData.color,
-    icon: rankData.icon,
+    // The rank's whole document, from the one place that declares it (utils/ranks.js). THE ORDER USED TO BE LEFT OUT
+    // OF THIS PAYLOAD ENTIRELY, which is why a rank could not save its order: the form collected it, the input was
+    // bound and the officer's number was in the state this object is built from - and none of it was ever put into the
+    // request, so there was nothing for Firestore to write and nothing for the save to fail on. It reported success.
+    //
+    // It is spread rather than listed because the failure was a LIST that fell out of date: every other column was
+    // typed out by hand next to it, so adding one to the document and not to this line was a silent no-op. Now the
+    // shape of a rank is stated once, and the harnesses can check it against the form's own declaration.
+    ...rankFieldsFromForm(rankData),
   });
 
 export const adminDeleteRank = async (rankId, token) =>
