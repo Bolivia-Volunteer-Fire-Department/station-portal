@@ -203,6 +203,62 @@ exports.whoami = onCall(async (request) => {
   };
 });
 
+exports.readRosterModule = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_view_roster', 'view the roster');
+
+  const [usersSnapshot, privateSnapshot, setupSnapshot, certificationsSnapshot] = await Promise.all([
+    db.collection('users').get(),
+    db.collection('users_private').get(),
+    db.collection('certification_setup').get(),
+    db.collection('certifications').get(),
+  ]);
+  const privateById = new Map(privateSnapshot.docs.map((row) => [row.id, row.data()]));
+  const members = usersSnapshot.docs
+    .filter((row) => String(privateById.get(row.id)?.status || '').trim().toLowerCase() === 'active')
+    .map((row) => ({
+      id: row.id,
+      name: String(row.get('name') || ''),
+      rank_id: String(row.get('rank_id') || ''),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const memberIds = new Set(members.map((member) => member.id));
+  const certificationTypes = setupSnapshot.docs
+    .filter((row) => row.get('show_on_roster') === true)
+    .map((row) => ({
+      id: row.id,
+      name: String(row.get('name') || ''),
+      icon: String(row.get('icon') || ''),
+      sort_order: Number(row.get('sort_order') || 999),
+    }))
+    .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
+  const visibleTypeIds = new Set(certificationTypes.map((type) => type.id));
+  const memberCertificationIds = Object.fromEntries(members.map((member) => [member.id, []]));
+  const today = stationTimestamp().slice(0, 10);
+
+  certificationsSnapshot.docs.forEach((row) => {
+    const record = row.data();
+    const memberId = String(record.user_id || '');
+    const typeId = String(record.certification_id || '');
+    const effectiveDate = String(record.effective_date || '').trim();
+    const endDate = String(record.end_date || '').trim();
+    if (
+      memberIds.has(memberId) &&
+      visibleTypeIds.has(typeId) &&
+      (!effectiveDate || effectiveDate <= today) &&
+      (!endDate || endDate >= today)
+    ) {
+      memberCertificationIds[memberId].push(typeId);
+    }
+  });
+
+  Object.values(memberCertificationIds).forEach((typeIds) => {
+    typeIds.splice(0, typeIds.length, ...new Set(typeIds));
+  });
+
+  return { members, certificationTypes, memberCertificationIds };
+});
+
 // Adding a member. The username IS the synthetic address, so a taken username is a taken email address - which is
 // how uniqueness gets enforced for free, by Auth, rather than by a query that could race.
 exports.createMember = onCall(async (request) => {

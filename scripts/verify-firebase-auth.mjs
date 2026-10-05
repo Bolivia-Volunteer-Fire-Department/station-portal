@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
-import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection } from 'firebase/firestore';
+import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection, setDoc } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail, updateMemberAccount } from '../src/services/firebaseAuth.js';
 import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
@@ -71,6 +71,9 @@ const main = async () => {
   check('the claims name the role', jane.roleId, 'r1');
   check('and the administrator switch', jane.isAdmin, true);
   check('with no password change pending', jane.mustChangePassword, false);
+  const adminRoster = await call('readRosterModule');
+  checkIs('the roster read returns active members', adminRoster.members.some((member) => member.id === 'u2'));
+  check('current opted-in certification types are returned as indicators', adminRoster.memberCertificationIds.u2, ['c1']);
 
   // --- adding a member, through the callable a browser may not bypass ---
   console.log('\n--- adding a member ---');
@@ -108,6 +111,14 @@ const main = async () => {
   const me = await call('whoami');
   check('the member is the record just created', me.userId, created.userId);
   check('and is not an administrator', me.isAdmin, false);
+  await refused('a member without View roster cannot read the roster module', () => call('readRosterModule'));
+  await signOut(auth);
+  await signIn('jane');
+  await setDoc(doc(db, 'roles', 'r2'), { can_view_roster: true }, { merge: true });
+  await signOut(auth);
+  await signIn(username, 'first-day-passw0rd');
+  const permittedRoster = await call('readRosterModule');
+  checkIs('a role with View roster receives its active member row', permittedRoster.members.some((member) => member.id === created.userId));
   const publicSettings = await getDoc(doc(db, 'settings', 'public'));
   check('the dashboard reads the department name', typeof publicSettings.data().department_name, 'string');
   const rosterDocs = await getDocs(collection(db, 'users'));
@@ -173,6 +184,8 @@ const main = async () => {
   await signIn('jane');
   console.log('\n--- suspending a member ---');
   await call('setMemberStatus', { userId: created.userId, status: 'suspended' });
+  const rosterAfterSuspension = await call('readRosterModule');
+  checkIs('suspended members are excluded from the roster response', !rosterAfterSuspension.members.some((member) => member.id === created.userId));
   await signOut(auth);
   checkIs(
     'a suspended member cannot sign in at all',

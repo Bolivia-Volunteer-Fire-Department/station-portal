@@ -19,6 +19,7 @@ import { lazy } from 'react';
 const loaders = {
   AdminPanel: () => import('../components/admin/AdminPanel'),
   ScheduleCalendar: () => import('../components/ScheduleCalendar'),
+  RosterModule: () => import('../components/RosterModule'),
   MyAvailability: () => import('../components/MyAvailability'),
   DocumentsModule: () => import('../components/DocumentsModule'),
   TrainingModule: () => import('../components/TrainingModule'),
@@ -37,6 +38,7 @@ const loaders = {
 // guide).
 export const AdminPanel = lazy(loaders.AdminPanel);
 export const ScheduleCalendar = lazy(loaders.ScheduleCalendar);
+export const RosterModule = lazy(loaders.RosterModule);
 export const MyAvailability = lazy(loaders.MyAvailability);
 export const DocumentsModule = lazy(loaders.DocumentsModule);
 export const TrainingModule = lazy(loaders.TrainingModule);
@@ -62,10 +64,12 @@ export const prefetchableFor = ({
   canViewDocuments = false,
   canSignTrainings = false,
   canAdminister = false,
+  canViewRoster = false,
 } = {}) => {
   const keys = ['CertificationsModule', 'UserSettings', 'HelpGuides'];
   if (canUseTimeclock) keys.push('MyClockHistory');
   if (canViewSchedule) keys.push('ScheduleCalendar');
+    if (canViewRoster) keys.push('RosterModule');
   if (canEditOwnAvailability) keys.push('MyAvailability');
   if (canViewDocuments) keys.push('DocumentsModule');
   if (canSignTrainings) keys.push('TrainingModule');

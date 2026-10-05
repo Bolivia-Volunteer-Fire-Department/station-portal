@@ -37,6 +37,11 @@ const SWITCHES = [
       "Shown beside the member's name wherever they appear, and only while the certification is current - an " +
       'expired badge would be the app claiming something the station cannot back.',
   },
+  {
+    key: 'show_on_roster',
+    label: 'Show on Roster',
+    help: 'Add a certification column to the Roster and mark members whose certification is current.',
+  },
 ];
 
 const EMPTY_FORM = {
@@ -48,6 +53,7 @@ const EMPTY_FORM = {
   warn_days_before: '',
   is_renewable: false,
   show_next_to_name: false,
+  show_on_roster: false,
 };
 
 // Certification Setup: what the station tracks, and what should happen when one runs out.
@@ -97,6 +103,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         row.warn_days_before === null || row.warn_days_before === undefined ? '' : String(row.warn_days_before),
       is_renewable: !!row.is_renewable,
       show_next_to_name: !!row.show_next_to_name,
+      show_on_roster: !!row.show_on_roster,
     });
     setError(null);
   };
@@ -253,13 +260,14 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
                 <th className="px-4 py-3">Renewable</th>
                 <th className="px-4 py-3">Warn</th>
                 <th className="px-4 py-3">Beside name</th>
+                <th className="px-4 py-3">Show on Roster</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
               {setup.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
                     No certifications yet. Add the first one above.
                   </td>
                 </tr>
@@ -282,6 +290,9 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
                     </td>
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                       {row.show_next_to_name ? 'Yes' : 'No'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      {row.show_on_roster ? 'Yes' : 'No'}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">

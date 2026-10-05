@@ -166,6 +166,7 @@ export const ROUTED_FEATURES = {
       // route worth keeping.
       'GET_ROSTER',
       // The badge index for the handful of names a screen actually draws. GET_ROSTER carries the WHOLE index, which is
+      'GET_ROSTER_MODULE',
       // right for the screens that draw many names and wrong for the ones that draw two - see the reader.
       'GET_CERTIFICATION_BADGES',
       'GET_TIMECLOCK_LOGS',

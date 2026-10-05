@@ -24,6 +24,7 @@ import {
   fetchEvents,
   fetchCertificationBadges,
   fetchRoster,
+  fetchRosterModule,
   fetchScheduleSetup,
   fetchScheduleWindow,
   fetchTimeclockLogs,
@@ -75,6 +76,7 @@ import {
   MyAvailability,
   MyClockHistory,
   ScheduleCalendar,
+  RosterModule,
   TrainingModule,
   UserSettings,
   prefetchDeferredModules,
@@ -195,6 +197,9 @@ export default function App() {
   // sign-ins are clock-ins. The effect below fetches it the first time a screen that LISTS people is opened, and once for the
   // rest of the session after that.
   const [rosterLoaded, setRosterLoaded] = useState(false);
+  const [rosterModuleData, setRosterModuleData] = useState(null);
+  const [rosterModuleLoading, setRosterModuleLoading] = useState(false);
+  const [rosterModuleError, setRosterModuleError] = useState('');
   // Shift offers: the signed-in member's own requests, plus (admins only) the
   // full table the Schedule Management calendar flags pending approvals from.
   const [offers, setOffers] = useState([]);
@@ -322,6 +327,7 @@ export default function App() {
   // roleAllowsTab already ties to can_administer_trainings.
   const canSignTrainings = can('can_sign_trainings');
   const canEditTrainings = can('can_edit_trainings');
+  const canViewRoster = isAdmin || can('can_view_roster');
 
   // Verifying checklists. A member permission rather than an administrative one: an officer confirming a new
   // member's truck checklist is not an administrator. The server re-checks it, so this flag only shapes what is
@@ -394,6 +400,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
         canViewDocuments,
         canSignTrainings,
         canAdminister,
+        canViewRoster,
       }).join(','),
     [
       canUseTimeclock,
@@ -402,8 +409,29 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
       canViewDocuments,
       canSignTrainings,
       canAdminister,
+      canViewRoster,
     ]
   );
+
+  useEffect(() => {
+    if (!authToken || activeTab !== 'roster' || !canViewRoster) return;
+    let cancelled = false;
+    setRosterModuleLoading(true);
+    setRosterModuleError('');
+    fetchRosterModule(authToken)
+      .then((data) => {
+        if (!cancelled) setRosterModuleData(data);
+      })
+      .catch((error) => {
+        if (!cancelled) setRosterModuleError(error.message || 'Could not load the roster.');
+      })
+      .finally(() => {
+        if (!cancelled) setRosterModuleLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, activeTab, canViewRoster]);
 
   useEffect(() => {
     // Nothing to warm until a member is signed in: that is when a role exists, and so a set of reachable tabs.
@@ -944,7 +972,7 @@ const getLoadingMessage = () => {
       schedule: ['schedule', 'scheduleTemplates', 'assignments', 'scheduleOffers', 'directory'],
       templates: ['scheduleTemplates', 'assignments'],
       assignments: ['assignments', 'scheduleTemplates', 'directory'],
-      approvals: ['scheduleOffers', 'directory'],
+      approvals: ['scheduleOffers', 'directory', 'schedule', 'scheduleTemplates', 'assignments'],
       clock: ['shifts', 'directory'],
       users: ['users'],
       certifications: ['certificationRecords', 'directory'],
@@ -1626,6 +1654,8 @@ const getLoadingMessage = () => {
                 ? canSignTrainings
                 : activeTab === 'documents'
                   ? canViewDocuments
+                  : activeTab === 'roster'
+                    ? canViewRoster
                   : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
@@ -1637,6 +1667,7 @@ const getLoadingMessage = () => {
     canUseTimeclock,
     canSignTrainings,
     canViewDocuments,
+    canViewRoster,
   ]);
 
   const handleLogout = () => {
@@ -2205,6 +2236,7 @@ const getLoadingMessage = () => {
             canUseTimeclock={canUseTimeclock}
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
+            canViewRoster={canViewRoster}
             ranks={ranks}
           />
 
@@ -2229,6 +2261,7 @@ const getLoadingMessage = () => {
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
                 {activeTab === 'clock-history' && 'Clock History'}
+                {activeTab === 'roster' && 'Roster'}
                 {activeTab === 'schedule' && 'Schedule'}
                 {activeTab === 'availability' && 'Availability'}
                 {activeTab === 'training' && 'Training'}
@@ -2240,6 +2273,7 @@ const getLoadingMessage = () => {
               <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
                 {activeTab === 'dashboard' && 'Manage your hours and time tracking.'}
                 {activeTab === 'clock-history' && 'Review your previous clock-in entries, duration, and locations.'}
+                {activeTab === 'roster' && 'View active members, ranks, and current certifications.'}
                 {activeTab === 'schedule' && 'Review your assigned shifts, or switch on "Show everyone" to see the whole crew.'}
                 {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
                 {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
@@ -2300,6 +2334,17 @@ const getLoadingMessage = () => {
                   if (!logsScope || !logsScope.from) return undefined;
                   return loadLogs(monthsBack(24), logsScope.from);
                 }}
+              />
+            )}
+
+            {activeTab === 'roster' && canViewRoster && (
+              <RosterModule
+                loading={rosterModuleLoading}
+                error={rosterModuleError}
+                members={rosterModuleData?.members || []}
+                ranks={ranks}
+                certificationTypes={rosterModuleData?.certificationTypes || []}
+                memberCertificationIds={rosterModuleData?.memberCertificationIds || {}}
               />
             )}
 

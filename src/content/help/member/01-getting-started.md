@@ -40,6 +40,10 @@ Modules are switched on by your **role**, not by you. If something you expect is
 
 This app was created by Matt Wills for the Bolivia Fire Department.
 
+**Version 1.2x**
+* Added the Roster module
+* Added rank coloring to Administration > People > Members to match the new Roster module.
+
 **Version 1.1x**
 * Moved the app onto a modern database (Firebase, in place of the Google Sheet it used to run on). Nothing for you to do — it should simply feel quicker, and it lets the app do things a spreadsheet could not.
 * **Sign-in is much faster.** The app now asks for everything it needs in one request instead of two dozen small ones.

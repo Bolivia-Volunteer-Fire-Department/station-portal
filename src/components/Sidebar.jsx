@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl } from '../utils/assets';
@@ -20,6 +20,7 @@ export default function Sidebar({
     canUseTimeclock,
     canSignTrainings,
     canViewDocuments,
+    canViewRoster = false,
     ranks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
@@ -117,6 +118,18 @@ export default function Sidebar({
                         <span>Clock History</span>
                     </button>
                     )}
+
+                    {canViewRoster && (
+                    <button
+                        onClick={() => { setActiveTab('roster'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'roster'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <Users className="w-5 h-5" />
+                        <span>Roster</span>
+                    </button>)}
 
                     {canViewSchedule && (
                     <button

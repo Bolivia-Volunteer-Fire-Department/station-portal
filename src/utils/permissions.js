@@ -142,7 +142,7 @@ export const ADMIN_PERMISSIONS = [
     key: 'can_manage_certification_setup',
     tab: 'certification-setup',
     label: 'Set up certifications',
-    description: 'Open Certification Setup: define the certifications the station tracks, their icon, whether each can be renewed, how many days before one expires to warn the member, and whether it shows as an icon beside their name. Requires "Manage certifications".',
+    description: 'Open Certification Setup: define the certifications the station tracks, their icon, whether each can be renewed, and where current certifications are shown. Requires "Manage certifications".',
     requires: 'can_manage_certifications',
   },
   {
@@ -188,6 +188,11 @@ export const MEMBER_PERMISSIONS = [
     key: 'can_use_timeclock',
     label: 'Use the timeclock',
     description: 'Clock in and out and open Clock History. Without it a member still sees the clock and who is on duty, just no buttons.',
+  },
+  {
+    key: 'can_view_roster',
+    label: 'View roster',
+    description: 'Open the Roster module to see active members, their ranks, and current certifications marked for display.',
   },
   {
     key: 'can_sign_trainings',

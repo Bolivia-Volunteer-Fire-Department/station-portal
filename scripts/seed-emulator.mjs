@@ -57,6 +57,7 @@ const PERMISSION_FLAGS = [
   'can_view_documents',
   'can_view_full_schedule',
   'can_view_my_schedule',
+  'can_view_roster',
 ];
 
 // A role row: the description, the master switch, and every flag explicitly granted or not.
@@ -346,6 +347,7 @@ export const seed = async () => {
   await put('certification_setup/c1', {
     name: 'EMT',
     icon: 'heart-pulse',
+    show_on_roster: true,
     sort_order: 1,
     warn_days_before: 60,
     is_renewable: true,

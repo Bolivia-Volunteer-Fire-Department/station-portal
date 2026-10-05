@@ -172,10 +172,12 @@ checkIs(
 checkIs('so the module opens for everyone', /activeTab === 'certifications' && \(/.test(app));
 checkIs('and its nav item is not gated either', /onClick=\{\(\) => \{ setActiveTab\('certifications'\)/.test(sidebar));
 checkIs('while recording them still is', /key: 'can_manage_certifications'/.test(permissions) && /key: 'can_manage_certification_setup'/.test(permissions));
+checkIs('Certification Setup includes the separate Show on Roster switch', /key: 'show_on_roster'/.test(setupTab) && /label: 'Show on Roster'/.test(setupTab));
 
 // The six actions, and who each one answers to - the reader and the writer functions in api.js, checked
 // against the routes they map to.
 const apiSource = readFileSync('src/services/api.js', 'utf8');
+checkIs('the switch is restored when editing and sent when saving', /show_on_roster: !!row\.show_on_roster/.test(setupTab) && /show_on_roster: certification\.show_on_roster === true/.test(apiSource));
 checkIs('the member read is unprivileged', /export const fetchCertifications = /.test(apiSource));
 ['adminSaveCertification', 'adminDeleteCertification'].forEach((fn) => {
   checkIs(`${fn} exists`, new RegExp(`export const ${fn} = `).test(apiSource));

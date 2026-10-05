@@ -334,6 +334,14 @@ const sectionNames = [
 checkIs('the section readers were found', sectionNames.length >= 8, `only found ${sectionNames.join(', ')}`);
 
 const appSource = readFileSync('src/App.jsx', 'utf8');
+const approvalSections = /approvals:\s*\[([^\]]*)\]/.exec(appSource)?.[1] || '';
+checkIs(
+  'Pending Approvals loads its complete row context without Schedule Management first',
+  ['scheduleOffers', 'directory', 'schedule', 'scheduleTemplates', 'assignments'].every((section) =>
+    new RegExp(`['\"]${section}['\"]`).test(approvalSections)
+  ),
+  approvalSections
+);
 
 // THE ADMINISTRATION WAVE IS NOT READ AT SIGN-IN. It used to be: six shared reads - the roster, the user directory, every
 // assignment, every schedule template, the offers, the certifications - spent on every administrator sign-in, including the

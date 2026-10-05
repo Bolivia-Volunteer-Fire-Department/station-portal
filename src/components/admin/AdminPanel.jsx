@@ -430,6 +430,7 @@ export default function AdminPanel({
         />
       )}
 
+
       {activeSubTab === 'templates' && (
         <AdminScheduleTemplatesTab
           token={token}

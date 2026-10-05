@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
+import RankIcon from '../RankIcon';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
@@ -123,7 +124,27 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
   };
 
   const roleLabel = (roleId) => roles.find((r) => String(r.id) === String(roleId))?.description || '—';
-  const rankLabel = (rankId) => ranks.find((r) => String(r.id) === String(rankId))?.description || '—';
+  const rankLabel = (rankId) => {
+    const rank = ranks.find((r) => String(r.id) === String(rankId));
+    if (!rank) return <span className="text-slate-400">—</span>;
+    const color = String(rank.color || '').trim();
+
+    if (color) {
+      return (
+        <span style={{ color }} className="inline-flex items-center gap-1.5">
+          <RankIcon name={rank.icon} className="w-4 h-4 shrink-0" />
+          <span>{rank.description || rankId}</span>
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <RankIcon name={rank.icon} className="w-4 h-4 shrink-0" />
+        <span>{rank.description || rankId}</span>
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -371,7 +392,6 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                   </span>
                 </th>
               ))}
-              <th className="px-4 py-3">Scheduling</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
@@ -380,22 +400,9 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
               <tr key={user.id} className="text-slate-700 dark:text-slate-200">
                 <td className="px-4 py-3 font-mono text-slate-500 dark:text-slate-400">{user.user_name}</td>
                 <td className="px-4 py-3 font-medium"><MemberName user={user} /></td>
-                <td className="px-4 py-3 capitalize">{user.status}</td>
-                <td className="px-4 py-3">{roleLabel(user.role_id)}</td>
-                <td className="px-4 py-3">{rankLabel(user.rank_id)}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    {String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                        Excluded
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                        Schedulable
-                      </span>
-                    )}
-                    {/* Worth seeing in the list: an account sitting on a temporary password is waiting for
-                        somebody, and until they sign in nothing else will show it. */}
+                    <span className="capitalize">{user.status}</span>
                     {String(user.is_change_password_on_login ?? '').trim().toUpperCase() === 'TRUE' && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                         <KeyRound className="w-3 h-3" />
@@ -404,6 +411,8 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                     )}
                   </div>
                 </td>
+                <td className="px-4 py-3">{roleLabel(user.role_id)}</td>
+                <td className="px-4 py-3">{rankLabel(user.rank_id)}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     <button onClick={() => handleEdit(user)} className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
@@ -422,7 +431,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             ))}
             {sortedUsers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">No members found.</td>
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">No members found.</td>
               </tr>
             )}
           </tbody>

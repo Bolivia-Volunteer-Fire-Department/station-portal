@@ -200,6 +200,8 @@ export const fetchScheduleWindow = async (from, to, token) =>
 // when such a screen opens rather than at sign-in: see firestorePayload#readStationRows and App#loadRoster.
 export const fetchRoster = async (token) => dispatchRequest({ action: 'GET_ROSTER', token });
 
+export const fetchRosterModule = async (token) => dispatchRequest({ action: 'GET_ROSTER_MODULE', token });
+
 // --- Certification badges ---------------------------------------------------------------------------------------
 
 // The badge index for NAMED members only. The roster read carries the whole index for the screens that draw many names;
@@ -284,6 +286,7 @@ export const adminSaveCertificationSetup = async (certification, token) =>
       certification.warn_days_before === undefined ? undefined : String(certification.warn_days_before),
     is_renewable: certification.is_renewable === true,
     show_next_to_name: certification.show_next_to_name === true,
+    show_on_roster: certification.show_on_roster === true,
   });
 
 export const adminDeleteCertificationSetup = async (id, token) =>

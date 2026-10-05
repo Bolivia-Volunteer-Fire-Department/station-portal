@@ -58,6 +58,7 @@ check(
 );
 check('permissionTab maps approvals to its tab', permissionTab('can_approve_shifts'), 'approvals');
 check('permissionTab is null for a member permission', permissionTab('can_use_timeclock'), null);
+check('View roster is a member permission, not an Administration tab', permissionTab('can_view_roster'), null);
 
 console.log('\n--- TRUE parsing (the sheet stores booleans or the text TRUE) ---');
 check('boolean true', permissionGranted({ can_edit_users: true }, 'can_edit_users'), true);
@@ -149,6 +150,8 @@ check(
 // is what a role needs before it can be given either of the other two.
 check('viewing documents is a member permission, not a tab', permissionTab('can_view_documents'), null);
 check('and it grants no Administration access on its own', roleHasAdministration({ can_view_documents: true }), false);
+check('View roster alone does not open Administration', roleHasAdministration({ can_view_roster: true }), false);
+check('and does not add a phantom Administration tab', allowedAdminTabs({ can_view_roster: true }), []);
 
 // The Documents TAB is the one place two permissions open the same thing, which is the whole reason a verifier can
 // reach the Administration module at all.

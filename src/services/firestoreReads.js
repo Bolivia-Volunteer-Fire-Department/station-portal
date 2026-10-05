@@ -462,6 +462,10 @@ export const READERS = {
     };
   },
   // THE SCHEDULE'S REFERENCE DATA - the templates a shift is drawn from, the assignments that colour and order them, and the shift
+  GET_ROSTER_MODULE: async () => {
+    const answer = await httpsCallable(firebaseFunctions(), 'readRosterModule')({});
+    return answer.data || {};
+  },
   // definitions a clock entry is labeled with. Read when a screen that has a schedule (or a clock table) is opened, rather than at
   // sign-in: see firestorePayload#scheduleSetupFor and App#loadScheduleSetup.
   //

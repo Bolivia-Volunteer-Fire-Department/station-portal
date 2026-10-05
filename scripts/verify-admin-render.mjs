@@ -32,8 +32,9 @@ import HelpGuides from '../src/components/HelpGuides.jsx';
 import Markdown from '../src/components/Markdown.jsx';
 import { hasGuideContent, helpGuides } from '../src/utils/helpGuides.js';
 import AdminSystemSettingsTab from '../src/components/admin/AdminSystemSettingsTab.jsx';
-// The roster is a private component inside AdminAvailabilityTab now, so this block renders the tab itself.
+// The separate roster module is rendered below with focused fixtures.
 import AdminUsersTab from '../src/components/admin/AdminUsersTab.jsx';
+import RosterModule from '../src/components/RosterModule.jsx';
 import AdminPendingApprovalsTab from '../src/components/admin/AdminPendingApprovalsTab.jsx';
 import AdminTrainingTab from '../src/components/admin/AdminTrainingTab.jsx';
 import { ADMIN_PERMISSIONS, roleAllowsTab } from '../src/utils/permissions.js';
@@ -85,13 +86,14 @@ check('with nothing from the signed-in shell in it', !String(appRender.html || '
 // that has been granted nothing at all.
 const ROLES = {
   administrator: { id: 'r1', description: 'Administrator', is_admin: true },
+  rosterOnly: { id: 'r6', description: 'Roster Viewer', can_view_roster: true },
   approverOnly: { id: 'r2', description: 'Lieutenant', can_approve_shifts: 'TRUE' },
   usersOnly: { id: 'r3', description: 'Clerk', can_edit_users: 'TRUE' },
   memberOnly: { id: 'r4', description: 'Firefighter', can_view_my_schedule: true, can_use_timeclock: true },
   nothing: { id: 'r5', description: 'Suspended', is_admin: false },
 };
 
-const users = [{ id: 'u1', name: 'Matt', role_id: 'r1', rank_id: 'k1', status: 'active' }];
+const users = [{ id: 'u1', name: 'Matt', role_id: 'r1', rank_id: 'k1', status: 'active', is_change_password_on_login: true }];
 const currentUser = { id: 'u1', name: 'Matt', role_id: 'r1', rank_id: 'k1', status: 'active' };
 
 const adminPanelProps = {
@@ -137,14 +139,12 @@ for (const [name, role] of Object.entries(ROLES)) {
   if (name === 'nothing') {
     check('a role with no permissions sees an explanation', panelHtml.includes('does not include access'));
   }
-  // The menu is filtered by the same permission list, so it shows what the role can reach. (The
-  // item labels exist on the cards, so the category headings and item names are the reliable
-  // things to assert on.) Note the Users tab has its own "Scheduling" column, so presence of that
-  // word alone proves nothing - the table header is the precise marker.
+  // The menu is filtered by the same permission list, so it shows what the role can reach. The
+  // Users table's Username header distinguishes that panel from the Scheduling menu category.
   if (name === 'approverOnly') {
     check('an approver-only role gets the Scheduling category', panelHtml.includes('Scheduling'));
     check('and not the People category it cannot use', !panelHtml.includes('>People<'));
-    check('and the Users panel is not rendered', !panelHtml.includes('Scheduling</th>'));
+    check('and the Users panel is not rendered', !panelHtml.includes('Username</th>'));
   }
   if (name === 'usersOnly') {
     check('a users-only role gets the People category', panelHtml.includes('>People<'));
@@ -152,13 +152,13 @@ for (const [name, role] of Object.entries(ROLES)) {
     // assertion said ">Users<" and had been failing for that reason alone: a stale label, not a regression, and it was
     // masking whether the rest of this file ran. Asserted on the label the nav actually carries.
     check('and the menu lists the members tab it may open', panelHtml.includes('>Members<'));
-    check('and no tab panel is rendered on the menu', !panelHtml.includes('Scheduling</th>'));
+    check('and no tab panel is rendered on the menu', !panelHtml.includes('Username</th>'));
   }
   if (name === 'administrator') {
     check('an administrator sees every category', ['People', 'Scheduling', 'Timeclock', 'System'].every((label) => panelHtml.includes(label)));
   }
   if (name === 'memberOnly' || name === 'nothing') {
-    check(`a ${name} role sees no administration panels`, !panelHtml.includes('Scheduling</th>'));
+    check(`a ${name} role sees no administration panels`, !panelHtml.includes('Username</th>'));
   }
 
   // ...and CHOOSING a tab from the menu renders that tab: the menu's cards and the dropdown bar
@@ -173,7 +173,11 @@ for (const [name, role] of Object.entries(ROLES)) {
         onSelectTab: () => {},
       })
     );
-    check('and choosing Users from the menu renders the Users panel', usersPanelHtml.includes('Scheduling</th>'));
+    check(
+      'and choosing Users renders the table without the Scheduling status column',
+      usersPanelHtml.includes('Username') && !/Schedulable|Excluded/.test(usersPanelHtml)
+    );
+    check('the password-change badge remains visible in the Members list', usersPanelHtml.includes('Password change due'));
   }
 
   // 2. The Roles editor, including the form for an administrator-only role.
@@ -228,6 +232,7 @@ for (const [name, role] of Object.entries(ROLES)) {
         canViewSchedule: Boolean(role.can_view_my_schedule),
         canEditAvailability: false,
         canUseTimeclock: Boolean(role.can_use_timeclock),
+        canViewRoster: role.is_admin === true || Boolean(role.can_view_roster),
         ranks: [],
       })
     );
@@ -243,6 +248,10 @@ for (const [name, role] of Object.entries(ROLES)) {
   // Help is open to everyone - unlike every other module it is not permission-gated, so it must
   // appear for the role granted nothing at all, not just for administrators.
   check('Help is in the sidebar for every role', String(sidebarHtml).includes('Help'));
+  check(
+    `Roster is visible to ${name} only with its permission`,
+    String(sidebarHtml).includes('Roster') === (role.is_admin === true || role.can_view_roster === true)
+  );
 
   // 4. The member calendar, with and without the offer permission.
   let calendarError = null;
@@ -2797,6 +2806,27 @@ CLOSING_TABS.forEach((file) => {
     true
   );
 });
+
+console.log('\n--- the member-facing Roster module ---');
+const rosterHtml = renderToStaticMarkup(
+  React.createElement(RosterModule, {
+    members: [{ id: 'm1', name: 'Jordan Jones', rank_id: 'k1' }],
+    ranks: [{ id: 'k1', description: 'Captain', color: '#c3223b', icon: 'shield-check' }],
+    certificationTypes: [{ id: 'c1', name: 'Emergency Medical Technician', icon: 'heart-pulse' }],
+    memberCertificationIds: { m1: ['c1'] },
+  })
+);
+check('the Roster has Name and Rank columns', rosterHtml.includes('>Name</th>') && rosterHtml.includes('>Rank</th>'));
+check(
+  'the Roster scrolls inside a bounded container with sticky headings',
+  rosterHtml.includes('max-h-[calc(100dvh-18rem)]') &&
+    rosterHtml.includes('overflow-auto') &&
+    (rosterHtml.match(/sticky top-0/g) || []).length === 3
+);
+check('the member name and colored rank icon render', rosterHtml.includes('Jordan Jones') && rosterHtml.includes('Captain') && rosterHtml.includes('color:#c3223b'));
+check('certification names are truncated with their full label available', rosterHtml.includes('title="Emergency Medical Technician"') && rosterHtml.includes('truncate'));
+check('an active certification is indicated in its own column', rosterHtml.includes('aria-label="Emergency Medical Technician active"'));
+check('the read-only module offers no member editing actions', !/\b(Edit|Delete|Add member)\b/.test(rosterHtml));
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
