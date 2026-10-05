@@ -199,7 +199,6 @@ export default function AdminScheduleManagementTab({
   // about a member by name, so it fetches what it needs to say that - one month of claims, not seven.
   onRosterMonth,
   offers = [],
-  onOffersChanged,
   onAdminDataChanged,
   // Non-shift calendar entries. The board's audience is EVERYONE, because it draws the whole crew's month -
   // an event targeted at one rank still belongs on the board an administrator is building from.
@@ -1415,7 +1414,6 @@ export default function AdminScheduleManagementTab({
         // stale open-shift pills that were rendered from offer data).
       }
       setNotice(`Offer ${decision.toLowerCase()}.`);
-      await onOffersChanged?.();
       // Approved offers write a schedule row (the backend fills the empty slot), so the schedule section is refreshed
       // too - named explicitly, because the payload fallback cannot carry it. Declining writes only the offer.
       void onAdminDataChanged?.(

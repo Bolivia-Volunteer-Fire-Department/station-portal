@@ -70,19 +70,18 @@ check('nonsense does not', mustChangePassword({ is_change_password_on_login: 'ma
 // ---------------------------------------------------------------------------
 console.log('\n--- the new password ---');
 check('a blank one is refused', passwordChangeProblem({ newPassword: '', confirmPassword: '' }), 'Choose a new password.');
-check('an unconfirmed one is refused', passwordChangeProblem({ newPassword: 'unit-42', confirmPassword: '' }), 'Repeat the new password to confirm it.');
-check('a mistyped confirmation is refused', passwordChangeProblem({ newPassword: 'unit-42', confirmPassword: 'unit-24' }), 'The two passwords do not match.');
-check('and the typo is caught whichever way round it is', passwordChangeProblem({ newPassword: 'unit-24', confirmPassword: 'unit-42' }), 'The two passwords do not match.');
-check('a matching pair is accepted', passwordChangeProblem({ newPassword: 'unit-42', confirmPassword: 'unit-42' }), '');
+check('an unconfirmed one is refused', passwordChangeProblem({ newPassword: 'unit-042', confirmPassword: '' }), 'Repeat the new password to confirm it.');
+check('a mistyped confirmation is refused', passwordChangeProblem({ newPassword: 'unit-042', confirmPassword: 'unit-024' }), 'The two passwords do not match.');
+check('and the typo is caught whichever way round it is', passwordChangeProblem({ newPassword: 'unit-024', confirmPassword: 'unit-042' }), 'The two passwords do not match.');
+check('a matching pair is accepted', passwordChangeProblem({ newPassword: 'unit-042', confirmPassword: 'unit-042' }), '');
 // Whitespace is part of a password (the backend deliberately does not trim), so " a " is a real choice and the
 // two fields must agree exactly.
-check('spaces are significant', passwordChangeProblem({ newPassword: ' a ', confirmPassword: 'a' }), 'The two passwords do not match.');
-check('and matching spaces are fine', passwordChangeProblem({ newPassword: ' a ', confirmPassword: ' a ' }), '');
+check('spaces are significant', passwordChangeProblem({ newPassword: ' abcdef ', confirmPassword: 'abcdef' }), 'The two passwords do not match.');
+check('and matching spaces are fine', passwordChangeProblem({ newPassword: ' abcdef ', confirmPassword: ' abcdef ' }), '');
 check('nothing supplied at all is refused', passwordChangeProblem({}), 'Choose a new password.');
 check('and no argument is refused, not a crash', passwordChangeProblem(), 'Choose a new password.');
-// The rule mirrors the backend rather than inventing policy, so a short password is allowed: the server has no
-// minimum, and a client-side minimum would be a rule nobody enforces.
-check('a short password is allowed, because the server has no minimum', passwordChangeProblem({ newPassword: 'ab', confirmPassword: 'ab' }), '');
+check('a short password is refused', passwordChangeProblem({ newPassword: 'short', confirmPassword: 'short' }), 'Use at least 8 characters.');
+check('an eight-character password is accepted', passwordChangeProblem({ newPassword: 'eight888', confirmPassword: 'eight888' }), '');
 checkIs('the copy tells the member what is happening', passwordChangeCopy().lead.includes('only thing you can do'));
 checkIs('and that there is no reset link', /no reset link/.test(passwordChangeCopy().hint));
 
@@ -125,7 +124,7 @@ check(
   /setCurrentUser\(\(prev\) => \(\{ \.\.\.prev, \[MUST_CHANGE_PASSWORD_COLUMN\]: 'FALSE' \}\)\)/.test(appSource),
   true
 );
-check('the callable that completes the change exists', /completePasswordChange/.test(readFileSync('src/services/firebaseAuth.js', 'utf8')), true);
+check('the callable receives the password to change server-side', /call\('completePasswordChange', \{ newPassword \}\)/.test(readFileSync('src/services/firebaseAuth.js', 'utf8')), true);
 
 
 console.log('\n--- the popup nobody can get past ---');
@@ -230,6 +229,12 @@ checkIs(
   'and no writer left clearing only the claim',
   !/must_change_password: false/.test(functionsSource) && !/must_change_password: true/.test(functionsSource),
   'a writer would set one half and leave the other'
+);
+checkIs(
+  'and the callable changes the Auth password before clearing the flags',
+  /auth\.updateUser\(caller\.uid, \{ password: cleanPassword\(data\.newPassword\) \}\);[\s\S]{0,120}setPasswordChangeRequired\(caller\.uid, false\)/.test(
+    functionsSource
+  )
 );
 
 // ---------------------------------------------------------------------------

@@ -66,14 +66,26 @@ const callerRole = async (uid) => {
   return role.exists ? { roleId, ...role.data() } : null;
 };
 
+const isGranted = (value) => value === true || String(value ?? '').trim().toUpperCase() === 'TRUE';
+
 const callerMay = async (uid, flag) => {
   const role = await callerRole(uid);
-  return !!role && (role.is_admin === true || role[flag] === true);
+  return !!role && (isGranted(role.is_admin) || isGranted(role[flag]));
 };
 
 const requirePermission = async (uid, flag, what) => {
   if (!(await callerMay(uid, flag))) {
     throw new HttpsError('permission-denied', `You do not have permission to ${what}.`);
+  }
+};
+
+const requireAssignableRole = async (callerUid, roleId) => {
+  const [caller, target] = await Promise.all([
+    callerRole(callerUid),
+    roleId ? db.doc(`roles/${roleId}`).get() : null,
+  ]);
+  if (target?.exists && isGranted(target.get('is_admin')) && !isGranted(caller?.is_admin)) {
+    throw new HttpsError('permission-denied', 'Only an administrator may assign the Administrator role.');
   }
 };
 
@@ -203,6 +215,7 @@ exports.whoami = onCall(async (request) => {
   };
 });
 
+
 exports.readRosterModule = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   await requirePermission(request.auth.uid, 'can_view_roster', 'view the roster');
@@ -273,6 +286,7 @@ exports.createMember = onCall(async (request) => {
   if (!name) throw new HttpsError('invalid-argument', 'A name is required.');
   const rankId = String(data.rank_id || '');
   const roleId = String(data.role_id || '');
+  await requireAssignableRole(caller.uid, roleId);
 
   const email = syntheticEmail(username);
   try {
@@ -331,15 +345,87 @@ exports.resetMemberPassword = onCall(async (request) => {
 
 // The member's own half: they have changed it, so the flag comes off. Only a function can clear it.
 //
-// BOTH HALVES, through the one writer - and this is the line the reported bug was in. Clearing the claim alone left
-// `users_private.is_change_password_on_login` set, so the member was asked again at every sign-in: the modal closed
-// because they had done what it asked, and the next login read the column the app gates on and opened it again.
+// The function changes the Auth password itself before clearing either flag. An empty "done" call cannot clear the
+// requirement while leaving the temporary password usable.
 exports.completePasswordChange = onCall(async (request) => {
   const caller = request.auth;
   if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const privateAccount = await db.doc(`users_private/${caller.uid}`).get();
+  if (caller.token.must_change_password !== true && privateAccount.get('is_change_password_on_login') !== true) {
+    throw new HttpsError('failed-precondition', 'A password change has not been requested for this account.');
+  }
+  const data = request.data || {};
+  await auth.updateUser(caller.uid, { password: cleanPassword(data.newPassword) });
   await setPasswordChangeRequired(caller.uid, false);
   await audit(caller.uid, 'COMPLETE_PASSWORD_CHANGE', 'Changed their own password');
   return { ok: true };
+});
+
+exports.clockIn = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_use_timeclock', 'use the timeclock');
+
+  const data = request.data || {};
+  const latitude = String(data.gps_lat ?? '').trim();
+  const longitude = String(data.gps_lon ?? '').trim();
+  if (Boolean(latitude) !== Boolean(longitude)) {
+    throw new HttpsError('invalid-argument', 'Both location coordinates are required together.');
+  }
+  if (latitude && (!Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude)))) {
+    throw new HttpsError('invalid-argument', 'Location coordinates must be numeric.');
+  }
+  if (latitude && (Number(latitude) < -90 || Number(latitude) > 90 || Number(longitude) < -180 || Number(longitude) > 180)) {
+    throw new HttpsError('invalid-argument', 'Location coordinates are outside valid ranges.');
+  }
+
+  const entryRef = db.collection('timeclock').doc();
+  const dutyRef = db.doc(`on_duty/${caller.uid}`);
+  const stamp = stationTimestamp();
+  await db.runTransaction(async (transaction) => {
+    const duty = await transaction.get(dutyRef);
+    if (duty.exists) throw new HttpsError('failed-precondition', 'already-clocked-in');
+    transaction.create(entryRef, {
+      user_id: caller.uid,
+      time_in: stamp,
+      time_out: '',
+      is_manual: false,
+      gps_lat: latitude,
+      gps_lon: longitude,
+    });
+    transaction.create(dutyRef, { user_id: caller.uid, time_in: stamp });
+  });
+
+  return { id: entryRef.id };
+});
+
+exports.clockOut = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_use_timeclock', 'use the timeclock');
+
+  const entryId = String((request.data || {}).entryId || '').trim();
+  if (!entryId) throw new HttpsError('invalid-argument', 'An open timeclock entry is required.');
+  const entryRef = db.doc(`timeclock/${entryId}`);
+  const dutyRef = db.doc(`on_duty/${caller.uid}`);
+  const stamp = stationTimestamp();
+  await db.runTransaction(async (transaction) => {
+    const entry = await transaction.get(entryRef);
+    if (!entry.exists) throw new HttpsError('failed-precondition', 'no-entry');
+    const data = entry.data() || {};
+    if (String(data.user_id || '') !== caller.uid) {
+      throw new HttpsError('permission-denied', 'not-your-entry');
+    }
+    if (String(data.time_out || '')) throw new HttpsError('failed-precondition', 'already-clocked-out');
+    const duty = await transaction.get(dutyRef);
+    if (duty.exists && String(duty.get('time_in') || '') !== String(data.time_in || '')) {
+      throw new HttpsError('failed-precondition', 'on-duty-mismatch');
+    }
+    transaction.update(entryRef, { time_out: stamp });
+    if (duty.exists) transaction.delete(dutyRef);
+  });
+
+  return { id: entryId };
 });
 
 // ---------------------------------------------------------------------------------------------

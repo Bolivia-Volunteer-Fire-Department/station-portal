@@ -17,7 +17,7 @@ import {
   updateMemberAccount,
 } from './firebaseAuth.js';
 import { firebaseAuth, firebaseConfigured, firestore } from './firebase.js';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 // The row version a save was based on, when the caller has one.
 //
@@ -796,8 +796,13 @@ export const verifyDocumentSignature = async (documentId, userId, token) =>
     user_id: userId,
   });
 
-export const adminSaveChecklistItem = async (item, token) =>
-  dispatchRequest({
+export const adminSaveChecklistItem = async (item, token) => {
+  const documentId = String(item.document_id || '').trim();
+  if (!documentId) throw new Error('A checklist item needs a document.');
+  const parent = await getDoc(doc(firestore(), 'documents', documentId));
+  if (!parent.exists()) throw new Error('The checklist document is not available.');
+
+  return dispatchRequest({
     action: 'ADMIN_SAVE_CHECKLIST_ITEM',
     token,
     // A blank id creates; an id edits IN PLACE, which is what keeps the signatures pointing at it.
@@ -806,7 +811,9 @@ export const adminSaveChecklistItem = async (item, token) =>
     sort_order: item.sort_order ?? 0,
     section: item.section || '',
     label: item.label || '',
+    audience_keys: Array.isArray(parent.get('audience_keys')) ? parent.get('audience_keys') : [],
   });
+  };
 
 export const adminDeleteChecklistItem = async (id, token) =>
   dispatchRequest({ action: 'ADMIN_DELETE_CHECKLIST_ITEM', token, id });

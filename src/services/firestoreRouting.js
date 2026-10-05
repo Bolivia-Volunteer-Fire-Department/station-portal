@@ -347,6 +347,7 @@ const FAILURE_MESSAGES = {
   'no-entry': 'That shift is no longer open.',
   'not-your-entry': 'That shift belongs to somebody else.',
   'already-clocked-out': 'That shift is already closed.',
+    'on-duty-mismatch': 'Your clock record and on-duty status do not match. Ask an officer to review it.',
   // Thrown by the clock writers when the device has no connection (see utils/connectivity.js): clocking in and out is the
   // one pair of writes that must NOT queue, because the record itself asserts when somebody was at the station.
   offline: OFFLINE_CLOCK_MESSAGE,
@@ -405,7 +406,8 @@ export const routeRead = async (action, body = {}) => {
 export const failureFor = (error) => {
   const name = String((error && error.message) || '');
   const code = String((error && error.code) || '');
-  if (FAILURE_MESSAGES[name]) return fail(FAILURE_MESSAGES[name], 'REFUSED');
+  const refusal = Object.keys(FAILURE_MESSAGES).find((message) => name === message || name.startsWith(`${message} `));
+  if (refusal) return fail(FAILURE_MESSAGES[refusal], 'REFUSED');
   if (code === 'functions/permission-denied' || code === 'permission-denied') {
     return fail('You do not have permission to do that.', 'UNAUTHORIZED');
   }
@@ -483,26 +485,28 @@ const READ_DISPATCH = {
   },
 };
 
+const refuseClockOffline = () => {
+  if (isOffline()) throw new Error('offline');
+};
+
 const DISPATCH = {
   // CLOCK OUT needs the open entry's id, which the sheet backend found for itself. The Firestore side reads the
   // member's own open entry for it (`time_out == ''`), and the transaction in clockOut re-checks everything that
   // matters - it is the same document the clock-in guard watches.
   CLOCK_IN: async (body, uid) => {
-    const { clockIn } = await writes();
-    const id = await clockIn({
-      userId: uid,
-      gps: body.gps_lat ? { latitude: body.gps_lat, longitude: body.gps_lon } : null,
-      isManual: body.is_manual === true || body.is_manual === 'true',
-    });
-    return ok({ id });
+    refuseClockOffline();
+    return ok(await callable('clockIn', {
+      gps_lat: body.gps_lat || '',
+      gps_lon: body.gps_lon || '',
+    }));
   },
 
   CLOCK_OUT: async (body, uid) => {
-    const { clockOut, openClockEntryFor } = await writes();
+    refuseClockOffline();
+    const { openClockEntryFor } = await writes();
     const open = await openClockEntryFor(uid);
     if (!open) return fail('You are not clocked in.', 'REFUSED');
-    await clockOut({ userId: uid, entryId: open.id });
-    return ok({ id: open.id });
+    return ok(await callable('clockOut', { entryId: open.id }));
   },
 
   // ONE MONTH, ONE WRITE: the month the screen was editing, and the marks it now holds (utils/availability.js). There is

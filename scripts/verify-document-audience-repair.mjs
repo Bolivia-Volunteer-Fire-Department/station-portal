@@ -43,6 +43,11 @@ const pendingCount = (output) => {
   return found ? Number(found[1]) : -1;
 };
 
+const checklistPendingCount = (output) => {
+  const found = /(\d+) checklist item\(s\) need the parent audience copied/.exec(output);
+  return found ? Number(found[1]) : -1;
+};
+
 const main = async () => {
   await seed();
   const db = getFirestore(initializeApp({ projectId: 'demo-station-portal' }));
@@ -53,6 +58,7 @@ const main = async () => {
   // genuinely repair, because a run that only finds correct rows proves nothing about the writing path.
   await db.doc('documents/doc2').update({ rank_id: 'k1', audience_keys: ['rank:k1'] });
   await db.doc('documents/doc6').update({ rank_id: 'k2', audience_keys: ['rank:k1'] });
+  await db.doc('document_checklist_items/it1').update({ audience_keys: ['rank:k1'] });
 
   const runRepair = (args) =>
     spawnSync(process.execPath, ['scripts/normalize-document-audience.mjs', ...args], { encoding: 'utf8' });
@@ -60,6 +66,7 @@ const main = async () => {
   console.log('\n--- a report-only run writes nothing ---');
   const reported = runRepair([]);
   check('it found exactly the one broken document', pendingCount(reported.stdout), 1);
+    check('and the one checklist item with stale audience', checklistPendingCount(reported.stdout), 1);
   check(
     'and named it, with the list it would write',
     docLines(reported.stdout),
@@ -68,10 +75,12 @@ const main = async () => {
   checkIs('and wrote nothing', reported.stdout.includes('Nothing was written'), 'the report did not say so');
   const untouched = (await db.doc('documents/doc6').get()).data();
   check('leaving the stored list exactly as it was', untouched.audience_keys, ['rank:k1']);
+  check('report-only leaves the checklist item untouched', (await db.doc('document_checklist_items/it1').get()).get('audience_keys'), ['rank:k1']);
 
   console.log('\n--- the repair, with --apply ---');
   const applied = runRepair(['--apply']);
   check('it found the same one document to change', pendingCount(applied.stdout), 1);
+    check('and repairs the checklist audience in the same run', checklistPendingCount(applied.stdout), 1);
   checkIs('and says what it rewrote', applied.stdout.includes('Rewrote 1 document audience'), applied.stdout.trim());
   const repaired = (await db.doc('documents/doc6').get()).data();
   check('the broken document now holds every rank at or above its minimum', repaired.audience_keys.sort(), ['rank:k1', 'rank:k2']);
@@ -84,10 +93,12 @@ const main = async () => {
   );
   const alone = (await db.doc('documents/doc2').get()).data();
   check('while a document already holding the right list is untouched', alone.audience_keys, ['rank:k1']);
+  check('the checklist item now inherits its parent audience', (await db.doc('document_checklist_items/it1').get()).get('audience_keys'), ['*']);
 
   console.log('\n--- a second run finds nothing to do ---');
   const again = runRepair([]);
   check('nothing left to repair', pendingCount(again.stdout), 0);
+  check('and no checklist audiences need repair', checklistPendingCount(again.stdout), 0);
   check('and names no document', docLines(again.stdout), []);
 
   // Restore the seed's own shape, so a run that leaves the emulator dirty cannot affect a later case in this file.

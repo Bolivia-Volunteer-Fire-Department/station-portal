@@ -16,7 +16,7 @@ import { unnamedLabel } from '../../utils/displayLabel';
 // 'sonner' directly here would silence every toast on this screen (the verifier fails on that import).
 import { toast } from '../../utils/toast';
 
-export default function AdminPendingApprovalsTab({ token, offers = [], onOffersChanged, users = [], assignments = [], schedule = [], scheduleTemplates = [], timeFormat = '12', onAdminDataChanged }) {
+export default function AdminPendingApprovalsTab({ token, offers = [], users = [], assignments = [], schedule = [], scheduleTemplates = [], timeFormat = '12', onAdminDataChanged }) {
   const [pendingOffers, setPendingOffers] = useState([]);
   const [resolvingOfferId, setResolvingOfferId] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -102,26 +102,8 @@ export default function AdminPendingApprovalsTab({ token, offers = [], onOffersC
       
       if (result && result.success) { 
         toast.success('Shift offer approved');
-        
-        // Optionally notify parent of change - but refresh from our own state is primary
-        if (onOffersChanged) {
-          onOffersChanged();
-        }
-        
-        // Also trigger admin data refresh so the Schedule Management calendar sees changes immediately. `schedule` is
-        // named explicitly because approving FILLS AN EMPTY SLOT with a new schedule row, and the payload fallback no
-        // longer carries that collection - an unnamed refresh would leave every calendar showing the slot as open.
+        setPendingOffers((current) => current.filter((row) => row.id !== offer.id));
         void onAdminDataChanged?.(['schedule', 'scheduleOffers'], token);
-        
-        // Refresh the offers list to get updated data - extract offers array from response
-        const refreshResult = await adminFetchScheduleOffers(token);
-        if (Array.isArray(refreshResult?.offers)) {
-          // The fetch returns every offer; only the undecided ones belong here.
-          setPendingOffers(pendingOffersOnly(refreshResult.offers));
-          toast.success('List refreshed');
-        } else {
-          console.warn('Non-array response from adminFetchScheduleOffers:', refreshResult);
-        }
       } 
       else { 
         console.error('Approve failed:', result);
@@ -154,25 +136,8 @@ export default function AdminPendingApprovalsTab({ token, offers = [], onOffersC
       
       if (result && result.success) { 
         toast.success('Shift offer declined');
-        
-        // Optionally notify parent of change - but refresh from our own state is primary
-        if (onOffersChanged) {
-          onOffersChanged();
-        }
-        
-        // Also trigger admin data refresh. ONLY the offers: a decline changes no schedule row - the slot was never
-        // filled - so refreshing the schedule here would be a read of a month for nothing.
+        setPendingOffers((current) => current.filter((row) => row.id !== offer.id));
         void onAdminDataChanged?.(['scheduleOffers'], token);
-        
-        // Refresh the offers list to get updated data - extract offers array from response
-        const refreshResult = await adminFetchScheduleOffers(token);
-        if (Array.isArray(refreshResult?.offers)) {
-          // The fetch returns every offer; only the undecided ones belong here.
-          setPendingOffers(pendingOffersOnly(refreshResult.offers));
-          toast.success('List refreshed');
-        } else {
-          console.warn('Non-array response from adminFetchScheduleOffers:', refreshResult);
-        }
       } 
       else { 
         console.error('Decline failed:', result);

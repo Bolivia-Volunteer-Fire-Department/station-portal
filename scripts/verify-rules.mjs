@@ -114,6 +114,16 @@ const main = async () => {
 
   await read('reads its own availability month', true, doc(db, 'availability_months', 'u2_2026-09'));
   await read('but not another member availability month', false, doc(db, 'availability_months', 'u1_2026-09'));
+  await write('cannot overwrite another member month by changing user_id', false, doc(db, 'availability_months', 'u1_2026-09'), {
+    user_id: 'u2',
+    month: '2026-09',
+    claims: { aw1: ['2026-09-03'] },
+  });
+  await write('cannot move a month document by changing its month field', false, doc(db, 'availability_months', 'u2_2026-09'), {
+    user_id: 'u2',
+    month: '2026-10',
+    claims: { aw1: ['2026-10-03'] },
+  });
   await read('reads its own clock entry', true, doc(db, 'timeclock', 'c2'));
   await read('but not another member clock entry', false, doc(db, 'timeclock', 'c1'));
 
@@ -140,7 +150,7 @@ const main = async () => {
     memberOwnClock.size === 1,
     `got ${memberOwnClock.size} rows`
   );
-  await write('opens its own clock entry', true, doc(db, 'timeclock', 'c3'), {
+  await write('cannot open a clock entry directly from the client', false, doc(db, 'timeclock', 'c3'), {
     user_id: 'u2',
     time_in: '2026-03-03 08:00',
     time_out: '',
@@ -152,8 +162,16 @@ const main = async () => {
     time_out: '',
     is_manual: false,
   });
+  await write('cannot rewrite its own historical clock entry', false, doc(db, 'timeclock', 'c2'), {
+    user_id: 'u2',
+    time_in: '1999-01-01 00:00',
+    time_out: '1999-01-01 01:00',
+    is_manual: false,
+    gps_lat: '0',
+    gps_lon: '0',
+  });
   await read('reads who is on duty', true, doc(db, 'on_duty', 'u1'));
-  await write('marks itself on duty', true, doc(db, 'on_duty', 'u2'), { user_id: 'u2', time_in: '2026-03-03 08:00' });
+  await write('cannot forge its own on-duty row directly', false, doc(db, 'on_duty', 'u2'), { user_id: 'u2', time_in: '2026-03-03 08:00' });
   await write('and cannot mark somebody else on duty', false, doc(db, 'on_duty', 'u1'), {
     user_id: 'u1',
     time_in: '2026-03-03 08:00',
@@ -244,12 +262,38 @@ const main = async () => {
   await asUser('u1');
   // The Documents tab reads the WHOLE collection, which the audience rule alone could not prove - this is the first
   // half of the check.
+  await setDoc(doc(db, 'users', 'u2'), {
+    name: 'Bo Jones',
+    rank_id: 'k2',
+    role_id: 'r2',
+    exclude_from_scheduling: false,
+    runner_sound_profile: '',
+  });
   await setDoc(doc(db, 'documents', 'doc-r2'), { id: 'doc-r2', title: 'Guide for firefighters', audience_keys: ['role:r2'] });
   await setDoc(doc(db, 'documents', 'doc-r1'), { id: 'doc-r1', title: 'Guide for officers', audience_keys: ['role:r1'] });
   const allDocuments = await getDocs(collection(db, 'documents'));
   checkIs('an officer reads the whole documents collection', allDocuments.size >= 2, `${allDocuments.size} document(s)`);
   const allAnnouncements = await getDocs(collection(db, 'announcements'));
   checkIs('and the whole announcements collection', allAnnouncements.size >= 1, `${allAnnouncements.size} announcement(s)`);
+  const hiddenChecklistFixture = await getDoc(doc(db, 'document_checklist_items', 'it5'));
+  checkIs('the rank-hidden checklist fixture exists', hiddenChecklistFixture.exists());
+  const validChecklistItem = await setDoc(doc(db, 'document_checklist_items', 'it-valid-audience'), {
+    document_id: 'doc1',
+    audience_keys: ['*'],
+    label: 'A valid item',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('a manager can save an item with its parent audience', validChecklistItem, 'written');
+  const forgedChecklistAudience = await setDoc(
+    doc(db, 'document_checklist_items', 'it-forged-audience'),
+    { document_id: 'doc1', audience_keys: ['rank:k1'], label: 'A forged item' }
+  ).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('a manager cannot give an item an audience wider or different than its parent', forgedChecklistAudience.includes('permission-denied'), forgedChecklistAudience);
 
   // The second half: a member still sees only what their keys match. `bo` is the firefighter (role r2).
   await asUser('u2');
@@ -263,6 +307,33 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('and is refused the one aimed at another role', theirs.includes('permission-denied'), theirs);
+
+  await read('reads checklist items for a document in their audience', true, doc(db, 'document_checklist_items', 'it1'));
+    const visibleChecklistDetail = await getDocs(
+      query(
+        collection(db, 'document_checklist_items'),
+        where('document_id', '==', 'doc1'),
+        where('audience_keys', 'array-contains-any', ['*', 'user:u2', 'role:r2', 'rank:k2'])
+      )
+    );
+    checkIs('the member detail query reads their visible checklist rows', visibleChecklistDetail.docs.some((item) => item.id === 'it1'));
+  await read('cannot read checklist labels for a rank-hidden document', false, doc(db, 'document_checklist_items', 'it5'));
+  const visibleChecklistItems = await getDocs(
+    query(
+      collection(db, 'document_checklist_items'),
+      where('audience_keys', 'array-contains-any', ['*', 'user:u2', 'role:r2', 'rank:k2'])
+    )
+  );
+  checkIs(
+    'the audience-filtered checklist query includes visible items only',
+    visibleChecklistItems.docs.some((item) => item.id === 'it1') && !visibleChecklistItems.docs.some((item) => item.id === 'it5'),
+    JSON.stringify(visibleChecklistItems.docs.map((item) => item.id))
+  );
+  const unfilteredChecklistItems = await getDocs(collection(db, 'document_checklist_items')).then(
+    () => 'read',
+    (error) => String(error.code || '')
+  );
+  checkIs('a member cannot scan checklist items across document audiences', unfilteredChecklistItems.includes('permission-denied'), unfilteredChecklistItems);
 
   // Signatures: everyone gives their own, nobody gives somebody else's - and a row now has to say WHO GAVE IT
   // (`signed_by_user_id`) as well as who it is about, because that is the pair a verification is built out of.
@@ -285,6 +356,16 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('and cannot sign as another member', forged.includes('permission-denied'), forged);
+  const verifierSelfSignature = await setDoc(doc(db, 'document_signatures', 'sig-verifier-self'), {
+    document_id: 'doc1',
+    user_id: 'u2',
+    signed_by_user_id: 'u2',
+    signature_role: 'verifier',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('a non-admin verifier cannot verify their own work', verifierSelfSignature.includes('permission-denied'), verifierSelfSignature);
   // The SECOND identity is checked too: a member cannot attribute a signature to somebody else, which is the hole a
   // "user_id must be mine" check alone would leave open.
   const misattributed = await setDoc(doc(db, 'document_signatures', 'sig-misattributed'), {
@@ -298,6 +379,16 @@ const main = async () => {
   );
   checkIs('nor attribute their own row to somebody else', misattributed.includes('permission-denied'), misattributed);
 
+  const adminSelfVerification = await setDoc(doc(db, 'document_signatures', 'sig-admin-self'), {
+    document_id: 'doc1',
+    user_id: 'u1',
+    signed_by_user_id: 'u1',
+    signature_role: 'verifier',
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('an administrator may verify their own work by exception', adminSelfVerification, 'written');
   // A BACK-FILL, which is the one case where an OFFICER may write a 'member' row for somebody else - and only while
   // saying that is what it is. Tested from both sides, because either one alone proves nothing: a refusal could be the
   // permission, and an allowance could be the wrong branch.
@@ -556,15 +647,33 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('nor with the boolean, which is the case this always covered', escalateBoolean.includes('permission-denied'), escalateBoolean);
+  const demoteAdmin = await setDoc(doc(db, 'roles', 'r1'), { is_admin: false }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('nor may a role editor demote an existing administrator role', demoteAdmin.includes('permission-denied'), demoteAdmin);
   const escalateDelete = await deleteDoc(doc(db, 'roles', 'r1')).then(
     () => 'deleted',
     (error) => String(error.code || '')
   );
   checkIs('nor delete an administrator role', escalateDelete.includes('permission-denied'), escalateDelete);
 
+  // A user manager may assign ordinary roles, but an admin role remains admin-only at the data boundary.
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r2'), { can_edit_users: true }, { merge: true });
+  await asUser('u2');
+  await write('a user manager cannot assign the administrator role to their own account', false, doc(db, 'users', 'u2'), {
+    name: 'Bo Jones',
+    rank_id: 'k2',
+    role_id: 'r1',
+    exclude_from_scheduling: false,
+    runner_sound_profile: '',
+  });
+
   // Put the table back as it was found, so nothing below this line is reading a role it did not expect.
   await asUser('u1');
   await setDoc(doc(db, 'roles', 'r1'), originalRole);
+  await setDoc(doc(db, 'roles', 'r2'), { can_edit_users: false }, { merge: true });
 
   checkIs('every case ran', cases >= 27, `only ${cases} cases: a section has stopped running`);
 };

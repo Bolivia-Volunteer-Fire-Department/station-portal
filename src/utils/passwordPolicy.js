@@ -33,15 +33,14 @@ export const mustChangePassword = (user) => {
 
 // Why a new password cannot be accepted, or '' when it can.
 //
-// This mirrors what the server will actually do rather than inventing policy: the backend refuses a blank
-// password (it could never sign in) and nothing else, so there is no length or complexity rule here to disagree
-// with it. The confirmation match is the one thing the client has to do, because the server is only sent the
-// new password - and the typo it catches is the reason a forced change needs confirming at all.
+// Match the backend's eight-character minimum. The confirmation match is client-side because only the chosen
+// password is sent to the server.
 export const passwordChangeProblem = ({ newPassword, confirmPassword } = {}) => {
   const chosen = String(newPassword ?? '');
   const repeated = String(confirmPassword ?? '');
 
   if (!chosen) return 'Choose a new password.';
+  if (chosen.length < 8) return 'Use at least 8 characters.';
   if (!repeated) return 'Repeat the new password to confirm it.';
   if (chosen !== repeated) return 'The two passwords do not match.';
   return '';

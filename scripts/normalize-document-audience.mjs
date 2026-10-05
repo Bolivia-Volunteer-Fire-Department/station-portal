@@ -173,6 +173,7 @@ const main = async () => {
 
   const wanted = [];
   const unjudgeable = [];
+  const audienceByDocument = new Map();
   documents.forEach((document) => {
     const row = { id: document.id, ...document.data() };
     if (isUnjudgeable(row)) {
@@ -180,12 +181,32 @@ const main = async () => {
       return;
     }
     const to = correctedAudienceKeys(row, ranks);
+    const audienceKeys = to || (Array.isArray(row.audience_keys) ? row.audience_keys : []);
+    audienceByDocument.set(row.id, audienceKeys);
     if (to) wanted.push({ id: row.id, from: row.audience_keys || [], to });
+  });
+
+  const checklistItems = await db.collection('document_checklist_items').get();
+  const checklistWanted = [];
+  const orphanChecklistItems = [];
+  checklistItems.forEach((item) => {
+    const row = { id: item.id, ...item.data() };
+    const documentId = text(row.document_id);
+    const audienceKeys = audienceByDocument.get(documentId);
+    if (!audienceKeys) {
+      orphanChecklistItems.push(row.id);
+      return;
+    }
+    const stored = Array.isArray(row.audience_keys) ? row.audience_keys.map(text).filter(Boolean) : [];
+    const matches = stored.length === audienceKeys.length && audienceKeys.every((key) => stored.includes(key));
+    if (!matches) checklistWanted.push({ id: row.id, documentId, from: stored, to: audienceKeys });
   });
 
   console.log(`  ${ranks.length} rank(s), ${documents.size} document(s)`);
   console.log(`  ${wanted.length} holding an audience narrower than their minimum rank`);
   console.log(`  ${unjudgeable.length} cannot be judged (see below)`);
+  console.log(`  ${checklistWanted.length} checklist item(s) need the parent audience copied`);
+  console.log(`  ${orphanChecklistItems.length} checklist item(s) have no parent audience to copy`);
   wanted.slice(0, 20).forEach((entry) => {
     console.log(`    ${entry.id}: ${JSON.stringify(entry.from)} -> ${JSON.stringify(entry.to)}`);
   });
@@ -194,9 +215,13 @@ const main = async () => {
     console.log(`    ${row.id}: rank in the audience, no minimum rank recorded - save it once to repair it`);
   });
   if (unjudgeable.length > 20) console.log(`    ... and ${unjudgeable.length - 20} more`);
+  checklistWanted.slice(0, 20).forEach((entry) => {
+    console.log(`    checklist ${entry.id} (${entry.documentId}): ${JSON.stringify(entry.from)} -> ${JSON.stringify(entry.to)}`);
+  });
+  if (checklistWanted.length > 20) console.log(`    ... and ${checklistWanted.length - 20} more checklist item(s)`);
 
   if (!apply) {
-    console.log('\nNothing was written. Add --apply to widen those documents to their minimum rank.');
+    console.log('\nNothing was written. Add --apply to repair document and checklist audiences.');
     return;
   }
   // `update` with a single field, NOT `set` with the whole row read back: the read is a snapshot and a set would write
@@ -208,7 +233,14 @@ const main = async () => {
       .forEach((entry) => batch.update(db.doc(`documents/${entry.id}`), { audience_keys: entry.to }));
     await batch.commit();
   }
-  console.log(`\nRewrote ${wanted.length} document audience(s).`);
+  for (let index = 0; index < checklistWanted.length; index += 400) {
+    const batch = db.batch();
+    checklistWanted.slice(index, index + 400).forEach((entry) =>
+      batch.update(db.doc(`document_checklist_items/${entry.id}`), { audience_keys: entry.to })
+    );
+    await batch.commit();
+  }
+  console.log(`\nRewrote ${wanted.length} document audience(s) and ${checklistWanted.length} checklist audience(s).`);
   if (unjudgeable.length) {
     console.log(`${unjudgeable.length} still need saving once through the editor - this script will not guess at them.`);
   }

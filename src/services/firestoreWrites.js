@@ -39,7 +39,6 @@ import {
 } from '../utils/documents.js';
 // The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
 // device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
-import { isOffline } from '../utils/connectivity.js';
 import { deleteField } from 'firebase/firestore';
 
 // The timestamp format the app reads everywhere: 'YYYY-MM-DD HH:MM:SS' in station time. Apps Script had
@@ -70,61 +69,6 @@ export const openClockEntryFor = async (userId) => {
 };
 
 // REFUSED BEFORE ANYTHING IS ATTEMPTED, and thrown as a name `failureFor` already knows (firestoreRouting.js), so the
-// member gets a sentence rather than Firestore's `unavailable`.
-//
-// WHY THIS IS IN THE WRITER RATHER THAN THE SCREEN: a guard in the UI protects the UI. This one protects the DATA, and it
-// covers every path that reaches these two functions - the clock card, a replayed action after a session refresh, and
-// anything added later. The transaction itself cannot queue (a transaction needs a server round trip to read), so what
-// this really buys is the honest message and the fact that nothing half-happens: a clock-in that cannot be recorded must
-// not leave the screen claiming somebody is on duty.
-const refuseOffline = () => {
-  if (isOffline()) throw new Error('offline');
-};
-
-export const clockIn = async ({ userId, gps, isManual = false }) => {
-  refuseOffline();
-  const db = firestore();
-  const entry = doc(collection(db, 'timeclock'));
-  const stamp = stationTimestamp();
-
-  await runTransaction(db, async (transaction) => {
-    // The already-open check reads the ON-DUTY document rather than querying the entries. Two reasons: a transaction
-    // in this SDK cannot run a query, and this document is the same fact as a single reference - a member is on duty
-    // exactly when their entry is open, and the two are written together below. Reading it inside the transaction is
-    // what stops a double tap opening two shifts; the sheet version had the same check under its script lock.
-    const onDuty = await transaction.get(doc(db, 'on_duty', userId));
-    if (onDuty.exists()) throw new Error('already-clocked-in');
-
-    transaction.set(entry, {
-      user_id: userId,
-      time_in: stamp,
-      time_out: '',
-      is_manual: isManual,
-      gps_lat: gps ? String(gps.latitude) : '',
-      gps_lon: gps ? String(gps.longitude) : '',
-    });
-    transaction.set(doc(db, 'on_duty', userId), { user_id: userId, time_in: stamp });
-  });
-
-  return entry.id;
-};
-
-export const clockOut = async ({ userId, entryId }) => {
-  refuseOffline();
-  const db = firestore();
-
-  await runTransaction(db, async (transaction) => {
-    const target = doc(db, 'timeclock', entryId);
-    const snapshot = await transaction.get(target);
-    if (!snapshot.exists()) throw new Error('no-entry');
-    if (String(snapshot.data().user_id) !== String(userId)) throw new Error('not-your-entry');
-    if (String(snapshot.data().time_out || '')) throw new Error('already-clocked-out');
-
-    transaction.update(target, { time_out: stationTimestamp() });
-    transaction.delete(doc(db, 'on_duty', userId));
-  });
-};
-
 // AVAILABILITY: one batch per save, which is how the app already sends it - the slots marked and unmarked in one
 // commit. The sheet version held the script lock for this; a batch is atomic without one, and the rules see to it
 // that every row written belongs to the member writing it.
@@ -327,7 +271,29 @@ export const saveAudienceDocument = async ({
   const extra = { audience_keys };
   if (liveUntilFrom) extra.live_until = parseSheetDateKey(body?.[liveUntilFrom]) || LIVE_UNTIL_OPEN;
   if (authorId && !String(id || '').trim()) extra.author_user_id = authorId;
-  return saveDocument({ collection: name, id, body, extra });
+  const documentId = String(id || '').trim();
+  if (name !== 'documents' || !documentId) return saveDocument({ collection: name, id, body, extra });
+
+  const db = firestore();
+  const parentRef = doc(db, 'documents', documentId);
+  const current = await getDoc(parentRef);
+  const currentKeys = current.exists() && Array.isArray(current.get('audience_keys'))
+    ? current.get('audience_keys').slice().sort()
+    : [];
+  const nextKeys = audience_keys.slice().sort();
+  if (JSON.stringify(currentKeys) === JSON.stringify(nextKeys)) {
+    return saveDocument({ collection: name, id: documentId, body, extra });
+  }
+
+  const items = await rowsFor('document_checklist_items', 'document_id', documentId);
+  if (items.length > 499) throw new Error('This checklist has too many items to change its audience safely.');
+  const batch = writeBatch(db);
+  batch.set(parentRef, { ...withoutEnvelope(body), ...extra }, { merge: true });
+  items.forEach((item) => {
+    batch.update(doc(db, 'document_checklist_items', item.id), { audience_keys });
+  });
+  await batch.commit();
+  return { id: documentId };
 };
 
 // A member's own device, gone. The rules decide whether this caller may - their own row, or an officer's permission -
@@ -493,7 +459,13 @@ export const signChecklistItems = async ({ userId, documentId, itemIds }) => {
   const wanted = [...new Set((Array.isArray(itemIds) ? itemIds : []).map((id) => String(id || '').trim()).filter(Boolean))];
   if (!wanted.length) return { success: false, message: 'No items were named.' };
 
-  const items = await rowsFor('document_checklist_items', 'document_id', documentId);
+  const items = document.audience_keys?.length
+    ? await rowsOf(query(
+        collection(firestore(), 'document_checklist_items'),
+        where('document_id', '==', documentId),
+        where('audience_keys', 'array-contains-any', document.audience_keys)
+      ))
+    : [];
   const owned = new Set(items.map((item) => item.id));
   const mine = await ownSignatureRows(userId);
   const signed = new Set(
@@ -1066,6 +1038,17 @@ export const deleteTimeclockEntry = async ({ id }) => {
 // would be a runtime error rather than a lint warning.
 export const deleteDocument = async ({ collection: collectionName, id }) => {
   const target = String(id || '');
+  if (collectionName === 'documents' && target) {
+    const db = firestore();
+    const items = await rowsFor('document_checklist_items', 'document_id', target);
+    for (let offset = 0; offset < items.length; offset += 450) {
+      const batch = writeBatch(db);
+      items.slice(offset, offset + 450).forEach((item) => {
+        batch.delete(doc(db, 'document_checklist_items', item.id));
+      });
+      await batch.commit();
+    }
+  }
   await deleteDoc(doc(firestore(), collectionName, target));
   return { id: target };
 };

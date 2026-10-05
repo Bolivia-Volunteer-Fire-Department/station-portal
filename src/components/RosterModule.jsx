@@ -1,5 +1,6 @@
 import React from 'react';
 import RankIcon from './RankIcon';
+import { unnamedLabel } from '../utils/displayLabel';
 
 export default function RosterModule({
   loading = false,
@@ -42,7 +43,7 @@ export default function RosterModule({
                   {rank ? (
                     <span style={{ color: String(rank.color || '').trim() || undefined }} className="inline-flex items-center gap-1.5">
                       <RankIcon name={rank.icon} className="h-4 w-4 shrink-0" />
-                      <span>{rank.description || rank.id}</span>
+                      <span>{rank.description || unnamedLabel('rank')}</span>
                     </span>
                   ) : '—'}
                 </td>

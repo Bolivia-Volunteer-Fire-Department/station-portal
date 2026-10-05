@@ -166,7 +166,6 @@ export default function AdminPanel({
   subTab = '',
   onSelectTab,
   offers = [],
-  onOffersChanged,
   // Training record and signatures. An administrator receives every signature; a member
   // receives only their own, which the server decides - so this tab only ever sees the full
   // set when the role can administer trainings.
@@ -477,7 +476,7 @@ export default function AdminPanel({
           rosterClaimsTo={rosterScope?.to || ''}
           onRosterMonth={onRosterMonth}
           offers={offers}
-          onOffersChanged={onOffersChanged}
+          onAdminDataChanged={onAdminDataChanged}
           // Non-shift entries, so the board shows the month as a whole.
           events={events}
           timeFormat={timeFormat}
@@ -617,7 +616,6 @@ export default function AdminPanel({
         <AdminPendingApprovalsTab
           token={token}
           offers={offers}
-          onOffersChanged={onOffersChanged}
           users={nameRows}
           assignments={assignments}
           schedule={schedule}

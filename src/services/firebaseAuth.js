@@ -4,7 +4,7 @@
 // domain. Nothing is ever sent there - the domain is RFC-reserved - so password resets cannot go by email and are
 // officer-driven instead (see the callables in functions/index.js). That is the accountability the department asked
 // for, and it is also what lets this file offer no reset-by-email path at all.
-import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, updatePassword } from 'firebase/auth';
+import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseAuth, firebaseConfigured, firebaseFunctions, firestore } from './firebase.js';
 import { passwordChangeRequired } from '../utils/passwordPolicy.js';
@@ -151,12 +151,8 @@ const call = async (name, data) => {
   return result.data;
 };
 
-// The member's own: change the password, then tell the server the flag can come off. The server call is what
-// clears it - the claim is not something a client can write.
-export const changeOwnPassword = async (newPassword) => {
-  await updatePassword(firebaseAuth().currentUser, newPassword);
-  await call('completePasswordChange', {});
-};
+// The server changes the Auth password and clears both forced-change flags only after that succeeds.
+export const changeOwnPassword = (newPassword) => call('completePasswordChange', { newPassword });
 
 // What the app asks after signing in, before it decides what to draw.
 export const fetchAccountState = () => call('whoami', {});

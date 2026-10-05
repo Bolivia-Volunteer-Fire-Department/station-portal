@@ -79,6 +79,14 @@
         { "fieldPath": "audience_keys", "arrayConfig": "CONTAINS" },
         { "fieldPath": "live_until", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "document_checklist_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "document_id", "order": "ASCENDING" },
+        { "fieldPath": "audience_keys", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -123,7 +123,6 @@ check('the API declares write functions to look for', writeFns.length >= 8, `${w
 const REFRESH_PROPS = [
   'onDataChanged',
   'onAdminDataChanged',
-  'onOffersChanged',
   'onLogsChanged',
   'onAvailabilityChanged',
 ];
@@ -171,17 +170,10 @@ for (const [prop, fn] of [
     'missing or pointing elsewhere'
   );
 }
-// Resolving an offer fills the shift, so this one save re-reads TWO collections - the offers table and the schedule row
-// it just filled - and it is written as an arrow because of it.
-check(
-  'onOffersChanged is wired to the scoped refresh, naming both collections',
-  /onOffersChanged=\{\(\) => refreshAdminCollections\(\['scheduleOffers', 'schedule'\]\)\}/.test(panelProps),
-  'missing or pointing elsewhere'
-);
 // A callback passed but not declared by AdminPanel would be silently dropped.
 check(
   'AdminPanel forwards every refresh callback it is given',
-  REFRESH_PROPS.filter((prop) => prop !== 'onOffersChanged').every((prop) =>
+  REFRESH_PROPS.every((prop) =>
     read('src/components/admin/AdminPanel.jsx').includes(prop)
   ),
   'AdminPanel does not declare one of them'
@@ -234,9 +226,17 @@ check('no tab awaits the fan-out refresh', awaitedWave.length === 0, awaitedWave
 // the row the administrator just acted on. This is the distinction, not an exception to the rule.
 check(
   'a single-request refresh may still be awaited',
-  tabFiles.some((name) => /if \(result\?\.success\) await onDataChanged/.test(read('src/components/admin/' + name))) &&
-    tabFiles.some((name) => /await onOffersChanged/.test(read('src/components/admin/' + name))),
-  'neither of the single-request screens awaits its own refresh'
+  tabFiles.some((name) => /if \(result\?\.success\) await onDataChanged/.test(read('src/components/admin/' + name))),
+  'no single-request screen awaits its own refresh'
+);
+
+const approvalSource = read('src/components/admin/AdminPendingApprovalsTab.jsx');
+check(
+  'offer decisions use one scoped refresh and no automatic second fetch',
+  (approvalSource.match(/onAdminDataChanged\?\.\(/g) || []).length === 2 &&
+    (approvalSource.match(/adminFetchScheduleOffers\(/g) || []).length === 1 &&
+    !/onOffersChanged/.test(approvalSource),
+  'approval decisions must not duplicate the offers refresh'
 );
 
 // "Do not wait" is not "do not refresh": every saving tab must still ask.

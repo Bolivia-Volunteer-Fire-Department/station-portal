@@ -465,12 +465,14 @@ export const seed = async () => {
   });
   await put('document_checklist_items/it3', {
     document_id: 'doc5',
+    audience_keys: ['*'],
     sort_order: 1,
     section: 'Engine',
     label: 'Fluids topped up',
   });
   await put('document_checklist_items/it4', {
     document_id: 'doc5',
+    audience_keys: ['*'],
     sort_order: 2,
     section: 'Engine',
     label: 'Lights tested',
@@ -495,6 +497,13 @@ export const seed = async () => {
     is_published: true,
     rank_id: 'k1',
   });
+  await put('document_checklist_items/it5', {
+    document_id: 'doc2',
+    audience_keys: ['rank:k1'],
+    sort_order: 1,
+    section: 'Officer',
+    label: 'Officer-only checklist detail',
+  });
   await put('documents/doc3', {
     title: 'Next Year Handbook',
     audience_keys: ['*'],
@@ -513,12 +522,14 @@ export const seed = async () => {
   });
   await put('document_checklist_items/it1', {
     document_id: 'doc1',
+    audience_keys: ['*'],
     sort_order: 1,
     section: 'Section A',
     label: 'I have read the SOG',
   });
   await put('document_checklist_items/it2', {
     document_id: 'doc1',
+    audience_keys: ['*'],
     sort_order: 2,
     section: 'Section A',
     label: 'I will follow it',

@@ -197,7 +197,7 @@ export default function App() {
   // sign-ins are clock-ins. The effect below fetches it the first time a screen that LISTS people is opened, and once for the
   // rest of the session after that.
   const [rosterLoaded, setRosterLoaded] = useState(false);
-  const [rosterModuleData, setRosterModuleData] = useState(null);
+  const [rosterModuleCache, setRosterModuleCache] = useState(null);
   const [rosterModuleLoading, setRosterModuleLoading] = useState(false);
   const [rosterModuleError, setRosterModuleError] = useState('');
   // Shift offers: the signed-in member's own requests, plus (admins only) the
@@ -415,12 +415,13 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
 
   useEffect(() => {
     if (!authToken || activeTab !== 'roster' || !canViewRoster) return;
+    if (rosterModuleCache?.token === authToken) return;
     let cancelled = false;
     setRosterModuleLoading(true);
     setRosterModuleError('');
     fetchRosterModule(authToken)
       .then((data) => {
-        if (!cancelled) setRosterModuleData(data);
+        if (!cancelled) setRosterModuleCache({ token: authToken, data });
       })
       .catch((error) => {
         if (!cancelled) setRosterModuleError(error.message || 'Could not load the roster.');
@@ -431,7 +432,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
     return () => {
       cancelled = true;
     };
-  }, [authToken, activeTab, canViewRoster]);
+  }, [authToken, activeTab, canViewRoster, rosterModuleCache]);
 
   useEffect(() => {
     // Nothing to warm until a member is signed in: that is when a role exists, and so a set of reachable tabs.
@@ -780,16 +781,22 @@ const getLoadingMessage = () => {
       .filter(Boolean)
       .filter((name) => ADMIN_SECTION_SETTERS[name]);
     if (!wanted.length) return refreshAdminData(token);
+    const rosterSections = ['users', 'certificationSetup', 'certificationRecords'];
+    const invalidateRoster = () => {
+      if (wanted.some((name) => rosterSections.includes(name))) setRosterModuleCache(null);
+    };
 
     try {
       const data = await fetchAdminSections(wanted);
       wanted.forEach((name) => ADMIN_SECTION_SETTERS[name](data[name]));
+      invalidateRoster();
       // The `schedule` section carries its own window and its setter records it (see ADMIN_SECTION_SETTERS above), so
       // there is nothing to do here. This used to look for a top-level `schedule_window`, which the section reader has
       // never returned - the window rides INSIDE the section, beside the rows it describes.
       return REFRESH_OK;
     } catch (err) {
       console.error(`[refresh] could not re-read ${wanted.join(', ')}, so the whole payload is being read instead`, err);
+      invalidateRoster();
       return refreshAdminData(token);
     }
   };
@@ -2341,10 +2348,10 @@ const getLoadingMessage = () => {
               <RosterModule
                 loading={rosterModuleLoading}
                 error={rosterModuleError}
-                members={rosterModuleData?.members || []}
+                members={rosterModuleCache?.token === authToken ? rosterModuleCache.data.members || [] : []}
                 ranks={ranks}
-                certificationTypes={rosterModuleData?.certificationTypes || []}
-                memberCertificationIds={rosterModuleData?.memberCertificationIds || {}}
+                certificationTypes={rosterModuleCache?.token === authToken ? rosterModuleCache.data.certificationTypes || [] : []}
+                memberCertificationIds={rosterModuleCache?.token === authToken ? rosterModuleCache.data.memberCertificationIds || {} : {}}
               />
             )}
 
@@ -2517,9 +2524,6 @@ const getLoadingMessage = () => {
                 // Non-shift entries, for the board and the availability grid this module hosts.
                 events={events}
                 offers={adminOffers}
-                // Resolving an offer fills the shift, so this one save touches two collections: the offers table and
-                // the schedule row it just filled.
-                onOffersChanged={() => refreshAdminCollections(['scheduleOffers', 'schedule'])}
                 trainings={trainings}
                 trainingSignatures={trainingSignatures}
                 // Lets any admin tab show a saved row immediately instead of waiting for the

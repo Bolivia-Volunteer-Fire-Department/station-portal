@@ -2,10 +2,9 @@
 //
 // WHY THIS DESERVES A HARNESS. Two of the claims here are the kind that fail silently:
 //
-//   1. CLOCKING IN AND OUT MUST NOT QUEUE. Firestore queues an offline write and applies it later, stamped with the DEVICE's
-//      clock - so a clock-in written in a dead spot and applied four hours on is a record saying somebody arrived at the
-//      wrong time, and it is the record the station uses to say who was on duty. That refusal has to exist, and it has to
-//      exist in the WRITER rather than in the screen, because the screen is not the only way in.
+//   1. CLOCKING IN AND OUT MUST NOT QUEUE. Both actions go through authenticated callables, and the client refuses them
+//      while offline before making a callable request or looking up an open entry. That prevents a delayed offline action
+//      from being recorded later with an incorrect arrival/departure time.
 //   2. NOTHING ELSE MAY REFUSE. The opposite mistake is a guard that spreads: a station with patchy coverage would stop
 //      accepting the notes and availability edits that queue perfectly safely, and nobody would connect the two.
 //
@@ -108,14 +107,23 @@ checkIs(
 checkIs('the old unconditional getFirestore is gone', !/getFirestore\(/.test(firebaseSource));
 
 check(
-  'the clock writers refuse rather than queue, on both doors',
-  (writesSource.match(/^  refuseOffline\(\);$/gm) || []).length,
+  'both clock routes share the offline refusal before callable work',
+  (routingSource.match(/refuseClockOffline\(\);/g) || []).length,
   2
 );
 checkIs(
-  'with the guard defined once, in the writer, before anything is attempted',
-  /const refuseOffline = \(\) => \{\n  if \(isOffline\(\)\) throw new Error\('offline'\);\n\};/.test(writesSource)
+  'with the guard defined once in the routing layer',
+  /const refuseClockOffline = \(\) => \{\n  if \(isOffline\(\)\) throw new Error\('offline'\);\n\};/.test(routingSource)
 );
+checkIs(
+  'clock-in refuses before calling the server',
+  /CLOCK_IN: async \(body, uid\) => \{\n    refuseClockOffline\(\);\n    return ok\(await callable\('clockIn'/.test(routingSource)
+);
+checkIs(
+  'clock-out refuses before reading its open entry',
+  /CLOCK_OUT: async \(body, uid\) => \{\n    refuseClockOffline\(\);\n    const \{ openClockEntryFor \} = await writes\(\)/.test(routingSource)
+);
+checkIs('and clock writes are no longer direct browser writers', !/export const clock(In|Out)\s*=/.test(writesSource));
 checkIs('and the refusal is a name the routing already knows', /offline: OFFLINE_CLOCK_MESSAGE/.test(routingSource));
 checkIs(
   'every routed write is translated, not only the clock',

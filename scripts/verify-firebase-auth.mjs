@@ -17,7 +17,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
+import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection, setDoc } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail, updateMemberAccount } from '../src/services/firebaseAuth.js';
@@ -40,12 +40,12 @@ const checkIs = (label, condition, detail) => {
 };
 
 // The refusal the server sends for a caller without the permission, as opposed to any other error.
-const refused = async (label, run) => {
+const refused = async (label, run, expectedCode = 'functions/permission-denied') => {
   try {
     await run();
     checkIs(label, false, 'the call was allowed');
   } catch (error) {
-    checkIs(label, error.code === 'functions/permission-denied', `threw ${error.code}`);
+    checkIs(label, error.code === expectedCode, `threw ${error.code}`);
   }
 };
 
@@ -71,6 +71,21 @@ const main = async () => {
   check('the claims name the role', jane.roleId, 'r1');
   check('and the administrator switch', jane.isAdmin, true);
   check('with no password change pending', jane.mustChangePassword, false);
+  await setDoc(doc(db, 'roles', 'r3'), { can_edit_users: true }, { merge: true });
+  await signOut(auth);
+  await signIn('rae');
+  await refused('a user manager cannot create an administrator account', () =>
+    call('createMember', {
+      username: `adminprobe${String(Date.now()).slice(-6)}`,
+      password: 'role-probe-passw0rd',
+      name: 'Role Probe',
+      rank_id: 'k1',
+      role_id: 'r1',
+    })
+  );
+  await signOut(auth);
+  await signIn('jane');
+  await setDoc(doc(db, 'roles', 'r3'), { can_edit_users: false }, { merge: true });
   const adminRoster = await call('readRosterModule');
   checkIs('the roster read returns active members', adminRoster.members.some((member) => member.id === 'u2'));
   check('current opted-in certification types are returned as indicators', adminRoster.memberCertificationIds.u2, ['c1']);
@@ -111,6 +126,11 @@ const main = async () => {
   const me = await call('whoami');
   check('the member is the record just created', me.userId, created.userId);
   check('and is not an administrator', me.isAdmin, false);
+  await refused(
+    'a member cannot use forced completion when no change is required',
+    () => call('completePasswordChange', { newPassword: 'unrequested-passw0rd' }),
+    'functions/failed-precondition'
+  );
   await refused('a member without View roster cannot read the roster module', () => call('readRosterModule'));
   await signOut(auth);
   await signIn('jane');
@@ -161,8 +181,12 @@ const main = async () => {
 
   // --- and the member changes it themselves ---
   console.log('\n--- the member changes it themselves ---');
-  await updatePassword(auth.currentUser, 'chosen-by-me-passw0rd');
-  await call('completePasswordChange');
+  await refused('an empty completion cannot clear the required change', () => call('completePasswordChange'), 'functions/invalid-argument');
+  const stillFlagged = await call('whoami');
+  check('the requirement remains after the refused empty completion', stillFlagged.mustChangePassword, true);
+  const stillFlaggedPrivate = await getDoc(doc(db, 'users_private', created.userId));
+  check('the officer-visible flag remains too', stillFlaggedPrivate.data().is_change_password_on_login, true);
+  await call('completePasswordChange', { newPassword: 'chosen-by-me-passw0rd' });
   const cleared = await call('whoami');
   check('the request to change it comes off', cleared.mustChangePassword, false);
   // THE HALF THE APP READS. `signInAsMember` spreads `users_private` onto the user object the app gates on, so a

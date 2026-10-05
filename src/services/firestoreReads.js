@@ -165,11 +165,17 @@ const documentIsLive = (document, today) => {
 // TRAVEL WITH THE DOCUMENT because the member's screen draws them from there (checklistSections(openDocument.items)), so
 // a document opened without them reads as a checklist with nothing in it - which is exactly what it did, while the items
 // sat in the collection the whole time.
-const checklistItemRows = async (documentId) => {
+const checklistItemRows = async (documentId, audienceKeys = null) => {
   const wanted = String(documentId || '').trim();
   if (!wanted) return [];
 
-  const items = await rowsFor('document_checklist_items', 'document_id', wanted);
+  const items = Array.isArray(audienceKeys) && audienceKeys.length
+    ? await rowsOf(query(
+        collection(firestore(), 'document_checklist_items'),
+        where('document_id', '==', wanted),
+        where('audience_keys', 'array-contains-any', audienceKeys)
+      ))
+    : await rowsFor('document_checklist_items', 'document_id', wanted);
   return items
     .map((item) => ({
       id: String(item.id || '').trim(),
@@ -219,9 +225,14 @@ const assessmentScoreRow = async (documentId, userId) => {
 // One pass over each collection rather than a lookup per row, which is what the sheet did and why a library of a hundred
 // documents stays cheap. `userId` of '' (the officer's list) leaves `items_signed` at 0: "signed by whom" is not a
 // question the editor asks, and the sheet answered it the same way.
-const documentItemSummaries = async (userId) => {
+const documentItemSummaries = async (userId, audienceKeys = null) => {
   const wantedUser = String(userId || '').trim();
-  const items = await rowsOf(collection(firestore(), 'document_checklist_items'));
+  const items = Array.isArray(audienceKeys) && audienceKeys.length
+    ? await rowsOf(query(
+        collection(firestore(), 'document_checklist_items'),
+        where('audience_keys', 'array-contains-any', audienceKeys)
+      ))
+    : await rowsOf(collection(firestore(), 'document_checklist_items'));
   const summaries = {};
 
   items.forEach((item) => {
@@ -280,7 +291,7 @@ const documentSort = (a, b) => {
 // `document_bodies` split that was never built: no writer, no rules, no migration entry. A reader that looked for the
 // body there got a permission-denied from the deny-by-default catch-all and no content at all - so this reads the row,
 // and the doc is the thing to fix when the split is wanted for real.
-const documentFullRow = async (row) => {
+const documentFullRow = async (row, audienceKeys = null) => {
   const source = row || {};
   const content = String(source.content ?? '');
   return {
@@ -289,7 +300,9 @@ const documentFullRow = async (row) => {
     // The list never carries a length (it has no body to measure where the body is split out); the sheet sent one with
     // every row, and the screens that show a document's size read it from here.
     content_length: content.length,
-    items: String(source.doc_type || '').trim().toLowerCase() === 'checklist' ? await checklistItemRows(source.id) : [],
+    items: String(source.doc_type || '').trim().toLowerCase() === 'checklist'
+      ? await checklistItemRows(source.id, audienceKeys)
+      : [],
   };
 };
 
@@ -626,10 +639,11 @@ export const READERS = {
   // outstanding without asking once per document. Deliberately WITHOUT the document bodies - those are fetched one at a
   // time by GET_DOCUMENT, which is what keeps opening the module cheap however large the library gets.
   GET_DOCUMENTS: async (uid) => {
+    const audienceKeys = await keysFor(uid);
     const [visible, signatures, summaries] = await Promise.all([
-      audienceRows('documents', await keysFor(uid)),
+      audienceRows('documents', audienceKeys),
       rowsFor('document_signatures', 'user_id', uid),
-      documentItemSummaries(uid),
+      documentItemSummaries(uid, audienceKeys),
     ]);
     const today = stationTodayKey();
     const live = visible.filter((document) => documentIsLive(document, today));
@@ -652,7 +666,7 @@ export const READERS = {
     const signature = documentSignatureFor(await rowsFor('document_signatures', 'user_id', uid), wanted, uid);
     return {
       success: true,
-      document: await documentFullRow(document),
+      document: await documentFullRow(document, document.audience_keys),
       signature,
       signature_stale: signatureIsStale(signature, document),
       // The CALLER'S OWN assessment score, and only that. It travels with the document for the same reason the signature

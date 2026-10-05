@@ -62,8 +62,6 @@ import {
   approveOffer,
   audienceKeysForWrite,
   badgeForRecord,
-  clockIn,
-  clockOut,
   makeOffer,
   saveAvailabilityMonth,
   saveScheduleBoard,
@@ -121,7 +119,9 @@ const main = async () => {
   // --- clocking in: the entry and the on-duty row, together ---
   console.log('\n--- a member clocks in ---');
   await signIn('bo');
-  const entryId = await clockIn({ userId: 'u2', gps: { latitude: 39.123, longitude: -79.123 }, isManual: false });
+  const clockInReply = await routeWrite('CLOCK_IN', { gps_lat: '39.123', gps_lon: '-79.123' });
+  checkIs('the routed clock-in succeeds', clockInReply.success === true, JSON.stringify(clockInReply));
+  const entryId = clockInReply.id;
   const entry = (await getDoc(doc(db, 'timeclock', entryId))).data();
   check('the entry belongs to the member who clocked in', entry.user_id, 'u2');
   check('and is open', entry.time_out, '');
@@ -132,21 +132,23 @@ const main = async () => {
   check('the on-duty row appeared with it', onDuty.exists(), true);
   check('carrying the same timestamp', onDuty.data().time_in, entry.time_in);
   // The double tap: the check is inside the transaction, so the second one cannot win the race.
-  await refused('a second clock-in is refused', 'already-clocked-in', () => clockIn({ userId: 'u2' }));
-
+  const secondClockIn = await routeWrite('CLOCK_IN', { gps_lat: '', gps_lon: '' });
+  check('a second clock-in is refused', secondClockIn.code, 'REFUSED');
+  check('with the duplicate-clock message', secondClockIn.message, 'You are already clocked in.');
   // --- clocking out: the mirror ---
   console.log('\n--- and clocks out ---');
-  await clockOut({ userId: 'u2', entryId });
+  const clockOutReply = await routeWrite('CLOCK_OUT', {});
+  checkIs('the routed clock-out succeeds', clockOutReply.success === true, JSON.stringify(clockOutReply));
   const closed = (await getDoc(doc(db, 'timeclock', entryId))).data();
   checkIs('the entry is closed', /^\d{4}-\d{2}-\d{2} /.test(closed.time_out), JSON.stringify(closed.time_out));
   check('and the on-duty row went with it', (await getDoc(doc(db, 'on_duty', 'u2'))).exists(), false);
-  await refused('clocking out twice is refused', 'already-clocked-out', () => clockOut({ userId: 'u2', entryId }));
-  // Somebody else's entry: the RULES refuse even the read inside the transaction.
-  await refused(
-    'somebody else entry cannot be closed',
-    'permission-denied',
-    () => clockOut({ userId: 'u2', entryId: 'c1' })
+  const secondClockOut = await routeWrite('CLOCK_OUT', {});
+  check('clocking out twice is refused', secondClockOut.code, 'REFUSED');
+  const forgedClockOut = await httpsCallable(firebaseFunctions(), 'clockOut')({ entryId: 'c1' }).then(
+    () => 'closed',
+    (error) => error.code
   );
+  checkIs('somebody else entry cannot be closed by a direct callable', forgedClockOut === 'functions/permission-denied', forgedClockOut);
 
   // --- offline: the pair of writes that must NOT queue ------------------------------------------------------------------
   //
@@ -203,7 +205,6 @@ const main = async () => {
 
   console.log('\n--- offline: clocking in refuses rather than queues ---');
   setOffline(true);
-  await refused('the writer refuses', 'offline', () => clockIn({ userId: 'u2' }));
   const offlineRoute = await routeWrite('CLOCK_IN', { gps_lat: '', gps_lon: '', is_manual: false });
   check('the route answers with the sentence, not a transport error', offlineRoute.message, OFFLINE_CLOCK_MESSAGE);
   check('and says it was refused', offlineRoute.code, 'REFUSED');
@@ -218,7 +219,7 @@ const main = async () => {
   const backOnline = await routeWrite('CLOCK_IN', { gps_lat: '', gps_lon: '', is_manual: false });
   checkIs('and the same clock-in works the moment there is a connection', backOnline.success === true, JSON.stringify(backOnline));
   // Put the member back where this section found them, so the sections after it are unaffected by it.
-  if (backOnline.id) await clockOut({ userId: 'u2', entryId: backOnline.id });
+  if (backOnline.id) await routeWrite('CLOCK_OUT', {});
 
   console.log('\n--- availability ---');
   // ONE WRITE REPLACES THE MONTH: the screen sends the month it was editing and the marks it now holds, and the document
@@ -1199,6 +1200,7 @@ const main = async () => {
   const itemOrder = await routeWrite('ADMIN_SAVE_CHECKLIST_ITEM', {
     id: '',
     document_id: 'doc5',
+    audience_keys: ['*'],
     label: 'Radio check',
     section: 'Engine',
     sort_order: checklistItemSortOrder('0', 10),
@@ -1221,6 +1223,7 @@ const main = async () => {
   const reopenedItem = await routeWrite('ADMIN_SAVE_CHECKLIST_ITEM', {
     id: itemOrder.id,
     document_id: 'doc5',
+    audience_keys: ['*'],
     label: 'Radio check',
     section: 'Engine',
     sort_order: checklistItemSortOrder(String(storedItem.sort_order)),
@@ -1236,6 +1239,7 @@ const main = async () => {
   const blankOrder = await routeWrite('ADMIN_SAVE_CHECKLIST_ITEM', {
     id: '',
     document_id: 'doc5',
+    audience_keys: ['*'],
     label: 'Beacon check',
     section: 'Engine',
     sort_order: checklistItemSortOrder('', (3 + 1) * 10),

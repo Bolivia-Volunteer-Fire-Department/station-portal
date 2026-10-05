@@ -126,6 +126,39 @@ service cloud.firestore {
       return role != null && granted(role.get('is_admin', false));
     }
 
+    function roleIsAdministrator(roleId) {
+      return roleId is string
+        ? (roleId == ''
+          ? false
+          : (exists(/databases/$(database)/documents/roles/$(roleId))
+            ? granted(get(/databases/$(database)/documents/roles/$(roleId)).data.get('is_admin', false))
+            : false))
+        : false;
+    }
+
+    function checklistItemMatchesParent(item) {
+      let documentId = item.get('document_id', '');
+      let itemAudience = item.get('audience_keys', null);
+      let parent = documentId is string && documentId != ''
+        ? (existsAfter(/databases/$(database)/documents/documents/$(documentId))
+          ? getAfter(/databases/$(database)/documents/documents/$(documentId)).data
+          : null)
+        : null;
+      return parent != null
+        && itemAudience is list
+        && itemAudience == parent.get('audience_keys', []);
+    }
+
+    function hasAvailabilityIdentity(docId, data) {
+      let memberId = data.get('user_id', '');
+      let month = data.get('month', '');
+      return memberId is string
+        && memberId != ''
+        && month is string
+        && month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && docId == memberId + '_' + month;
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Identity and access
     // ---------------------------------------------------------------------------------------------
@@ -142,8 +175,14 @@ service cloud.firestore {
       // facts about a member's place in the station rather than secrets about them, and they live on this document.
       // Everything else about an account (the username, the status, the password-change flag) still goes through a
       // callable, because those are the facts a client must not be able to rewrite about itself.
-      allow create, update: if permission('can_edit_users')
-        && request.resource.data.keys().hasOnly(['name', 'rank_id', 'role_id', 'exclude_from_scheduling', 'runner_sound_profile']);
+      allow create: if permission('can_edit_users')
+        && request.resource.data.keys().hasOnly(['name', 'rank_id', 'role_id', 'exclude_from_scheduling', 'runner_sound_profile'])
+        && (isAdministrator() || !roleIsAdministrator(request.resource.data.get('role_id', '')));
+      allow update: if permission('can_edit_users')
+        && request.resource.data.keys().hasOnly(['name', 'rank_id', 'role_id', 'exclude_from_scheduling', 'runner_sound_profile'])
+        && (isAdministrator()
+          || (!roleIsAdministrator(resource.data.get('role_id', ''))
+            && !roleIsAdministrator(request.resource.data.get('role_id', ''))));
       allow delete: if permission('can_edit_users');
     }
 
@@ -170,7 +209,10 @@ service cloud.firestore {
     // no `is_admin` key at all must read as "not an administrator", not as an evaluation error.
     match /roles/{roleId} {
       allow read: if signedIn();
-      allow create, update: if permission('can_edit_roles')
+      allow create: if permission('can_edit_roles')
+        && (!granted(request.resource.data.get('is_admin', false)) || isAdministrator());
+      allow update: if permission('can_edit_roles')
+        && (isAdministrator() || !granted(resource.data.get('is_admin', false)))
         && (!granted(request.resource.data.get('is_admin', false)) || isAdministrator());
       allow delete: if permission('can_edit_roles') && !granted(resource.data.get('is_admin', false));
     }
@@ -297,9 +339,16 @@ service cloud.firestore {
         && (resource == null
           || resource.data.user_id == uid()
           || permission('can_edit_member_availability'));
-      allow create, update: if signedIn()
+      allow create: if signedIn()
+        && hasAvailabilityIdentity(docId, request.resource.data)
         && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'))
-        && request.resource.data.month is string
+        && request.resource.data.claims is map;
+      allow update: if signedIn()
+        && resource != null
+        && hasAvailabilityIdentity(docId, resource.data)
+        && hasAvailabilityIdentity(docId, request.resource.data)
+        && request.resource.data.user_id == resource.data.user_id
+        && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'))
         && request.resource.data.claims is map;
       allow delete: if signedIn()
         && resource != null
@@ -307,10 +356,8 @@ service cloud.firestore {
     }
 
     // Clock entries, written by the clock in/out TRANSACTION, which also writes the on_duty row so the two cannot
-    // disagree. That pairing is what used to be covered by the script-wide lock; a transaction is what covers it now.
-    //
-    // The coordinates are the record of where: the app restricts clocking in and out to a radius, so a resolved
-    // street address was extra data to keep in step for no decision it changed. `calc_address` is gone.
+    // Member clock entries are written by Functions, which owns server timestamps and the paired on_duty transaction.
+    // Coordinates are client-reported; location attestation remains a separate trust limitation.
     match /timeclock/{entryId} {
       // The same null guard as `document_signatures`, and for the same reason: this is read as a QUERY
       // (`where('user_id', '==', uid).where('time_out', '==', '')`, in `openClockEntryFor`), and `.data` off a null
@@ -320,23 +367,8 @@ service cloud.firestore {
       allow read: if signedIn()
         && ((resource != null && resource.data.user_id == uid()) || permission('can_edit_timeclock'));
       // An entry OPENS with no time_out and belongs to the caller: a member cannot open a shift for somebody else, and
-      // cannot open one that is already closed.
-      //
-      // AN OFFICER IS THE OTHER DOOR, which is why this has two branches: the Clock Management tab exists to add an
-      // entry somebody forgot to clock in for, and that is by definition an entry for another member - and a manual one
-      // carries both times at once, because whoever writes it knows when the shift ended.
-      //
-      // `get(key, default)` rather than `data.key`: a row that omits a field would make this rule ERROR, and an error is
-      // indistinguishable from a denial in a log.
-      allow create: if signedIn()
-        && ((request.resource.data.get('user_id', '') == uid()
-              && request.resource.data.get('time_out', 'closed') == '')
-            || (request.resource.data.get('user_id', '') != ''
-              && permission('can_edit_timeclock')));
-      // Closing it is the same document again, by its owner; an officer may do anything, which is the Clock
-      // Management tab.
-      allow update, delete: if signedIn()
-        && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
+      // Direct writes are limited to Clock Management; member clock actions use the callables above.
+      allow create, update, delete: if permission('can_edit_timeclock');
     }
 
     // Who is on duty, materialized by that same transaction so the two cannot disagree. One small document per
@@ -344,7 +376,7 @@ service cloud.firestore {
     // because the dashboard shows it.
     match /on_duty/{memberId} {
       allow read: if signedIn();
-      allow write: if signedIn() && (memberId == uid() || permission('can_edit_timeclock'));
+      allow write: if permission('can_edit_timeclock');
     }
 
     // The audit trail is NOT here any more, and there is no permission to hold for it: the app's audit lines go to
@@ -467,10 +499,18 @@ service cloud.firestore {
     }
 
     match /document_checklist_items/{itemId} {
-      // The labels a signature is collected against. They carry no audience of their own and are always read
-      // alongside the document they belong to, so any signed-in member may read them; only a manager may change them.
-      allow read: if signedIn();
-      allow write: if permission('can_manage_documents');
+      // Checklist items inherit the parent document's audience. The child copy keeps member queries provable;
+      // matching it against the parent prevents stale or forged child audiences from widening access.
+      allow read: if signedIn()
+        && (permission('can_manage_documents')
+          || permission('can_verify_documents')
+          || (resource != null && resource.data.audience_keys.hasAny(viewerKeys())));
+      allow create: if permission('can_manage_documents')
+        && checklistItemMatchesParent(request.resource.data);
+      allow update: if permission('can_manage_documents')
+        && checklistItemMatchesParent(request.resource.data)
+        && resource.data.get('document_id', '') == request.resource.data.get('document_id', '');
+      allow delete: if permission('can_manage_documents');
     }
 
     match /document_signatures/{signatureId} {
@@ -511,6 +551,11 @@ service cloud.firestore {
               && request.resource.data.get('signature_role', '') == 'member'
               && permission('can_view_documents'))
             || (permission('can_verify_documents')
+              && request.resource.data.get('user_id', '') != uid()
+              && request.resource.data.get('signed_by_user_id', '') == uid()
+              && request.resource.data.get('signature_role', '') == 'verifier')
+            || (isAdministrator()
+              && request.resource.data.get('user_id', '') == uid()
               && request.resource.data.get('signed_by_user_id', '') == uid()
               && request.resource.data.get('signature_role', '') == 'verifier')
             // A BACK-FILL, and the `backfilled == true` clause is the whole reason this branch is safe to add. An

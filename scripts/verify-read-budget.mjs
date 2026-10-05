@@ -375,6 +375,16 @@ checkIs(
   'the crew directory waits for a screen that lists people',
   /if \(activeTab !== 'schedule' && activeTab !== 'admin'\) return;/.test(appSource) && /fetchRoster\(authToken\)/.test(appSource)
 );
+checkIs(
+  'the roster module reuses its response for the same signed-in account',
+  /rosterModuleCache\?\.token === authToken/.test(appSource) &&
+    /\}, \[authToken, activeTab, canViewRoster, rosterModuleCache\]\);/.test(appSource)
+);
+checkIs(
+  'roster-backed admin changes invalidate that cached response',
+  /const rosterSections = \['users', 'certificationSetup', 'certificationRecords'\]/.test(appSource) &&
+    /if \(wanted\.some\(\(name\) => rosterSections\.includes\(name\)\)\) setRosterModuleCache\(null\)/.test(appSource)
+);
 // ...AND THE EVENTS LISTENER FOLLOWS THE SCREEN RATHER THAN THE SESSION, which is the one live read that does. The sign-in
 // subscription names exactly three handlers - on-duty, announcements and settings - and something on the dashboard draws every
 // one of them. Events are watched by an effect that only runs while a calendar screen is open, which is the same "a module's
