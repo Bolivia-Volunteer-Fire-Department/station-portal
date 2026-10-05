@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ALERT_KINDS } from '../src/utils/markdown.js';
-import { CALLOUT_CLASSES, HEADING_CLASSES, INLINE_CLASSES } from '../src/utils/markdownStyles.js';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, EDITOR_CHROME_CLASSES, EDITOR_SURFACE_CLASSES, HEADING_CLASSES, INLINE_CLASSES } from '../src/utils/markdownStyles.js';
 import {
   ACTION_IDS,
   BLOCK_ACTIONS,
@@ -23,7 +23,9 @@ import {
   EDITOR_ACTIONS,
   INLINE_ACTIONS,
   INSERT_ACTIONS,
+  TABLE_ACTIONS,
   applyBlockCommand,
+  applyTableCommand,
   applyTextCommand,
   blockLineText,
   blocksFromHtml,
@@ -317,7 +319,14 @@ console.log('\n--- every toolbar button does something ---');
 // introspection to lean on, so this is behavioural: every BLOCK or INSERT action except "Normal text" must change
 // the block. The inline ones are not its job - they wrap a selection, which is the surface's half of the toolbar -
 // so they are asserted separately, as the text equivalent below and as the surface's own handlers after that.
-const blockIds = EDITOR_ACTIONS.filter((entry) => entry.mode !== 'inline' && entry.id !== 'paragraph');
+//
+// THE TABLE'S FIVE ARE EXCLUDED HERE ON PURPOSE, and the exclusion is the fix this check needed when they were added: a
+// table action means nothing on a paragraph (that is what `mode: 'table'` is for, and the dispatcher refuses one rather
+// than reshaping somebody's document), so demanding that it change a paragraph would be demanding a bug. They are
+// asserted below against a TABLE, which is the only place they can be judged.
+const blockIds = EDITOR_ACTIONS.filter(
+  (entry) => entry.mode !== 'inline' && entry.mode !== 'table' && entry.id !== 'paragraph'
+);
 blockIds.forEach((action) => {
   check(
     `${action.id} changes the block`,
@@ -342,6 +351,152 @@ check(
   'and an id nobody wrote leaves the document alone',
   blocksToMarkdown(applyBlockCommand(paragraph(), 0, { id: 'nonsense' }).blocks),
   'Words'
+);
+
+console.log('\n--- reshaping a table ---');
+// The five table actions, against a REAL table - which is where they can only be judged. A 3x2 grid with its cells
+// labelled so a row or a column can be named in an expectation rather than counted.
+const grid = () => ({
+  type: 'table',
+  head: ['H1', 'H2', 'H3'],
+  rows: [['a', 'b', 'c'], ['d', 'e', 'f']],
+});
+const cell = (row, column) => ({ row, column });
+const shape = (table) => [table.head, ...table.rows];
+
+// Every one of them does something to a table, which is the half the paragraph loop above cannot ask for.
+TABLE_ACTIONS.forEach((action) => {
+  check(
+    `${action.id} changes the table`,
+    blocksToMarkdown(applyBlockCommand([grid()], 0, { ...action, cell: cell(1, 1) }).blocks) !==
+      blocksToMarkdown([grid()]),
+    true
+  );
+});
+// ...AND NONE OF THEM DOES ANYTHING TO ANYTHING ELSE. That is the refusal that keeps a stale screen from reshaping a
+// document: the toolbar only shows these inside a table, and a paragraph is not one.
+TABLE_ACTIONS.forEach((action) => {
+  check(
+    `and ${action.id} leaves a paragraph alone`,
+    blocksToMarkdown(applyBlockCommand(paragraph(), 0, { ...action, cell: cell(1, 1) }).blocks),
+    'Words'
+  );
+});
+// THE REFUSAL ITSELF, by IDENTITY - because the markdown comparison above cannot see it. A paragraph serializes its
+// `text` and ignores any other field, so a command that wrongly returned `{ ...paragraph, rows: [...] }` would produce
+// the same markdown and pass every check here while quietly bending the shape of the block. What the DISPATCHER relies
+// on is that a refused command hands back the very object it was given - that is how "nothing to do" is told from
+// "reshaped" - so that is what is asserted, for every table action, against a block that is not a table.
+check(
+  'and a table command on anything else hands back the same block, which is how the dispatcher tells it did nothing',
+  TABLE_ACTIONS.every((action) => {
+    const notATable = { type: 'paragraph', text: 'Words' };
+    return applyTableCommand(notATable, { ...action, cell: cell(1, 1) }) === notATable;
+  }),
+  true
+);
+const oneTable = grid();
+check(
+  'while on a real table it hands back a new one, which is how the dispatcher tells it did something',
+  applyTableCommand(oneTable, { id: 'tableAddRow', cell: cell(1, 1) }) !== oneTable,
+  true
+);
+
+// A row lands BELOW the row the caret is in, which is what "Add row below" says.
+check(
+  'a new row goes below the one the caret is in',
+  shape(applyTableCommand(grid(), { id: 'tableAddRow', cell: cell(1, 0) })),
+  [['H1', 'H2', 'H3'], ['a', 'b', 'c'], ['', '', ''], ['d', 'e', 'f']]
+);
+check(
+  'and it is the full width of the table',
+  applyTableCommand(grid(), { id: 'tableAddRow', cell: cell(2, 0) }).rows[2].length,
+  3
+);
+check(
+  'asking for a row in the header still adds to the body',
+  shape(applyTableCommand(grid(), { id: 'tableAddRow', cell: cell(0, 0) })),
+  [['H1', 'H2', 'H3'], ['', '', ''], ['a', 'b', 'c'], ['d', 'e', 'f']]
+);
+// A column lands to the RIGHT of the caret's, in every row including the header.
+check(
+  'a new column goes to the right of the one the caret is in',
+  shape(applyTableCommand(grid(), { id: 'tableAddColumn', cell: cell(1, 0) })),
+  [['H1', '', 'H2', 'H3'], ['a', '', 'b', 'c'], ['d', '', 'e', 'f']]
+);
+
+// DELETING, which is the half that was impossible before: the caret's row, or its column.
+check(
+  'the row the caret is in can be deleted',
+  shape(applyTableCommand(grid(), { id: 'tableRemoveRow', cell: cell(1, 0) })),
+  [['H1', 'H2', 'H3'], ['d', 'e', 'f']]
+);
+check(
+  'the column the caret is in can be deleted, header and all',
+  shape(applyTableCommand(grid(), { id: 'tableRemoveColumn', cell: cell(1, 1) })),
+  [['H1', 'H3'], ['a', 'c'], ['d', 'f']]
+);
+// THE HEADER ROW IS NOT DELETABLE, and this is the reason: a table with no header has its first body row silently
+// promoted to one by the parser on the next round trip, so somebody's data would become a heading they never wrote.
+// Promoting it here does the same thing deliberately, and visibly, instead of by accident.
+check(
+  'deleting the header row promotes the first body row rather than leaving none',
+  shape(applyTableCommand(grid(), { id: 'tableRemoveRow', cell: cell(0, 0) })),
+  [['a', 'b', 'c'], ['d', 'e', 'f']]
+);
+check(
+  'and with no body to promote, the header stays',
+  shape(applyTableCommand({ type: 'table', head: ['H1'], rows: [] }, { id: 'tableRemoveRow', cell: cell(0, 0) })),
+  [['H1']]
+);
+
+// THE REFUSALS. Each returns the table it was given - the SAME object, so the caller can tell "nothing to do" from
+// "reshaped", which is what the dispatcher uses to leave the document alone.
+check(
+  'the last column is not deletable, because a table of no cells is not a table',
+  applyTableCommand({ type: 'table', head: ['H1'], rows: [['a']] }, { id: 'tableRemoveColumn', cell: cell(1, 0) }).head,
+  ['H1']
+);
+check(
+  'a column that is not there is not a crash',
+  applyTableCommand(grid(), { id: 'tableRemoveColumn', cell: cell(1, 9) }).head,
+  ['H1', 'H2', 'H3']
+);
+check(
+  'a row that is not there is not a crash',
+  applyTableCommand(grid(), { id: 'tableRemoveRow', cell: cell(9, 0) }).rows.length,
+  2
+);
+check(
+  'an action with no cell does not guess',
+  shape(applyTableCommand(grid(), { id: 'tableRemoveRow' })),
+  [['H1', 'H2', 'H3'], ['a', 'b', 'c'], ['d', 'e', 'f']]
+);
+// A ragged table - which the model allows, because the renderer pads on the way out - is padded before it is edited, so
+// an edit does not write the raggedness back as a change of its own.
+check(
+  'a short row is padded before it is edited',
+  shape(applyTableCommand({ type: 'table', head: ['H1', 'H2'], rows: [['a']] }, { id: 'tableAddRow', cell: cell(1, 0) })),
+  [['H1', 'H2'], ['a', ''], ['', '']]
+);
+
+// DELETING THE TABLE ITSELF, through the dispatcher, because that is the path the toolbar takes.
+check(
+  'the whole table can be removed',
+  blocksToMarkdown(applyBlockCommand([...paragraph(), grid()], 1, { id: 'tableRemove' }).blocks),
+  'Words'
+);
+check(
+  'leaving the blocks around it alone',
+  applyBlockCommand([...paragraph(), grid(), ...paragraph()], 1, { id: 'tableRemove' }).blocks.length,
+  2
+);
+check(
+  // The document cannot become empty: the surface needs somewhere for the caret to be, and `blocksFromHtml` says the
+  // same thing for an empty surface.
+  'and removing the only block leaves a paragraph to type into',
+  applyBlockCommand([grid()], 0, { id: 'tableRemove' }).blocks.map((block) => block.type),
+  ['paragraph']
 );
 
 console.log('\n--- the toolbar acts on markdown text (Markdown mode) ---');
@@ -437,7 +592,7 @@ const readerSource = readFileSync(path.resolve(process.cwd(), 'src/components/Ma
 // between them: a name with no mapping would be a toolbar button that renders nothing. The five callouts are a MENU
 // rather than five buttons, which is why they are not in this list - the menu's own trigger has its icon inline.
 const iconMap = /const ICONS = \{([\s\S]*?)\};/.exec(editorSource)?.[1] || '';
-const buttonActions = [...INLINE_ACTIONS, ...BLOCK_ACTIONS, ...INSERT_ACTIONS];
+const buttonActions = [...INLINE_ACTIONS, ...BLOCK_ACTIONS, ...INSERT_ACTIONS, ...TABLE_ACTIONS];
 const unmapped = buttonActions
   .map((action) => action.icon)
   .filter((name) => !new RegExp(`(^|[\\s{])${name}[,:]`).test(iconMap));
@@ -483,6 +638,59 @@ checkIs(
   'and the surface is only rebuilt for an external change',
   /asText === renderedMarkdown\.current/.test(editorSource),
   'the caret would be reset on every pass'
+);
+
+// ---------------------------------------------------------------------------
+// The three faults reported against this component, each pinned so it cannot come back.
+// ---------------------------------------------------------------------------
+console.log('\n--- the editor\u2019s own reported faults ---');
+// 1. Clicking a toolbar button scrolled the frame to the bottom of the document. Taking focus back from the button made
+//    the browser scroll the nearest scrollable ancestor - the editor's modal frame - to reveal the textarea, which is
+//    taller than the frame. `preventScroll` is the whole fix, and the assertion is that focus is never called without it.
+checkIs(
+  'focus is taken back without scrolling the frame to the bottom of the document',
+  /textarea\.focus\(\{ preventScroll: true \}\)/.test(editorSource) &&
+    !/textarea\.focus\(\)/.test(editorSource) &&
+    !/surface\.focus\(\);/.test(editorSource),
+  'a toolbar press would jump to the end of the document again'
+);
+// 2. Choosing a callout left the menu open, because only the block path closed it and in Markdown mode every button goes
+//    through the text path. The close now lives in `runAction`, which is the one place every button passes through.
+checkIs(
+  'the callout menu closes for every toolbar action, in either mode',
+  /const runAction = \(action\) => \{[\s\S]{0,300}setShowCallouts\(false\);/.test(editorSource),
+  'choosing a callout in Markdown mode would leave the menu open'
+);
+checkIs(
+  // ...and it closes on a click elsewhere or Escape, which is what every other menu in the app does.
+  'and it closes when the author clicks away or presses Escape',
+  /document\.addEventListener\('mousedown', close\)/.test(editorSource) &&
+    /event\.key === 'Escape'/.test(editorSource) &&
+    /calloutRef\.current\.contains\(event\.target\)/.test(editorSource),
+  'the menu would only ever close from its own trigger'
+);
+// 3. The spacing in Write mode did not match what a member reads. The surface now STARTS from the reader's body classes,
+//    so the gap between blocks, the type size and the leading are one declaration rather than two that can drift.
+checkIs(
+  'the writing surface is styled with the reader\u2019s own body classes',
+  EDITOR_SURFACE_CLASSES.includes(BLOCK_CLASSES.body) && EDITOR_SURFACE_CLASSES.includes(EDITOR_CHROME_CLASSES),
+  'the editor would lay out with its own typography again'
+);
+check(
+  'and the chrome is kept, because an editing surface needs it',
+  ['min-h-[16rem]', 'rounded-xl', 'focus:ring-2'].filter((token) => EDITOR_CHROME_CLASSES.includes(token)).length,
+  3
+);
+check(
+  'so the paragraph gap is the reader\u2019s, not something the editor made up',
+  BLOCK_CLASSES.body.includes('space-y-3') && BLOCK_CLASSES.body.includes('text-sm'),
+  true
+);
+checkIs(
+  'the table\u2019s own toolbar is offered only inside a table',
+  /mode === 'write' && activeBlock === 'table' && \(/.test(editorSource) &&
+    /TABLE_ACTIONS\.map\(/.test(editorSource),
+  'the table buttons would be offered where they do nothing'
 );
 
 console.log('\n--- the toolbar table, against the parser and the styles ---');

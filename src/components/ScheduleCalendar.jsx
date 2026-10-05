@@ -5,7 +5,7 @@ import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
 import RankIcon from './RankIcon';
 import { rowTimeText, templateTimeText, timeToMinutes, prettyRange, shiftTimeLabel } from '../utils/shiftTime';
-import { WEEKDAYS, MONTHS, DAY_ORDER } from '../utils/calendarConstants';
+import { WEEKDAYS, MONTHS, DAY_ORDER, monthGridCells } from '../utils/calendarConstants';
 import { desktopViewport, subscribeViewport } from '../utils/viewport';
 import { isShiftDay } from '../utils/shiftPlacement';
 import EventPill from './EventPill';
@@ -22,6 +22,7 @@ import { submitShiftOffer } from '../services/api';
 import ViewToggle from './ViewToggle';
 import ShiftOfferModal from './ShiftOfferModal';
 import ScheduleItemModal from './ScheduleItemModal';
+import MonthPickerModal from './MonthPickerModal';
 import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
 import PrintableSchedule from './PrintableSchedule';
 import MemberName from './MemberName';
@@ -100,6 +101,10 @@ export default function ScheduleCalendar({
   // filled and event pills open this; open pills keep going straight to the offer modal, which is the same
   // layout plus the one action that pill has.
   const [detailTarget, setDetailTarget] = useState(null);
+  // Whether the month picker is up. Only ever opened from a DAY view (see the toolbar), where stepping a day at a time is
+  // otherwise the only way to reach a day that is not today - and "the 14th of next month" was fourteen presses and a
+  // month boundary. Local to this component like every other temporary view control here.
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -232,13 +237,11 @@ export default function ScheduleCalendar({
 
   // Build the MONTH grid: leading blanks, then one cell per day, then trailing blanks. The day view draws one of these
   // days - `cells` below picks which - rather than a second renderer, so a change to how a day is drawn cannot reach one
-  // view and miss the other.
-  const firstWeekday = new Date(year, month, 1).getDay();
+  // view and miss the other. Built by `monthGridCells` (utils/calendarConstants), which the month picker uses too.
+  const monthCells = monthGridCells(year, month);
+  // How many days the month has: the open-slot pass below walks the month by day, and it is the same date arithmetic
+  // the grid above is built from.
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthCells = [];
-  for (let i = 0; i < firstWeekday; i++) monthCells.push(null);
-  for (let day = 1; day <= daysInMonth; day++) monthCells.push(new Date(year, month, day));
-  while (monthCells.length % 7 !== 0) monthCells.push(null);
 
   // WHICH DAYS ARE DRAWN: every day of the month, or the one day on screen. `viewDate` rather than a leading blank,
   // because it is a real date - so the day view never has a blank cell to draw and the day it shows is the day the
@@ -483,6 +486,18 @@ export default function ScheduleCalendar({
   const goNext = () => goBy(1);
   const goToday = () => goTo(now);
 
+  // A DAY CHOSEN FROM THE PICKER, which moves the view the same way Today does - through the slide, so the day it lands
+  // on arrives the way a stepped one does rather than appearing. `goTo` takes a Date, and the picker hands back a key.
+  //
+  // THE READ IS THE VIEW'S, unchanged: picking a day inside the month on screen asks the reader for nothing, and picking
+  // one outside it asks for that month - exactly as walking there with the arrows would.
+  const chooseDay = (dateKey) => {
+    const [y, m, d] = String(dateKey).split('-').map(Number);
+    if (!y || !m || !d) return;
+    goTo(new Date(y, m - 1, d));
+    setPickerOpen(false);
+  };
+
   return (
     <div className="space-y-6">
       {/* The month the member is looking at is read when they look at it (no schedule travels with the sign-in), so this is
@@ -526,6 +541,25 @@ export default function ScheduleCalendar({
           >
             Today
           </button>
+
+          {/* CHOOSE A DAY, which a day view needs and a month view does not: the whole month is already on screen there, so
+              a picker over it would be a second grid saying what the first one says. In a day view it is the difference
+              between fourteen presses and one. */}
+          {dayView && (
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              aria-label="Choose a day"
+              title="Pick a day from the month"
+              className="ml-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700"
+            >
+              {/* The word is dropped below `sm`, where the row is arrows, the day's name, Today and Print already - the
+                  icon and its tooltip carry it there, and the `aria-label` carries it for a screen reader at every
+                  width. From `sm` up there is room for it. */}
+              <CalendarDays className="w-4 h-4" />
+              <span className="hidden sm:inline">Day</span>
+            </button>
+          )}
 
           {/* Prints the month the day falls in, whatever unit is on screen: a printed sheet is a month - that is what a
               member sticks on the fridge - and the whole month is already in hand, so this costs nothing to offer here. */}
@@ -907,6 +941,19 @@ export default function ScheduleCalendar({
           }
           icon={detailTarget.kind}
           onClose={() => setDetailTarget(null)}
+        />
+      )}
+
+      {/* The month, to pick a day from. Mounted only while it is open, so the calendar behind it is untouched and
+          there is no state to reset. `viewDate` is what it opens on, so the day the member is reading is marked in
+          it rather than being a month they have to find again. */}
+      {pickerOpen && (
+        <MonthPickerModal
+          viewDate={viewDate}
+          selectedKey={viewDayKey}
+          todayKey={todayKey}
+          onPick={chooseDay}
+          onClose={() => setPickerOpen(false)}
         />
       )}
 

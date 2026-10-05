@@ -69,7 +69,23 @@ export const BLOCK_CLASSES = {
   tableCell: 'py-1.5 pr-3 align-top',
 };
 
-// The editor surface adds one thing the reader does not need: a visible edge around the block the caret is in, so
-// an author can tell a heading from a bold paragraph. Only the editor uses this.
-export const EDITOR_SURFACE_CLASSES =
-  'min-h-[16rem] w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
+// The editor surface is the READER'S OWN BODY, plus the chrome an editing surface needs and a reader does not.
+//
+// THAT COMPOSITION IS THE FIX FOR A REPORTED BUG: "the rendered spacing in Write mode does not match what members see".
+// It did not, because the surface carried no typography of its own beyond a text colour and its own padding - so
+// paragraphs sat one against the next with NO gap where the reader has `space-y-3`, the text was the browser's default
+// size instead of `text-sm`, and the leading was the default rather than `leading-relaxed`. A heading in the editor
+// looked like a slightly bolder line than a paragraph rather than a new section, which is exactly the difference an
+// author is trying to judge when they press Save.
+//
+// Starting from `BLOCK_CLASSES.body` rather than restating it is what stops this drifting again: the spacing between
+// blocks, the size of the type and the colour it is drawn in are now the SAME DECLARATION the reader uses, so there is
+// no second list to fall behind. The `text-*` and `leading-*` on the children (a heading's size, a table cell's) still
+// win where they are set, exactly as they do on the reading side.
+//
+// The chrome stays: a minimum height so an empty document is still a place to click, the border and rounding, and the
+// focus ring that says the surface has the caret.
+export const EDITOR_CHROME_CLASSES =
+  'min-h-[16rem] w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-red-500';
+
+export const EDITOR_SURFACE_CLASSES = `${EDITOR_CHROME_CLASSES} ${BLOCK_CLASSES.body}`;

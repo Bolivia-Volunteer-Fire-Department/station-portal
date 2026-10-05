@@ -209,6 +209,9 @@ export const ROUTED_FEATURES = {
       'SIGN_CHECKLIST_ITEM',
       'VERIFY_CHECKLIST_ITEM',
       'VERIFY_CHECKLIST_REMAINING',
+      // The document-level twin of the two above: confirming the signature a document carries as a whole, rather than
+      // an item of a checklist. Same permission, same two identities, one row instead of many.
+      'VERIFY_DOCUMENT_SIGNATURE',
       'ADMIN_REMOVE_DOCUMENT_SIGNATURE',
       // Recording what a paper file says for a member who did the work before this app existed. A member-module action
       // rather than an Administration one, like SET_DOCUMENT_ASSESSMENT_SCORE below and for the same reason: it is
@@ -621,6 +624,20 @@ const DISPATCH = {
     return ok(await verifyChecklistRemaining({ verifierId: uid, documentId: body.document_id, memberId: body.user_id }));
   },
 
+  // The document-level twin of VERIFY_CHECKLIST_ITEM: the same two identities and the same permission, and no item,
+  // because the row being confirmed is the document's own signature. `body.user_id` is the MEMBER whose signature it
+  // is; `uid` is the verifier, always, which is what makes "somebody else checked it" a property of the shape.
+  VERIFY_DOCUMENT_SIGNATURE: async (body, uid) => {
+    const { verifyDocumentSignature } = await writes();
+    return ok(
+      await verifyDocumentSignature({
+        verifierId: uid,
+        documentId: body.document_id,
+        memberId: body.user_id,
+      })
+    );
+  },
+
   // The administrator's half of documents: removing a signature, and the two pieces of housekeeping. All three are
   // ordinary writes - the rules are the permission (`can_manage_documents`) - and each writes as little as it can: one
   // row deleted, a `folder` field, a `sort_order`, so none of them can be a way to save a document.
@@ -727,7 +744,12 @@ const DISPATCH = {
     const id = await makeOffer({
       userId: uid,
       scheduleId,
+      // THE OFFER KEEPS THE SHIFT IT IS FOR. `schedule_template_id` was used here to build the slot key and then thrown
+      // away, which is how the approvals queue ended up unable to show a time for any offer raised against a template
+      // occurrence - see the note on `offerTemplateId`, and on `makeOffer` itself.
+      templateId: String(body.schedule_template_id || ''),
       dateFrom: body.date_from,
+      dateTo: body.date_to,
       assignmentId: body.assignment_id,
       slotKey,
     });

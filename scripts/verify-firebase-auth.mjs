@@ -140,6 +140,13 @@ const main = async () => {
   await signIn(username, 'temporary-passw0rd');
   const flagged = await call('whoami');
   check('the member is asked to change it', flagged.mustChangePassword, true);
+  // BOTH HALVES, and this is the assertion whose absence let the reported bug through. The flag is stored twice: the
+  // CLAIM, which `whoami` reports, and `users_private.is_change_password_on_login`, which is the copy the sign-in
+  // payload hands the app as `currentUser` and therefore the copy the forced-change modal actually gates on. A harness
+  // that only asked `whoami` agreed with a backend that only cleared the claim - so the member was asked to change
+  // their password at every sign-in, for ever, and every check here stayed green.
+  const flaggedPrivate = await getDoc(doc(db, 'users_private', created.userId));
+  check('and the officer-visible column agrees', flaggedPrivate.data().is_change_password_on_login, true);
 
   // --- and the member changes it themselves ---
   console.log('\n--- the member changes it themselves ---');
@@ -147,6 +154,10 @@ const main = async () => {
   await call('completePasswordChange');
   const cleared = await call('whoami');
   check('the request to change it comes off', cleared.mustChangePassword, false);
+  // THE HALF THE APP READS. `signInAsMember` spreads `users_private` onto the user object the app gates on, so a
+  // column left TRUE here is a member who is asked again at the next sign-in - which is exactly what was reported.
+  const clearedPrivate = await getDoc(doc(db, 'users_private', created.userId));
+  check('and the column the app gates on comes off with it', clearedPrivate.data().is_change_password_on_login, false);
   await signOut(auth);
   checkIs(
     'the temporary password stops working too',
@@ -319,6 +330,27 @@ const main = async () => {
   const priv = await getDoc(doc(db, 'users_private', 'u2'));
   check('and is written to the private half', priv.data().username, 'bo-renamed');
   check('with the flag as a real boolean', priv.data().is_change_password_on_login, true);
+  // AND THE CLAIM MOVES WITH IT, which is the other half of the same one-writer rule. The checkbox is how an officer
+  // says "ask this member to change their password" OR "stop asking"; writing only their own column would leave the
+  // member's token carrying the opposite answer, so the modal and the Users tab would disagree about the same member.
+  //
+  // ASSERTED THROUGH `accountState` - the token - rather than through the user object `signInAsMember` returns. That
+  // object is assembled from a roster read which this harness's environment intermittently fails with
+  // `failed-precondition`, and the failure is swallowed on purpose, so the field silently reads false. The claim is the
+  // thing being tested, and this reads it from the source.
+  await signInAsMember('bo-renamed', DEMO_PASSWORD);
+  const boState = await accountState();
+  check('and the claim an officer sets turns the member\u2019s own gate on', boState.mustChangePassword, true);
+  // ...and off again, which is what un-ticking the box has to do: with the claim left behind, an officer clearing the
+  // flag would watch the member be held at the modal every sign-in - the reported bug, mirrored.
+  await signIn('jane');
+  await updateMemberAccount({ userId: 'u2', isChangePasswordOnLogin: false });
+  const boCleared = await getDoc(doc(db, 'users_private', 'u2'));
+  check('while clearing it clears their column too', boCleared.data().is_change_password_on_login, false);
+  await signInAsMember('bo-renamed', DEMO_PASSWORD);
+  const boClearedState = await accountState();
+  check('so the member is not asked again', boClearedState.mustChangePassword, false);
+  await signOut(auth);
   const renamedSignIn = await signInWithEmailAndPassword(auth, `bo-renamed@${EMAIL_DOMAIN}`, DEMO_PASSWORD).then(
     () => 'signed in',
     (error) => String(error.code || '')

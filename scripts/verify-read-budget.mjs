@@ -276,9 +276,16 @@ checkIs(
     /where\('status', 'in', OFFER_STATUSES_ON_A_CALENDAR\)/.test(payloadSource)
 );
 checkIs('the officer offers read is bounded to the pending ones', /pendingOffers\(firestore\(\)\)/.test(readsSource));
+// POSITIONAL, not a character budget. This check used to allow a fixed 400-character window between `setDoc(created, {`
+// and `status: 'pending'`, and the window closed on it when explanatory comments were added to `makeOffer` - the write
+// was correct and now more correct, and the check went red saying it was missing. What it means to assert is that the
+// object being written carries the field, so it reads to the END OF THAT OBJECT rather than counting characters.
+const offerWriteAt = writesSource.indexOf('setDoc(created, {');
+const offerWrite = offerWriteAt < 0 ? '' : writesSource.slice(offerWriteAt, writesSource.indexOf('});', offerWriteAt));
 checkIs(
   'and every offer the app creates carries the status that filter needs',
-  /setDoc\(created, \{[\s\S]{0,400}status: 'pending'/.test(writesSource)
+  /status: 'pending'/.test(offerWrite),
+  'the offers read is bounded to `status`, so an offer written without one is an offer nobody sees'
 );
 const liveCollections = [...liveSource.matchAll(/collection\(db, '([a-z_]+)'\)/g)].map((match) => match[1]);
 check('the live collections are the small and audience ones', [...new Set(liveCollections)].sort(), [
@@ -425,6 +432,12 @@ checkIs('and the schedule board reads the schedule rows, not just its templates'
 const NAME_DRAWING_TABS = [
   'schedule', 'assignments', 'clock', 'certifications', 'availability', 'approvals',
   'announcements', 'events', 'training', 'system-log',
+  // DOCUMENTS WAS MISSING FROM THIS LIST, and that is why the gap it describes went unnoticed until somebody
+  // tried to use the screen: the tab names members in three places - the signature report, the verification
+  // panel and the back-fill panel - and the back-fill panel's member list is not a label but its only control.
+  // With no directory it renders EMPTY rather than wrong, so the tab looks complete and one dropdown simply has
+  // nothing in it. A tab belongs here the moment it renders a member's name, which is the rule this list is.
+  'documents',
 ];
 check(
   'every tab that draws member names reads the directory',

@@ -25,6 +25,7 @@ import {
   signDocument,
   verifyChecklistItem,
   verifyChecklistRemaining,
+  verifyDocumentSignature,
 } from '../services/api';
 import { toast } from '../utils/toast';
 import ConfirmModal from './ConfirmModal';
@@ -35,14 +36,17 @@ import {
   assessmentScoreProblem,
   documentFolder,
   documentLinkUrl,
+  documentRequiresVerification,
   documentSignatureState,
   documentUpdatedLabel,
+  documentVerificationState,
   documentsInFolder,
   filterDocuments,
   folderSummaries,
   isAssessment,
   isChecklist,
   isLink,
+  membersAwaitingDocumentVerification,
   memberSignatureFor,
   normalizeAssessmentScore,
   normalizeChecklistItemList,
@@ -470,6 +474,9 @@ export default function DocumentsModule({
   const [verifyTargetId, setVerifyTargetId] = useState('');
   const [verifyingItemId, setVerifyingItemId] = useState('');
   const [verifyingAll, setVerifyingAll] = useState(false);
+  // The member whose DOCUMENT signature is being confirmed. Separate from the item above because it is a different
+  // kind of row: one confirmation for the whole document rather than one per line.
+  const [verifyingMemberId, setVerifyingMemberId] = useState('');
 
   const userId = currentUser?.id || '';
 
@@ -550,6 +557,10 @@ export default function DocumentsModule({
 
   const documentIsChecklist = isChecklist(openDocument || {});
   const documentIsAssessment = isAssessment(openDocument || {});
+  // Whether this document's signature is one a verifier has to confirm - the author's checkbox, through the one rule
+  // that decides it (utils/documents). It decides three things below: what the signature block says, whether the
+  // verification panel appears, and whether it lists members or items.
+  const documentNeedsConfirmation = documentRequiresVerification(openDocument || {});
   const openDocumentId = openDocument?.id || '';
 
 
@@ -717,14 +728,27 @@ export default function DocumentsModule({
     return signatureIsStale(shownSignature, openDocument || {});
   }, [viewingSomeoneElse, openDocument, shownSignature]);
 
+  // WHAT HAS HAPPENED TO THAT SIGNATURE SINCE: whether a verifier has confirmed it, who, and when. Read from the
+  // records the card is already showing rather than from a second request - the member's own rows include the verifier
+  // rows recorded ABOUT them (the read is by member), so both the reader's own view and a verifier looking at somebody
+  // else's are answered from the same list. Null unless the document asks for a confirmation.
+  const shownVerification = useMemo(
+    () =>
+      documentNeedsConfirmation
+        ? documentVerificationState(recordSignatures, openDocumentId, recordUserId)
+        : null,
+    [documentNeedsConfirmation, recordSignatures, openDocumentId, recordUserId]
+  );
+
   // Whether the reader may TICK anything. Looking at another member's records is read-only in the strongest sense:
   // their ticks belong to them, and only they can produce one, from their own sign-in.
   const canTickItems = itemsAreSignable && !viewingSomeoneElse;
 
-  // The verification panel's data: read when a checklist is open and the reader may verify, and cleared
-  // otherwise so a stale list can never be shown against another document.
+  // The verification panel's data: read when something open can be confirmed - a checklist's items, or a document whose
+  // signature the author asked to have checked - and cleared otherwise so a stale list can never be shown against
+  // another document.
   useEffect(() => {
-    if (!canVerify || !documentIsChecklist || !openDocumentId) {
+    if (!canVerify || !(documentIsChecklist || documentNeedsConfirmation) || !openDocumentId) {
       setPanelItems([]);
       setPanelSignatures([]);
       setPanelError('');
@@ -753,7 +777,7 @@ export default function DocumentsModule({
     return () => {
       canceled = true;
     };
-  }, [canVerify, documentIsChecklist, openDocumentId, token]);
+  }, [canVerify, documentIsChecklist, documentNeedsConfirmation, openDocumentId, token]);
 
   // Ticking an item that is already signed is refused here rather than by the server, and says why: signatures
   // are add-only, so the only thing that button could do is nothing.
@@ -854,6 +878,26 @@ export default function DocumentsModule({
     }
   };
 
+  // Confirming the DOCUMENT's own signature - the same act as confirming an item of a checklist, once, for the
+  // document as a whole. Reloaded from the server's answer for the same reason as above: the rows the panel draws and
+  // the count it prints must never be this screen's guess about what happened.
+  const handleVerifyDocument = async (memberId) => {
+    const documentId = openDocumentId;
+    if (!documentId || !memberId || verifyingMemberId) return;
+
+    setVerifyingMemberId(memberId);
+    try {
+      const result = await verifyDocumentSignature(documentId, memberId, token);
+      if (!result?.success) throw new Error(result?.message || 'Could not record the confirmation.');
+      setPanelSignatures(normalizeSignatureList(result.signatures));
+      toast.success(result.already_verified ? 'That was already confirmed.' : 'Signature confirmed.');
+    } catch (err) {
+      toast.error(err?.message || 'Could not record the confirmation.');
+    } finally {
+      setVerifyingMemberId('');
+    }
+  };
+
   // Signing is a deliberate act, so it goes through a confirmation the member has to answer - and the answer is
   // sent to the server, which stamps the date and both identities. Nothing about who signed is decided here.
   const handleSign = async () => {
@@ -915,6 +959,14 @@ export default function DocumentsModule({
   const verifyTargetQueue = useMemo(
     () => (verifyTargetId ? verificationQueue(panelItems, panelSignatures, verifyTargetId) : null),
     [panelItems, panelSignatures, verifyTargetId]
+  );
+
+  // WHO STILL NEEDS CONFIRMING, on a document whose signature is confirmed as a whole. The same list the admin panel
+  // builds, from the same helper, so the two screens cannot disagree about who is waiting - and it is empty unless the
+  // document asks for a confirmation at all.
+  const documentVerifyQueue = useMemo(
+    () => (documentNeedsConfirmation ? membersAwaitingDocumentVerification(openDocument || {}, panelSignatures, userId) : []),
+    [documentNeedsConfirmation, openDocument, panelSignatures, userId]
   );
 
   const outstanding = useMemo(
@@ -1327,6 +1379,30 @@ export default function DocumentsModule({
                             <CheckCircle2 className="w-4 h-4" />
                             {signatureDateLabel(shownSignature, timeFormat) || 'Signed'}
                           </p>
+                          {/* THE SECOND SIGNATURE, where the author asked for one: whether anybody has confirmed it
+                              yet. It sits directly under the date because that is what it is a judgment about - and it
+                              is the reader's answer to "is my signature done?", which a bare "Signed 12 Mar" does not
+                              give when a verifier is still to look. */}
+                          {shownVerification && (
+                            shownVerification.verified ? (
+                              <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                                <BadgeCheck className="w-3.5 h-3.5" />
+                                {checklistVerifiedLabel(
+                                  shownVerification,
+                                  shownVerification.verifiedByUserId
+                                    ? userLabelFor(shownVerification.verifiedByUserId)
+                                    : '',
+                                  timeFormat
+                                )}
+                              </p>
+                            ) : (
+                              <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                                {viewingSomeoneElse
+                                  ? 'Waiting for a verifier to confirm this signature.'
+                                  : 'Waiting for a verifier to confirm your signature. Nothing is asked of you — somebody with the “Verify signatures” permission confirms it.'}
+                              </p>
+                            )
+                          )}
                           {shownSignatureStale && (
                             <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
                               {viewingSomeoneElse
@@ -1456,7 +1532,7 @@ export default function DocumentsModule({
 
                       The reader's OWN checklist is never offered: the server refuses self-verification, so listing
                       it would be listing a button that always fails. */}
-                  {canVerify && isChecklist(openDocument) && (
+                  {canVerify && (isChecklist(openDocument) || documentNeedsConfirmation) && (
                     <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4">
                       <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
                         <ShieldCheck className="w-4 h-4" />
@@ -1474,13 +1550,55 @@ export default function DocumentsModule({
                         <p className="mt-2 text-sm font-medium text-red-600 dark:text-red-400">{panelError}</p>
                       )}
 
-                      {!panelLoading && !panelError && verifyQueue.length === 0 && (
+                      {/* A DOCUMENT: one signature per member, so the list is the whole job - no expanding and no
+                          "verify all", because each row already IS all of it. The date shown is what the confirmation
+                          is being given against. */}
+                      {!panelLoading && !panelError && documentNeedsConfirmation && (
+                        <>
+                          {documentVerifyQueue.length === 0 ? (
+                            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                              Nothing is waiting to be confirmed on this document.
+                            </p>
+                          ) : (
+                            <>
+                              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Signatures nobody has confirmed yet. You cannot confirm your own.
+                              </p>
+                              <ul className="mt-3 space-y-1.5">
+                                {documentVerifyQueue.map((entry) => (
+                                  <li
+                                    key={entry.userId}
+                                    className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                                  >
+                                    <span className="min-w-0 flex-1 truncate font-medium text-slate-800 dark:text-slate-100">
+                                      {userLabelFor(entry.userId)}
+                                    </span>
+                                    <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                                      {signatureDateLabel({ signed_at: entry.signedAt }, timeFormat) || 'On file'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyDocument(entry.userId)}
+                                      disabled={Boolean(verifyingMemberId)}
+                                      className="shrink-0 rounded-xl border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                                    >
+                                      {verifyingMemberId === entry.userId ? 'Confirming…' : 'Confirm'}
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {!panelLoading && !panelError && !documentNeedsConfirmation && verifyQueue.length === 0 && (
                         <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                           Nothing is waiting to be verified on this checklist.
                         </p>
                       )}
 
-                      {!panelLoading && !panelError && verifyQueue.length > 0 && (
+                      {!panelLoading && !panelError && !documentNeedsConfirmation && verifyQueue.length > 0 && (
                         <>
                           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                             Signed items nobody has confirmed yet. You cannot verify your own checklist.

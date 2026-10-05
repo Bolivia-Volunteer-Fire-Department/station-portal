@@ -395,6 +395,81 @@ console.log('\n--- a narrow window: one day, and arrows that walk days ---');
   setViewportWidth(1024);
 }
 
+console.log('\n--- the month picker, which a day view has and a month view does not ---');
+{
+  // Reached the way a member reaches it, and the two claims that matter are about the READ: a day inside the month on
+  // screen is rows already in hand, and a day outside it is the month arrived at - exactly what walking there with the
+  // arrows costs. Anything else would make the shortcut more expensive than the walk it replaces.
+  setViewportWidth(375);
+  const otherDay = TODAY_DAY === 20 ? 21 : 20;
+  const nextYear = THIS_MONTH === 11 ? THIS_YEAR + 1 : THIS_YEAR;
+  const nextMonth = (THIS_MONTH + 1) % 12;
+  const { container, calls } = openCalendar({
+    [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: [rowOn(THIS_YEAR, THIS_MONTH, TODAY_DAY, ME)],
+    [`${nextYear}-${pad(nextMonth + 1)}`]: [rowOn(nextYear, nextMonth, 14, ME)],
+  });
+  await flush();
+
+  const openPicker = async () => {
+    fireEvent.click(inBody('button[aria-label="Choose a day"]'));
+    await flush();
+  };
+  // The day buttons carry their DATE as the label, which is what lets this press an exact day rather than counting
+  // cells - and what a screen reader announces, because "14" is not a day.
+  const dayButton = (dateKey) => inBody(`button[aria-label="${dateKey}"]`);
+
+  check('a day view offers the picker', Boolean(inBody('button[aria-label="Choose a day"]')), arrowLabels());
+  await openPicker();
+  check('and it opens a month of days to choose from', Boolean(inBody('[role="dialog"][aria-label="Choose a day"]')), 'no picker');
+  check(
+    'opening on the month on screen, so the day being read is in it',
+    (inBody('[role="dialog"] h2')?.textContent || '').includes(monthLabel(THIS_YEAR, THIS_MONTH)),
+    inBody('[role="dialog"] h2')?.textContent || 'no heading'
+  );
+  check('marking the day the screen is on', dayButton(dayKey(THIS_YEAR, THIS_MONTH, TODAY_DAY))?.getAttribute('aria-current'), 'date');
+
+  // A DAY INSIDE THE MONTH: the view moves and nothing is read, exactly as an arrow press.
+  const readsBeforePick = calls.length;
+  fireEvent.click(dayButton(dayKey(THIS_YEAR, THIS_MONTH, otherDay)));
+  await settle(container);
+  check('choosing a day moves the view to it', title() === dayLabelFor(THIS_YEAR, THIS_MONTH, otherDay), title());
+  check('and asks the reader for nothing, because the month is already in hand', calls.length === readsBeforePick, `${calls.length - readsBeforePick} read(s)`);
+  check('and the picker is gone once the day is chosen', !inBody('[role="dialog"][aria-label="Choose a day"]'), 'the picker stayed open');
+
+  // A DAY IN ANOTHER MONTH, which is the whole reason the picker can walk its own month: one press, and the month
+  // arrived at is read - the same read an arrow walk would have made, one month at a time.
+  await openPicker();
+  fireEvent.click(inBody('[role="dialog"] button[aria-label="Next month"]'));
+  await flush();
+  check(
+    'the picker can leave its own month without moving the screen behind it',
+    title() === dayLabelFor(THIS_YEAR, THIS_MONTH, otherDay),
+    'the calendar moved while the picker was only being browsed'
+  );
+  fireEvent.click(dayButton(dayKey(nextYear, nextMonth, 14)));
+  await settle(container);
+  check('and a day in another month takes the view there', title() === dayLabelFor(nextYear, nextMonth, 14), title());
+  check(
+    'reading that month, once, as walking there would have',
+    calls.length === readsBeforePick + 1 &&
+      calls[calls.length - 1].from === monthStart(nextYear, nextMonth) &&
+      calls[calls.length - 1].to === monthEnd(nextYear, nextMonth),
+    calls.map((c) => `${c.from}..${c.to}`).join(' | ')
+  );
+  check('drawing its day, with the shift it holds', /Firefighter 3/.test(gridOf(container).textContent || ''), gridOf(container).textContent?.slice(0, 120));
+
+  // A MONTH VIEW HAS NO PICKER: every day of the month is already on screen, so a button there would open a second grid
+  // saying what the first one says.
+  await act(async () => {
+    setViewportWidth(1024);
+  });
+  await flush();
+  check('and the calendar, which shows every day already, offers none', !inBody('button[aria-label="Choose a day"]'), arrowLabels());
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
 console.log('\n--- walking off the end of the month ---');
 {
   setViewportWidth(375);

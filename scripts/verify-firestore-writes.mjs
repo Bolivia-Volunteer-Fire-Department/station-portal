@@ -31,6 +31,9 @@ import { routeRead, routeWrite } from '../src/services/firestoreRouting.js';
 // The board's own swap helper: the entries below are built with the code the client runs, so this cannot drift from
 // what a swap really sends. It has no imports of its own, which is what makes it usable from here at all.
 import { swapSlotFields } from '../src/utils/scheduleDrop.js';
+// The approvals-row derivation, so the offers section can assert what the OFFICER'S TABLE shows rather than only what
+// the row holds: "the offer carries its template" is not the same claim as "the queue shows a time".
+import { describeShiftOffer } from '../src/utils/shiftOfferRow.js';
 // The checklist arithmetic, so the back-fill section can assert that the rows it writes move the member's own progress -
 // which is the claim that matters, and not the same as "the row exists".
 import { checklistProgress } from '../src/utils/checklists.js';
@@ -46,6 +49,7 @@ import {
   applyDocumentOrder,
   checklistItemSortOrder,
   documentOrderSignature,
+  documentVerificationState,
   groupDocumentsByFolder,
   normalizeChecklistItemList,
   pendingDocumentOrderPairs,
@@ -411,8 +415,43 @@ const main = async () => {
     slotKey: '2026-03-09|a1',
   });
   const offer = (await getDoc(doc(db, 'schedule_offers', offerId))).data();
-  check('the offer starts pending', offer.status, 'pending');
-  check('against the member who raised it', offer.user_id, 'u2');
+  check('and carries the shift it is for', offer.schedule_template_id, '');
+  // THE OFFER KEEPS THE SHIFT IT IS FOR, which is the reported bug at its source. An offer raised against a TEMPLATE
+  // OCCURRENCE has no schedule row - nothing is written until it is approved - so `schedule_template_id` is the only
+  // thing that says what the shift IS. `makeOffer` used to drop it while `slot_key` was built from it, so the approvals
+  // queue could not find the template, could not find its hours, and printed "Time not set" for every such offer while
+  // the same shift read "8:00 AM – 6:00 PM" on the calendar. Nothing looked broken because the calendar's pill matches
+  // on `slot_key`.
+  //
+  // Routed rather than called directly, because the routing is where the field was being thrown away.
+  const occurrenceId = await routeWrite('SUBMIT_SHIFT_OFFER', {
+    schedule_template_id: 't1',
+    date_from: '2026-03-16',
+    date_to: '2026-03-16',
+    assignment_id: 'a1',
+    schedule_id: '',
+  });
+  const occurrence = (await getDoc(doc(db, 'schedule_offers', occurrenceId.id))).data();
+  check('a template-occurrence offer carries the template it is for', occurrence.schedule_template_id, 't1');
+  check('and the end of its date range', occurrence.date_to, '2026-03-16');
+  check('with the slot key the calendar matches on still built from it', occurrence.slot_key, 'slot-2026-03-16-t1');
+
+  // ...AND THE OFFICER'S SCREEN CAN NOW READ IT, which is the claim that matters - "the row has a field" is not the same
+  // as "the table shows a time". The row is fed through the app's own describeShiftOffer with the real template, exactly
+  // as the approvals tab does, and the hours are asserted on what comes out.
+  const seededTemplate = (await getDoc(doc(db, 'schedule_templates', 't1'))).data();
+  const described = describeShiftOffer(
+    { ...occurrence, id: occurrenceId.id },
+    { schedule: [], scheduleTemplates: [{ ...seededTemplate, id: 't1' }], assignments: [], timeFormat: '12' }
+  );
+  check('so the shift\u2019s hours are what the queue shows', described.timeLabel, '8:00 AM – 6:00 PM');
+  check('and the shift reads under its own name', described.shiftLabel, 'Day Shift');
+  // THE SAME ROW WITHOUT THE FIELD - what is in the database from before this fix - still resolves, from the slot key.
+  const recovered = describeShiftOffer(
+    { ...occurrence, id: occurrenceId.id, schedule_template_id: '' },
+    { schedule: [], scheduleTemplates: [{ ...seededTemplate, id: 't1' }], assignments: [], timeFormat: '12' }
+  );
+  check('and an offer written before the field existed is recovered from its slot key', recovered.timeLabel, '8:00 AM – 6:00 PM');
   // The hole worth an explicit case: owning the offer must not mean being able to approve it. The first version of
   // this rule allowed exactly that, because "you own the row" covered every field including the status. Now it is a
   // function that refuses, so the refusal arrives as a callable error rather than a rules one.
@@ -937,6 +976,77 @@ const main = async () => {
   await signIn('bo');
   const memberVerifies = await routeWrite('VERIFY_CHECKLIST_ITEM', { document_id: 'doc5', item_id: 'it4', user_id: 'u1' });
   checkIs('and a member without the permission cannot write the row either', memberVerifies.success === false, JSON.stringify(memberVerifies).slice(0, 140));
+
+  // --- THE SECOND SIGNATURE: a document whose author asked for its signature to be confirmed -------------------------
+  //
+  // The same act as confirming a checklist item, one level up: the member signs the document, and somebody else
+  // confirms they looked. What the round trip has to prove is that the ROW lands with the shape every reader looks for -
+  // the empty item id, and the verifier's own id as the signer - and that the three refusals hold: confirming your own,
+  // confirming a signature nobody gave, and confirming on a document that never asked for it.
+  //
+  // The flag is set through the SDK rather than put in the seed because this writer READS THE DOCUMENT BACK before it
+  // writes anything: "does this document still ask for a second signature" is the author's stored decision, so a
+  // document written outside the app is exactly the shape under test.
+  await signIn('jane');
+  await setDoc(doc(firestore(), 'documents', 'doc6'), { requires_verification: true }, { merge: true });
+  const confirmedDocument = await routeWrite('VERIFY_DOCUMENT_SIGNATURE', { document_id: 'doc6', user_id: 'u2' });
+  checkIs('a verifier confirms a document signature', confirmedDocument.verified === 1, JSON.stringify(confirmedDocument).slice(0, 140));
+  const documentRows = await rowsOf(query(collection(firestore(), 'document_signatures'), where('document_id', '==', 'doc6')));
+  const documentConfirmation = documentRows.find((row) => row.signature_role === 'verifier');
+  check(
+    'and the row says who it is about and who checked it',
+    [documentConfirmation.user_id, documentConfirmation.signed_by_user_id],
+    ['u2', 'u1']
+  );
+  check('it is the document own row, carrying no item', documentConfirmation.checklist_item_id, '');
+  check(
+    'and it is a second row rather than an edit of the member own',
+    documentRows.filter((row) => row.user_id === 'u2').length,
+    2
+  );
+  check(
+    'so the app reads the signature as confirmed, by whom',
+    [
+      documentVerificationState(documentRows, 'doc6', 'u2').verified,
+      documentVerificationState(documentRows, 'doc6', 'u2').verifiedByUserId,
+    ],
+    [true, 'u1']
+  );
+  const confirmedAgain = await routeWrite('VERIFY_DOCUMENT_SIGNATURE', { document_id: 'doc6', user_id: 'u2' });
+  checkIs(
+    'confirming twice is a double click',
+    confirmedAgain.success === true && confirmedAgain.already_verified === true,
+    JSON.stringify(confirmedAgain).slice(0, 140)
+  );
+
+  // The first three refusals are the WRITER's, and they are different ones.
+  const ownDocumentSignature = await routeWrite('VERIFY_DOCUMENT_SIGNATURE', { document_id: 'doc6', user_id: 'u1' });
+  checkIs('nobody confirms their own signature', ownDocumentSignature.success === false, JSON.stringify(ownDocumentSignature).slice(0, 140));
+  const unsignedMember = await routeWrite('VERIFY_DOCUMENT_SIGNATURE', { document_id: 'doc6', user_id: 'u3' });
+  checkIs(
+    'nor one for a member who has not signed it - a confirmation of nothing is not a record',
+    unsignedMember.success === false,
+    JSON.stringify(unsignedMember).slice(0, 140)
+  );
+  const unaskedDocument = await routeWrite('VERIFY_DOCUMENT_SIGNATURE', { document_id: 'doc1', user_id: 'u2' });
+  checkIs(
+    'and a document that never asked for a confirmation is refused',
+    unaskedDocument.success === false,
+    JSON.stringify(unaskedDocument).slice(0, 140)
+  );
+
+  // The third is the RULES. The pair is valid - Jane signs the document - and a member who may not verify still cannot
+  // write the confirmation, which is what makes "nobody confirms other people's paperwork without the permission" a
+  // property of the data rather than of a screen.
+  const janeSignedDocument = await routeWrite('SIGN_DOCUMENT', { id: 'doc6' });
+  checkIs('an officer signs the document too', janeSignedDocument.signed === 1, JSON.stringify(janeSignedDocument).slice(0, 140));
+  await signIn('bo');
+  const memberConfirms = await routeWrite('VERIFY_DOCUMENT_SIGNATURE', { document_id: 'doc6', user_id: 'u1' });
+  checkIs(
+    'and a member without the permission cannot write the row either',
+    memberConfirms.success === false,
+    JSON.stringify(memberConfirms).slice(0, 140)
+  );
 
   // --- the administrator's half of documents: removal, folders, and a drag -------------------------------------------
   await signIn('jane');

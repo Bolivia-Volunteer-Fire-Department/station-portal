@@ -17,8 +17,13 @@ import {
   Minus,
   Pencil,
   Pilcrow,
+  Rows3,
+  Columns3,
   SquareCode,
   Table as TableIcon,
+  TableColumnsSplit,
+  TableRowsSplit,
+  Trash2,
   TextQuote,
 } from 'lucide-react';
 import Markdown from './Markdown';
@@ -29,6 +34,7 @@ import {
   CALLOUT_ACTIONS,
   INLINE_ACTIONS,
   INSERT_ACTIONS,
+  TABLE_ACTIONS,
   applyBlockCommand,
   applyTextCommand,
   blocksFromHtml,
@@ -73,6 +79,13 @@ const ICONS = {
   SquareCode,
   Table: TableIcon,
   Minus,
+  // The table row's five. `Rows3` and `Columns3` say "a grid" beside the split icons that add to one; `Trash2` is the
+  // remove, as it is on every other row in the app.
+  TableRowAdd: Rows3,
+  TableColumnAdd: Columns3,
+  TableRowRemove: TableRowsSplit,
+  TableColumnRemove: TableColumnsSplit,
+  TableRemove: Trash2,
 };
 
 // How long after the last keystroke the surface becomes markdown. Short enough for the character count to feel
@@ -99,6 +112,8 @@ export default function MarkdownEditor({
   const [draft, setDraft] = useState(() => String(value ?? ''));
   const [linkDraft, setLinkDraft] = useState(null);
   const [showCallouts, setShowCallouts] = useState(false);
+  // The callout menu's own element, so a click inside it can be told from a click outside. See the outside-click effect.
+  const calloutRef = useRef(null);
   const [activeBlock, setActiveBlock] = useState('paragraph');
   const [activeInline, setActiveInline] = useState([]);
 
@@ -201,6 +216,30 @@ export default function MarkdownEditor({
     return () => document.removeEventListener('selectionchange', handler);
   }, [mode, refreshActiveFormats]);
 
+  // A MENU THAT ONLY ITS OWN BUTTON CAN CLOSE IS A MENU PEOPLE CLICK TWICE. The callout list had exactly that problem in
+  // Markdown mode (see `runAction`, which fixed the choosing half); this is the other half - clicking anywhere else, or
+  // pressing Escape, dismisses it the way every other menu in the app does.
+  //
+  // `mousedown` rather than `click`, so the dismissal lands BEFORE whatever was clicked does its work: a click outside
+  // should put the menu away and then do what it was aimed at, rather than being swallowed by the close. Clicks INSIDE
+  // are left alone entirely, which is what lets a callout be chosen at all.
+  useEffect(() => {
+    if (!showCallouts || typeof document === 'undefined') return undefined;
+    const close = (event) => {
+      if (calloutRef.current && calloutRef.current.contains(event.target)) return;
+      setShowCallouts(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setShowCallouts(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showCallouts]);
+
   // The element the caret's line belongs to, and the index the model knows its block by. A list item reports its
   // LIST, because the whole list converts together - which is what pressing the bullet button inside one line of it
   // should do.
@@ -215,19 +254,45 @@ export default function MarkdownEditor({
   };
 
   // Puts the caret at the end of a block, after the surface has been re-rendered from the model.
-  const placeCaretInBlock = (index) => {
+  const placeCaretInBlock = (index, cell = null) => {
     const surface = surfaceRef.current;
     if (!surface) return;
     const block = surface.querySelector(`[data-block][data-index="${index}"]`);
     if (!block) return;
-    const target = block.matches('ul, ol') ? block.querySelector('li') || block : block;
+    // A TABLE LANDS IN THE CELL THE EDIT WAS ABOUT, not at the end of the grid. Adding a row and being put at the bottom
+    // of the last cell is the small annoyance that makes a table feel unusable; landing in the new row is what makes the
+    // button worth pressing. `cell` is where the author was, or '' for "wherever the block starts".
+    const wanted = cell ? block.querySelector(`tr:nth-child(${cell.row + 1}) > *:nth-child(${cell.column + 1})`) : null;
+    const target = wanted || (block.matches('ul, ol') ? block.querySelector('li') || block : block);
     const range = document.createRange();
     range.selectNodeContents(target);
     range.collapse(false);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-    surface.focus();
+    surface.focus({ preventScroll: true });
+  };
+
+  // WHERE THE CARET IS INSIDE A TABLE, as the rendered position the table commands take: `row` counts from the header
+  // (0), `column` from the left. Null when the caret is not in one, which is what hides the table toolbar.
+  //
+  // Read from the DOM rather than from the model, like every other "where is the caret" question here: the DOM is where
+  // the caret actually is, and the model is rebuilt from it anyway.
+  const tableCellAt = () => {
+    const element = currentBlockElement();
+    if (!element || element.getAttribute('data-block') !== 'table') return null;
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    const anchor = selection?.anchorNode;
+    if (!anchor) return null;
+    const node = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+    const cellElement = node?.closest('th, td');
+    const rowElement = cellElement?.closest('tr');
+    const table = cellElement?.closest('table');
+    if (!cellElement || !rowElement || !table) return null;
+    return {
+      row: [...table.querySelectorAll('tr')].indexOf(rowElement),
+      column: [...rowElement.children].indexOf(cellElement),
+    };
   };
 
   // Wraps the selection in a tag, or takes the tag off when the selection is already inside one. One function for
@@ -277,15 +342,27 @@ export default function MarkdownEditor({
     const element = currentBlockElement();
     const blocks = blocksFromHtml(surface.innerHTML);
     const index = element ? Number(element.getAttribute('data-index')) : blocks.length - 1;
-    const result = applyBlockCommand(blocks, Number.isFinite(index) ? index : 0, action);
+    // Where in the table the caret is, BEFORE the surface is rebuilt - the position is a fact about the DOM as it stands,
+    // and the rebuilt surface no longer has the caret in it. Only a table action uses it.
+    const cell = action.mode === 'table' ? tableCellAt() : null;
+    const result = applyBlockCommand(blocks, Number.isFinite(index) ? index : 0, { ...action, cell });
 
     surface.innerHTML = htmlFromBlocks(result.blocks);
     const markdown = blocksToMarkdown(result.blocks);
     renderedMarkdown.current = markdown;
     setDraft(markdown);
     onChange?.(markdown);
-    placeCaretInBlock(result.index);
-    setShowCallouts(false);
+    // After an ADD, the caret goes where the author is looking: the new row, or the new column of the cell they were in.
+    // A delete keeps them where they were, which is the cell beside the gap that closed - and deleting the whole table
+    // has no cell to aim at, so it falls back to the block.
+    const caret =
+      cell && action.id !== 'tableRemove'
+        ? {
+            row: action.id === 'tableAddRow' ? cell.row + 1 : cell.row,
+            column: action.id === 'tableAddColumn' ? cell.column + 1 : cell.column,
+          }
+        : null;
+    placeCaretInBlock(result.index, caret);
     refreshActiveFormats();
   };
 
@@ -357,15 +434,28 @@ export default function MarkdownEditor({
     setDraft(result.text);
     onChange?.(result.text);
     requestAnimationFrame(() => {
-      textarea.focus();
+      // preventScroll IS THE FIX FOR A REPORTED BUG, and it is not a nicety: clicking a toolbar button took focus off the
+      // textarea, and calling `focus()` again made the browser scroll the nearest scrollable ancestor to reveal the
+      // element it was focusing. The textarea is taller than the editor's modal frame, so "reveal it" means scrolling the
+      // frame to the BOTTOM of the document - the author pressed Bold and the view jumped to the end of the page. Only
+      // focusing is asked not to scroll: `setSelectionRange` below still scrolls the textarea's own contents to the
+      // caret, which is what should happen and is not the thing that was moving the page.
+      textarea.focus({ preventScroll: true });
       textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
     });
   };
 
+  // One entry point for every toolbar button, so the menu closes whatever was pressed. It used to close only in the
+  // block path, which meant that in Markdown mode - where every button goes through the text path instead - choosing a
+  // callout left the menu open over the document and the author had to click the button again to dismiss it.
+  //
+  // The link prompt is deliberately NOT touched here: the link action OPENS it and returns, so clearing it at this level
+  // would close the prompt in the same breath as opening it.
   const runAction = (action) => {
     if (mode === 'markdown') runTextCommand(action);
     else if (action.mode === 'inline') runInlineCommand(action);
     else runBlockCommand(action);
+    setShowCallouts(false);
   };
 
   // Which button is lit. Only meaningful in Write mode: in Markdown mode the caret is in a textarea and there is no
@@ -457,7 +547,7 @@ export default function MarkdownEditor({
           ))}
 
           {/* The five callouts are one action with five answers, so they are a menu rather than five buttons. */}
-          <div className="relative">
+          <div className="relative" ref={calloutRef}>
             <button
               type="button"
               onClick={() => setShowCallouts((open) => !open)}
@@ -488,6 +578,26 @@ export default function MarkdownEditor({
           <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
 
           {INSERT_ACTIONS.map((action) => (
+            <ToolbarButton
+              key={action.id}
+              action={action}
+              active={false}
+              onClick={() => runAction(action)}
+              className={toolbarButtonClass(false)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* THE TABLE'S OWN TOOLBAR, shown only while the caret is inside a table. It is a second row rather than five more
+          buttons in the one above, because these mean nothing anywhere else: "Add column" beside "Bold" would be a
+          button that does nothing for most of a document's life, and the toolbar is already long. The row appears when
+          there is something for it to act on and disappears when there is not, so it reads as a property of the table
+          rather than as part of the toolbar. */}
+      {mode === 'write' && activeBlock === 'table' && (
+        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-300 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">
+          <span className="px-1 text-xs font-medium text-slate-500 dark:text-slate-400">Table</span>
+          {TABLE_ACTIONS.map((action) => (
             <ToolbarButton
               key={action.id}
               action={action}
@@ -586,8 +696,9 @@ export default function MarkdownEditor({
       <p className="text-xs text-slate-500 dark:text-slate-400">
         Select text and use the toolbar, as in a word processor — the buttons show what is already applied, and
         pressing one twice takes it off. Bold, italic, highlights, headings, lists, quotes, callouts, code, tables and
-        dividers all render here exactly as they will for a member. <strong>Markdown</strong> shows the same document
-        as plain text if you need to paste from elsewhere or repair a table by hand.
+        dividers all render here exactly as they will for a member, spacing included. Put the cursor in a table and a
+        second row of buttons appears for adding and removing rows and columns.{' '}
+        <strong>Markdown</strong> shows the same document as plain text if you need to paste from elsewhere.
       </p>
     </div>
   );

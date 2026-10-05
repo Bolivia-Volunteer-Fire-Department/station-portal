@@ -7,6 +7,7 @@
 import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, updatePassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseAuth, firebaseConfigured, firebaseFunctions, firestore } from './firebase.js';
+import { passwordChangeRequired } from '../utils/passwordPolicy.js';
 import { doc, getDoc } from 'firebase/firestore';
 
 // MUST MATCH EMAIL_DOMAIN in functions/index.js: the function creates the account under this domain, and the client
@@ -95,7 +96,13 @@ export const signInAsMember = async (username, password) => {
       rank_id: row.rank_id || '',
       user_name: secret.username || String(username || ''),
       status: secret.status || 'active',
-      is_change_password_on_login: secret.is_change_password_on_login === true,
+      // EITHER COPY IS ENOUGH TO ASK, and that is the whole point of asking both. See `passwordChangeRequired` for why
+      // the rule is an OR and why it fails closed: the column is fetched by a read that is allowed to fail, and `false`
+      // is the answer that lets somebody past a forced password change.
+      is_change_password_on_login: passwordChangeRequired({
+        column: secret.is_change_password_on_login,
+        claim: account.mustChangePassword,
+      }),
     },
     // The session token the app holds, and it has to be a real one: `applyToken` in App.jsx treats an empty string as
     // no session (it guards the admin refresh wave, and it is passed to every screen as the `token` prop). It used to

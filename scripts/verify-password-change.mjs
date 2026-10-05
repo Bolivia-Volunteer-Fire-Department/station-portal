@@ -18,10 +18,12 @@
  */
 import { readFileSync } from 'node:fs';
 import {
+  MUST_CHANGE_PASSWORD_CLAIM,
   MUST_CHANGE_PASSWORD_COLUMN,
   mustChangePassword,
-  passwordChangeProblem,
   passwordChangeCopy,
+  passwordChangeProblem,
+  passwordChangeRequired,
 } from '../src/utils/passwordPolicy.js';
 
 let failures = 0;
@@ -161,6 +163,74 @@ checkIs('it validates before calling the server', /const problem = passwordChang
 checkIs('and reports a refusal without closing', /setError\(result\?\.message/.test(modalSource));
 // The modal is only mounted for the member it belongs to: it reads THEIR row, not the admin's copy of the roster.
 checkIs('it is gated on the signed-in member, not the roster', /\{currentUser && mustChangePassword\(currentUser\) && \(/.test(appSource));
+
+// ---------------------------------------------------------------------------
+// The flag is stored TWICE, and the app must not be fooled by either copy being missing.
+// ---------------------------------------------------------------------------
+// This is the loop that a reported bug left open. The flag lives in two places because the two readers need different
+// things - the CLAIM travels in the token, the COLUMN on `users_private` is what the Users tab shows an officer - and
+// the sign-in reads the column with a fetch that is ALLOWED TO FAIL, so that a hiccup cannot push a member back to the
+// login screen. Every other field on that page can safely fall back to something cosmetic. This one cannot: `false` is
+// the answer that lets somebody past a forced password change, so the rule fails CLOSED.
+console.log('\n--- one fact, two copies, and a rule that asks both ---');
+check('the column alone is enough to ask', passwordChangeRequired({ column: true, claim: false }), true);
+check('and so is the claim alone', passwordChangeRequired({ column: false, claim: true }), true);
+check('both together are still just "yes"', passwordChangeRequired({ column: true, claim: true }), true);
+check('only when both say no is the member left alone', passwordChangeRequired({ column: false, claim: false }), false);
+// THE FAILED READ. `{}` is what a caller has when neither copy arrived, and `undefined` is what it has when neither was
+// even looked for - both must not be read as "no change needed".
+check('a record that could not be read is not read as "no password change needed"', passwordChangeRequired({}), false);
+check('and neither is one that was never fetched', passwordChangeRequired(), false);
+check('nor one that arrived as something other than a boolean', passwordChangeRequired({ column: 'TRUE', claim: 1 }), false);
+// Which is exactly the direction that matters: the only way to be LEFT ALONE is for a copy to say so explicitly.
+check(
+  'so the only way past the gate is a copy that positively says no',
+  [
+    passwordChangeRequired({ column: 'false', claim: 'false' }),
+    passwordChangeRequired({ column: false, claim: false }),
+    passwordChangeRequired({ column: 0, claim: null }),
+  ],
+  [false, false, false]
+);
+
+// The sign-in asks BOTH, and the claim is the one that survives a failed read - so this is asserted at the source as
+// well: a future edit that goes back to reading the column alone would reopen the hole.
+const authSource = readFileSync('src/services/firebaseAuth.js', 'utf8');
+checkIs(
+  'the sign-in asks both copies through the shared rule',
+  /passwordChangeRequired\(\{[\s\S]{0,160}column: secret\.is_change_password_on_login[\s\S]{0,120}claim: account\.mustChangePassword/.test(
+    authSource
+  ),
+  'reading the column alone lets a member past a forced change when that read fails'
+);
+checkIs(
+  'and names the claim through the one constant, not a string of its own',
+  new RegExp(`${MUST_CHANGE_PASSWORD_CLAIM}`).test(readFileSync('src/utils/passwordPolicy.js', 'utf8')) &&
+    !/must_change_password'/.test(authSource),
+  'the claim name would live in two files'
+);
+// ONE WRITER. Every writer of the fact goes through the function that writes both halves, which is what stops them
+// drifting - the reported bug was `completePasswordChange` clearing the claim and leaving the column set.
+const functionsSource = readFileSync('functions/index.js', 'utf8');
+checkIs(
+  'and one function in the backend owns both halves',
+  /const setPasswordChangeRequired = async \(userId, required\) => \{[\s\S]{0,400}setRoleClaims\(userId, roleId, \{ must_change_password: wanted \}\)[\s\S]{0,200}is_change_password_on_login: wanted/.test(
+    functionsSource
+  ),
+  'the two copies could be written apart again'
+);
+check(
+  'with every writer of the flag going through it',
+  // The three: resetting a password (on), completing a change (off), and an officer's checkbox (either). The
+  // definition itself does not match this pattern, which is why the number is three rather than four.
+  (functionsSource.match(/setPasswordChangeRequired\(/g) || []).length,
+  3
+);
+checkIs(
+  'and no writer left clearing only the claim',
+  !/must_change_password: false/.test(functionsSource) && !/must_change_password: true/.test(functionsSource),
+  'a writer would set one half and leave the other'
+);
 
 // ---------------------------------------------------------------------------
 // 6. The real switch cases, against a stand-in users sheet  — REMOVED with the sheet.

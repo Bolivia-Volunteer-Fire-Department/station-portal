@@ -28,8 +28,16 @@ The board reads the **month today falls in** and shows you **today**, one day to
 | Shows | The whole month | One day |
 | **◀ ▶** step | A month | **A day** |
 | **Today** | The month today falls in | Today |
+| **Day** (calendar button) | — | Opens a month to pick a day from |
+| Member picker | A panel anchored to the pill or slot you clicked | A dialog, with the day's pills left uncovered |
+
+**Getting to a day that is not nearby.** The **Day** button beside the arrows opens the month in a small window that holds nothing but the calendar. Press a day and the board goes there — one press for *the 14th of next month*, where the arrows would be fourteen presses and a month boundary on the way. It reads no more than the walk would: a day inside the month on screen is already in hand, and a day in another month reads that month.
+
+The picker has its own **◀ ▶** for paging through months while you look, and the board behind it does not move until you choose a day. It opens on the month you are reading, with the day you are on marked.
 
 Because a day has the whole card to itself, its pills are **not clipped**: a shift shows who is on it and its times on two lines, where the month view has to fit the same facts onto one line and leave the rest to the tooltip.
+
+**On a phone the member picker is a dialog.** Clicking a pill or an empty slot opens the same picker in the middle of the screen rather than as a panel hanging off what you clicked: a 300px panel anchored to a pill covers the very shifts you are choosing between, on a screen that is barely wider than the panel. The list and the actions are identical — Escape, the backdrop and the ✕ all close it — and on a wide screen it goes back to hanging off the pill, where there is room for it.
 
 Walking past the last day of a month moves into the next one and reads it, exactly as the calendar does — one month of shifts at a time, whichever view you are in. Resizing the window (or rotating a tablet) switches between the two views on the spot, keeping the day you were reading, and costs no read.
 

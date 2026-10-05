@@ -74,6 +74,10 @@ export const normalizeDocument = (row) => {
     is_published: source.is_published === true || text(source.is_published).toUpperCase() === 'TRUE',
     rank_id: text(source.rank_id),
     is_sign_required: source.is_sign_required === true || text(source.is_sign_required).toUpperCase() === 'TRUE',
+    // The SECOND signature: what a checklist does for its items, for a document that is signed as a whole. See
+    // `documentRequiresVerification` below for the three conditions that make it mean something.
+    requires_verification:
+      source.requires_verification === true || text(source.requires_verification).toUpperCase() === 'TRUE',
     // The window, read through the schedule's own date parser so a real date cell, a typed date and an ISO string
     // all land on the same yyyy-MM-dd key. '' is "no restriction", never "retired".
     effective_date: effectiveDateKey(source.effective_date),
@@ -106,6 +110,39 @@ export const isLink = (document) => normalizeDocument(document).doc_type === 'li
 // score panel - and, importantly, the READER only ever draws it read-only; entering a score needs its own permission
 // and lives in the panel's officer half.
 export const isAssessment = (document) => normalizeDocument(document).doc_type === 'assessment';
+
+// WHETHER A DOCUMENT'S SIGNATURE ALSO NEEDS CONFIRMING BY SOMEBODY ELSE - the document-level twin of a checklist item
+// being verified, and the one place the rule is written.
+//
+// Three conditions, and all three are load-bearing:
+//
+//   * IT MUST BE SIGNED. A second signature on a document nobody has to sign confirms nothing, because there is
+//     nothing there to confirm.
+//   * IT MUST NOT BE A CHECKLIST. A checklist's acknowledgment IS its items, and they are already confirmed one by
+//     one; a document-level row would be a second, weaker statement about the same work - and there is no
+//     document-level signature to confirm at all, since the server refuses one on a checklist.
+//   * AND THE AUTHOR MUST HAVE ASKED FOR IT, which is the checkbox in the document editor.
+//
+// One function rather than three tests copied into each screen, the payload and the writer: every one of those has to
+// agree about which documents are in the queue, and the failure when they disagree is a document that sits in
+// somebody's list of things to confirm and is refused the moment they press the button.
+export const documentRequiresVerification = (document) => {
+  const normalized = normalizeDocument(document);
+  return normalized.is_sign_required && normalized.doc_type !== 'checklist' && normalized.requires_verification;
+};
+
+// What a SAVE may keep in that column: the author's checkbox, minus the two cases a form can offer but that cannot
+// mean anything (above). Applied by the payload builder rather than only by the editor, so a checklist saved by
+// anything at all - this screen today, an importer tomorrow - cannot be stored asking for its items to be confirmed
+// twice over.
+export const storedRequiresVerification = (form) => {
+  const source = form || {};
+  const signable = source.is_sign_required === true || text(source.is_sign_required).toUpperCase() === 'TRUE';
+  const checklist = text(source.doc_type).toLowerCase() === 'checklist';
+  const checked =
+    source.requires_verification === true || text(source.requires_verification).toUpperCase() === 'TRUE';
+  return signable && !checklist && checked;
+};
 
 // ---------------------------------------------------------------------------
 // Ordering by dragging
@@ -508,6 +545,9 @@ export const EMPTY_DOCUMENT_FORM = {
   is_published: true,
   rank_id: '',
   is_sign_required: false,
+  // The second signature. Only ever true on a document that is signed and is not a checklist; see
+  // `documentRequiresVerification`.
+  requires_verification: false,
   // The window, from the same two columns the schedule uses: to start a document on a date and retire it on a date
   // without deleting it. Blank means no restriction, so every document written before these fields existed is live
   // forever, exactly as it behaved before.
@@ -529,6 +569,7 @@ export const documentToForm = (document) => {
     is_published: normalized.is_published,
     rank_id: normalized.rank_id,
     is_sign_required: normalized.is_sign_required,
+    requires_verification: normalized.requires_verification,
     effective_date: normalized.effective_date,
     end_date: normalized.end_date,
     // Read-only, for the "Created by" and "Updated" lines: never sent back by a save.
@@ -620,6 +661,77 @@ export const signedDocumentIds = (signatures, userId) => {
     ids.add(signature.document_id);
   });
   return ids;
+};
+
+// THE ID A DOCUMENT'S OWN SIGNATURE CARRIES: the empty one. A signature with no item is the whole document's - every
+// reader in this module tests for exactly that - and it is named here because the writers pass it by hand, where a bare
+// '' would read like a value that went missing rather than like a document.
+export const WHOLE_DOCUMENT_ITEM = '';
+
+// THE PAIR OF ROWS BEHIND ONE MEMBER'S DOCUMENT SIGNATURE: theirs, and the confirmations recorded over it.
+//
+// The document-level twin of `checklistItemState` in utils/checklists.js - the same arithmetic over the same two kinds
+// of row, asked at a different scope. That one reads the signatures ONE MEMBER OWNS, for one item of one checklist;
+// this one reads THE ROWS OF ONE DOCUMENT, which is what a verifier is handed, and it is what lets the member's own
+// screen and the verifier's panel agree about whether a signature has been confirmed.
+//
+// `verified` counts every verifier's row rather than the reader's, because "has this been confirmed" is a fact about
+// the signature and not about who is looking at it - the same reading as the item version.
+export const documentVerificationState = (signatures, documentId, userId) => {
+  const wantedDocument = text(documentId);
+  const wantedUser = text(userId);
+  const mine = normalizeSignatureList(signatures).filter(
+    (signature) =>
+      signature.document_id === wantedDocument &&
+      signature.checklist_item_id === WHOLE_DOCUMENT_ITEM &&
+      signature.user_id === wantedUser
+  );
+
+  const member = mine.find((signature) => signature.signature_role === 'member') || null;
+  const verifications = mine.filter((signature) => signature.signature_role === 'verifier');
+
+  return {
+    signed: member !== null,
+    signedAt: member ? member.signed_at : '',
+    verified: verifications.length > 0,
+    verifiedAt: verifications.length > 0 ? verifications[0].signed_at : '',
+    verifiedByUserId: verifications.length > 0 ? verifications[0].signed_by_user_id : '',
+    verificationCount: verifications.length,
+  };
+};
+
+// THE MEMBERS A VERIFIER STILL HAS TO CONFIRM ON ONE DOCUMENT: everybody who signed it whose signature nobody has
+// confirmed. One signature per member, so there is no "busiest first" to sort by; they are ordered by id, which is
+// stable, rather than by whatever order the rows came back in.
+//
+// EMPTY UNLESS THE DOCUMENT ASKS FOR IT, which is why the DOCUMENT is a parameter rather than something the caller is
+// trusted to test first: the queue and the thing that fills it are one decision, so a document whose requirement was
+// turned off cannot be left sitting in a verifier's list by a screen that forgot to ask.
+//
+// The VERIFIER'S OWN signature is left out on purpose - the server refuses self-verification, so listing it would be
+// listing a button that always fails.
+export const membersAwaitingDocumentVerification = (document, signatures, verifierUserId) => {
+  if (!documentRequiresVerification(document)) return [];
+  const wantedDocument = text(normalizeDocument(document).id);
+  const wantedVerifier = text(verifierUserId);
+  const rows = normalizeSignatureList(signatures).filter(
+    (signature) => signature.document_id === wantedDocument && signature.checklist_item_id === WHOLE_DOCUMENT_ITEM
+  );
+
+  const signed = new Map();
+  const confirmed = new Set();
+  rows.forEach((signature) => {
+    if (signature.signature_role === 'verifier') {
+      confirmed.add(signature.user_id);
+      return;
+    }
+    if (!signed.has(signature.user_id)) signed.set(signature.user_id, signature);
+  });
+
+  return [...signed.values()]
+    .filter((signature) => signature.user_id !== wantedVerifier && !confirmed.has(signature.user_id))
+    .map((signature) => ({ userId: signature.user_id, signedAt: signature.signed_at }))
+    .sort((a, b) => a.userId.localeCompare(b.userId));
 };
 
 // What the module shows beside a document. Three states rather than a boolean, because "does not need a
@@ -755,7 +867,10 @@ export const backfillItemStates = (items, signatures, memberId) =>
 // would be a count saying four beside a write that makes three - or, worse, a second row for an item somebody had
 // already signed. Duplicates are collapsed here, so a double tick cannot become two rows.
 export const backfillableItemIds = (items, signatures, memberId, wantedIds) => {
-  const wanted = (Array.isArray(wantedIds) ? wantedIds : []).map((id) => text(id)).filter(Boolean);
+  // NOT `filter(Boolean)`, deliberately: the whole-document marker IS the empty string (see WHOLE_DOCUMENT_ITEM), so a
+  // filter that drops empty values drops the one id a plain document has. It was there, and it broke exactly that case -
+  // "Record signature" on a plain document planned no rows and reported everything as already on file.
+  const wanted = [...new Set((Array.isArray(wantedIds) ? wantedIds : []).map((id) => text(id)))];
   if (!wanted.length) return [];
 
   const owned = new Set(normalizeChecklistItemList(items).map((item) => item.id));
@@ -764,13 +879,17 @@ export const backfillableItemIds = (items, signatures, memberId, wantedIds) => {
       .filter(
         (signature) =>
           signature.user_id === text(memberId) &&
-          signature.signature_role === 'member' &&
-          signature.checklist_item_id !== ''
+          signature.signature_role === 'member'
       )
       .map((signature) => signature.checklist_item_id)
   );
 
-  return [...new Set(wanted)].filter((id) => owned.has(id) && !onFile.has(id));
+  // THE WHOLE-DOCUMENT MARKER IS NOT AN ITEM, so it is not checked against the document's items - a plain document has
+  // none, and there is nothing it could honestly be checked against. It IS checked against what is already on file,
+  // because that is the rule every other id follows: one row per thing, so a second press cannot write a second row.
+  return wanted.filter((id) =>
+    id === WHOLE_DOCUMENT_ITEM ? !onFile.has(WHOLE_DOCUMENT_ITEM) : owned.has(id) && !onFile.has(id)
+  );
 };
 
 // The rows a back-fill should create, as DATA rather than as writes - so the record can be asserted without an

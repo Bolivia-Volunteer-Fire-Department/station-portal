@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { renderInViewport } from '../../utils/viewportLayer';
 import {
-  AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight,
+  AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, CalendarDays,
     Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2, UserPlus, UserMinus, X, CheckCircle2, XCircle, Printer, Eye
 } from 'lucide-react';
 import { adminBulkSaveSchedule, adminResolveShiftOffer } from '../../services/api';
@@ -17,6 +17,9 @@ import RankDot from '../RankDot';
 import CertificationBadges from '../CertificationBadges';
 import EventPill from '../EventPill';
 import ViewToggle from '../ViewToggle';
+import MonthPickerModal from '../MonthPickerModal';
+// The same picker, as a DIALOG, in the day view. One component, two frames - see the file for why the split matters.
+import ScheduleAssignmentModal from '../ScheduleAssignmentModal';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { mergeDayItems } from '../../utils/dayOrder';
 
@@ -33,7 +36,7 @@ import {
   parseRankOrder,
   rankLabel,
 } from '../../utils/rankEligibility';
-import { WEEKDAYS, MONTHS, DAY_ORDER } from '../../utils/calendarConstants';
+import { WEEKDAYS, MONTHS, DAY_ORDER, monthGridCells } from '../../utils/calendarConstants';
 import { desktopViewport, subscribeViewport } from '../../utils/viewport';
 import { unnamedLabel } from '../../utils/displayLabel';
 import PrintableSchedule from '../PrintableSchedule';
@@ -261,7 +264,12 @@ export default function AdminScheduleManagementTab({
   const [selectedKey, setSelectedKey] = useState(null);
   // Inline member picker anchored to the pill/slot that was clicked in the
   // calendar (positioned with `fixed` so the card's overflow cannot clip it).
+  // IN A DAY VIEW THE SAME PICKER IS A DIALOG - see the render below and components/ScheduleAssignmentModal: on a
+  // phone-sized screen a 300px panel anchored to a pill covers the day it is about, and there is no wide margin to
+  // hang it in. One piece of state either way, so the two views cannot disagree about what is open.
   const [popover, setPopover] = useState(null);
+  // Whether the month picker is up. Only ever opened from a day view (see the toolbar).
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [dragKey, setDragKey] = useState(null);
   const [dragSourceDate, setDragSourceDate] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
@@ -716,15 +724,7 @@ export default function AdminScheduleManagementTab({
     return map;
   }, [working, year, month]);
 
-  const monthGrid = useMemo(() => {
-    const firstWeekday = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const arr = [];
-    for (let i = 0; i < firstWeekday; i++) arr.push(null);
-    for (let d = 1; d <= daysInMonth; d++) arr.push(new Date(year, month, d));
-    while (arr.length % 7 !== 0) arr.push(null);
-    return arr;
-  }, [year, month]);
+  const monthGrid = useMemo(() => monthGridCells(year, month), [year, month]);
 
   // WHICH DAYS THE CELLS ARE DRAWN FOR: every day of the month on a wide screen, the one day on screen on a narrow
   // one. Both draw the SAME cell through the same closure below - the day view is one entry of this list, not a second
@@ -1440,15 +1440,17 @@ export default function AdminScheduleManagementTab({
     );
   };
 
-  // Escape closes the inline picker (matching the menus elsewhere in the app).
+  // Escape closes the POPOVER (matching the menus elsewhere in the app). The dialog does not come through here: on a
+  // narrow screen the picker is a modal owned by ScheduleAssignmentModal, which handles Escape itself and leaves through
+  // its exit animation - so this effect stands aside rather than closing it in a single frame.
   useEffect(() => {
-    if (!popover) return undefined;
+    if (!popover || dayView) return undefined;
     const onKey = (e) => {
       if (e.key === 'Escape') closePopover();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [popover]);
+  }, [popover, dayView]);
 
   // Diff the working copy against the loaded server data. Only the delta is
   // transmitted on Save. `upsertKeys` records which working row each upsert
@@ -1632,6 +1634,18 @@ export default function AdminScheduleManagementTab({
   // Today, in BOTH views: the date whose month is read, and the day the day view draws.
   const goToday = () => setViewDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
 
+  // A DAY CHOSEN FROM THE PICKER: the same state change a press of an arrow makes, so the read follows it exactly as it
+  // follows a walk - picking a day inside the month on screen asks the reader for nothing, and picking one outside it
+  // reads that month.
+  //
+  // NOT `stepView`, deliberately: that one steps a day from the current date, and this one is being handed the date.
+  const chooseDay = (dateKey) => {
+    const [y, m, d] = String(dateKey).split('-').map(Number);
+    if (!y || !m || !d) return;
+    setViewDate(new Date(y, m - 1, d));
+    setPickerOpen(false);
+  };
+
   return (
     <div className="space-y-6">
       {/* The month on screen is read when it is looked at - no schedule travels with the sign-in - so this says so while
@@ -1659,6 +1673,25 @@ export default function AdminScheduleManagementTab({
             <button type="button" onClick={goToday} className="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600">
               Today
             </button>
+
+            {/* CHOOSE A DAY, which only a day view needs: the month view already has every day on screen, so a picker
+                over it would be a second grid saying what the first one says. Here it is the difference between fourteen
+                presses and one, and between a month boundary and none. */}
+            {dayView && (
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                aria-label="Choose a day"
+                title="Pick a day from the month"
+                className="ml-1 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <CalendarDays className="w-4 h-4" />
+                {/* The word is dropped below `sm`, where the toolbar is arrows, the shift count, Quick Add, Discard and
+                    Save already. The icon and its tooltip carry it there, and the `aria-label` carries it for a screen
+                    reader at every width. */}
+                <span className="hidden sm:inline">Day</span>
+              </button>
+            )}
 
             {/* RE-READS THE MONTH ON SCREEN, whatever the window already covers. It is also the retry after a failed
                 read, and the only way to pick up a colleague's edit while this board is already open - `schedule` has
@@ -2147,6 +2180,70 @@ export default function AdminScheduleManagementTab({
             const slot = popover.slot;
             const slotOffer = popover.pending[0];
             const offerUser = slotOffer ? userById(slotOffer.user_id) : null;
+            // THE BODY IS THE SAME IN BOTH FRAMES - what the panel says about the offer, and the two buttons - so it is
+            // built once here and handed to whichever frame is in use. Only the frame, the header and where it sits
+            // differ; see components/ScheduleAssignmentModal for why a day view gets a dialog.
+            const offerBody = (
+              <>
+                <div className="p-3 space-y-2">
+                  <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" />
+                    <div>
+                      <p className="font-medium">Approve</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Fill the shift with {offerUser ? offerUser.name : 'that member'} and close any other pending offers for this shift.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <XCircle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500" />
+                    <div>
+                      <p className="font-medium">Decline</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Turn down the offer. The member cannot offer for this shift again — assign it to them directly if you change your mind.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 border-t border-slate-200 dark:border-slate-700 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => resolveOffer(slotOffer?.id ?? '', 'APPROVE')}
+                    disabled={saving}
+                    className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-300 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    {saving ? 'Resolving…' : 'Approve'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => resolveOffer(slotOffer?.id ?? '', 'DECLINE')}
+                    disabled={saving}
+                    className="flex-1 flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-300 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                    {saving ? 'Resolving…' : 'Decline'}
+                  </button>
+                </div>
+              </>
+            );
+
+            // THE FRAME IS THE VIEW'S: the same panel in a modal on a narrow screen, and hanging off the pill on a wide one.
+            // The tone is passed because the popover's amber frame is what marks a pending offer as an offer.
+            if (dayView) {
+              return (
+                <ScheduleAssignmentModal
+                  title="Pending approval"
+                  subtitle={`${offerUser ? offerUser.name : unnamedLabel('member')} · ${slotLabelText(slot)}`}
+                  tone="offer"
+                  onClose={closePopover}
+                >
+                  {offerBody}
+                </ScheduleAssignmentModal>
+              );
+            }
+
             // Both popovers below are `fixed` and positioned from the trigger's getBoundingClientRect, i.e. in
             // VIEWPORT coordinates - so they are handed to document.body, which is what position:fixed has
             // always meant (see utils/viewportLayer). Otherwise a transformed or clipping ancestor anywhere
@@ -2180,47 +2277,7 @@ export default function AdminScheduleManagementTab({
                     </button>
                   </div>
 
-                  <div className="p-3 space-y-2">
-                    <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
-                      <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" />
-                      <div>
-                        <p className="font-medium">Approve</p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Fill the shift with {offerUser ? offerUser.name : 'that member'} and close any other pending offers for this shift.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
-                      <XCircle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500" />
-                      <div>
-                        <p className="font-medium">Decline</p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Turn down the offer. The member cannot offer for this shift again — assign it to them directly if you change your mind.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 border-t border-slate-200 dark:border-slate-700 px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => resolveOffer(slotOffer?.id ?? '', 'APPROVE')}
-                      disabled={saving}
-                      className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-300 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
-                    >
-                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                      {saving ? 'Resolving…' : 'Approve'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => resolveOffer(slotOffer?.id ?? '', 'DECLINE')}
-                      disabled={saving}
-                      className="flex-1 flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-300 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
-                    >
-                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-                      {saving ? 'Resolving…' : 'Decline'}
-                    </button>
-                  </div>
+                  {offerBody}
                 </div>
               </>
             );
@@ -2261,6 +2318,80 @@ export default function AdminScheduleManagementTab({
               ].filter(Boolean).join(' · ')
             : slotLabelText(popover.slot);
 
+          const memberPickerBody = (
+            <>
+              <div className={`overflow-y-auto ${dayView ? 'max-h-[55dvh]' : ''}`} style={dayView ? undefined : { maxHeight: popover.maxHeight }}>
+                {options.map(({ u, note }) => {
+                  const selected = isEntry && String(u.id) === String(currentUserId);
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => assignUser(u.id)}
+                      className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition ${
+                        selected
+                          ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-medium'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <span className="truncate">{u.name}</span>
+                      {note && <span className="text-[10px] shrink-0 text-amber-600 dark:text-amber-400">— {note}</span>}
+                      {selected && <Check className="w-4 h-4 ml-auto shrink-0" />}
+                    </button>
+                  );
+                })}
+                {options.length === 0 && (
+                  <p className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">No members available.</p>
+                )}
+              </div>
+
+              {/* A shift with someone on it can have that person taken off:
+                  "Remove from shift" now clears the MEMBER and leaves the shift
+                  OPEN, rather than deleting the row. */}
+              {isEntry && String(entry.user_id ?? '').trim() !== '' && (
+                <button
+                  type="button"
+                  onClick={() => unassignEntry(entry._key)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border-t border-slate-200 dark:border-slate-700"
+                >
+                  <UserMinus className="w-4 h-4" /> Remove from shift
+                  <span className="ml-auto text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                    leaves it Open
+                  </span>
+                </button>
+              )}
+
+              {/* Deleting the row is only meaningful for a shift the row defines
+                  itself - a custom (non-template) shift, or one whose template
+                  was deleted. For a template slot the shift exists because the
+                  template says so, so an empty slot is already the "deleted"
+                  state and there is nothing to remove. */}
+              {isEntry && !isTemplateBacked && (
+                <button
+                  type="button"
+                  onClick={() => removeEntry(entry._key)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 border-t border-slate-200 dark:border-slate-700"
+                >
+                  <Trash2 className="w-4 h-4" /> Delete Shift
+                </button>
+              )}
+            </>
+          );
+
+          // THE FRAME IS THE VIEW'S, exactly as the offer panel above: a day view gets the dialog, a wide screen keeps the
+          // menu hanging off the pill it was opened from. The list and its actions are ONE definition - `title` and
+          // `subtitle` are computed once, above - so the two frames cannot offer different things.
+          //
+          // The inner cap on the list's height is the POPOVER's (`maxHeight`, sized for a panel anchored to a pill); the
+          // dialog lets its own frame scroll instead, which is why the body is capped in dvh there.
+          if (dayView) {
+            return (
+              <ScheduleAssignmentModal title={title} subtitle={subtitle} onClose={closePopover}>
+                {memberPickerBody}
+              </ScheduleAssignmentModal>
+            );
+          }
+
           return renderInViewport(
             <>
               <div className="fixed inset-0 z-40" onClick={closePopover} />
@@ -2279,61 +2410,7 @@ export default function AdminScheduleManagementTab({
                   </button>
                 </div>
 
-                <div className="overflow-y-auto" style={{ maxHeight: popover.maxHeight }}>
-                  {options.map(({ u, note }) => {
-                    const selected = isEntry && String(u.id) === String(currentUserId);
-                    return (
-                      <button
-                        key={u.id}
-                        type="button"
-                        onClick={() => assignUser(u.id)}
-                        className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition ${
-                          selected
-                            ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-medium'
-                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60'
-                        }`}
-                      >
-                        <span className="truncate">{u.name}</span>
-                        {note && <span className="text-[10px] shrink-0 text-amber-600 dark:text-amber-400">— {note}</span>}
-                        {selected && <Check className="w-4 h-4 ml-auto shrink-0" />}
-                      </button>
-                    );
-                  })}
-                  {options.length === 0 && (
-                    <p className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">No members available.</p>
-                  )}
-                </div>
-
-                {/* A shift with someone on it can have that person taken off:
-                    "Remove from shift" now clears the MEMBER and leaves the shift
-                    OPEN, rather than deleting the row. */}
-                {isEntry && String(entry.user_id ?? '').trim() !== '' && (
-                  <button
-                    type="button"
-                    onClick={() => unassignEntry(entry._key)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border-t border-slate-200 dark:border-slate-700"
-                  >
-                    <UserMinus className="w-4 h-4" /> Remove from shift
-                    <span className="ml-auto text-[10px] font-normal text-slate-500 dark:text-slate-400">
-                      leaves it Open
-                    </span>
-                  </button>
-                )}
-
-                {/* Deleting the row is only meaningful for a shift the row defines
-                    itself - a custom (non-template) shift, or one whose template
-                    was deleted. For a template slot the shift exists because the
-                    template says so, so an empty slot is already the "deleted"
-                    state and there is nothing to remove. */}
-                {isEntry && !isTemplateBacked && (
-                  <button
-                    type="button"
-                    onClick={() => removeEntry(entry._key)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 border-t border-slate-200 dark:border-slate-700"
-                  >
-                    <Trash2 className="w-4 h-4" /> Delete Shift
-                  </button>
-                )}
+                {memberPickerBody}
               </div>
             </>
           );
@@ -2607,6 +2684,19 @@ export default function AdminScheduleManagementTab({
           })}
         </div>
       </div>
+
+      {/* The month, to pick a day from. Mounted only while it is open, so the board behind it is untouched and there is
+          no state to reset. `viewDate` is what it opens on, so the day being managed is marked in it rather than being a
+          month the officer has to find again. */}
+      {pickerOpen && (
+        <MonthPickerModal
+          viewDate={viewDate}
+          selectedKey={toDateKey(viewDate)}
+          todayKey={todayKey}
+          onPick={chooseDay}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
 
       {/* Printer-friendly month. Rendered from the SAVED schedule rather than the in-memory draft, so a
           printout always matches the record; the button says so when there are unsaved changes. */}

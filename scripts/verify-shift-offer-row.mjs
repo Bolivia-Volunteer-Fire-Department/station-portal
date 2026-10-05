@@ -136,6 +136,63 @@ check('the offerer is still excluded',
   rowOffer.coworkers.some((c) => c.userId === 'u-matt'), false);
 check('others on the shift are listed', rowOffer.coworkers.length, 3);
 
+console.log('\n--- a template-occurrence offer: nothing on the row, and nothing on the offer ---');
+// THE REPORTED BUG, and the shape the rest of this file never had. Every offer above carries `schedule_template_id`, so
+// none of them could show the fault - and the real ones did not carry it, because `makeOffer` dropped the field. An
+// offer raised against a TEMPLATE OCCURRENCE has no schedule row (nothing is written until it is approved), so with the
+// template missing from both places the times were unreachable and the approvals queue printed "Time not set" while the
+// same shift read "8:00 AM – 6:00 PM" on the calendar.
+//
+// The offer below is exactly that row: a slot key and a date, no schedule row, no template id of its own - which is
+// what is in the database today, so the recovery has to work on it.
+const occurrenceOffer = {
+  id: 'of-occurrence',
+  user_id: 'u-matt',
+  schedule_id: '',
+  schedule_template_id: '',
+  assignment_id: 'a-ff3',
+  date_from: '2026-09-16',
+  date_to: '2026-09-16',
+  status: 'pending',
+  slot_key: `slot-${DATE}-t-ff3`,
+};
+const occurrence = describeShiftOffer(occurrenceOffer, ctx);
+check('the template is recovered from the slot key the offer carries', occurrence.templateId, 't-ff3');
+check('so the shift’s hours are found and shown', occurrence.timeLabel, '8:00 AM – 6:00 PM');
+check('and the shift reads as itself rather than as "Time not set"', occurrence.shiftLabel, '8:00 AM – 6:00 PM');
+// The offset is the format, not a guess: 'slot-' + a ten-character date + '-'.
+check(
+  'the recovery takes the id after the date, whatever the id looks like',
+  describeShiftOffer({ ...occurrenceOffer, slot_key: `slot-${DATE}-night-cover-2` }, ctx).templateId,
+  'night-cover-2'
+);
+// A row offer's key is 'row-<schedule id>' and carries no template at all - so it must not be mistaken for one.
+check(
+  'a row-offer key is not read as a template',
+  describeShiftOffer({ ...occurrenceOffer, schedule_id: 's-open', slot_key: 'row-s-open' }, ctx).templateId,
+  't-drv'
+);
+
+console.log('\n--- the shift’s own name, when it has one ---');
+// A nickname identifies a shift faster than its clock times, so the approvals row leads with it - and the times are
+// still returned, because an officer approving cover needs to know WHEN even when they know the shift by name.
+const nicknamed = [...templates.map((t) => (t.id === 't-ff3' ? { ...t, nickname: 'Day Shift' } : t))];
+const namedRow = describeShiftOffer(occurrenceOffer, { ...ctx, scheduleTemplates: nicknamed });
+check('the nickname is the shift’s label', namedRow.shiftLabel, 'Day Shift');
+check('and the name is returned separately, so the panel can show the times too', namedRow.templateName, 'Day Shift');
+check('with the hours still available beside it', namedRow.timeLabel, '8:00 AM – 6:00 PM');
+check(
+  'a shift with no nickname has no name to show',
+  occurrence.templateName,
+  ''
+);
+check(
+  'so its label falls back to the window rather than staying blank',
+  occurrence.shiftLabel,
+  '8:00 AM – 6:00 PM'
+);
+check('and a slot that resolves to no template at all says so rather than inventing one', describeShiftOffer({ ...occurrenceOffer, slot_key: '' }, ctx).shiftLabel, '');
+
 console.log('\n--- fallback when hours are missing on both sides ---');
 const noTimes = describeShiftOffer(
   { ...offer, schedule_template_id: 't-notimes' },

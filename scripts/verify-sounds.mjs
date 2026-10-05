@@ -663,7 +663,19 @@ check('and there is no stale entry', Object.keys(MODAL_SOUNDS).filter((key) => !
 
 // The popovers in Schedule Management are menus and context popovers, not modals: their ITEMS click, and the panel
 // opening is not an interruption. Asserted so a later "tidy up" cannot quietly make them modal.
+//
+// ...WHICH IS STILL TRUE OF THE FRAME THEY KEEP ON A WIDE SCREEN, and the tone is what says so: the board itself has no
+// modalSoundFor call anywhere, and the DIALOG its day view uses - a different component, outside this file - is the only
+// half that opens with a tone. Both directions are asserted below, because "the popover is silent" and "the dialog
+// sounds" are two claims and a single check on the board can only ever see one of them.
 const popoverSource = readSource('src/components/admin/AdminScheduleManagementTab.jsx');
+const assignmentDialogSource = readSource('src/components/ScheduleAssignmentModal.jsx');
+checkIs('and the member picker sounds when it is the dialog, not when it is the menu', /playSound\(modalSoundFor\('scheduleAssignment'\)\)/.test(assignmentDialogSource));
+checkIs(
+  'which is the frame only the day view uses',
+  /if \(dayView\) \{[\s\S]{0,200}<ScheduleAssignmentModal/.test(popoverSource),
+  'the two frames would have to be told apart by something other than the view'
+);
 
 // ---------------------------------------------------------------------------
 // 6. Toasts

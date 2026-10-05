@@ -19,6 +19,7 @@ import { renderToString } from 'react-dom/server';
 import MarkdownEditor from '../src/components/MarkdownEditor.jsx';
 import DocumentsModule from '../src/components/DocumentsModule.jsx';
 import AdminDocumentsTab from '../src/components/admin/AdminDocumentsTab.jsx';
+import AdminSignatureBackfill from '../src/components/admin/AdminSignatureBackfill.jsx';
 import { ADMIN_PERMISSIONS, MEMBER_PERMISSIONS, allowedAdminTabs, permissionTab } from '../src/utils/permissions.js';
 // The security rules, read as text. They are what actually decide a score can be written, and the assessment checks
 // below assert the shape of that decision rather than trusting the client to have hidden the control. The emulator proof
@@ -28,6 +29,7 @@ import { ADMIN_BAR_LABELS, PAGE_BAR_LABELS } from '../src/utils/pageLabels.js';
 import {
   DOCUMENT_CONTENT_LIMIT,
   DOCUMENT_TYPES,
+  EMPTY_DOCUMENT_FORM,
   UNFILED_LABEL,
   assessmentScoreDateLabel,
   assessmentScoreId,
@@ -49,11 +51,13 @@ import {
   documentLinkProblem,
   documentLinkUrl,
   documentOrderSignature,
+  documentRequiresVerification,
   documentSaveProblem,
   documentsInFolder,
   documentSignatureState,
   documentToForm,
   documentUpdatedLabel,
+  documentVerificationState,
   documentWindowLabel,
   filterDocuments,
   folderSummaries,
@@ -63,6 +67,7 @@ import {
   isLink,
   memberAssessmentScore,
   memberSignatureFor,
+  membersAwaitingDocumentVerification,
   normalizeChecklistItemList,
   normalizeAssessmentScore,
   normalizeDocument,
@@ -80,6 +85,7 @@ import {
   signatureIsStale,
   signatureRecordedLabel,
   signedDocumentIds,
+  storedRequiresVerification,
 } from '../src/utils/documents.js';
 import { isActiveOnDate } from '../src/utils/effectiveDates.js';
 import {
@@ -586,6 +592,39 @@ check('and a double tick is one row, not two', backfillableItemIds(backfillItems
 check('a member\u2019s own signature blocks a back-fill of the same item', backfillableItemIds(backfillItems, [anaOwn], ana, ['b1']), []);
 check('but not for a different member', backfillableItemIds(backfillItems, [anaOwn], 'u-other', ['b1']), ['b1']);
 
+// THE WHOLE-DOCUMENT MARKER, which is the EMPTY item id rather than an item: a plain document's acknowledgment is ONE
+// row, so its panel asks for that id and nothing else. It is not checked against the document's items - a plain
+// document has none, and there is nothing it could honestly be checked against - and it IS checked against what is
+// already on file, because that is the rule every other id follows.
+//
+// This is where it broke: the selection dropped empty values on their way in, which dropped the one id a plain document
+// has. "Record signature" then planned no rows at all and reported everything as already recorded.
+check('a plain document asks for its own row, not for an item', backfillableItemIds([], [], ana, ['']), ['']);
+check(
+  'and a second press writes nothing, because one row per thing is the rule there too',
+  backfillableItemIds([], [{ ...anaOwn, id: 'sg-whole', checklist_item_id: '' }], ana, ['']),
+  []
+);
+check('while an item id is still checked against the document that owns it', backfillableItemIds([], [], ana, ['b1']), []);
+const wholeDocumentPlan = backfillSignaturePlan({
+  documentId: 'doc-plain',
+  items: [],
+  signatures: [],
+  memberId: ana,
+  recorderId: officer,
+  itemIds: [''],
+  at: '2025-05-01',
+  revision: 4,
+  confirmVerified: true,
+});
+check('so the plan writes the one row a plain document has', wholeDocumentPlan.member.length, 1);
+check(
+  'with the document on it and no item, which is what every reader looks for',
+  [wholeDocumentPlan.member[0].document_id, wholeDocumentPlan.member[0].checklist_item_id],
+  ['doc-plain', '']
+);
+check('and the confirmation beside it when the officer also confirmed it', wholeDocumentPlan.verifier.length, 1);
+
 // The plan: the rows themselves, as data.
 const plan = backfillSignaturePlan({
   documentId: 'doc-bf',
@@ -714,6 +753,164 @@ check(
   'signatureRecordedLabel labels only back-filled rows',
   [signatureRecordedLabel(anaFilled), signatureRecordedLabel(anaOwn)],
   ['Recorded Sun, Mar 1 2026 · 9:00 AM', '']
+);
+
+// ---------------------------------------------------------------------------
+// THE SECOND SIGNATURE - a document whose author asked for its signature to be confirmed
+// ---------------------------------------------------------------------------
+// What a checklist does item by item, a document can do as a whole: the member signs, and somebody else confirms they
+// looked. One rule decides which documents are in that arrangement, and both screens read the answer from it - so a
+// document cannot sit in a verifier's list while the writer refuses the confirmation, or the other way round.
+console.log('\n--- the second signature ---');
+const secondSignature = {
+  id: 'ss',
+  title: 'Acknowledgment',
+  doc_type: 'markdown',
+  is_sign_required: true,
+  requires_verification: true,
+};
+check('a signed document the author asked about needs a confirmation', documentRequiresVerification(secondSignature), true);
+check(
+  'a checklist never does - its items are what get confirmed',
+  documentRequiresVerification({ ...secondSignature, doc_type: 'checklist' }),
+  false
+);
+check(
+  'nor does a document nobody signs',
+  documentRequiresVerification({ ...secondSignature, is_sign_required: false }),
+  false
+);
+check(
+  'nor one whose author left the box unticked',
+  documentRequiresVerification({ ...secondSignature, requires_verification: false }),
+  false
+);
+check('the column is read off the row like every other flag', normalizeDocument({ requires_verification: 'TRUE' }).requires_verification, true);
+check('a new document starts with it off', EMPTY_DOCUMENT_FORM.requires_verification, false);
+check('and opening a stored one carries it', documentToForm(secondSignature).requires_verification, true);
+
+// WHAT A SAVE MAY STORE, which is that rule one step earlier: the payload builder applies it, so a checklist cannot be
+// written asking for its items to be confirmed twice over however the request was shaped.
+check('a save keeps the box on a signed document', storedRequiresVerification(secondSignature), true);
+check(
+  'a checklist cannot be stored with it',
+  storedRequiresVerification({ ...secondSignature, doc_type: 'checklist' }),
+  false
+);
+check(
+  'nor can an unsigned document',
+  storedRequiresVerification({ ...secondSignature, is_sign_required: false }),
+  false
+);
+check(
+  'and a row that never mentioned it is false',
+  storedRequiresVerification({ doc_type: 'markdown', is_sign_required: true }),
+  false
+);
+
+const herSignature = {
+  id: 'q1',
+  document_id: 'ss',
+  checklist_item_id: '',
+  user_id: 'ana',
+  signed_by_user_id: 'ana',
+  signature_role: 'member',
+  signed_at: '2026-03-01 09:00:00',
+};
+const hisSignature = { ...herSignature, id: 'q2', user_id: 'bo', signed_by_user_id: 'bo', signed_at: '2026-03-02 10:00:00' };
+const herConfirmation = {
+  ...herSignature,
+  id: 'q3',
+  signed_by_user_id: 'jane',
+  signature_role: 'verifier',
+  signed_at: '2026-03-03 11:00:00',
+};
+// An ITEM signature and an item verification on the same document. Neither is the document's own signature, and reading
+// either as one would put a checklist's line into the count of who has signed the document.
+const secondSignatureRows = [
+  herSignature,
+  hisSignature,
+  herConfirmation,
+  { ...herSignature, id: 'q4', checklist_item_id: 'it1' },
+  { ...herConfirmation, id: 'q5', checklist_item_id: 'it1' },
+];
+
+check(
+  'her signature and its confirmation are read as a pair',
+  [
+    documentVerificationState(secondSignatureRows, 'ss', 'ana').signed,
+    documentVerificationState(secondSignatureRows, 'ss', 'ana').verified,
+  ],
+  [true, true]
+);
+check(
+  'and the confirmation says who gave it, and when',
+  [
+    documentVerificationState(secondSignatureRows, 'ss', 'ana').verifiedByUserId,
+    documentVerificationState(secondSignatureRows, 'ss', 'ana').verifiedAt,
+  ],
+  ['jane', '2026-03-03 11:00:00']
+);
+check(
+  'a signature nobody has confirmed reads as signed but not confirmed',
+  [
+    documentVerificationState(secondSignatureRows, 'ss', 'bo').signed,
+    documentVerificationState(secondSignatureRows, 'ss', 'bo').verified,
+  ],
+  [true, false]
+);
+check(
+  'an item signature is not the document\u2019s own',
+  documentVerificationState(secondSignatureRows, 'ss', 'ana').signedAt,
+  '2026-03-01 09:00:00'
+);
+check(
+  'nor does an item confirmation confirm it - the marker is the empty item on both sides',
+  documentVerificationState(
+    [
+      { ...herSignature, checklist_item_id: 'it1' },
+      { ...herConfirmation, checklist_item_id: 'it1' },
+    ],
+    'ss',
+    'ana'
+  ).verified,
+  false
+);
+check(
+  'and somebody who has not signed has neither',
+  [
+    documentVerificationState(secondSignatureRows, 'ss', 'cy').signed,
+    documentVerificationState(secondSignatureRows, 'ss', 'cy').verified,
+  ],
+  [false, false]
+);
+check('another document\u2019s rows are not counted', documentVerificationState(secondSignatureRows, 'other', 'ana').signed, false);
+
+// The queue a verifier works from - the same helper behind the administration panel and the module's own panel.
+check(
+  'the people waiting are those who signed and nobody confirmed',
+  membersAwaitingDocumentVerification(secondSignature, secondSignatureRows, 'jane').map((entry) => entry.userId),
+  ['bo']
+);
+check(
+  'and each row carries the date the confirmation is being given against',
+  membersAwaitingDocumentVerification(secondSignature, secondSignatureRows, 'jane')[0].signedAt,
+  '2026-03-02 10:00:00'
+);
+check(
+  'a verifier\u2019s own signature is not offered, because the server refuses self-verification',
+  membersAwaitingDocumentVerification(secondSignature, [herSignature], 'ana'),
+  []
+);
+check(
+  'and a confirmed signature leaves the queue',
+  membersAwaitingDocumentVerification(secondSignature, [herSignature, herConfirmation], 'jane'),
+  []
+);
+check(
+  'a document that does not ask for a confirmation has no queue at all',
+  membersAwaitingDocumentVerification({ ...secondSignature, requires_verification: false }, secondSignatureRows, 'jane'),
+  []
 );
 
 
@@ -1347,7 +1544,7 @@ checkIs(
 const verifierTabHtml = renderToString(
   React.createElement(AdminDocumentsTab, { token: 't1', canVerifyDocuments: true })
 );
-checkIs('a verifier gets the verification view', /Verify checklists/.test(verifierTabHtml));
+checkIs('a verifier gets the verification view', /Verify signatures/.test(verifierTabHtml));
 checkIs('and never the editor', !/New document/.test(verifierTabHtml), 'a verifier was offered the editor');
 checkIs(
   'and is told why when the role can do neither',
@@ -1748,6 +1945,71 @@ checkIs(
   'a retired document would be indistinguishable from a live one'
 );
 
+// THE CHECKBOX ITSELF, and the screens that act on it. What is asserted here is the pair of facts a screenshot cannot
+// show: that the option is only OFFERED where it can mean something, and that the column a save writes is decided by
+// the shared rule rather than by whatever the form happened to hold.
+const apiSource = readFileSync(path.resolve(process.cwd(), 'src/services/api.js'), 'utf8');
+checkIs(
+  'the editor offers the second signature on a document',
+  /A verifier must confirm the signature/.test(tabSource),
+  'the option the whole feature hangs on is not on the form'
+);
+// A POSITIONAL assertion rather than a character budget: the guard and the label are ~40 lines apart with a comment
+// between them, and a `{0,400}` window broke the moment the comment grew - which is exactly the brittleness the
+// back-fill checks were converted away from. What matters is only that the checkbox comes AFTER its guard.
+const secondSignatureGuard = tabSource.indexOf("{form.doc_type !== 'checklist' && (");
+checkIs(
+  'and never on a checklist, whose items are what get confirmed',
+  secondSignatureGuard !== -1 &&
+    tabSource.indexOf('A verifier must confirm the signature') > secondSignatureGuard,
+  'a checklist would be offered a confirmation of a signature it does not have'
+);
+checkIs(
+  'it is disabled until the document is signed, and says why',
+  /disabled=\{!form\.is_sign_required\}/.test(tabSource) &&
+    /Turn on \u201cMembers must sign this\u201d first/.test(tabSource),
+  'an author would be left to guess why the box is not available'
+);
+checkIs(
+  'and turning the signature off takes the requirement with it',
+  /requires_verification: on \? current\.requires_verification : false/.test(tabSource),
+  'a stored setting would describe a confirmation of nothing'
+);
+checkIs(
+  'the column a save writes comes from the shared rule, not from the form',
+  /requires_verification: storedRequiresVerification\(documentData\)/.test(apiSource),
+  'a checklist could be stored asking for its items to be confirmed twice over'
+);
+checkIs(
+  'the module reads the confirmation for the member whose records are on screen',
+  /documentVerificationState\(recordSignatures, openDocumentId, recordUserId\)/.test(moduleSource),
+  'a signed document would read the same whether or not anybody had confirmed it'
+);
+checkIs(
+  'and says which of the two it is',
+  /Waiting for a verifier to confirm your signature/.test(moduleSource) &&
+    /checklistVerifiedLabel\([\s\S]{0,80}shownVerification/.test(moduleSource),
+  'the reader is not told whether their signature is confirmed'
+);
+checkIs(
+  'the verification panel is drawn for a checklist OR a document that asks',
+  /canVerify && \(isChecklist\(openDocument\) \|\| documentNeedsConfirmation\)/.test(moduleSource),
+  'a document asking for a confirmation would have no panel to confirm it from'
+);
+checkIs(
+  'and it confirms the document through its own action',
+  /verifyDocumentSignature\(documentId, memberId, token\)/.test(moduleSource) &&
+    /membersAwaitingDocumentVerification\(openDocument/.test(moduleSource),
+  'the panel would offer nothing to act on'
+);
+const routingSource = readFileSync(path.resolve(process.cwd(), 'src/services/firestoreRouting.js'), 'utf8');
+checkIs(
+  'which is declared in the documents feature and dispatched',
+  /writes: \[[\s\S]{0,400}'VERIFY_DOCUMENT_SIGNATURE'/.test(routingSource) &&
+    /VERIFY_DOCUMENT_SIGNATURE: async \(body, uid\)/.test(routingSource),
+  'the action would be a route that throws, or one nothing lists'
+);
+
 // Verifying from the Administration module: pick the checklist, then the member, then confirm each item.
 console.log('\n--- saying who verified an item ---');
 const verifiedState = {
@@ -1866,9 +2128,9 @@ const verificationView = readFileSync(
 );
 checkIs('the view exists and is rendered by the tab', /<AdminChecklistVerification/.test(tabSource));
 checkIs(
-  'it lists only the checklists',
-  /\.filter\(\(row\) => row\.doc_type === 'checklist'\)/.test(verificationView),
-  'a plain document would be offered, and would have nothing to confirm'
+  'it offers the checklists AND the documents that ask for a confirmation',
+  /doc_type === 'checklist' \|\| documentRequiresVerification\(row\)/.test(verificationView),
+  'a document asking for its signature to be confirmed would never appear, and a plain one that does not ask would'
 );
 checkIs(
   'it shows the members who are waiting',
@@ -1911,7 +2173,7 @@ checkIs(
 );
 checkIs(
   'including the rule that makes it look empty',
-  /you cannot verify your[\s\S]{0,40}own checklist/.test(verificationView),
+  /you cannot verify your[\s\S]{0,60}checklist/.test(verificationView),
   'the self-verification rule is not explained where it bites'
 );
 checkIs(
@@ -2439,7 +2701,7 @@ checkIs(
 );
 checkIs(
   'and a plain document gets the whole-document row instead',
-  /itemIds: isChecklist \? itemIds : \[''\]/.test(writesSource),
+  /itemIds: isChecklist \? itemIds : \[WHOLE_DOCUMENT_ITEM\]/.test(writesSource),
   'a non-checklist would be given item rows that point at nothing'
 );
 checkIs(
@@ -2481,6 +2743,84 @@ checkIs(
   /backfillCandidates\(users, currentUserId\)/.test(backfillSource),
   'the member list would offer a save that always fails'
 );
+// THE MEMBER LIST IS THE ONE CONTROL THE PANEL HAS, so it has to actually ARRIVE. It is handed down two hops - the tab
+// passes `users` on to the panel, and the panel turns it into options with `userLabel` - and the list it comes from is
+// the crew directory, which is read per TAB (see sectionsForTab in App.jsx and NAME_DRAWING_TABS in
+// verify-read-budget). Each hop is asserted because each has failed: the Documents tab had no directory entry at all,
+// so the dropdown rendered empty and the screen looked complete, which is how it was reported.
+checkIs(
+  'the tab hands the panel the member rows it names from',
+  /<AdminSignatureBackfill[\s\S]{0,300}users=\{users\}/.test(tabSource),
+  'the panel would have nothing to list'
+);
+checkIs(
+  'and the options are labelled by the shared helper rather than a raw field',
+  /userLabel\(user\)/.test(backfillSource),
+  'a half-filled row would read differently here than on every other screen'
+);
+checkIs(
+  'with an empty list said out loud, so a silent dropdown is not the only symptom',
+  /No members to record for/.test(backfillSource),
+  'the officer would be left looking at a blank select with nothing to explain it'
+);
+// ...AND WHICH DOCUMENTS MAY BE BACK-FILLED IS READ THE SAME WAY AS EVERYWHERE ELSE. The raw `=== true` this first made
+// is true of a row this app saved and false of the same row written by the sheet, whose cell is 'TRUE' - so a migrated
+// document would be missing from the list while the server would have accepted the record for it. The string form is
+// asserted against the helper directly, because that is the shape the disagreement appears in.
+checkIs(
+  'and a document is offered by the shared reading of the flag, not a raw one',
+  /normalized\.is_sign_required/.test(backfillSource) && /normalizeDocument\(row\)/.test(backfillSource),
+  "a row whose cell is 'TRUE' - which is what a migrated one holds - would be missing from the list"
+);
+check('the tolerant reading is what the module actually does', normalizeDocument({ is_sign_required: 'TRUE' }).is_sign_required, true);
+check('and a plain false is still false', normalizeDocument({ is_sign_required: false }).is_sign_required, false);
+
+// RENDERED, which is the claim the report was really about: "I can't select any members from the dropdown list". The
+// source checks above say the prop is passed and the flag is read the shared way; this says the MEMBERS ARE ON THE
+// SCREEN - options drawn, in the order the picker sorts them - and that the empty case explains itself rather than
+// being a blank control. Both halves, because a panel that renders names proves nothing about the one that does not.
+const backfillDoc = {
+  id: 'cl1',
+  title: 'Weekly Apparatus Check',
+  folder: 'Engine',
+  doc_type: 'checklist',
+  is_sign_required: true,
+};
+// THREE MEMBERS, ONE OF THEM THE RECORDER: two have to be offered and the third must not be, so this render proves the
+// list is populated AND that "a back-fill is somebody else's record" is still the rule - which is the one thing a
+// populated list could silently lose.
+const backfillHtml = renderToString(
+  React.createElement(AdminSignatureBackfill, {
+    token: 't1',
+    documents: [backfillDoc],
+    users: [
+      { id: 'u2', name: 'Ana Ruiz' },
+      { id: 'u1', name: 'Zed Quarles' },
+      { id: 'u3', name: 'Bo Tran' },
+    ],
+    currentUserId: 'u1',
+  })
+);
+checkIs('the broadest case: the member list is not empty', !/No members to record for/.test(backfillHtml), 'the panel reported an empty list');
+[['a member', 'Ana Ruiz'], ['the other', 'Bo Tran'], ['the checklist', 'Weekly Apparatus Check']].forEach(([what, label]) => {
+  checkIs(`and ${what} is an option`, backfillHtml.includes(label), `${label} is missing from the rendered panel`);
+});
+checkIs(
+  'while the recording officer is not, because a back-fill is somebody else',
+  !backfillHtml.includes('Zed Quarles'),
+  'the officer could pick themselves, which the writer always refuses'
+);
+checkIs(
+  'sorted, so the picker reads alphabetically',
+  backfillHtml.indexOf('Ana Ruiz') < backfillHtml.indexOf('Bo Tran'),
+  'the options would be in whatever order the directory arrived in'
+);
+// THE REPORTED SYMPTOM, as a rendered case: with no rows to name, the dropdown must SAY so. The document still has to
+// be there, or the panel would be explaining an empty list it never drew.
+const backfillEmptyHtml = renderToString(
+  React.createElement(AdminSignatureBackfill, { token: 't1', documents: [backfillDoc], users: [], currentUserId: 'u1' })
+);
+checkIs('with nobody to record for, the panel says so', /No members to record for/.test(backfillEmptyHtml), 'a blank dropdown and no explanation');
 checkIs(
   'Save & next member moves down the list, which is what makes a stack of files one pass',
   /if \(advance\) \{[\s\S]{0,700}const at = members\.findIndex[\s\S]{0,200}chooseMember\(String\(next\.id\)\)/.test(backfillSource),
@@ -2508,7 +2848,7 @@ checkIs(
 );
 checkIs(
   'what the button says it will save is the same list the writer is given',
-  /pending\.length\} item/.test(backfillSource) && /itemIds: isChecklist \? pending : \[''\]/.test(backfillSource),
+  /pending\.length\} item/.test(backfillSource) && /itemIds: isChecklist \? pending : \[WHOLE_DOCUMENT_ITEM\]/.test(backfillSource),
   'the count on the button and the rows written could drift apart'
 );
 

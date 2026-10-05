@@ -642,6 +642,149 @@ console.log('\n--- a day with nobody on it ---');
 }
 
 // ---------------------------------------------------------------------------
+// 6c. The member picker as a DIALOG, and the day picker beside it
+// ---------------------------------------------------------------------------
+// On a phone-sized board the picker is the one thing the day view cannot fix by giving the day more room: a 300px panel
+// anchored to a pill, in a card that is already the full width of the window, has nowhere to hang. So the day view opens
+// the SAME picker as a dialog - same list, same two actions, one frame instead of the other - and the claims that need a
+// real DOM are that the dialog is what appears, that it is the picker rather than a menu, and that the day picker beside
+// it costs exactly the read an arrow walk would have.
+console.log('\n--- a narrow screen: the picker is a dialog, and the calendar is one press away ---');
+{
+  setViewportWidth(375);
+  const rowsByMonth = { [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: rowsOn(MEMBERS.thisMonth, TODAY_DAY) };
+  // Only the reader: this case is about which FRAME the picker opens in, not about how many times the month was read.
+  const { read } = makeReader(rowsByMonth);
+  const { container } = render(
+    React.createElement(AdminScheduleManagementTab, boardProps({ onNeedSchedule: read }))
+  );
+  await flush();
+
+  // THE PILL OPENS THE DIALOG. It is the member's name in the day view; clicking it is what an officer does to fill or
+  // change the shift. Found by the class every drag-source shares rather than by `draggable`, which is the board's own
+  // helper (`shiftPills`) and the shape the pill is drawn in.
+  const pill = shiftPills(container).find((el) => String(el.textContent).includes(MEMBERS.thisMonth.name));
+  check('the day draws the shift it read', Boolean(pill), text(container).slice(0, 140));
+  fireEvent.click(pill);
+  await flush();
+
+  const dialog = document.body.querySelector('[role="dialog"]');
+  check('clicking a pill opens a dialog, not a menu', Boolean(dialog), 'no dialog');
+  check(
+    'which is named after the member whose shift it is',
+    String(dialog?.getAttribute('aria-label') || '').includes(MEMBERS.thisMonth.name),
+    dialog?.getAttribute('aria-label') || 'nothing'
+  );
+  check(
+    'and offers the same members the wide-screen popover does',
+    [...document.body.querySelectorAll('[role="dialog"] button')].some((b) => /Zed Quarles/.test(b.textContent || '')),
+    [...document.body.querySelectorAll('[role="dialog"] button')].map((b) => b.textContent).join(' | ').slice(0, 160)
+  );
+
+  // ESCAPE LEAVES THROUGH THE DIALOG. jsdom runs no CSS, so the exit animation never ends by itself - which is what makes
+  // this observable: the overlay takes the exit class and the board is still holding the picker open. Had the board's own
+  // Escape handler closed it, the class would never have been applied.
+  fireEvent.keyDown(window, { key: 'Escape' });
+  const overlay = document.body.querySelector('.animate-overlayOut');
+  check('Escape leaves through the exit animation rather than snapping shut', Boolean(overlay), 'no exit class');
+  // The fallback timer in useDismissAnimation is the safety net for a browser that never fires animationend, and it is
+  // also this harness's way of finishing the dismissal.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 420));
+  });
+  check('and the dialog does eventually close', !document.body.querySelector('[role="dialog"]'), 'the dialog stayed up');
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
+// THE DAY PICKER, and the read it does or does not cost. `Next month` inside the picker walks the PICKER's month: the
+// board must not move until a day is chosen.
+console.log('\n--- a narrow screen: the day picker, and one press to any day ---');
+{
+  setViewportWidth(375);
+  const rowsByMonth = { [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: rowsOn(MEMBERS.thisMonth, TODAY_DAY) };
+  const { read, calls } = makeReader(rowsByMonth);
+  const { container } = render(
+    React.createElement(AdminScheduleManagementTab, boardProps({ onNeedSchedule: read }))
+  );
+  await flush();
+
+  const readsBeforePicker = calls.length;
+  fireEvent.click(container.querySelector('button[aria-label="Choose a day"]'));
+  await flush();
+  const picker = document.body.querySelector('[role="dialog"][aria-label="Choose a day"]');
+  check('the toolbar offers the day picker in a day view', Boolean(picker), 'no picker');
+  check(
+    'and it is the calendar, drawing the month on screen',
+    (picker?.querySelector('h2')?.textContent || '').includes(monthLabel(THIS_YEAR, THIS_MONTH)),
+    picker?.querySelector('h2')?.textContent || 'no heading'
+  );
+  fireEvent.click(picker.querySelector('button[aria-label="Next month"]'));
+  await flush();
+  check(
+    'browsing inside it moves nothing behind it',
+    text(container).includes(dayLabelFor(THIS_YEAR, THIS_MONTH, TODAY_DAY)) && calls.length === readsBeforePicker,
+    `${calls.length - readsBeforePicker} read(s) while browsing`
+  );
+
+  // A DAY OF ANOTHER MONTH: one press, and the month arrived at is read - the same read as walking there.
+  const nextYear = THIS_MONTH === 11 ? THIS_YEAR + 1 : THIS_YEAR;
+  const nextMonth = (THIS_MONTH + 1) % 12;
+  const pickerDay = document.body.querySelector(`button[aria-label="${dayKey(nextYear, nextMonth, 14)}"]`);
+  check('and it offers days of the month it walked to', Boolean(pickerDay), 'no day button');
+  fireEvent.click(pickerDay);
+  await flush();
+  check(
+    'choosing one takes the board to that day',
+    text(container).includes(dayLabelFor(nextYear, nextMonth, 14)),
+    text(container).slice(0, 140)
+  );
+  check(
+    'reading that month, once, exactly as an arrow walk would have',
+    calls.length === readsBeforePicker + 1 &&
+      calls[calls.length - 1].from === monthStart(nextYear, nextMonth) &&
+      calls[calls.length - 1].to === monthEnd(nextYear, nextMonth),
+    calls.map((c) => `${c.from}..${c.to}`).join(' | ')
+  );
+  check(
+    'and the picker closes on the day chosen',
+    !document.body.querySelector('[role="dialog"][aria-label="Choose a day"]'),
+    'the picker stayed up'
+  );
+
+  // THE WIDE SCREEN KEEPS ITS POPOVER, which is the other half of the claim: the same click, on the same shift, is
+  // anchored where it always was rather than becoming a dialog everywhere - and the toolbar stops offering a picker that
+  // would only say what the month already says.
+  //
+  // Back to today first, because the board is on the 14th of the next month and this case's row is in THIS one: the
+  // pill has to be on the day being drawn for the click to have anything to open.
+  fireEvent.click([...container.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Today'));
+  await flush();
+  await act(async () => {
+    setViewportWidth(1024);
+  });
+  await flush();
+  const widePill = shiftPills(container).find((el) => String(el.textContent).includes(MEMBERS.thisMonth.name));
+  check('the calendar draws the same day as one of the month again', Boolean(widePill), text(container).slice(0, 140));
+  fireEvent.click(widePill);
+  await flush();
+  check(
+    'and widening the window puts the picker back on the pill it belongs to',
+    !document.body.querySelector('[role="dialog"]') && Boolean(document.body.querySelector('.animate-popoverIn')),
+    'the calendar lost its popovers'
+  );
+  check(
+    'with the toolbar offering no day picker, because every day is on screen',
+    !container.querySelector('button[aria-label="Choose a day"]'),
+    'a picker over a month view says what the month already says'
+  );
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
+// ---------------------------------------------------------------------------
 // 7. Walking off the end of the month, and the util behind all of it
 // ---------------------------------------------------------------------------
 console.log('\n--- walking off the end of the month ---');

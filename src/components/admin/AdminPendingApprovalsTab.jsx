@@ -332,9 +332,17 @@ export default function AdminPendingApprovalsTab({ token, offers = [], onOffersC
                     </td>
                     <td className="px-4 py-4 align-top">
                       <div className="text-slate-900 dark:text-white">{shift.dateLabel}</div>
+                      {/* THE SHIFT, THEN WHEN IT IS. The name is the template's nickname when it has one ("Day
+                          Shift"), which identifies a shift far quicker than its clock times - and the times follow on
+                          their own muted line rather than being replaced by it, because an officer approving cover
+                          needs to know the window even when the shift has a name. When there is no nickname the label
+                          IS the window, so nothing is printed twice. */}
                       <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {shift.timeLabel || 'Time not set'}
+                        {shift.shiftLabel || 'Time not set'}
                       </div>
+                      {shift.templateName && shift.timeLabel && (
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{shift.timeLabel}</div>
+                      )}
                       <div className="flex items-center gap-1.5 mt-1 text-xs">
                         <span
                           className="w-2 h-2 rounded-full shrink-0"

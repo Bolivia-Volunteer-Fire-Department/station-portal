@@ -954,6 +954,13 @@ const getLoadingMessage = () => {
       // The tabs whose only use for the directory is the name beside a record (an audit row's actor, an audience
       // picker, a signature, a pending offer). Their own rows arrive by the route they always did - a live listener
       // for announcements, the events read, each tab's own section - so this is the one addition each of them needs.
+      //
+      // DOCUMENTS IS THE REPEAT OF THAT SAME MISTAKE, and the one that hid worst: the tab names members in three
+      // places - the signature report, the verification panel, and the back-fill panel, whose member list is not a
+      // label but the ONLY control that screen has. Without the directory that list is empty rather than wrong, so
+      // "I can't select any members" was the report rather than a screen full of "Unnamed member" - and nothing about
+      // the tab looks broken otherwise. `verify-read-budget` now holds Documents in NAME_DRAWING_TABS with the rest.
+      documents: ['directory'],
       'system-log': ['directory'],
       announcements: ['directory'],
       events: ['directory'],

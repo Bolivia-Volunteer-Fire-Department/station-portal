@@ -28,7 +28,15 @@ import { availabilityMonthId } from '../utils/availability.js';
 import { parseSheetDateKey } from '../utils/scheduleDate.js';
 // The assessment score's row id and type guard, shared with the reader so the two cannot disagree about which documents
 // carry scores or what a score row is called.
-import { assessmentScoreId, assessmentScoreLimit as ASSESSMENT_SCORE_LIMIT, backfillSignaturePlan, isAssessment } from '../utils/documents.js';
+import {
+  WHOLE_DOCUMENT_ITEM,
+  assessmentScoreId,
+  assessmentScoreLimit as ASSESSMENT_SCORE_LIMIT,
+  backfillSignaturePlan,
+  documentRequiresVerification,
+  documentVerificationState,
+  isAssessment,
+} from '../utils/documents.js';
 // The trustworthy-clock rule: clocking in and out refuses while offline rather than queueing a record stamped with the
 // device's clock. See the note in that module - it is the whole reason the guard is here and not in the UI.
 import { isOffline } from '../utils/connectivity.js';
@@ -149,7 +157,7 @@ export const saveAvailabilityMonth = async ({ userId, month, claims = {} }) => {
 // shift, but a screen that was already open when the officer said no would still be holding a live button - so the refusal
 // belongs on the write, not only on the screen. Their own offers are what gets read: the rules allow that (they are the
 // caller's own rows) and it costs one small query, with no index beyond `user_id`.
-export const makeOffer = async ({ userId, scheduleId, dateFrom, assignmentId, slotKey }) => {
+export const makeOffer = async ({ userId, scheduleId, templateId, dateFrom, dateTo, assignmentId, slotKey }) => {
   const key = String(slotKey || '');
   const mine = await rowsFor('schedule_offers', 'user_id', userId);
   if (mine.some((row) => String(row.slot_key ?? '') === key && row.status === 'declined')) {
@@ -160,10 +168,20 @@ export const makeOffer = async ({ userId, scheduleId, dateFrom, assignmentId, sl
   await setDoc(created, {
     user_id: userId,
     schedule_id: String(scheduleId || ''),
+    // THE SHIFT, NOT ONLY THE SLOT. `schedule_template_id` is what makes an offer readable as a shift: the times and the
+    // nickname live on the template, so an offer that does not carry it can only be shown as a date and an assignment -
+    // which is exactly what the approvals queue used to do, printing "Time not set" for every offer raised against a
+    // template occurrence (the ones with no schedule row, which is most of them). It was derivable from `slot_key`, and
+    // the calendar's open pill matched on that, so nothing looked broken until somebody tried to approve a shift without
+    // knowing when it was.
+    schedule_template_id: String(templateId || ''),
     date_from: String(dateFrom || ''),
+    // The END date too, for a shift that runs across days: the read falls back to the start date, so leaving it off
+    // silently flattened a multi-day occurrence into its first day.
+    date_to: String(dateTo || dateFrom || ''),
     assignment_id: String(assignmentId || ''),
     status: 'pending',
-    slot_key: String(slotKey || ''),
+    slot_key: key,
   });
   return created.id;
 };
@@ -535,6 +553,61 @@ export const verifyChecklistItem = async ({ verifierId, documentId, itemId, memb
   return { success: true, verified: 1, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
 };
 
+// THE DOCUMENT'S OWN SIGNATURE, confirmed by somebody else - the same act as verifying a checklist item, one level up.
+//
+// The row it writes is the item verification's shape with the item left empty, which is how this collection has always
+// said "the document itself" (see WHOLE_DOCUMENT_ITEM): the member's signature and the confirmation standing beside each
+// other, told apart by `signature_role` and attributed to two different people. Nothing new is needed from the rules -
+// the branch that lets a verifier write a row about somebody else already covers it.
+//
+// THREE REFUSALS, and none of them is paranoia:
+//
+//   - THE VERIFIER CANNOT BE THE MEMBER. "I checked my own work" is not a check, which is the same position the item
+//     path and the assessment scores take.
+//   - THE MEMBER MUST HAVE SIGNED IT. A confirmation with no signature under it asserts something that never happened,
+//     and a screen - or an old link - must not be able to produce one.
+//   - THE DOCUMENT MUST STILL ASK FOR IT. An author who turns the requirement off is saying the second signature is no
+//     longer wanted, so a stale screen offering a button must not be able to record one anyway.
+export const verifyDocumentSignature = async ({ verifierId, documentId, memberId }) => {
+  const member = String(memberId || '').trim();
+  const document = String(documentId || '').trim();
+  if (!member || !document) return { success: false, message: 'Which member, on which document?' };
+  if (member === verifierId) return { success: false, message: 'A verification is somebody else looking at it.' };
+
+  // Read rather than trusted from the request: whether this document wants a second signature is the author's stored
+  // decision, and a client that says otherwise is either stale or lying.
+  const source = await getDoc(doc(firestore(), 'documents', document));
+  if (!source.exists()) return { success: false, message: 'That document is not available.' };
+  if (!documentRequiresVerification({ ...source.data(), id: source.id })) {
+    return { success: false, message: 'That document does not ask for its signature to be confirmed.' };
+  }
+
+  const signatures = await rowsFor('document_signatures', 'document_id', document);
+  const state = documentVerificationState(signatures, document, member);
+  if (!state.signed) return { success: false, message: 'That member has not signed this document.' };
+  if (state.verified) {
+    // Confirming twice is a double click rather than an error, and the caller is told what is already on file - the
+    // same reading as the item path above.
+    return { success: true, verified: 0, already_verified: true, signatures };
+  }
+
+  await addDoc(
+    collection(firestore(), 'document_signatures'),
+    signatureRow({
+      documentId: document,
+      itemId: WHOLE_DOCUMENT_ITEM,
+      memberId: member,
+      signerId: verifierId,
+      role: 'verifier',
+      // A verification is not a signature OF a revision, exactly as on the item path: the member's row carries the
+      // revision it was signed against, and this one only records that somebody else looked.
+      revision: 0,
+      at: stationTimestamp(),
+    })
+  );
+  return { success: true, verified: 1, signatures: await rowsFor('document_signatures', 'document_id', document) };
+};
+
 // Everything that member has signed and nobody has verified, in ONE call: a verifier going down a list wants the list
 // finished, and doing it one at a time is how a checklist ends up half-verified with no way to tell which half.
 export const verifyChecklistRemaining = async ({ verifierId, documentId, memberId }) => {
@@ -717,7 +790,7 @@ export const backfillDocumentSignatures = async ({
     signatures: existing,
     memberId: member,
     recorderId: recorder,
-    itemIds: isChecklist ? itemIds : [''],
+    itemIds: isChecklist ? itemIds : [WHOLE_DOCUMENT_ITEM],
     at,
     revision: row.content_revision,
     note,

@@ -30,6 +30,7 @@ import {
   documentFolder,
   documentFolders,
   documentLifecycle,
+  documentRequiresVerification,
   documentSaveProblem,
   documentToForm,
   documentUpdatedLabel,
@@ -1259,6 +1260,12 @@ export default function AdminDocumentsTab({
                         ...current,
                         doc_type: nextType,
                         is_sign_required: nextType === 'checklist' ? true : current.is_sign_required,
+                        // ...and takes the SECOND signature off with it. A checklist's acknowledgment is its items,
+                        // each confirmed on its own, so a document-level requirement cannot mean anything on one -
+                        // and `storedRequiresVerification` refuses to store it anyway. Clearing it here keeps the form
+                        // from holding a setting the save will silently drop.
+                        requires_verification:
+                          nextType === 'checklist' ? false : current.requires_verification,
                       }));
                     }}
                     className={fieldClass}
@@ -1376,7 +1383,18 @@ export default function AdminDocumentsTab({
                     type="checkbox"
                     checked={form.doc_type === 'checklist' ? true : Boolean(form.is_sign_required)}
                     disabled={form.doc_type === 'checklist'}
-                    onChange={(event) => setField('is_sign_required', event.target.checked)}
+                    onChange={(event) => {
+                      const on = event.target.checked;
+                      setForm((current) => ({
+                        ...current,
+                        is_sign_required: on,
+                        // THE TWO FLAGS ARE A PAIR. A document nobody signs has nothing to confirm, so turning the
+                        // signature off takes the requirement with it rather than leaving a stored setting that
+                        // describes nothing - and the payload builder would drop it on save anyway, which is a worse
+                        // way to find out.
+                        requires_verification: on ? current.requires_verification : false,
+                      }));
+                    }}
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500 disabled:opacity-60"
                   />
                   <span>
@@ -1389,6 +1407,33 @@ export default function AdminDocumentsTab({
                     )}
                   </span>
                 </label>
+
+                {/* THE SECOND SIGNATURE - the same arrangement a checklist gives its items, for a document that is
+                    signed as a whole: the member acknowledges it, and somebody else confirms they looked. It appears
+                    only where it can mean something. On a checklist the box is not offered at all (its items are what
+                    get confirmed, one by one), and until "Members must sign this" is on it is DISABLED with the reason
+                    rather than hidden - an author looking for the option is told why it is not available instead of
+                    being left to wonder. The column is forced to match on save either way; see
+                    `storedRequiresVerification` in utils/documents. */}
+                {form.doc_type !== 'checklist' && (
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={documentRequiresVerification(form)}
+                      disabled={!form.is_sign_required}
+                      onChange={(event) => setField('requires_verification', event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-red-600 focus:ring-red-500 disabled:opacity-60"
+                    />
+                    <span>
+                      A verifier must confirm the signature
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                        {form.is_sign_required
+                          ? 'The member signs it, then somebody with the “Verify signatures” permission confirms they have read it. Their name and the date are recorded against the confirmation.'
+                          : 'Turn on “Members must sign this” first — there is nothing to confirm until members sign.'}
+                      </span>
+                    </span>
+                  </label>
+                )}
               </div>
             </div>
 

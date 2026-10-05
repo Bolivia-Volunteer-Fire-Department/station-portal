@@ -135,6 +135,35 @@ const setRoleClaims = async (userId, roleId, extra = {}) => {
   });
 };
 
+// WHETHER A MEMBER MUST CHOOSE A NEW PASSWORD: one fact, two places it is read, and therefore ONE WRITER.
+//
+// This is the whole of a bug that survived a green test suite, and the shape of it is worth keeping written down. The
+// flag is stored twice, because the two readers have different needs:
+//
+//   - the CLAIM (`must_change_password`) travels in the member's ID token, which is what the app can gate on without a
+//     read - and it is what `whoami` reports;
+//   - `users_private.is_change_password_on_login` is the officer's copy, read by the Users tab (the checkbox and the
+//     "Password change due" badge) and joined onto the roster row, which is the copy the sign-in payload hands the app
+//     as `currentUser`.
+//
+// Clearing only the claim is what went wrong: the member changed their password, the modal closed because the app
+// cleared its own local copy, and the NEXT sign-in read the private column - still TRUE - so the forced change came
+// back, every single time, until an officer unticked the box by hand. `completePasswordChange` did exactly half the job
+// and `verify-firebase-auth.mjs` agreed with it, because that harness asserted `whoami` and never read the document the
+// app actually gates on.
+//
+// So both halves are written here, together, and every writer of this fact goes through this one function: resetting a
+// password, completing a change, and an officer toggling the box in the Users tab. Two files can no longer disagree
+// about it, which is the property the README's "one writer per fact" is for - and it is why this is not a one-line
+// patch at the call site.
+const setPasswordChangeRequired = async (userId, required) => {
+  const wanted = required === true;
+  const roleId = (await db.doc(`users/${userId}`).get()).get('role_id');
+  await setRoleClaims(userId, roleId, { must_change_password: wanted });
+  await db.doc(`users_private/${userId}`).set({ is_change_password_on_login: wanted }, { merge: true });
+  return wanted;
+};
+
 const cleanUsername = (value) => {
   const username = String(value || '').trim().toLowerCase();
   if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
@@ -230,9 +259,10 @@ exports.resetMemberPassword = onCall(async (request) => {
   const userId = String(data.userId || '');
   const target = await auth.getUser(userId);
   await auth.updateUser(userId, { password: cleanPassword(data.temporaryPassword) });
-  await setRoleClaims(userId, (await db.doc(`users/${userId}`).get()).get('role_id'), {
-    must_change_password: true,
-  });
+  // The claim AND the officer's column, through the one writer: the app gates on the claim, the Users tab reads the
+  // column, and a reset has to turn them on in both - or the member is asked to change a password the officer's own
+  // screen does not say is due.
+  await setPasswordChangeRequired(userId, true);
   // Who reset whose password, on the member's own record as well as in the log: accountability is the reason resets
   // are officer-driven at all.
   await db.doc(`users_private/${userId}`).set(
@@ -244,11 +274,14 @@ exports.resetMemberPassword = onCall(async (request) => {
 });
 
 // The member's own half: they have changed it, so the flag comes off. Only a function can clear it.
+//
+// BOTH HALVES, through the one writer - and this is the line the reported bug was in. Clearing the claim alone left
+// `users_private.is_change_password_on_login` set, so the member was asked again at every sign-in: the modal closed
+// because they had done what it asked, and the next login read the column the app gates on and opened it again.
 exports.completePasswordChange = onCall(async (request) => {
   const caller = request.auth;
   if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
-  const roleId = (await db.doc(`users/${caller.uid}`).get()).get('role_id');
-  await setRoleClaims(caller.uid, roleId, { must_change_password: false });
+  await setPasswordChangeRequired(caller.uid, false);
   await audit(caller.uid, 'COMPLETE_PASSWORD_CHANGE', 'Changed their own password');
   return { ok: true };
 });
@@ -507,8 +540,12 @@ exports.updateMemberAccount = onCall(async (request) => {
   }
 
   if (data.isChangePasswordOnLogin !== undefined) {
-    changes.is_change_password_on_login = data.isChangePasswordOnLogin === true;
-    described.push(`change-password-on-next-login ${data.isChangePasswordOnLogin === true ? 'on' : 'off'}`);
+    // THROUGH THE ONE WRITER, so the officer's checkbox clears the claim as well as their own column. Unticking it is
+    // how an officer says "stop asking", and with only the column written the member would be held at the modal by a
+    // claim nobody had told about it - the same drift as the reported bug, from the other direction.
+    const required = await setPasswordChangeRequired(userId, data.isChangePasswordOnLogin === true);
+    changes.is_change_password_on_login = required;
+    described.push(`change-password-on-next-login ${required ? 'on' : 'off'}`);
   }
 
   if (!described.length) throw new HttpsError('invalid-argument', 'Nothing was asked for.');

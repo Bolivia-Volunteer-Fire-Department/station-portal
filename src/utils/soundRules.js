@@ -119,6 +119,16 @@ export const MODAL_SOUNDS = {
   confirm: 'positive',
   // The document editor: a screen of its own opened from the toolbar or a row, so the reader asked for it too.
   documentEditor: 'positive',
+  // The month picker, opened from the calendar button in a day view. Positive for the same reason: it is a control the
+  // reader just pressed, not something the app put in front of them.
+  monthPicker: 'positive',
+  // Assigning somebody to a shift on a NARROW screen, where the board's member picker is a dialog rather than a menu
+  // hanging off the pill (see ScheduleAssignmentModal). Positive: the officer clicked the slot.
+  //
+  // NOTE THE SPLIT, because it is deliberate and the popovers are NOT this: on a wide screen the same picker is a
+  // context menu, and a menu takes no tone - the panel opening is not an interruption, only the thing you click in it
+  // is. So this key belongs to the dialog frame alone, which is asserted in verify-sounds.
+  scheduleAssignment: 'positive',
   reauth: 'error',
   clockBlocked: 'error',
   passwordChange: 'error',

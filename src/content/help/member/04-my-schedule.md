@@ -52,7 +52,12 @@ On a narrow screen — a phone, or a window narrower than a tablet — the calen
 | Shows | The whole month | One day |
 | **◀ ▶** step | A month | **A day** |
 | **Today** | The month today falls in | Today |
+| **Day** (calendar button) | — | Opens a month to pick a day from |
 | A shift pill | Two clipped lines | Who is on it and its times, on two lines with room to read |
+
+**Getting to a day that is not nearby.** In the day view there is a **Day** button beside the arrows: it opens the month in a small window with nothing on it but the calendar. Tap any day and you are taken there. That is one press for *the 14th of next month*, where the arrows would be fourteen presses and a month boundary on the way — and it costs no extra reading, because a day inside the month you are already looking at was loaded with it, and a day in another month reads that month exactly as walking to it would.
+
+The picker opens on the month you are reading, marks the day you are on, and has its own **◀ ▶** so you can page through months while you look — the calendar behind it does not move until you actually choose a day.
 
 The **Schedule Details** list below follows the view: a month of shifts under the calendar, or just the day's under a single day. The **Print** button prints a month either way — a printed sheet is a month, and the whole month is already loaded.
 

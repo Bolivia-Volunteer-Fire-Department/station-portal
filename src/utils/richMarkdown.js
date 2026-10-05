@@ -63,7 +63,26 @@ export const CALLOUT_ACTIONS = ALERT_KINDS.map((kind) => ({
   mode: 'block',
 }));
 
-export const EDITOR_ACTIONS = [...INLINE_ACTIONS, ...BLOCK_ACTIONS, ...CALLOUT_ACTIONS, ...INSERT_ACTIONS];
+// The table's own toolbar: the five things an author wants to do to a grid, which the main toolbar could not offer
+// because a table is the only block whose SHAPE is editable.
+//
+// WHY THIS IS A THIRD `mode`. The main toolbar's actions change what a block IS (a heading, a list, a quote) or insert a
+// new one, and every one of them is meaningful on a paragraph. These are meaningful only INSIDE a table and refer to the
+// cell the caret is in, so they are a group of their own: the component shows them only while the caret is in a table,
+// and the verifier knows not to demand that "Add column" do something to a paragraph.
+//
+// DECLARED ABOVE `EDITOR_ACTIONS`, which spreads it. A `const` is not hoisted, so declaring it below was not a style
+// mistake - it was a `TypeError: TABLE_ACTIONS is not iterable` at module load, and the kind of thing the verifier
+// catches for free by importing this file.
+export const TABLE_ACTIONS = [
+  { id: 'tableAddRow', label: 'Add row below', icon: 'TableRowAdd', mode: 'table' },
+  { id: 'tableAddColumn', label: 'Add column right', icon: 'TableColumnAdd', mode: 'table' },
+  { id: 'tableRemoveRow', label: 'Delete this row', icon: 'TableRowRemove', mode: 'table' },
+  { id: 'tableRemoveColumn', label: 'Delete this column', icon: 'TableColumnRemove', mode: 'table' },
+  { id: 'tableRemove', label: 'Delete the table', icon: 'TableRemove', mode: 'table' },
+];
+
+export const EDITOR_ACTIONS = [...INLINE_ACTIONS, ...BLOCK_ACTIONS, ...CALLOUT_ACTIONS, ...INSERT_ACTIONS, ...TABLE_ACTIONS];
 
 // Every action id the dispatcher must handle, for the verifier to check the toolbar against.
 export const ACTION_IDS = [...new Set(EDITOR_ACTIONS.map((action) => action.id))].sort();
@@ -730,6 +749,105 @@ export const newTableBlock = (columns = NEW_TABLE_COLUMNS, rows = NEW_TABLE_ROWS
   rows: Array.from({ length: rows }, () => new Array(columns).fill('')),
 });
 
+// ---------------------------------------------------------------------------
+// Reshaping a table
+// ---------------------------------------------------------------------------
+// The five commands behind TABLE_ACTIONS. Each takes the table and the CELL the caret is in, and each returns the table
+// unchanged when the request does not apply - so "Delete this column" on a one-column table is a no-op the caller can
+// detect rather than a table quietly destroyed.
+//
+// THE POSITIONS ARE THE RENDERED ONES: `row` is an index into the rows as drawn, where 0 is the HEADER row and 1 is the
+// first body row. That is the number the DOM gives the component (`tr` index within the table), so nothing has to
+// translate between the two views of a table - which is what makes "delete THIS row" mean the row the caret is in.
+//
+// A ROW IS ALWAYS RESHAPED AS A RECTANGLE. `tableHtml` pads short rows on the way out, so a table can be ragged in the
+// model and still look right; these commands pad first, so an edit does not write the raggedness back as a change. And a
+// table always keeps its HEADER: removing the header row promotes the first body row instead, because a headerless
+// table is not a table the parser can read back (the first row would silently become the header on the next round trip).
+export const tableWidth = (table) => {
+  const head = Array.isArray(table?.head) ? table.head : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  return Math.max(head.length, ...rows.map((row) => (Array.isArray(row) ? row.length : 0)), 1);
+};
+
+const paddedTable = (table) => {
+  const width = tableWidth(table);
+  const pad = (cells) => {
+    const padded = (Array.isArray(cells) ? cells : []).slice(0, width);
+    while (padded.length < width) padded.push('');
+    return padded;
+  };
+  return { head: pad(table?.head), rows: (Array.isArray(table?.rows) ? table.rows : []).map(pad) };
+};
+
+const at = (value, fallback) => (Number.isFinite(value) && value >= 0 ? value : fallback);
+
+export const tableAddRow = (table, afterRow) => {
+  const { head, rows } = paddedTable(table);
+  const width = head.length;
+  // A blank position means "at the end", which is what an author asking for a row with no caret in a cell expects.
+  const insertAt = Math.min(at(afterRow, rows.length), rows.length);
+  const next = rows.slice();
+  next.splice(insertAt, 0, new Array(width).fill(''));
+  return { ...table, head, rows: next };
+};
+
+export const tableAddColumn = (table, afterColumn) => {
+  const { head, rows } = paddedTable(table);
+  const width = head.length;
+  const insertAt = Math.min(at(afterColumn, width - 1) + 1, width);
+  const withGap = (cells) => {
+    const next = cells.slice();
+    next.splice(insertAt, 0, '');
+    return next;
+  };
+  return { ...table, head: withGap(head), rows: rows.map(withGap) };
+};
+
+export const tableRemoveRow = (table, row) => {
+  const { head, rows } = paddedTable(table);
+  const index = Number.isFinite(row) ? row : -1;
+  if (index <= 0) {
+    // The header row: promote the first body row, and refuse when there is nothing to promote - a table with no head is
+    // a table this editor would read back with somebody's data promoted into a header they never wrote.
+    if (index < 0 || rows.length === 0) return table;
+    const [promoted, ...rest] = rows;
+    return { ...table, head: promoted, rows: rest };
+  }
+  const bodyIndex = index - 1;
+  if (bodyIndex >= rows.length) return table;
+  return { ...table, head, rows: rows.filter((_, position) => position !== bodyIndex) };
+};
+
+export const tableRemoveColumn = (table, column) => {
+  const { head, rows } = paddedTable(table);
+  const width = head.length;
+  // The last column stays: a table with no cells is not a table, and the renderer would draw it back as one empty
+  // column anyway - so removing it would look like nothing happened.
+  if (width <= 1) return table;
+  const index = Number.isFinite(column) ? column : -1;
+  if (index < 0 || index >= width) return table;
+  const without = (cells) => cells.filter((_, position) => position !== index);
+  return { ...table, head: without(head), rows: rows.map(without) };
+};
+
+export const applyTableCommand = (table, action) => {
+  if (!table || table.type !== 'table') return table;
+  const cell = action?.cell || {};
+  switch (action?.id) {
+    case 'tableAddRow':
+      return tableAddRow(table, cell.row);
+    case 'tableAddColumn':
+      return tableAddColumn(table, cell.column);
+    case 'tableRemoveRow':
+      return tableRemoveRow(table, cell.row);
+    case 'tableRemoveColumn':
+      return tableRemoveColumn(table, cell.column);
+    default:
+      return table;
+  }
+};
+
 // Applies one toolbar action to the block at `index`.
 //
 // Every styling action TOGGLES: asking for the style a block already has takes it off again, which is what a
@@ -783,6 +901,28 @@ export const applyBlockCommand = (blocks, index, action) => {
 
     case 'table':
       return inserted(list, index, newTableBlock());
+
+    // The table's own five, which act on the CELL the caret is in. A table action anywhere else is a no-op rather than
+    // an error: the toolbar only offers them inside a table, and a stale screen that sent one anyway must not reshape
+    // somebody's document. `cell` is the rendered position (row 0 = the header), passed in by the component.
+    case 'tableAddRow':
+    case 'tableAddColumn':
+    case 'tableRemoveRow':
+    case 'tableRemoveColumn': {
+      const reshaped = applyTableCommand(block, { id, cell: action.cell });
+      return reshaped === block ? { blocks: list, index } : replaceWith(reshaped);
+    }
+
+    // Deleting the grid itself, which is what an author wants after inserting one by mistake - and which they could
+    // previously only do by switching to Markdown and deleting the pipes by hand. The block goes; the document cannot
+    // become empty, so the last block standing is replaced with an empty paragraph to put the caret in.
+    case 'tableRemove': {
+      if (block.type !== 'table') return { blocks: list, index };
+      const next = list.filter((_, position) => position !== index);
+      return next.length
+        ? { blocks: next, index: Math.max(0, index - 1) }
+        : { blocks: [emptyParagraph()], index: 0 };
+    }
 
     case 'rule':
       return inserted(list, index, { type: 'rule' });

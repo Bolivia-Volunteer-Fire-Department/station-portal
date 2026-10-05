@@ -61,7 +61,7 @@ These do not open Administration at all; they decide what the member can do in t
 - **Sign trainings** — the **Training** module. Without it the module is not in the sidebar at all, because signing is the whole point of it.
 - **Manage trainings** — the add/edit form in the Training module. Cannot be stored without *Sign trainings*, since a role that may change a training but cannot open the module would have nowhere to do it.
 - **View documents** — the **Documents** module. Without it the module is not in the sidebar at all, and the server refuses to send a document: reading the station's documents is a permission in its own right.
-- **Verify checklists** — the **Verify checklists** panel on the **Documents** tab in Administration, and the verification card in the member-facing **Documents** module. It lets a member confirm other members' signed checklist items without being able to edit anything. Cannot be stored without *View documents*. Nobody can verify their own checklist.
+- **Verify signatures** — the **Verify signatures** panel on the **Documents** tab in Administration, and the verification card in the member-facing **Documents** module. It lets a member confirm other members' signed checklist items, and a document whose author asked for its signature to be confirmed, without being able to edit anything. Cannot be stored without *View documents*. Nobody can verify their own work.
 
 ## Dependencies
 
@@ -71,12 +71,12 @@ Five permissions require another, and the form disables them with the reason in 
 - **View full schedule** requires **View my schedule** — there is no calendar to show everyone on otherwise.
 - **Manage trainings** requires **Sign trainings** — the add/edit form lives inside the Training module, which a role without *Sign trainings* cannot open.
 - **Manage documents** requires **View documents** — managing documents you cannot see is not a thing.
-- **Verify checklists** requires **View documents** — a verifier has to be able to see the checklist they are confirming, and the tab the panel lives on.
+- **Verify signatures** requires **View documents** — a verifier has to be able to see the checklist they are confirming, and the tab the panel lives on.
 
 The server enforces the same rule, so it is not only a form convenience. Availability is deliberately **not** chained this way: a role may manage other members' availability without the member-facing *Edit own availability*, since one is a scheduling job and the other is a personal one.
 
 > [!NOTE]
-> **The Documents tab is the one tab two permissions open.** *Manage documents* is the obvious one; *Verify checklists* opens it too, because that is where a verifier confirms another member's checklist without needing to be able to edit it. A role with only the verifying permission sees just that panel — no editor, no folders, no signature report. Both permissions require *View documents*, so neither can be stored on a role that cannot see documents at all.
+> **The Documents tab is the one tab two permissions open.** *Manage documents* is the obvious one; *Verify signatures* opens it too, because that is where a verifier confirms another member's checklist items — or a document whose author asked for its signature to be confirmed — without needing to be able to edit it. A role with only the verifying permission sees just that panel — no editor, no folders, no signature report. Both permissions require *View documents*, so neither can be stored on a role that cannot see documents at all.
 
 ## Which flags to check for a shift approver
 

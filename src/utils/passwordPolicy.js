@@ -7,6 +7,23 @@
 
 export const MUST_CHANGE_PASSWORD_COLUMN = 'is_change_password_on_login';
 
+// The claim's name for the same fact. It lives in the member's ID token, which is what the app can gate on without a
+// read, and only a function can write it.
+export const MUST_CHANGE_PASSWORD_CLAIM = 'must_change_password';
+
+// Whether a member must choose a new password, given BOTH copies of the fact.
+//
+// THE FLAG IS STORED TWICE, because the two readers need different things: the claim travels in the token, and the
+// column on `users_private` is what the Users tab shows an officer. They are written together - one function in
+// `functions/index.js` owns both - so normally they agree, and this reads the same whichever way round they are.
+//
+// EITHER ONE IS ENOUGH TO ASK, and the direction is deliberate. At sign-in the column is fetched by a read that is
+// ALLOWED TO FAIL (it must not push a member back to the login screen over a hiccup), and every other field on that
+// page can safely fall back to something cosmetic. This one cannot: `false` is the answer that lets somebody past a
+// forced password change, so a document that could not be read is not a reason to stop asking. That is why this is an
+// OR rather than a preference for the column - it fails CLOSED.
+export const passwordChangeRequired = ({ column, claim } = {}) => column === true || claim === true;
+
 // Tolerant on purpose: this arrives from a spreadsheet cell somebody may have typed into by hand, and a blank
 // or unrecognized value is off. TRUE is what the app writes, so that is what to expect.
 export const mustChangePassword = (user) => {

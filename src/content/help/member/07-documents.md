@@ -71,11 +71,13 @@ If a line has been confirmed by more than one officer it says *Verified by 2 peo
 If a document says **Members must sign this** and has *no* items, you sign the document itself with the button in the box above. On a checklist you sign the lines here instead — they are separate records on purpose: one is "I have read this", the other is "I did this specific thing".
 
 > [!NOTE]
-> **Verification is not something you ask for.** It appears when somebody with the *Verify checklists* permission opens this checklist and confirms your lines. If your work is waiting, it shows as **Awaiting verification** until they do. Nobody can verify their own checklist, so an officer who is also on the crew has somebody else check theirs.
+> **Verification is not something you ask for.** It appears when somebody with the *Verify signatures* permission opens this checklist and confirms your lines. If your work is waiting, it shows as **Awaiting verification** until they do. Nobody can verify their own checklist, so an officer who is also on the crew has somebody else check theirs.
+>
+> A document can work the same way without any items. Where its author ticked **A verifier must confirm the signature**, the box under the document shows **Signed** with the date, and beneath it either **Verified by Jane Doe on …** or **Waiting for a verifier to confirm your signature**. Your file is signed either way — the second line is somebody else's job, not yours.
 
 ## Seeing another member's records
 
-If your role has the **Verify checklists** permission, the top of the module has a **View as** box. Choosing a member from it shows *their* document signatures and *their* checklist lines — ticked, awaiting verification, or verified by whom — instead of your own, so an officer can answer "did they do the truck check, and who confirmed it" without leaving the module.
+If your role has the **Verify signatures** permission, the top of the module has a **View as** box. Choosing a member from it shows *their* document signatures and *their* checklist lines — ticked, awaiting verification, or verified by whom — instead of your own, so an officer can answer "did they do the truck check, and who confirmed it" without leaving the module.
 
 It is a reader, not a way to act as somebody else:
 

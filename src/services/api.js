@@ -1,6 +1,7 @@
 import { NOTIFICATION_TYPES } from '../utils/notificationPrefs';
 import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
+import { storedRequiresVerification } from '../utils/documents.js';
 import { systemLogRequest } from '../utils/systemLog';
 import { rankFieldsFromForm } from '../utils/ranks';
 import { isReadAction } from '../utils/readCoalescing';
@@ -651,6 +652,11 @@ export const adminSaveDocument = async (documentData, token) =>
     is_published: documentData.is_published === undefined ? true : Boolean(documentData.is_published),
     rank_id: documentData.rank_id || '',
     is_sign_required: Boolean(documentData.is_sign_required),
+    // The second signature. Through `storedRequiresVerification` rather than taken as sent, because two combinations
+    // the editor can offer cannot mean anything: a checklist's acknowledgment IS its items (each verified on its own),
+    // and a document nobody signs has nothing to confirm. The rule lives in utils/documents so the form, this and any
+    // future importer cannot each decide it differently.
+    requires_verification: storedRequiresVerification(documentData),
   });
 
 export const adminDeleteDocument = async (id, token) =>
@@ -770,6 +776,18 @@ export const verifyChecklistItem = async (documentId, itemId, userId, token) =>
 export const verifyChecklistRemaining = async (documentId, userId, token) =>
   dispatchRequest({
     action: 'VERIFY_CHECKLIST_REMAINING',
+    token,
+    document_id: documentId,
+    user_id: userId,
+  });
+
+// Confirming a DOCUMENT's own signature rather than an item of a checklist - the same permission, the same two people,
+// and the same add-only rule. It exists as its own action rather than as "verify item, with no item" because the two
+// are different statements: a checklist item is a line somebody ticked, and this is the document as a whole. The
+// backend refuses it unless the member has signed and the document still asks for a second signature.
+export const verifyDocumentSignature = async (documentId, userId, token) =>
+  dispatchRequest({
+    action: 'VERIFY_DOCUMENT_SIGNATURE',
     token,
     document_id: documentId,
     user_id: userId,

@@ -1,7 +1,7 @@
 The station's own documents: procedures, policies and checklists, written and organized here and read by members in the **Documents** module.
 
 > [!IMPORTANT]
-> Access to this area requires the **Manage documents** role permission, which itself requires **View documents**. A role with **Verify checklists** also opens this tab, but sees only the verification view at the bottom of it — never the editor.
+> Access to this area requires the **Manage documents** role permission, which itself requires **View documents**. A role with **Verify signatures** also opens this tab, but sees only the verification view at the bottom of it — never the editor.
 
 Unlike the Help guides — which are files in the app's repository, written by whoever maintains it — these are written **from this screen**, by your own administrators, and stored on the station's server. Adding one needs no code change and no new deployment.
 
@@ -26,6 +26,7 @@ While a save is in flight the editor is **disabled** — every field, in one go 
 | **End Date** | The last date members may see it. After that it is **retired** — see below |
 | **Visible to members** | Untick for a draft — it stays out of every member's list, including yours |
 | **Members must sign this** | For a *Document* or *Link*: whether members sign it. **Always on, and fixed on, for a Checklist** — a checklist's items are what gets signed |
+| **A verifier must confirm the signature** | For a *Document*, *Link* or *Assessment*: whether somebody else has to confirm each member's signature. Off until **Members must sign this** is on, and not offered on a Checklist — its items are confirmed one by one instead. See *The second signature* below |
 
 There is no **Order** box: position is set by dragging the rows in the list above (see *Ordering*), which is the only place the order is visible. A number typed in the editor and a row sitting in the list would be two answers to the same question, and the one on screen would win.
 
@@ -68,6 +69,18 @@ Write mode is a rich editor: the document appears as it will be read, and format
 | Divider | A horizontal rule across the page |
 
 Every styling button is a **toggle**: pressing it again on the same text takes the formatting off, and the button stays lit while the cursor is inside the formatting it applies. So there is no syntax to remember and no way to get it half right.
+
+**Tables have a toolbar of their own.** Click into a cell and a second row of buttons appears under the main toolbar — it shows only while the cursor is in a table, because nowhere else would it mean anything:
+
+| Button | What it does |
+|---|---|
+| Add row below | A new row under the one you are in, as wide as the table |
+| Add column right | A new column to the right of the one you are in, in every row including the header |
+| Delete this row | Removes the row your cursor is in |
+| Delete this column | Removes the column your cursor is in, header and all |
+| Delete the table | Removes the grid — for one added by mistake |
+
+Clicking **Table** again does not delete it; use **Delete the table**. The header row cannot be deleted: removing it promotes the first row below to be the new header instead, because a table with no header does not survive being saved and read back.
 
 Three things worth knowing:
 
@@ -154,7 +167,7 @@ Selecting a document shows a **Signatures** panel below its fields, in the same 
 |---|---|
 | How many have signed | On the heading, with the count of stale ones if any. On a checklist this counts **signed items** — one row per member per item — not the underlying records |
 | Each member and the date | The date is stamped by the server, not the member's device |
-| **verified by** | On a checklist: who confirmed that member's item. It sits on the same row as the signature, because it is a fact about it rather than a separate piece of work |
+| **verified by** | Who confirmed it. On a checklist that is the member's *item*; on a document whose author asked for a second signature it is the signature itself. Either way it sits on the same row as the signature, because it is a fact about it rather than a separate piece of work |
 | **before the last edit** | A signature taken before the current wording. Editing a document makes existing signatures stale, which is the point: a signature that appears to approve text nobody read is the one way this feature misleads |
 | **remove signature** | The only way a signature ever disappears. It is recorded in the system log, and it puts the member back on the outstanding list |
 | **remove verification** | Removes one verifier's confirmation and leaves the signature it confirmed in place, waiting to be verified again |
@@ -166,6 +179,23 @@ On a checklist, **each item appears once per member**. A signature and a verific
 > [!WARNING]
 > Editing a document does not require anyone to sign again — it marks the signatures they already gave as older than the current text. Whether that matters is a judgment for you, which is why it is reported rather than enforced.
 
+## The second signature
+
+A signature records that a member said they read something. **A verifier must confirm the signature** adds the other half, exactly as a checklist does for its items: somebody with the **Verify signatures** permission reads what was signed and confirms it, in their own name.
+
+It is **optional, per document**, and it only appears where it can mean something. Tick it on a policy acknowledgement that has to be countersigned; leave it off on a notice that members simply acknowledge. The rules, which are worth knowing because they are why the box behaves as it does:
+
+| The box | Why |
+|---|---|
+| Disabled until **Members must sign this** is on | There is nothing to confirm until somebody has signed. A requirement without a signature is a queue item that can never be cleared |
+| Not offered at all on a **Checklist** | A checklist's acknowledgment *is* its items, and each one is already confirmable from the verification panel. A document-level requirement there would confirm the same work twice, in the weaker of the two ways |
+| Cleared when you turn the signature off, or switch the type to Checklist | The stored column is forced to match what the form shows, so a document cannot be left carrying a setting that describes nothing |
+
+The confirmation is **one row per member, for the document as a whole** — not one per item, and not an edit of their signature. The member's signature and the verifier's confirmation stand beside each other on the same record, which is what makes *"David read it, and Jane checked that he did"* two facts rather than one. In the member's own view the document then reads **Signed** with the date, and beneath it either **Verified by Jane Doe on …** or **Waiting for a verifier to confirm your signature** — so a member can see that their part is done even while somebody else's is still outstanding.
+
+> [!NOTE]
+> The permission is the same one that confirms checklist items, and it is called **Verify signatures** for that reason. Nobody confirms their own — the server refuses it, and the panels never offer it — so a document you signed yourself goes to somebody else, exactly as your own checklist does.
+
 ## Assessments
 
 A document of type **Assessment** is an ordinary document with one extra thing under it: a **score** for each member.
@@ -174,7 +204,7 @@ Every member the assessment is shared with sees the document, exactly like any o
 
 **Nobody enters their own score.** Not a member, and not an officer either — the security rules refuse a score whose subject is the person writing it, so an assessor cannot grade themselves even with the permission in hand. If somebody who runs the test also takes it, somebody else records the result.
 
-To record scores, a role needs **Add assessment scores** (a member-level permission, like *Verify checklists* — it opens the Documents module, not an Administration tab).
+To record scores, a role needs **Add assessment scores** (a member-level permission, like *Verify signatures* — it opens the Documents module, not an Administration tab).
 
 The member a score belongs to is chosen with the **View as** dropdown at the top right — the same one that switches whose paperwork you are reading. There is no second dropdown on the assessment itself, so there is only ever one answer to "whose records am I looking at".
 
@@ -238,25 +268,32 @@ But it never pretends the member tapped it. Every row entered this way is stampe
 > [!IMPORTANT]
 > **Only administrators can do this** — it needs *Manage documents*. That is deliberate: writing a signature for somebody else is the one thing the rest of the app refuses, so the permission to do it is not handed out casually.
 
-**Also confirm these as verified** is ticked by default. It records a second row saying you confirmed what you entered — which is what the supervisor's initials on the paper already meant. Untick it if you would rather these went through the ordinary **Verify checklists** queue for a second pair of eyes, and they will appear there like anything else.
+**Also confirm these as verified** is ticked by default. It records a second row saying you confirmed what you entered — which is what the supervisor's initials on the paper already meant. Untick it if you would rather these went through the ordinary **Verify signatures** queue for a second pair of eyes, and they will appear there like anything else.
 
 > [!NOTE]
 > **No item is required.** A document that members must sign (a policy acknowledgement, say) is back-filled with a single tick per member rather than a list of items — there is only one acknowledgment to record. And you cannot back-fill your own record: enter your own items from your own checklist.
 
+> [!NOTE]
+> **The member list is everybody except you.** If it is empty, the panel says so rather than leaving you with a blank box: either the crew list could not be read (reload the tab), or you are the only member on it — and a back-fill is somebody else recording what they found, so your own name is never offered.
+
 ## Verifying
 
-Verifying is somebody confirming work the member reported doing, and it is a permission of its own: **Verify checklists**. Give it to the officers who check a new member's truck checklist — they do not need **Manage documents**, and they do not need to be administrators.
+Verifying is somebody confirming work the member reported doing, and it is a permission of its own: **Verify signatures**. Give it to the officers who check a new member's truck checklist — they do not need **Manage documents**, and they do not need to be administrators.
 
 There are two ways to do it, and they answer different questions:
 
 | Where | What it is good at |
 |---|---|
-| The **Verification** card on a checklist in the member-facing **Documents** module | An officer who is already reading the checklist |
-| **Verify checklists** at the bottom of this tab | *Who is waiting on me?* Pick the checklist, then the member |
+| The **Verification** card on a checklist or a document in the member-facing **Documents** module | An officer who is already reading it |
+| **Verify signatures** at the bottom of this tab | *Who is waiting on me?* Pick the checklist or document, then the member |
 
-The second one is the one to use for a backlog. It lists the station's checklists, and for the one you pick it lists every member with something outstanding — *3 to verify, 8 of 12 signed* — busiest first. Expanding a member shows their signed items with **Verify** on each, and **Verify all 3** for the rest. Confirming several at once asks first, because a verification is a record that a check was made.
+The second one is the one to use for a backlog. It lists everything that can be confirmed — every checklist, and every document whose author ticked **A verifier must confirm the signature** — and for the one you pick it lists the members with something outstanding.
 
-A role with *Verify checklists* opens this tab for that panel alone: it sees no editor, no folder list and no signatures report. That is why the permission is a member permission — a verifier has nothing to edit here.
+On a **checklist** that is *3 to verify, 8 of 12 signed*, busiest first; expanding a member shows their signed items with **Verify** on each, and **Verify all 3** for the rest. Confirming several at once asks first, because a verification is a record that a check was made.
+
+On a **document** there is a single signature per member, so the list is the whole job — the member, when they signed, and a **Confirm** button. There is no expanding and no *verify all*, because each row already is all of it.
+
+A role with *Verify signatures* opens this tab for that panel alone: it sees no editor, no folder list and no signatures report. That is why the permission is a member permission — a verifier has nothing to edit here.
 
 ### The record, once it is done
 
@@ -273,12 +310,14 @@ That is where you answer "who checked the truck checklist in March", and it work
 | *The only signed items are yours* | You signed them yourself, and **nobody can verify their own checklist** — that rule is what makes a verification mean something. Ask another verifier to check yours, or wait for a member's items to arrive |
 | *Everything signed has been verified* | Nothing outstanding — this is the good one |
 
-The checklist picker says how many items each checklist has, so a checklist with none is visible before you select it.
+A **document** that asks for a confirmation reads the same way, one row per member: *Nobody has signed this document yet*, *The only signature on this document is yours*, or *Everything signed on this document has been confirmed*.
+
+The picker says what each entry is and how much of it there is — *Weekly Apparatus Check — Engine (12 items)* for a checklist, and *(signature confirmed as a whole)* for a document — so you can see what you are choosing before you choose it.
 
 | Rule | Why |
 |---|---|
-| Only items the member has **signed** can be verified | There is nothing to confirm about work nobody claimed |
-| **Nobody can verify their own checklist** | Self-verification is one person agreeing with themselves, which is the opposite of what a verification is for. Your own checklist never appears in the panel |
+| Only work the member has **signed** can be confirmed | There is nothing to confirm about work nobody claimed |
+| **Nobody can verify their own** | Self-verification is one person agreeing with themselves, which is the opposite of what a verification is for. Your own checklist, and your own signature on a document, never appear in the panel |
 | A second verifier may confirm the same item | Two officers checking one line is two confirmations, not an error; the row records each of them |
 | Every verification is stamped by the server | Who confirmed it and when come from the session, never from the device |
 

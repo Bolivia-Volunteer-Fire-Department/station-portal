@@ -218,11 +218,16 @@ export const MEMBER_PERMISSIONS = [
   },
   {
     key: 'can_verify_documents',
-    label: 'Verify checklists',
+    label: 'Verify signatures',
     // Deliberately a member permission rather than an administration one: an officer checking that a new
     // member's truck checklist was really done is not an administrator, and should not need to become one.
     // Verifying happens on the Documents tab, which this permission opens on its own.
-    description: 'Confirm other members\' signed checklist items, from Documents. Requires "View documents". Nobody can verify their own checklist.',
+    //
+    // The KEY is still `can_verify_documents` and stays that way: it names the paperwork, as the other document
+    // permissions do, and it is stored on every role that already has it. Only the label moved, when the same panel
+    // started confirming a document's whole signature as well as a checklist's items.
+    description:
+      'Confirm what another member has signed: the items of a checklist, or a document whose author asked for its signature to be confirmed. From Documents. Requires "View documents". Nobody can verify their own work.',
     requires: 'can_view_documents',
   },
   {

@@ -232,8 +232,10 @@ checkIs('the exit targets the panel the entry class is on', /\.animate-overlayOu
 checkIs('and takes no clicks while it leaves', /\.animate-overlayOut \{[\s\S]{0,200}pointer-events: none/.test(css));
 checkIs('the hook exists', /export function useDismissAnimation/.test(motion));
 // Every dialog a member can dismiss uses it; Confirm is the one that deliberately does not (a dialog that
-// lingers before acting reads as hesitation).
-['ConfirmModal', 'ShiftOfferModal', 'ScheduleItemModal'].forEach((name) => {
+// lingers before acting reads as hesitation). The two schedule dialogs added later are here for the same reason as the
+// three original ones - a modal that closed in one frame would be the odd one out, and the popovers they sit beside are
+// not modals and are not covered by this.
+['ConfirmModal', 'ShiftOfferModal', 'ScheduleItemModal', 'MonthPickerModal', 'ScheduleAssignmentModal'].forEach((name) => {
   const source = readFileSync(`src/components/${name}.jsx`, 'utf8');
   checkIs(`${name} dismisses through the animation`, /useDismissAnimation\(/.test(source));
   checkIs(`and routes its own close controls through it`, /onClick=\{dismiss\}/.test(source));

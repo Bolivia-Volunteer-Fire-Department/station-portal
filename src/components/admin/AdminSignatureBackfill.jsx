@@ -4,9 +4,11 @@ import { adminBackfillDocumentSignatures, fetchDocumentSignatures } from '../../
 import { toast } from '../../utils/toast';
 import {
   BACKFILL_NOTE_LIMIT,
+  WHOLE_DOCUMENT_ITEM,
   backfillCandidates,
   backfillItemStates,
   backfillableItemIds,
+  normalizeDocument,
   normalizeSignatureList,
   signatureDateLabel,
 } from '../../utils/documents';
@@ -138,11 +140,18 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
 
   // Only what has a signature to record: a checklist, or a document that members must sign. Offering a document nobody
   // has to sign would be a screen that does nothing.
+  //
+  // READ THROUGH `normalizeDocument`, like every other screen and the writer itself. The raw test this used to make
+  // (`row.is_sign_required === true`) is true of a row this app saved and FALSE of the same row written by the sheet -
+  // where the cell is 'TRUE' and the column has held strings since long before the move. A migrated document would then
+  // be missing from this list while the server would have accepted the back-fill for it, which is the kind of
+  // disagreement between two readings of one column that utils/documents exists to prevent.
   const signable = useMemo(
     () =>
-      (Array.isArray(documents) ? documents : []).filter(
-        (row) => row.doc_type === 'checklist' || row.is_sign_required === true
-      ),
+      (Array.isArray(documents) ? documents : []).filter((row) => {
+        const normalized = normalizeDocument(row);
+        return normalized.doc_type === 'checklist' || normalized.is_sign_required;
+      }),
     [documents]
   );
 
@@ -279,7 +288,9 @@ const handleSave = async ({ advance = false } = {}) => {
         {
           documentId: activeDocument.id,
           userId: memberId,
-          itemIds: isChecklist ? pending : [''],
+          // A plain document is ONE row and its id is the empty one - the same marker every reader here uses for "the
+          // document itself" (see WHOLE_DOCUMENT_ITEM), rather than a bare '' that reads like a missing value.
+          itemIds: isChecklist ? pending : [WHOLE_DOCUMENT_ITEM],
           recordedOn,
           note,
           confirmVerified,
@@ -393,6 +404,16 @@ const handleSave = async ({ advance = false } = {}) => {
                     </option>
                   ))}
                 </select>
+                {/* AN EMPTY LIST SAID OUT LOUD. This select has one control and no other content, so when the list is
+                    empty the panel is simply blank - which is what "I cannot select any members" looked like, and it
+                    was in fact the crew directory never having been read for this tab (see sectionsForTab in App.jsx).
+                    A sentence costs nothing and turns a dead-looking dropdown into a statement somebody can act on. */}
+                {members.length === 0 && (
+                  <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    No members to record for. The crew list could not be read, or you are the only member on it — a
+                    back-fill is somebody else recording what they found, so your own name is never offered.
+                  </p>
+                )}
               </div>
             </div>
 

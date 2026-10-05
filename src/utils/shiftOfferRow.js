@@ -9,8 +9,13 @@
 //   - the time comes from the schedule template, not from the assignment
 //   - co-workers are whoever overlaps the shift in time
 
-import { displayDate, parseSheetDateKey } from './scheduleDate';
-import { rowTimeText, templateTimeText, timeToMinutes, formatClockRange } from './shiftTime';
+// THE FILE EXTENSIONS ARE LOAD-BEARING, as they are at the top of documents.js and checklists.js, and for the same
+// reason - this is the third module to be reached from a harness that imports it UNBUNDLED, straight into Node, where
+// `./scheduleDate` is not a path. Vite resolves it happily, so an extensionless specifier only fails once something
+// outside the bundler imports this file; `scripts/verify-firestore-writes.mjs` now does, so that the offers section can
+// assert what the officer's approvals table shows rather than only what the row holds.
+import { displayDate, parseSheetDateKey } from './scheduleDate.js';
+import { rowTimeText, templateTimeText, timeToMinutes, formatClockRange, shiftTimeLabel } from './shiftTime.js';
 
 // --- offer state -----------------------------------------------------------
 
@@ -59,12 +64,29 @@ export function offerDateToKey(offer) {
   return parseSheetDateKey(offer?.date_to) || offerDateKey(offer);
 }
 
-// The template an offer belongs to: from the offer itself, else from the row it
-// fills.
+// The template an offer belongs to: from the offer itself, else from the row it fills, else - for a template occurrence
+// - from the slot key.
+//
+// THE THIRD SOURCE IS A RECOVERY, and it is the reason this bug is fixable rather than merely preventable. `makeOffer`
+// used to drop `schedule_template_id` on the floor, so an offer raised against a template occurrence - which has no
+// schedule row, and is the common case - arrived at this function with only a date and an assignment to go on. The
+// approvals table could not find the template, so it could not find the shift's TIMES, and every such row showed
+// "Time not set" while the same shift read "8:00 AM – 6:00 PM" everywhere else in the app. Nobody noticed because the
+// calendar's open pill matches on `slot_key`, which WAS stored - so the offer looked fine until somebody tried to
+// approve it without knowing when it was.
+//
+// `slot_key` is 'slot-<YYYY-MM-DD>-<template id>' for exactly these offers (see the routing's SUBMIT_SHIFT_OFFER), so
+// the template is recoverable from the key the offer already carries. That recovers the rows written before the field
+// existed rather than leaving them permanently blind, and it is asserted in the tests rather than assumed: the format is
+// 'slot-' (5) + the date (10) + '-' (1), which is why the offset is 16 and not a search for a dash.
 export function offerTemplateId(offer, row = null) {
   const fromOffer = String(offer?.schedule_template_id ?? '').trim();
   if (fromOffer) return fromOffer;
-  return String(row?.schedule_template_id ?? '').trim();
+  const fromRow = String(row?.schedule_template_id ?? '').trim();
+  if (fromRow) return fromRow;
+  const slotKey = String(offer?.slot_key ?? '').trim();
+  if (slotKey.startsWith('slot-') && slotKey.length > 16) return slotKey.slice(16);
+  return '';
 }
 
 // The shift window. Template times win, then the row's own times (custom shifts
@@ -321,14 +343,26 @@ export function describeShiftOffer(offer, {
   const [ownStart, ownEnd] = ownRange ? ownRange.split('–') : ['', ''];
   const startMin = timeToMinutes(ownStart);
   const ownWindow = toWindow(startMin, timeToMinutes(ownEnd));
+  const timeLabel = formatClockRange(ownRange, timeFormat);
+
+  // WHAT THE SHIFT IS CALLED, which is the nickname when the template has one and the window otherwise - the same rule
+  // the schedule board and the member calendar follow, taken from utils/shiftTime rather than restated here. An
+  // approvals queue is a list of decisions about shifts, and "Day Shift" identifies one faster than "8:00 AM – 6:00 PM"
+  // does; the times are still returned below, so a screen with room for both can show both.
+  const templateName = String(template?.nickname ?? '').trim();
 
   return {
     row,
     templateId,
+    // The shift's nickname, or '' when it has none - which is not the same as `shiftLabel`, and the panel uses the
+    // difference to decide whether the times are worth a line of their own.
+    templateName,
     dateKey,
     dateToKey,
     dateLabel: dateLabel || '—',
-    timeLabel: formatClockRange(ownRange, timeFormat),
+    timeLabel,
+    // The label for the shift: its nickname if it has one, its window otherwise.
+    shiftLabel: shiftTimeLabel(template, timeLabel),
     // Minutes past midnight, for ordering shifts within a day. Null when the shift has no
     // readable start time, which the sorts treat as "last".
     startMin,
