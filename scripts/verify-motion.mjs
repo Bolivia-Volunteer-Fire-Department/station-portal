@@ -268,11 +268,33 @@ checkIs(
     readFileSync('src/components/ScheduleCalendar.jsx', 'utf8')
   )
 );
+// ...AND THE ADMINISTRATOR SCHEDULE BOARD, WHICH IS THE ONLY OTHER SCREEN WITH ARROWS. It used to jump straight to the
+// new date, which was a different experience from every other screen for no reason anyone could name - so it is on the
+// same hook, the same two phases, and it passes the unit rather than taking the default, because it walks a day in the
+// day view and a month in the calendar.
+const schedule = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+checkIs(
+  'the administrator schedule board slides too',
+  /useMonthSlide\(viewDate, setViewDate, dayView \? 'day' : 'month'\)/.test(schedule) &&
+    /onAnimationEnd=\{onAnimationEnd\}/.test(schedule)
+);
 checkIs(
   'and the administrator roster still steps months, by taking the default',
   /useMonthSlide\(viewDate, setViewDate\)/.test(readFileSync('src/components/AvailabilityCalendar.jsx', 'utf8'))
 );
 checkIs('an unknown unit is still months', /export function useMonthSlide\(viewDate, setViewDate, unit = 'month'\)/.test(motion));
+// Today pressed while already standing on today, or a picker choice for the day already on screen, has nowhere to go -
+// so the slide does not run for a date that did not move.
+checkIs(
+  'a step to where the view already stands travels nowhere',
+  /next\.getTime\(\) === viewDate\.getTime\(\)/.test(motion)
+);
+// THE CLOCK IS THE GRID'S OWN ANIMATION. `animationend` bubbles, and the schedule board's grid holds pills that
+// animate of their own accord (a swap's pop) - an event from one of those would advance a slide still in flight.
+checkIs(
+  'and an animation inside the grid does not advance it',
+  /event\.target !== event\.currentTarget/.test(motion)
+);
 // Reduced motion gets the month, not the wait: the phases are skipped rather than run invisibly.
 checkIs('a member who asked for less movement skips to the month', /if \(reduced\.current\) \{[\s\S]{0,80}setViewDate\(next\)/.test(motion));
 
@@ -300,7 +322,6 @@ check(
   dialogs.filter((file) => !/renderInViewport\(/.test(sourceOf(file))).map((file) => file),
   []
 );
-const schedule = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
 checkIs('and so are the viewport-positioned popovers', /renderInViewport\(/.test(schedule) && !/createPortal/.test(schedule));
 
 console.log('\n--- the help guides ---');

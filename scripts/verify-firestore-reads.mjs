@@ -221,7 +221,22 @@ checkIs(
     // administrative. Present so the rules harness has somebody who may score but must not score themselves.
     ['Rae Nolan', 'rae', 'active'],
   ]);
-  checkIs('and no password, because there is none to leak', !JSON.stringify(directory.users).toLowerCase().includes('password'));
+  // THE SHAPE OF A DIRECTORY ROW, asserted exactly rather than by hunting for a substring.
+  //
+  // This check used to read `!JSON.stringify(directory.users).includes('password')`, which was asking the right question
+  // the wrong way: the row now carries `is_change_password_on_login`, a boolean the edit form's checkbox and the
+  // "Password change due" badge need, and its NAME contains "password". So the test went red on a flag while being
+  // unable to tell a credential from a field about credentials - it could not have caught the leak it exists for either,
+  // since any password field would also have to be matched by value.
+  //
+  // Naming the seven keys instead is both stricter and honest: every field the projection hands the tab is declared here,
+  // so a credential reaching this payload means a key was ADDED and this line must be changed to allow it. That is the
+  // friction a leak should meet.
+  check(
+    'and no password, because there is none to leak',
+    [...new Set(directory.users.flatMap((user) => Object.keys(user)))].sort(),
+    ['id', 'is_change_password_on_login', 'name', 'rank_id', 'role_id', 'status', 'user_name']
+  );
   // THE BOARD'S SECTIONS ARE NOT CARRIED EITHER - the assignments and templates with their private notes, the offers still waiting,
   // the shift definitions - because each of them belongs to a sub-tab that reads it when opened. They are read here the way those
   // tabs read them, one section at a time, which is also the assertion that the NOTE merge still happens: an officer's pickers and
@@ -896,13 +911,72 @@ checkIs(
   check('a member reads their own devices', devices.devices.map((row) => row.id), ['dev-own']);
   check('and no owner is claimed when the browser passed no token', devices.device_owner, null);
 
-  // A verifier's view of another member's records: the documents THAT MEMBER can see, and their signatures. The
-  // permission is the rules' - which is why a member is refused and an officer is not.
+  // A verifier's view of another member's records, and their signatures. The permission is the rules' - which is why a
+  // member is refused and an officer is not.
+  //
+  // EVERY LIVE DOCUMENT, and this list used to be the member's OWN audience instead. That made the officer's answer
+  // depend on WHO they were standing next to: Bo holds `k2`, so `doc2` - aimed at `rank:k1` - was missing from his
+  // report, and an officer checking a probationary firefighter could conclude he owed nothing when the station simply
+  // had not asked him. The rules already let a verifier read the collection whole (`ADMIN_GET_DOCUMENTS` depends on
+  // exactly that); the reader was filtering that access away.
   await signIn('jane');
   const boRecords = await routeRead('GET_MEMBER_DOCUMENT_RECORDS', { user_id: 'u2' });
-  check('a verifier reads another member records', boRecords.documents.map((entry) => entry.id).sort(), ['doc1', 'doc5', 'doc6']);
+  check('a verifier reads another member records', boRecords.documents.map((entry) => entry.id).sort(), ['doc1', 'doc2', 'doc5', 'doc6']);
+  checkIs(
+    'including a document whose minimum rank sits above the member being viewed',
+    boRecords.documents.some((entry) => entry.id === 'doc2'),
+    JSON.stringify(boRecords.documents.map((entry) => entry.id))
+  );
   checkIs('with that member own signatures', boRecords.signatures.every((row) => row.user_id === 'u2'), JSON.stringify(boRecords.signatures).slice(0, 100));
   check('and a member who does not exist is reported rather than throwing', (await routeRead('GET_MEMBER_DOCUMENT_RECORDS', { user_id: 'nobody' })).message, 'That member no longer exists.');
+  // ...WHILE WHAT THEY OWE IS STILL THEIRS. `doc2` is aimed at `rank:k1` and Bo holds `k2`, so it asks nothing of him.
+  // Reading somebody's records must not invent obligations they do not have - that is the half of this the audience
+  // filter was still doing right, and it is asserted separately so the widening above cannot quietly take it too.
+  checkIs(
+    'and the documents above their rank still ask nothing of them',
+    boRecords.signatures.every((row) => row.document_id !== 'doc2'),
+    JSON.stringify(boRecords.signatures.map((row) => row.document_id))
+  );
+
+  // "MINIMUM RANK" MEANS MINIMUM, and the fixture above cannot prove it: `doc2`'s audience is the single rank `k1`, which
+  // is exactly the shape the bug produced, so it passes either way. What has to be shown is the OTHER direction - a
+  // document whose minimum sits BELOW the reader, expanded to include them.
+  //
+  // So: a document aimed at `k2` (Firefighter, order 1), written the way the editor now writes it - both ranks, because
+  // both are at or above the minimum. Jane holds `k1` (Officer, order 3), so she must see it; Bo holds `k2` and must see
+  // it too. Under the old exact-rank behaviour both of these saw nothing, which is the reported bug: a rank-6 member
+  // could not see a single document whose minimum was 1.
+  //
+  // WRITTEN AND REMOVED HERE rather than seeded, so the library assertions further down - which enumerate documents -
+  // are unaffected by a fixture that only this block cares about.
+  await setDoc(doc(firestore(), 'documents', 'doc-minrank'), {
+    title: 'Minimum Rank Probe',
+    audience_keys: ['rank:k1', 'rank:k2'],
+    content_revision: 1,
+    is_published: true,
+    doc_type: 'document',
+  });
+  await signIn('jane');
+  checkIs(
+    'a member sees a document whose minimum rank sits below their own',
+    (await routeRead('GET_DOCUMENTS')).documents.some((entry) => entry.id === 'doc-minrank'),
+    'the higher rank was not included in the document audience'
+  );
+  await signIn('bo');
+  checkIs(
+    'and so does the member holding the minimum rank itself',
+    (await routeRead('GET_DOCUMENTS')).documents.some((entry) => entry.id === 'doc-minrank'),
+    'the minimum rank itself cannot see its own document'
+  );
+  // REMOVED AS JANE, and that detail is not incidental: the delete is `can_manage_documents`, so doing this as Bo is
+  // refused by the rules - which is the harness telling us the collection is protected, one line after trusting it.
+  await signIn('jane');
+  await deleteDoc(doc(firestore(), 'documents', 'doc-minrank'));
+  checkIs(
+    'and the probe is gone again, so it cannot follow this harness around',
+    !(await routeRead('GET_DOCUMENTS')).documents.some((entry) => entry.id === 'doc-minrank'),
+    'the fixture outlived its block'
+  );
 
   await signIn('bo');
   checkIs(

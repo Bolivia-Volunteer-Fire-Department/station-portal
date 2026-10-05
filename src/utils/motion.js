@@ -102,6 +102,10 @@ export function useMonthSlide(viewDate, setViewDate, unit = 'month') {
   const stepTo = useCallback(
     (next) => {
       if (phase) return;
+      // NOTHING TO TRAVEL TO. Today pressed while already standing on today is a reset gesture, not a request to watch
+      // the board leave and arrive in the same place - and without this the slide would run for a date that did not
+      // move. It also keeps a picker choice for the day already on screen from animating a no-op.
+      if (next.getTime() === viewDate.getTime()) return;
       if (reduced.current) {
         setViewDate(next);
         return;
@@ -130,15 +134,23 @@ export function useMonthSlide(viewDate, setViewDate, unit = 'month') {
     [stepTo]
   );
 
-  const onAnimationEnd = useCallback(() => {
-    if (phase === 'out') {
-      if (pending.current) setViewDate(pending.current);
-      pending.current = null;
-      setPhase('in');
-      return;
-    }
-    if (phase === 'in') setPhase(null);
-  }, [phase, setViewDate]);
+  // THE CLOCK IS THIS ELEMENT'S OWN ANIMATION, and nothing that bubbles up from inside it. The grid holds things that
+  // animate of their own accord - a shift pill popping after a swap (utils/scheduleDrop) - and `animationend` BUBBLES,
+  // so an event from one of those would advance the slide while it was still running. The target is checked rather
+  // than the animation's name, because both phases of the slide are one class apiece and neither is named here.
+  const onAnimationEnd = useCallback(
+    (event) => {
+      if (event && event.target !== event.currentTarget) return;
+      if (phase === 'out') {
+        if (pending.current) setViewDate(pending.current);
+        pending.current = null;
+        setPhase('in');
+        return;
+      }
+      if (phase === 'in') setPhase(null);
+    },
+    [phase, setViewDate]
+  );
 
   const gridClass =
     phase === 'out'

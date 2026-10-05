@@ -101,6 +101,14 @@ import {
   verificationQueue,
 } from '../src/utils/checklists.js';
 
+// THE REPAIR SCRIPT'S DECISIONS, and the promise its own header makes - that it uses the app's expansion rather than a
+// copy. `audience_keys` is MATERIALIZED at save time, so a document saved before the fix keeps its old single-rank list
+// forever unless something re-derives it; scripts/normalize-document-audience.mjs is that something, and it writes to
+// production. So its decisions are exercised here rather than trusted, including the ones that must decide NOT to write.
+// This is the file that script's header names as the one that keeps it honest.
+import { correctedAudienceKeys, isUnjudgeable } from './normalize-document-audience.mjs';
+import { audienceKeysForWrite } from '../src/services/firestoreWrites.js';
+
 let failures = 0;
 const check = (label, actual, expected) => {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -2850,6 +2858,86 @@ checkIs(
   'what the button says it will save is the same list the writer is given',
   /pending\.length\} item/.test(backfillSource) && /itemIds: isChecklist \? pending : \[WHOLE_DOCUMENT_ITEM\]/.test(backfillSource),
   'the count on the button and the rows written could drift apart'
+);
+
+console.log('\n--- what the minimum-rank repair decides to write ---');
+// `correctedAudienceKeys` answers `null` for "leave it alone", and a `null` must be COMPARABLE, not fatal. The first
+// version of this section called `.sort()` straight on the result, so the mutation it exists to catch (a repair that
+// decides to write nothing) crashed the harness with a TypeError instead of reporting a named FAIL - a guard that fails
+// loudly in the wrong way reads as a broken test, not as a caught regression. This maps both sides to the same shape.
+const sorted = (value) => (value === null || value === undefined ? value : [...value].sort());
+
+const LADDER = [
+  { id: 'k1', rank_order: 3 },
+  { id: 'k2', rank_order: 1 },
+];
+
+// THE BROKEN SHAPE, which is what every document saved before the fix looks like: a minimum rank, and a list holding one
+// rank rather than every rank at or above it.
+check(
+  'the repair widens a document stored with one rank to every rank above its minimum',
+  sorted(correctedAudienceKeys({ rank_id: 'k2', audience_keys: ['rank:k1'] }, LADDER)),
+  ['rank:k1', 'rank:k2']
+);
+
+// THE CASE THAT MUST NOT BE "REPAIRED", and it is most of a real station: a minimum at the TOP of the ladder expands to
+// that one rank, which is exactly what the old code stored. Rewriting those would touch every document to change nothing -
+// and it is the reason the decision is null rather than an equal list.
+check('a document already holding the right list is left alone', correctedAudienceKeys({ rank_id: 'k1', audience_keys: ['rank:k1'] }, LADDER), null);
+
+// ORDER IS NOT AUDIENCE. The expansion reads the ranks collection in whatever order it returns, so a list holding the
+// same ranks in another order is the same audience and must not be rewritten.
+check(
+  'and a list holding the same ranks in another order counts as right',
+  correctedAudienceKeys({ rank_id: 'k2', audience_keys: ['rank:k2', 'rank:k1'] }, LADDER),
+  null
+);
+
+// THE NON-RANK AUDIENCES, which this script has no business touching. Widening a role or a personal audience would show a
+// document to people it was never aimed at, and that is the one failure a repair script must not be able to cause.
+check('a document aimed at a role is left alone', correctedAudienceKeys({ role_id: 'r1', audience_keys: ['role:r1'] }, LADDER), null);
+check('a document aimed at one member is left alone', correctedAudienceKeys({ user_id: 'u1', audience_keys: ['user:u1'] }, LADDER), null);
+check('and a document aimed at everybody is left alone', correctedAudienceKeys({ audience_keys: ['*'] }, LADDER), null);
+
+// A MINIMUM THAT IS NOT ON THE LADDER. `audienceKeysForWrite` refuses it, and the script passes that refusal through as
+// "leave it alone" rather than widening the document to every rank - which is what treating an unknown minimum as zero
+// would do.
+check('a minimum rank that is not on the ladder is left alone, not widened to everyone', correctedAudienceKeys({ rank_id: 'gone', audience_keys: ['rank:gone'] }, LADDER), null);
+
+// AND THE ROW THAT CANNOT BE JUDGED AT ALL, named separately because it is the one a station is most likely to have: a
+// rank in the audience with no minimum recorded, which the script cannot expand without guessing.
+check('a rank audience with no minimum rank recorded is reported rather than repaired', isUnjudgeable({ audience_keys: ['rank:k1'] }), true);
+check('while a row with a minimum rank is never unjudgeable', isUnjudgeable({ rank_id: 'k1', audience_keys: ['rank:k1'] }), false);
+check('and neither is one aimed at everybody', isUnjudgeable({ audience_keys: ['*'] }), false);
+
+// A DOCUMENT WITH NO LIST AT ALL IS NOT THIS SCRIPT'S BUSINESS, and the distinction is the point of the case. Such a
+// document is invisible to everybody, which is a different fault from the one being repaired, and "fixing" it here would
+// mean inventing an audience nobody chose.
+check('a document with no stored audience is left alone rather than given one', correctedAudienceKeys({ rank_id: 'k2' }, LADDER), null);
+
+// THE NO-DRIFT CLAIM, asserted rather than believed. The script imports the app's own expansion, so the two cannot differ
+// by accident - but only as long as it KEEPS importing it, and a future edit that pastes a copy in would leave every check
+// above still passing while the script quietly grew its own definition of "a rank and above".
+checkIs(
+  'the repair script imports the app expansion rather than restating it',
+  /import \{ audienceKeysForWrite \} from '\.\.\/src\/services\/firestoreWrites\.js'/.test(
+    readFileSync('scripts/normalize-document-audience.mjs', 'utf8')
+  ),
+  'the script no longer uses the app function, so it can drift from it'
+);
+check(
+  'and it agrees with the app on a widened document',
+  sorted(correctedAudienceKeys({ rank_id: 'k2', audience_keys: ['rank:k1'] }, LADDER)),
+  sorted(audienceKeysForWrite({ rankId: 'k2', ranks: LADDER, rankAndAbove: true }))
+);
+
+// SAFE TO RUN TWICE, which is what makes it a check as well as a fix: the second pass must find nothing to do, because
+// the first pass wrote what it would want to write.
+const once = correctedAudienceKeys({ rank_id: 'k2', audience_keys: ['rank:k1'] }, LADDER);
+check(
+  'and a second run over its own output finds nothing to do',
+  once === null ? 'first pass wrongly declined to repair' : correctedAudienceKeys({ rank_id: 'k2', audience_keys: once }, LADDER),
+  null
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);

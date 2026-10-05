@@ -111,6 +111,40 @@ const flush = async () => {
   });
 };
 
+// THE GRID THE SLIDE ANIMATES - the day cells' own parent, which is a fact about the markup rather than a class name
+// that could be renamed out from under this harness. The predicate is `dayCells`'s own (defined further down, after
+// the first case that needs it); a day cell always exists in every view, so there is always one to find.
+const gridOf = (scope) => {
+  const cell = [...scope.querySelectorAll('div')].find((el) => /flex flex-col gap-1/.test(String(el.className)));
+  return cell ? cell.parentElement : null;
+};
+
+// ONE PRESS OF AN ARROW, WHICH IS TWO PHASES OF A SLIDE.
+//
+// The board does not change its date when the button is pressed: the grid slides out, the swap happens WHILE IT IS OFF
+// THE EDGE, and the new day slides in - and the animation is the clock (`onAnimationEnd`). jsdom runs no CSS, so
+// nothing would ever fire and the board would sit on the same day forever; the harness rings the bell itself, twice,
+// which is exactly what a browser does. A harness that pressed the button and stopped would report every arrow on this
+// screen as broken. See scripts/verify-member-schedule-runtime.mjs, which settles the member's calendar the same way.
+const settle = async (scope) => {
+  const grid = gridOf(scope);
+  if (grid) {
+    await act(async () => {
+      fireEvent.animationEnd(grid);
+    });
+    await act(async () => {
+      fireEvent.animationEnd(grid);
+    });
+  }
+  await flush();
+};
+
+// A press of one of the board's own buttons, followed by the two phases of whatever slide it started.
+const press = async (scope, button) => {
+  fireEvent.click(button);
+  await settle(scope);
+};
+
 // A reader that records every call, which is the only way to see a loop: the board renders the same thing whether it read
 // the month once or two hundred times.
 const makeReader = (rowsByMonth) => {
@@ -279,8 +313,7 @@ console.log('\n--- walking to the next month ---');
   const nextButton = container.querySelector('button[aria-label="Next month"]');
   check('the board has a next-month button', Boolean(nextButton));
   const readsBefore = calls.length;
-  fireEvent.click(nextButton);
-  await flush();
+  await press(container, nextButton);
 
   check(
     'walking forward reads the month it walked to',
@@ -366,8 +399,7 @@ console.log('\n--- a late answer from a month already left ---');
   check('the first month is asked for', pending.length > 0);
 
   const nextButton = container.querySelector('button[aria-label="Next month"]');
-  fireEvent.click(nextButton);
-  await flush();
+  await press(container, nextButton);
   check('and so is the month walked to', pending.length > 1, `${pending.length} reads`);
 
   const [firstRead, secondRead] = pending;
@@ -525,8 +557,10 @@ const dayCells = (scope) =>
   const stepDelta = TODAY_DAY > 1 ? -1 : 1;
   const steppedDay = TODAY_DAY + stepDelta;
   const readsBefore = calls.length;
-  fireEvent.click(container.querySelector(`button[aria-label="${stepDelta < 0 ? 'Previous day' : 'Next day'}"]`));
-  await flush();
+  await press(
+    container,
+    container.querySelector(`button[aria-label="${stepDelta < 0 ? 'Previous day' : 'Next day'}"]`)
+  );
   check(
     'the arrows walk a day, not a month',
     text(container).includes(dayLabelFor(THIS_YEAR, THIS_MONTH, steppedDay)),
@@ -733,8 +767,7 @@ console.log('\n--- a narrow screen: the day picker, and one press to any day ---
   const nextMonth = (THIS_MONTH + 1) % 12;
   const pickerDay = document.body.querySelector(`button[aria-label="${dayKey(nextYear, nextMonth, 14)}"]`);
   check('and it offers days of the month it walked to', Boolean(pickerDay), 'no day button');
-  fireEvent.click(pickerDay);
-  await flush();
+  await press(container, pickerDay);
   check(
     'choosing one takes the board to that day',
     text(container).includes(dayLabelFor(nextYear, nextMonth, 14)),
@@ -759,8 +792,10 @@ console.log('\n--- a narrow screen: the day picker, and one press to any day ---
   //
   // Back to today first, because the board is on the 14th of the next month and this case's row is in THIS one: the
   // pill has to be on the day being drawn for the click to have anything to open.
-  fireEvent.click([...container.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Today'));
-  await flush();
+  await press(
+    container,
+    [...container.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Today')
+  );
   await act(async () => {
     setViewportWidth(1024);
   });
@@ -806,8 +841,9 @@ console.log('\n--- walking off the end of the month ---');
   // the wrap - `Date` normalizes the day overflow - so this is what proves the boundary is the calendar's rather than a
   // second implementation of one.
   const presses = LAST_DAY - TODAY_DAY + 1;
-  for (let i = 0; i < presses; i++) fireEvent.click(container.querySelector('button[aria-label="Next day"]'));
-  await flush();
+  for (let i = 0; i < presses; i++) {
+    await press(container, container.querySelector('button[aria-label="Next day"]'));
+  }
 
   check(
     'walking past the last day of the month reads the month it walked into',
@@ -882,11 +918,33 @@ console.log('\n--- the viewport question, and who is listening ---');
     DESKTOP_MEDIA_QUERY === '(min-width: 768px)' && /fixed md:static/.test(sidebar),
     `${DESKTOP_MEDIA_QUERY} against the sidebar's md`
   );
+  // The board must ask the SHARED module for its shape rather than carrying a number of its own. Matched on the imported
+  // NAMES and not on the text of the import statement, because a reformatted import is not a behaviour change and a check
+  // that fails on one sends the next person to "fix" a line that was never wrong.
+  const boardSource = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+  const viewportImports = boardSource.match(/import \{([^}]*)\} from '\.\.\/\.\.\/utils\/viewport'/s);
+  const viewportNames = viewportImports ? viewportImports[1] : '';
   check(
     'and the board asks it through the shared module rather than a number of its own',
-    /desktopViewport, subscribeViewport/.test(
-      readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8')
-    )
+    ['desktopViewport', 'subscribeViewport'].every((name) => viewportNames.includes(name)),
+    `the board imports ${viewportNames.replace(/\s+/g, ' ').trim()} from utils/viewport`
+  );
+
+  // ...AND IT ASKS FOR ALL THREE SHAPES, not the two it used to. The middle band - narrower than the sidebar's 768px and
+  // wider than a phone's 640px - is the whole feature, and it is invisible to a check that only proves the desktop and
+  // phone answers are imported: a board that asked `dayViewSpan` with `isPhone` hard-coded false would pass the line above.
+  check(
+    'and it asks for the phone answer too, which is what makes the two-day band exist',
+    ['phoneViewport', 'subscribePhoneViewport'].every((name) => viewportNames.includes(name)) &&
+      /dayViewSpan\(\{ isDesktop, isPhone \}\)/.test(boardSource),
+    'the board imports no phone query, or never passes isPhone to dayViewSpan'
+  );
+  // ...AND THE MEMBER'S CALENDAR USES THE SAME ONE, which is the only reason "the same narrow-view logic in both places"
+  // is a fact rather than two implementations that happen to agree today.
+  check(
+    'and the member calendar asks the same shared rule rather than repeating the bands',
+    /dayViewSpan\(\{ isDesktop, isPhone \}\)/.test(readFileSync('src/components/ScheduleCalendar.jsx', 'utf8')),
+    'the two calendars no longer share dayViewSpan'
   );
 }
 

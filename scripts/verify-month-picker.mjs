@@ -26,7 +26,7 @@
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { monthGridCells } from '../src/utils/calendarConstants.js';
+import { MONTH_VIEW, monthGridCells, dayViewSpan, spanDayDates } from '../src/utils/calendarConstants.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -89,6 +89,73 @@ const julyFirst = july.find(Boolean);
 check('a cell carries no time of day', [julyFirst.getHours(), julyFirst.getMinutes()], [0, 0]);
 check('and the grid hands back fresh objects each call', monthGridCells(2026, 6).find(Boolean) === julyFirst, false);
 
+console.log('\n--- how many days a window shows ---');
+// THREE SHAPES FROM TWO ANSWERS. The middle one is the feature: below the sidebar's 768px but above a phone's 640px the
+// calendar shows TWO days, and it is the band that could not exist before there were two answers to ask for.
+check('a desktop window draws the month', dayViewSpan({ isDesktop: true, isPhone: false }), MONTH_VIEW);
+check('a window between a phone and the sidebar draws two days', dayViewSpan({ isDesktop: false, isPhone: false }), 2);
+check('and a phone draws one', dayViewSpan({ isDesktop: false, isPhone: true }), 1);
+
+// THE BANDS MUST NOT OVERLAP, which is the property the two queries are written to give. If they did, a 700px window would
+// match both a `min-width: 640px` and a `max-width: 639px` question and no rule could decide; so the desktop question is
+// asked FIRST and a window answering both takes the month view. That ordering is the safety property, and it is asserted
+// rather than described.
+check('a window that somehow answers both takes the desktop shape', dayViewSpan({ isDesktop: true, isPhone: true }), MONTH_VIEW);
+
+console.log('\n--- the days a span covers ---');
+// A two-day span is the START day and the day after it - which is why the view opens on today and tomorrow rather than on
+// today and some other day of the week.
+check('a two-day span is the day and the one after', spanDayDates(new Date(2026, 9, 3), 2).map(key), ['2026-10-03', '2026-10-04']);
+check('a one-day span is just the day', spanDayDates(new Date(2026, 9, 3), 1).map(key), ['2026-10-03']);
+check('and a zero-day span is empty rather than one day', spanDayDates(new Date(2026, 9, 3), 0), []);
+
+// THE MONTH BOUNDARY, which is where a naive `getDate() + 1` would produce "32nd October" or a blank. The Date constructor
+// normalises the overflow, and this is the assertion that it still does: the member's calendar READS THE NEXT MONTH when a
+// span crosses, so a broken second day would show an empty column with no error anywhere.
+check('a span across a month boundary lands on the 1st', spanDayDates(new Date(2026, 9, 31), 2).map(key), ['2026-10-31', '2026-11-01']);
+check('and across a year boundary too', spanDayDates(new Date(2026, 11, 31), 2).map(key), ['2026-12-31', '2027-01-01']);
+check('a leap day steps onto the 1st of March', spanDayDates(new Date(2028, 1, 29), 2).map(key), ['2028-02-29', '2028-03-01']);
+// A junk span yields nothing rather than throwing, so a caller that has not decided its shape still gets a drawable list.
+check('a nonsense span is empty, not a crash', spanDayDates(new Date(2026, 9, 3), MONTH_VIEW), []);
+// A caller may hold on to one of these and shift it - the calendars do when the view moves - so the days have to be
+// FRESH objects rather than one array the function hands out again. This is checked by actually breaking one: if
+// `spanDayDates` reused a Date, the mutation below would leak into the next call.
+//
+// The first version of this check compared a returned day against `new Date(...)`, which is a reference comparison and so
+// can never be true - it passed whatever the function did. oxlint flagged it (the 31st warning on this branch), and it
+// earned the flag: an assertion that cannot fail is not coverage, it is decoration.
+const borrowed = spanDayDates(new Date(2026, 9, 3), 1);
+borrowed[0].setFullYear(1999);
+check('and the days are fresh objects, so a caller cannot corrupt the next span', spanDayDates(new Date(2026, 9, 3), 1).map(key), ['2026-10-03']);
+
+console.log('\n--- one rule, two callers ---');
+// Both calendars must ask the SAME function. Two implementations that agree today are two implementations, and the day one
+// of them is edited is the day they disagree.
+const spanMember = source('src/components/ScheduleCalendar.jsx');
+const spanBoard = source('src/components/admin/AdminScheduleManagementTab.jsx');
+for (const [label, text] of [['the member calendar', spanMember], ['the board', spanBoard]]) {
+  checkIs(`${label} asks the shared span rule`, /dayViewSpan\(\{ isDesktop, isPhone \}\)/.test(text));
+  checkIs(`${label} draws its days with the shared span builder`, /spanDayDates\(/.test(text));
+  checkIs(
+    `${label} steps its arrows by the span`,
+    /dayCount \|\| 1/.test(text) || /delta \* \(dayCount \|\| 1\)/.test(text)
+  );
+}
+// ...AND NEITHER CARRIES A BREAKPOINT NUMBER OF ITS OWN, which is how the bands would drift apart. Comments are stripped
+// first, because both files DISCUSS the numbers at length and a check that matched prose would pass on a deleted rule.
+const withoutComments = (text) => text.replace(/\/\/.*$/gm, '');
+checkIs(
+  'neither calendar names a pixel width',
+  !/min-width|max-width|\b768\b|\b639\b/.test(withoutComments(spanMember)) &&
+    !/min-width|max-width|\b768\b|\b639\b/.test(withoutComments(spanBoard)),
+  'a calendar is carrying its own breakpoint'
+);
+checkIs(
+  'and the phone breakpoint is a disjoint upper bound, which is what the ordering above relies on',
+  /PHONE_MEDIA_QUERY = '\(max-width: 639px\)'/.test(source('src/utils/viewport.js')),
+  'the phone query is not the disjoint upper bound the span rule depends on'
+);
+
 console.log('\n--- one builder, three callers ---');
 // The two calendars build the month; the picker builds the same month. One builder means they cannot disagree, and the
 // assertion is the ABSENCE of a second copy - a regex for the inline arithmetic that each of them used to carry.
@@ -97,6 +164,11 @@ const adminBoard = source('src/components/admin/AdminScheduleManagementTab.jsx')
 const picker = source('src/components/MonthPickerModal.jsx');
 
 checkIs('the member calendar uses the shared builder', /monthGridCells\(year, month\)/.test(memberCalendar));
+checkIs(
+  'and hands the reader the SAME span it draws, so a crossing span reads its second month',
+  /spanDates : monthCells/.test(memberCalendar) && /dayView \? spanKeys : \[monthStartKey\]/.test(memberCalendar),
+  'the drawn cells and the read range are derived from different things'
+);
 checkIs('the board uses the shared builder', /monthGridCells\(year, month\)/.test(adminBoard));
 checkIs('and so does the picker', /monthGridCells\(year, month\)/.test(picker));
 [['the member calendar', memberCalendar], ['the board', adminBoard]].forEach(([name, text]) => {

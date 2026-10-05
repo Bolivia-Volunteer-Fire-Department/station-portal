@@ -1171,6 +1171,30 @@ const getLoadingMessage = () => {
     }
   };
 
+  // THE CLOCK CARD ANSWERS THE ACTION, NOT THE NEXT RE-READ.
+  //
+  // `isClockedIn` is derived from `onDutyUsers`, so the card used to be at the mercy of the refresh that follows the
+  // write: if that refresh failed, was slow, or was answered from a cache still holding the deleted row, the member
+  // pressed Clock Out, the transaction committed, and the dashboard went on drawing "On Duty" with a Clock Out button
+  // still under it. Pressing again was then answered by the server - which looks for an open entry, finds none, and
+  // says "You are not clocked in." The record was right and the screen was wrong, and nothing on the screen said so.
+  //
+  // So the outcome is applied HERE, from the answer the action itself returned, and `refreshOnDuty` afterwards is a
+  // confirmation rather than the mechanism. The two agree; when they somehow do not, the next refresh has already put
+  // the server's answer back.
+  const applyClockOutcome = (clockedIn) =>
+    setOnDutyUsers((current) => {
+      const mine = String(currentUser?.id ?? '');
+      if (!mine) return current;
+      const withoutMe = current.filter((row) => String(row.id ?? row.user_id) !== mine);
+      if (!clockedIn) return withoutMe;
+      const alreadyDrawn = current.find((row) => String(row.id ?? row.user_id) === mine);
+      return [
+        ...withoutMe,
+        alreadyDrawn || { id: mine, user_id: mine, name: currentUser?.name || '', rank_id: currentUser?.rank_id || '' },
+      ];
+    });
+
   const refreshOnDuty = async (token) => {
     try {
       const data = await fetchOnDutyUsers(token);
@@ -1786,11 +1810,18 @@ const getLoadingMessage = () => {
       const result = await submitClockAction(actionType, currentUser.id, coords, token);
 
       if (result.success) {
+        const clockedIn = actionType === 'CLOCK_IN';
         setStatusMessage({
           type: 'success',
-          text: `Successfully ${actionType === 'CLOCK_IN' ? 'Clocked In' : 'Clocked Out'}${coords.latitude ? ' with GPS location' : ''
+          text: `Successfully ${clockedIn ? 'Clocked In' : 'Clocked Out'}${coords.latitude ? ' with GPS location' : ''
             }!`,
         });
+        // A TOAST, because the banner this also sets is only rendered on the login screen - see the note above
+        // `clockNotice`. Without one, the only confirmation a member ever got for a clock action was the card itself
+        // changing, so a card that had not changed yet left them with no signal at all that the press had worked.
+        toast.success(clockedIn ? 'Clocked in.' : 'Clocked out. Have a good one.');
+        // Applied BEFORE the re-read, so the card flips on the action's own answer rather than on the refresh below.
+        applyClockOutcome(clockedIn);
         await refreshLogs(token);
         await refreshOnDuty(token);
       } else if (result.code === 'UNAUTHORIZED') {

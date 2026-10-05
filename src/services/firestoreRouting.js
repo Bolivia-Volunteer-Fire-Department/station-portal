@@ -829,8 +829,21 @@ const DOCUMENT_DELETES = {
 };
 
 // The three collections a member sees by AUDIENCE, whose saves carry a materialized `audience_keys` list computed as
-// they are written - which is why they are not in the plain table above. Events are the one that expands to "this
-// rank and above"; announcements and documents target the rank exactly.
+// they are written - which is why they are not in the plain table above.
+//
+// TWO OF THEM EXPAND TO "THIS RANK AND ABOVE": events, and DOCUMENTS. An event aimed at a Captain's meeting is aimed at
+// everybody more junior as well, and that has always been how events behaved.
+//
+// A document did not, and that was a BUG rather than a decision. The editor has always labelled this field **"Minimum
+// rank"**, both help pages have always described it as "a rank and above", and the reader on the other side has always
+// answered it as one - but `rankAndAbove: false` stored the single rank id, so `array-contains-any` matched that one rank
+// and nothing else. A document with a minimum rank of Firefighter was therefore invisible to a Captain: not "not aimed at
+// you", simply absent, with nothing on screen to say why. The library a senior member sees was missing every document
+// whose minimum sat below them.
+//
+// ANNOUNCEMENTS STAY EXACT, and that difference is deliberate rather than an oversight left behind: an announcement names
+// the people it is for ("the probationary class reads this"), where a document names the rank from which it applies.
+// Changing announcements is a separate decision about a broadcast channel and is not taken here.
 //
 // `liveUntilFrom` is the second materialized field, and only announcements have it: a row's END date, written as a
 // `live_until` key so the read can ask for "what is in force" with one range filter. See firestoreWrites#saveAudienceDocument
@@ -839,7 +852,7 @@ const DOCUMENT_DELETES = {
 // they are not on this list.
 const AUDIENCE_SAVES = {
   ADMIN_SAVE_ANNOUNCEMENT: { collection: 'announcements', rankAndAbove: false, liveUntilFrom: 'end_date' },
-  ADMIN_SAVE_DOCUMENT: { collection: 'documents', rankAndAbove: false },
+  ADMIN_SAVE_DOCUMENT: { collection: 'documents', rankAndAbove: true },
   ADMIN_SAVE_EVENT: { collection: 'events', rankAndAbove: true },
 };
 

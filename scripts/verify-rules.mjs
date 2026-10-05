@@ -15,6 +15,7 @@
 import { initializeApp } from 'firebase/app';
 import {
   connectFirestoreEmulator,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -477,6 +478,93 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('but still not the status, which is a callable business', smuggled.includes('permission-denied'), smuggled);
+
+  // --- a role flag the sheet spelled as text ---------------------------------------------------------------
+  // THE REPORTED BUG. An officer whose role document holds `is_admin: "TRUE"` rather than a boolean was shown EVERY
+  // Administration tab, panel and button - `isTruthyFlag` has always accepted the sheet's spelling - and then refused
+  // every write with permission-denied, because these rules compared the flag to the boolean `true` alone. The client
+  // said administrator; the server said no, and nothing on screen could explain it.
+  //
+  // These four cases are the regression for that, and the seed could not have caught it: `seed-emulator.mjs` writes real
+  // booleans, so every check below this line was passing against a spelling that never occurs in a migrated station.
+  const originalRole = (await getDoc(doc(db, 'roles', 'r1'))).data();
+  const asSpelledText = Object.fromEntries(
+    Object.entries(originalRole).map(([key, value]) => [key, value === true ? 'TRUE' : value === false ? 'FALSE' : value])
+  );
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r1'), asSpelledText);
+  const textFlagOfficer = await setDoc(doc(db, 'document_signatures', 'sig-text-flag'), {
+    document_id: 'doc1',
+    user_id: 'u2',
+    signed_by_user_id: 'u1',
+    signature_role: 'member',
+    backfilled: true,
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('a role flag spelled as the sheet spells it still grants what the client says it grants', textFlagOfficer === 'written', textFlagOfficer);
+
+  // AND IT STILL REFUSES what the client refuses. A flag spelled "FALSE" is not a weaker "TRUE", and the seed cannot
+  // show that: it writes real booleans, so a `granted()` that accepted any non-empty string would have passed every
+  // existing case in this file and handed the whole app to any officer with a mis-typed cell.
+  await setDoc(doc(db, 'roles', 'r3'), {
+    description: 'Assessor',
+    is_admin: 'FALSE',
+    can_view_documents: 'TRUE',
+    can_manage_documents: 'FALSE',
+    can_edit_roles: 'TRUE',
+    can_add_assessment_scores: 'TRUE',
+  });
+  await asUser('u3');
+  const spelledFalse = await setDoc(doc(db, 'document_signatures', 'sig-text-false'), {
+    document_id: 'doc1',
+    user_id: 'u2',
+    signed_by_user_id: 'u3',
+    signature_role: 'member',
+    backfilled: true,
+  }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'a flag spelled FALSE is still not granted, so the type check is doing the work',
+    spelledFalse.includes('permission-denied'),
+    spelledFalse
+  );
+
+  // THE ESCALATION GUARD, in the same dialect as the permission it guards. `roles` is writable by a role editor, so a
+  // role editor that could write `is_admin: "TRUE"` could hand itself the whole app - which is the one thing the create
+  // and update rules exist to prevent. Written as a bare `!= true` the guard read "TRUE" as "not an administrator" and
+  // waved it straight through, so it has to be re-asserted against the widened spelling.
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r3'), {
+    description: 'Assessor',
+    is_admin: false,
+    can_view_documents: true,
+    can_edit_roles: true,
+    can_add_assessment_scores: true,
+  });
+  await asUser('u3');
+  const escalate = await setDoc(doc(db, 'roles', 'r3'), { description: 'x', is_admin: 'TRUE' }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('nor may a non-admin role editor promote a role with the text spelling', escalate.includes('permission-denied'), escalate);
+  const escalateBoolean = await setDoc(doc(db, 'roles', 'r3'), { description: 'x', is_admin: true }).then(
+    () => 'written',
+    (error) => String(error.code || '')
+  );
+  checkIs('nor with the boolean, which is the case this always covered', escalateBoolean.includes('permission-denied'), escalateBoolean);
+  const escalateDelete = await deleteDoc(doc(db, 'roles', 'r1')).then(
+    () => 'deleted',
+    (error) => String(error.code || '')
+  );
+  checkIs('nor delete an administrator role', escalateDelete.includes('permission-denied'), escalateDelete);
+
+  // Put the table back as it was found, so nothing below this line is reading a role it did not expect.
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r1'), originalRole);
 
   checkIs('every case ran', cases >= 27, `only ${cases} cases: a section has stopped running`);
 };

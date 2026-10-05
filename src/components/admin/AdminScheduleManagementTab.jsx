@@ -22,6 +22,9 @@ import MonthPickerModal from '../MonthPickerModal';
 import ScheduleAssignmentModal from '../ScheduleAssignmentModal';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { mergeDayItems } from '../../utils/dayOrder';
+// THE SAME SLIDE the member's calendar uses, so a change of view on this screen is not a different experience from one
+// on the other. See utils/motion for the two phases and why the swap happens off the edge.
+import { useMonthSlide } from '../../utils/motion';
 
 // A day's SLOTS in the order that day reads: start time, then the assignment's required rank. The board tracks time
 // itself (mergeDayItems, which is stable), so this is what decides the order of two shifts that start together.
@@ -36,8 +39,21 @@ import {
   parseRankOrder,
   rankLabel,
 } from '../../utils/rankEligibility';
-import { WEEKDAYS, MONTHS, DAY_ORDER, monthGridCells } from '../../utils/calendarConstants';
-import { desktopViewport, subscribeViewport } from '../../utils/viewport';
+import {
+  WEEKDAYS,
+  MONTHS,
+  DAY_ORDER,
+  MONTH_VIEW,
+  monthGridCells,
+  dayViewSpan,
+  spanDayDates,
+} from '../../utils/calendarConstants';
+import {
+  desktopViewport,
+  phoneViewport,
+  subscribePhoneViewport,
+  subscribeViewport,
+} from '../../utils/viewport';
 import { unnamedLabel } from '../../utils/displayLabel';
 import PrintableSchedule from '../PrintableSchedule';
 
@@ -204,7 +220,15 @@ export default function AdminScheduleManagementTab({
   // controls disagree with what is on it. So ONE flag decides all of it, and the breakpoint it reads is Tailwind's `md`
   // - the number the sidebar already switches on (Sidebar.jsx) - rather than a second threshold to keep in step.
   const isDesktop = useSyncExternalStore(subscribeViewport, desktopViewport, desktopViewport);
-  const dayView = !isDesktop;
+  // THE SAME THREE SHAPES THE MEMBER'S CALENDAR USES, from the same `dayViewSpan` (utils/calendarConstants): the month on a
+  // wide screen, TWO days in the band between a phone and the sidebar's 768px, one day on a phone. Asking the same function
+  // is what keeps "the same narrow-view logic in both places" a fact rather than a coincidence - and it is why the bands
+  // cannot drift apart when one of them is retuned.
+  const isPhone = useSyncExternalStore(subscribePhoneViewport, phoneViewport, phoneViewport);
+  const span = dayViewSpan({ isDesktop, isPhone });
+  const dayView = span !== MONTH_VIEW;
+  // Zero in the month view, so the arrow step below can never multiply a span of 'month' into NaN.
+  const dayCount = dayView ? span : 0;
 
   // THE DAY AND THE MONTH ARE ONE PIECE OF STATE, deliberately: `viewDate` carries both, so the day on screen in the
   // day view and the month in the calendar can never drift apart, and resizing between the two keeps the officer on
@@ -296,7 +320,23 @@ export default function AdminScheduleManagementTab({
   // THE DAY ON SCREEN, as a key and as the toolbar's own label. In the day view the day IS the unit, so the title has
   // to name it - and the same key is what the single cell is drawn for, so the title and the grid cannot disagree.
   const viewDayKey = toDateKey(viewDate);
-  const dayLabel = displayDate(viewDayKey);
+  // The month this view sits in, which is what the span is clipped to (see `spanDates`) and what every month-scoped read
+  // on this board is asked for.
+  // THE DAYS OF THE SPAN THIS BOARD CAN ACTUALLY DRAW, and the label to go with them.
+  //
+  // CLIPPED TO THE MONTH ON SCREEN, which is the one place this screen differs from the member's calendar and the reason is
+  // not cosmetic. The board's visible rows ARE the save's diff base: `base` holds the month on screen precisely so that a
+  // save deletes "every row the board can see and no longer has in working" (see scopeToMonth) and therefore cannot reach a
+  // neighbouring month. Widening what the board HOLDS to reach across a boundary would widen what a save DELETES with it -
+  // an officer editing the 31st would lose the 1st. So the span is asked of the day view and answered from the month this
+  // board owns: at a month end the second column is simply absent rather than present and empty, which is the honest
+  // answer and cannot delete anything. The member's calendar has no such base and reads the extra month freely.
+  const spanDates = dayView
+    ? spanDayDates(viewDate, dayCount).filter((day) => toDateKey(day).slice(0, 7) === viewDayKey.slice(0, 7))
+    : [];
+  // "Sat, Oct 3" for one day, "Sat, Oct 3 – Sun, Oct 4" for two, and for a span clipped to one day the single date - the
+  // title therefore always names exactly the columns on screen.
+  const dayLabel = spanDates.map((day) => displayDate(toDateKey(day))).join(' – ');
   const todayKey = toDateKey(now);
   // Events are visible by default. Not persisted: a temporary view choice, like "Show everyone".
   const [showEvents, setShowEvents] = useState(true);
@@ -726,13 +766,13 @@ export default function AdminScheduleManagementTab({
 
   const monthGrid = useMemo(() => monthGridCells(year, month), [year, month]);
 
-  // WHICH DAYS THE CELLS ARE DRAWN FOR: every day of the month on a wide screen, the one day on screen on a narrow
-  // one. Both draw the SAME cell through the same closure below - the day view is one entry of this list, not a second
-  // renderer - so a change to how a day is drawn cannot reach one view and miss the other.
+  // WHICH DAYS THE CELLS ARE DRAWN FOR: every day of the month on a wide screen, the days of the span on a narrow one.
+  // Both draw the SAME cell through the same closure below - a day view is an entry of this list, not a second renderer -
+  // so a change to how a day is drawn cannot reach one view and miss the other.
   //
-  // `viewDate` rather than a leading-blank cell: it is a real date (see the viewDate note), so the day view never has a
-  // blank to draw and the day it shows is the day the read is scoped to.
-  const daysOnBoard = dayView ? [viewDate] : monthGrid;
+  // `spanDates` rather than `[viewDate]`, and it is already clipped to this board's month (see the note there): the list
+  // is therefore never empty in a day view and never holds a day this board cannot edit.
+  const daysOnBoard = dayView ? spanDates : monthGrid;
 
   // Non-shift entries for the visible month, grouped by day. Normalized defensively so a raw sheet row
   // cannot silently render nothing: the engine reads `isAllDay`/`startsAt`, not `is_all_day`/`date_from`.
@@ -1612,27 +1652,28 @@ export default function AdminScheduleManagementTab({
     return groups;
   })();
 
-  // THE ARROWS WALK WHATEVER IS ON SCREEN: a day in the day view, a month in the calendar. One function, so the two
-  // buttons cannot step a different unit from each other or from the title.
-  const stepView = (delta) => {
-    if (dayView) {
-      // Day arithmetic by day-of-month overflow, which `Date` normalizes - so this walks across month and year ends
-      // with no special case. THE READ IS UNAFFECTED: the month bounds are derived from this date, so stepping a day
-      // INSIDE the month asks the reader for nothing new, and stepping off the month's end asks for the month arrived
-      // at - one month's read, exactly as before.
-      setViewDate(new Date(year, month, viewDate.getDate() + delta));
-      return;
-    }
-    // A MONTH STEP KEEPS THE DAY, clamped into the month it lands in (the 31st becomes the 28th or 30th). Pinning it to
-    // the 1st - which is what this did while a month was the only unit - silently moved the officer to the start of the
-    // month, so a window narrowed and widened again came back on the 1st instead of the day they were reading.
-    const landing = new Date(year, month + delta, 1);
-    const lastDay = new Date(landing.getFullYear(), landing.getMonth() + 1, 0).getDate();
-    setViewDate(new Date(landing.getFullYear(), landing.getMonth(), Math.min(viewDate.getDate(), lastDay)));
-  };
+  // THE ARROWS WALK WHATEVER IS ON SCREEN: a day in the day view, a month in the calendar. One hook call, so the two
+  // buttons, the title, Today and the picker cannot step a different unit from each other - and they travel there the
+  // way every other screen's arrows do, on the two-phase slide in utils/motion.
+  //
+  // THE UNIT IS THE VIEW'S for the same reason the member's calendar passes it: a day that animated differently from a
+  // month would be two boards wearing one card. The step is then THE SPAN (`dayCount || 1`, which is zero - so one -
+  // in the month view, where a month IS the step), so a two-day view moves the whole pair rather than sliding one
+  // column of it: a two-day view that advanced a day at a time would show the 4th and 5th after one press, having
+  // shown the 3rd and 4th before, and no officer would ever see two days in a row.
+  //
+  // THE READ IS UNAFFECTED by either unit: the month bounds are derived from this date, so stepping INSIDE the month
+  // asks the reader for nothing new, and stepping off the month's end asks for the month arrived at - one month's
+  // read, exactly as before. Day-of-month overflow is Date's own normalization, so a day step walks across month and
+  // year ends with no special case, and a MONTH step keeps the day, clamped into the month it lands in (the 31st
+  // becomes the 28th or 30th) rather than pinning it to the 1st and silently moving the officer to the start of the
+  // month.
+  const { gridClass, onAnimationEnd, goBy, goTo } = useMonthSlide(viewDate, setViewDate, dayView ? 'day' : 'month');
+  const stepView = (delta) => goBy(delta * (dayCount || 1));
 
-  // Today, in BOTH views: the date whose month is read, and the day the day view draws.
-  const goToday = () => setViewDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+  // Today, in BOTH views: the date whose month is read, and the day the day view draws. Through the slide, like an
+  // arrow press - and nowhere at all when the view is already standing on today (see stepTo in utils/motion).
+  const goToday = () => goTo(now);
 
   // A DAY CHOSEN FROM THE PICKER: the same state change a press of an arrow makes, so the read follows it exactly as it
   // follows a walk - picking a day inside the month on screen asks the reader for nothing, and picking one outside it
@@ -1642,7 +1683,8 @@ export default function AdminScheduleManagementTab({
   const chooseDay = (dateKey) => {
     const [y, m, d] = String(dateKey).split('-').map(Number);
     if (!y || !m || !d) return;
-    setViewDate(new Date(y, m - 1, d));
+    // Through the slide, so a day picked from another month travels there the way an arrow press would have.
+    goTo(new Date(y, m - 1, d));
     setPickerOpen(false);
   };
 
@@ -1663,11 +1705,11 @@ export default function AdminScheduleManagementTab({
             {/* THE ARROWS STEP THE UNIT ON SCREEN - a day in the day view, a month in the calendar - and their labels
                 say which, because a screen reader has no title bar to read it from. `aria-label` is also what the
                 board's own harness looks the buttons up by, so the two units' buttons stay distinguishable. */}
-            <button type="button" onClick={() => stepView(-1)} aria-label={dayView ? 'Previous day' : 'Previous month'} className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
+            <button type="button" onClick={() => stepView(-1)} aria-label={dayView ? (dayCount > 1 ? `Previous ${dayCount} days` : 'Previous day') : 'Previous month'} className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
               <ChevronLeft className="w-5 h-5" />
             </button>
             <span className="min-w-[150px] text-center text-base font-semibold text-slate-900 dark:text-white">{dayView ? dayLabel : monthLabel}</span>
-            <button type="button" onClick={() => stepView(1)} aria-label={dayView ? 'Next day' : 'Next month'} className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
+            <button type="button" onClick={() => stepView(1)} aria-label={dayView ? (dayCount > 1 ? `Next ${dayCount} days` : 'Next day') : 'Next month'} className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
               <ChevronRight className="w-5 h-5" />
             </button>
             <button type="button" onClick={goToday} className="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600">
@@ -2437,7 +2479,16 @@ export default function AdminScheduleManagementTab({
           </div>
         )}
 
-        <div className={dayView ? 'p-2' : 'p-2 grid grid-cols-7 gap-1'}>
+        {/* ONE COLUMN IN THE DAY VIEW, two when the span is two days, seven equal ones in the calendar. The
+            `p-2` padding is shared by all three so the cells sit the same way whichever shape is on screen.
+
+            `gridClass` AND `onAnimationEnd` GO HERE, on the grid and not on the card: the card holds still while the
+            days leave through one edge and arrive from the other, which is the whole shape of the slide. The weekday
+            header above stays put for the same reason it does in the member's calendar - only the days travel. */}
+        <div
+          className={`${dayView ? (spanDates.length > 1 ? 'p-2 grid grid-cols-2 gap-1' : 'p-2') : 'p-2 grid grid-cols-7 gap-1'} ${gridClass}`}
+          onAnimationEnd={onAnimationEnd}
+        >
 {daysOnBoard.map((day, i) => {
             if (!day) {
               return <div key={`blank-${i}`} className="min-h-[124px] rounded-lg bg-slate-50/50 dark:bg-slate-900/40" />;

@@ -5,8 +5,13 @@ import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
 import RankIcon from './RankIcon';
 import { rowTimeText, templateTimeText, timeToMinutes, prettyRange, shiftTimeLabel } from '../utils/shiftTime';
-import { WEEKDAYS, MONTHS, DAY_ORDER, monthGridCells } from '../utils/calendarConstants';
-import { desktopViewport, subscribeViewport } from '../utils/viewport';
+import { WEEKDAYS, MONTHS, DAY_ORDER, MONTH_VIEW, monthGridCells, dayViewSpan, spanDayDates } from '../utils/calendarConstants';
+import {
+  desktopViewport,
+  phoneViewport,
+  subscribePhoneViewport,
+  subscribeViewport,
+} from '../utils/viewport';
 import { isShiftDay } from '../utils/shiftPlacement';
 import EventPill from './EventPill';
 import { eventSegmentsByDay, normalizeEventList } from '../utils/events';
@@ -66,8 +71,8 @@ export default function ScheduleCalendar({
 }) {
   const now = new Date();
 
-  // WHICH SHAPE THIS CALENDAR IS IN: the whole month, or one day of it. Read from the VIEWPORT (utils/viewport) at the
-  // same 768px the shell's own layout switches at - the number the sidebar changes shape at (Sidebar.jsx) - so the
+  // WHICH SHAPE THIS CALENDAR IS IN: the whole month, one day of it, or two. Read from the VIEWPORT (utils/viewport) at
+  // the same 768px the shell's own layout switches at - the number the sidebar changes shape at (Sidebar.jsx) - so the
   // calendar's behaviour and the layout around it cannot disagree about whether this is a phone-shaped window.
   //
   // A JAVASCRIPT DECISION RATHER THAN A CSS ONE, and that is the point rather than a preference: the arrows walk DAYS
@@ -75,10 +80,17 @@ export default function ScheduleCalendar({
   // report the range being shown, and the month on screen is what gets read. Six columns hidden with `hidden md:block`
   // would give a single-day LAYOUT whose arrows still walked months and whose details list still listed the month.
   //
-  // SO THERE IS ONE FLAG, and both this screen and Administration's Schedule Management ask the same module for it -
-  // which is what makes "the same single-day view logic in both places" a fact rather than a coincidence.
+  // THREE SHAPES, NOT TWO. `dayViewSpan` (utils/calendarConstants) is the one place that decides, and Administration's
+  // board asks the same function rather than repeating the bands - so "the same narrow-view logic in both places" stays a
+  // fact rather than a coincidence. The band that is new is the middle one: below the sidebar's 768px but above a phone's
+  // 640px there is room for TWO days side by side, which answers "what have I got, and what is tomorrow" in one look.
   const isDesktop = useSyncExternalStore(subscribeViewport, desktopViewport, desktopViewport);
-  const dayView = !isDesktop;
+  const isPhone = useSyncExternalStore(subscribePhoneViewport, phoneViewport, phoneViewport);
+  const span = dayViewSpan({ isDesktop, isPhone });
+  const dayView = span !== MONTH_VIEW;
+  // A day count for anything that has to MEASURE the view rather than draw it: the arrows step this far, the read
+  // covers this many days. Zero in the month view, so a stray `span * 2` cannot quietly walk two months.
+  const dayCount = dayView ? span : 0;
 
   // IT OPENS ON TODAY rather than on the 1st. Invisible in the month view - the calendar draws the whole month whichever
   // day this is - and the entire point of the narrow one: a member opens Schedule on their phone and sees today.
@@ -117,11 +129,18 @@ export default function ScheduleCalendar({
   // states its date in full underneath (see the day cell), so repeating the full form in the toolbar would be the same
   // sentence twice on a phone.
   const viewDayKey = toDateKey(viewDate);
-  const dayLabel = displayDate(viewDayKey);
+  // THE DAYS ON SCREEN IN A DAY VIEW, and every measurement below is taken off these rather than off `viewDayKey` alone -
+  // so a two-day span cannot title itself after its first day, or report a range one day short of what it draws.
+  const spanDates = dayView ? spanDayDates(viewDate, dayCount) : [];
+  const spanKeys = spanDates.map(toDateKey);
+  // "Sat, Oct 3" for one day, "Sat, Oct 3 – Sun, Oct 4" for two. The SECOND date is what tells a member which day the
+  // arrows moved, and dropping it would leave a two-column grid under a one-day title.
+  const dayLabel = spanKeys.map(displayDate).join(' – ');
   const viewLabel = dayView ? dayLabel : monthLabel;
   // Whether the view is ALREADY on today, which is what the Today button goes by. Asked in the view's own unit: in the
-  // month view "today" is the month today falls in, and a member standing in it has nothing to press the button for.
-  const atToday = dayView ? viewDayKey === todayKey : viewDayKey.slice(0, 7) === todayKey.slice(0, 7);
+  // month view "today" is the month today falls in, and in a two-day span it is TODAY BEING THE FIRST DAY - a span that
+  // starts yesterday and runs into today is not standing on today, and Today should still take the member there.
+  const atToday = dayView ? spanKeys[0] === todayKey : viewDayKey.slice(0, 7) === todayKey.slice(0, 7);
 
   const assignmentById = (id) => assignments.find((a) => String(a.id) === String(id));
   const assignmentInfo = (id) => assignmentById(id)?.description || '';
@@ -129,30 +148,61 @@ export default function ScheduleCalendar({
   const monthStartKey = toDateKey(new Date(year, month, 1));
   const monthEndKey = toDateKey(new Date(year, month + 1, 0));
 
-  // THE RANGE ON SCREEN, which is the month in the calendar and the single day in the day view. Everything that answers
-  // "what is showing?" is measured against this - the events that are grouped, the legend under the toggles, and the
-  // details list below - so a day view cannot report a month of shifts beneath a single day.
+  // THE RANGE ON SCREEN, which is the month in the calendar and EVERY DAY OF THE SPAN in a day view. Everything that
+  // answers "what is showing?" is measured against this - the events that are grouped, the legend under the toggles, and
+  // the details list below - so a day view cannot report a month of shifts beneath a single day, and a two-day view
+  // cannot report only the first of its two days.
   //
-  // THE READ IS STILL BY MONTH (see the effect below): the day is a slice of the month already in hand, so walking days
-  // within a month asks for nothing, and stepping outside one asks for the month arrived at. That is why this range
-  // never reaches the reader.
-  const viewFromKey = dayView ? viewDayKey : monthStartKey;
-  const viewToKey = dayView ? viewDayKey : monthEndKey;
+  // THE READ IS STILL BY MONTH (see the effect below): each day is a slice of a month already in hand, so walking within
+  // a month asks for nothing, and stepping outside one asks for the month arrived at. That is why this range never
+  // reaches the reader.
+  const viewFromKey = dayView ? spanKeys[0] : monthStartKey;
+  const viewToKey = dayView ? spanKeys[spanKeys.length - 1] : monthEndKey;
+
+  // THE MONTHS THE VIEW TOUCHES, WHICH IS NOT ALWAYS ONE. A two-day span can cross a boundary - the 31st and the 1st -
+  // and the read below is issued per MONTH, so a span that quietly covered only the first of its two days would draw a
+  // second column with nothing in it and no error anywhere: the most convincing way to show a member an empty day.
+  //
+  // So the months are collected from the span and ALL of them must be in hand before the view is drawn. Deduplicated
+  // rather than assumed unique, because the common case - a span inside one month - would otherwise ask the same question
+  // of the same month twice.
+  const viewMonthKeys = [...new Set((dayView ? spanKeys : [monthStartKey]).map((key) => key.slice(0, 7)))];
+  // ...AND THE RANGE THE READ ASKS FOR, which has to reach from the first of the FIRST month to the last of the LAST.
+  // The month view's answer is exactly what it always was, so this changes nothing for the wide layout.
+  //
+  // BUILT FROM `viewMonthKeys` RATHER THAN FROM `viewDate`, and that is the difference between a crossing span working and
+  // drawing an empty second column: the months are collected from the days actually ON SCREEN precisely so the read can be
+  // issued over all of them. Deriving the end from `viewDate` would ask for the first month twice and never for the second -
+  // no error, no spinner, just a blank column that reads as "nothing is scheduled tomorrow".
+  const viewReadFromKey = `${viewMonthKeys[0]}-01`;
+  // THE LAST DAY OF THE LAST MONTH THE VIEW TOUCHES, which is not always the month `viewDate` is in. Day 0 of the following
+  // month IS that month's last day, so February and leap years stay somebody else's problem, as they are everywhere else.
+  const lastMonthKey = viewMonthKeys[viewMonthKeys.length - 1];
+  const viewReadToKey = toDateKey(
+    new Date(Number(lastMonthKey.slice(0, 4)), Number(lastMonthKey.slice(5, 7)), 0)
+  );
 
   // THE MONTH ON SCREEN IS NOT IN THE WINDOW THE APP HOLDS at first, and that is by design: sign-in carries NO schedule at
   // all - it is the one collection that grows without limit, and this screen may never be opened - so the month in front of
   // the member is always asked for, as is any month the arrows walk to. Asking is what keeps the arrows working without
   // reading every shift the station has ever scheduled, and it is why the window travels with the rows rather than being
   // worked out again here.
+  // WHETHER THE WINDOW ALREADY HOLDS EVERY MONTH THE VIEW TOUCHES, as a plain boolean.
+  //
+  // This is what the effect below keys off, rather than the array of month keys: that array is rebuilt on every render,
+  // so depending on it would re-fire the read on every render - which is the "a screen asks for the same rows fifty times
+  // while you watch" bug. A boolean is stable whenever the ANSWER is, which is exactly the condition for re-reading.
+  const viewMonthsInHand = viewMonthKeys.every((key) => windowCoversMonth(scheduleWindow, key));
+
   useEffect(() => {
     if (!onNeedSchedule) return;
-    if (windowCoversMonth(scheduleWindow, monthStartKey.slice(0, 7))) return;
-    void onNeedSchedule(monthStartKey, monthEndKey);
-  }, [onNeedSchedule, scheduleWindow, monthStartKey, monthEndKey]);
+    if (viewMonthsInHand) return;
+    void onNeedSchedule(viewReadFromKey, viewReadToKey);
+  }, [onNeedSchedule, viewMonthsInHand, viewReadFromKey, viewReadToKey]);
 
   // ...and while that read is in flight the screen SAYS SO. Without a word, opening Schedule shows an empty grid for a
   // moment, which is indistinguishable from a station with nothing scheduled - the failure the window exists to prevent.
-  const monthPending = Boolean(onNeedSchedule) && !windowCoversMonth(scheduleWindow, monthStartKey.slice(0, 7));
+  const monthPending = Boolean(onNeedSchedule) && !viewMonthsInHand;
 
   // Friendly label for a member: the signed-in user always resolves from the
   // session, everyone else comes from the name directory (the admin directory
@@ -243,10 +293,11 @@ export default function ScheduleCalendar({
   // the grid above is built from.
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // WHICH DAYS ARE DRAWN: every day of the month, or the one day on screen. `viewDate` rather than a leading blank,
-  // because it is a real date - so the day view never has a blank cell to draw and the day it shows is the day the
-  // read is scoped to.
-  const cells = dayView ? [viewDate] : monthCells;
+  // WHICH DAYS ARE DRAWN: every day of the month, or the days of the span. `viewDate` rather than a leading blank,
+  // because it is a real date - so the day view never has a blank cell to draw and the days it shows are the days the
+  // read is scoped to. `spanDayDates` is the same helper that decides where the arrows land, so the second column cannot
+  // come out empty while the arrows think they moved two days.
+  const cells = dayView ? spanDates : monthCells;
 
   // ---- Open shifts -------------------------------------------------------
   // A weekly template slot is "open" when no schedule row covers that date for
@@ -481,13 +532,23 @@ export default function ScheduleCalendar({
   //
   // THE UNIT IS THE VIEW'S: a month in the calendar, and a DAY in the day view, which is exactly what makes a narrow
   // screen's arrows walk a day at a time. The slide is identical either way.
+  //
+  // THE ARROWS MOVE THE WHOLE SPAN, so the step is the span and not a hard-coded 1: in a two-day view they walk two days,
+  // which keeps what is on screen a contiguous pair rather than a window that slides one column at a time and stops
+  // straddling the pair. `|| 1` rather than a ternary because the month view's span is the STRING 'month', and
+  // `'month' * 2` would be NaN - a step of NaN would silently freeze the arrows instead of walking months.
   const { gridClass, onAnimationEnd, goBy, goTo } = useMonthSlide(viewDate, setViewDate, dayView ? 'day' : 'month');
-  const goPrev = () => goBy(-1);
-  const goNext = () => goBy(1);
+  const step = dayCount || 1;
+  const goPrev = () => goBy(-step);
+  const goNext = () => goBy(step);
   const goToday = () => goTo(now);
 
   // A DAY CHOSEN FROM THE PICKER, which moves the view the same way Today does - through the slide, so the day it lands
   // on arrives the way a stepped one does rather than appearing. `goTo` takes a Date, and the picker hands back a key.
+  //
+  // THE CHOSEN DAY IS THE FIRST DAY OF THE SPAN, in a two-day view as much as in a one-day one: picking the 14th shows
+  // the 14th and the 15th, which is what Today does too (it opens on today and tomorrow). Anchoring on the SECOND day
+  // instead would hide the day the member just chose off the left of the screen.
   //
   // THE READ IS THE VIEW'S, unchanged: picking a day inside the month on screen asks the reader for nothing, and picking
   // one outside it asks for that month - exactly as walking there with the arrows would.
@@ -505,7 +566,11 @@ export default function ScheduleCalendar({
       {monthPending && (
         <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading {monthLabel}…
+          {/* The range being loaded, not just a month name: a two-day span that straddles the 31st asks for two months,
+              and saying "Loading October" while November is also on the way is the half-truth that makes the spinner
+              look like it has stalled. Tested on the MONTH COUNT rather than on the bounds, because `viewReadFromKey`
+              and `viewReadToKey` are the first and last days of a month and so are never equal to each other. */}
+          Loading {viewMonthKeys.length > 1 ? `${viewReadFromKey} – ${viewReadToKey}` : monthLabel}…
         </div>
       )}
       {/* Month-at-a-time calendar */}
@@ -514,7 +579,7 @@ export default function ScheduleCalendar({
           <button
             type="button"
             onClick={goPrev}
-            aria-label={dayView ? 'Previous day' : 'Previous month'}
+            aria-label={dayView ? (dayCount > 1 ? `Previous ${dayCount} days` : 'Previous day') : 'Previous month'}
             className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -527,7 +592,7 @@ export default function ScheduleCalendar({
           <button
             type="button"
             onClick={goNext}
-            aria-label={dayView ? 'Next day' : 'Next month'}
+            aria-label={dayView ? (dayCount > 1 ? `Next ${dayCount} days` : 'Next day') : 'Next month'}
             className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <ChevronRight className="w-5 h-5" />
@@ -651,9 +716,9 @@ export default function ScheduleCalendar({
           )}
 
           <div
-            // ONE LEFT-ALIGNED COLUMN IN THE DAY VIEW, seven equal ones in the calendar. The `gridClass` that drives the
-            // slide is applied either way, so the two views travel the same way.
-            className={`${dayView ? '' : 'grid grid-cols-7 gap-1'} ${gridClass}`}
+            // ONE LEFT-ALIGNED COLUMN IN THE DAY VIEW, two when the span is two days, seven equal ones in the calendar.
+            // The `gridClass` that drives the slide is applied either way, so the two views travel the same way.
+            className={`${dayView ? (dayCount > 1 ? 'grid grid-cols-2 gap-1' : '') : 'grid grid-cols-7 gap-1'} ${gridClass}`}
             onAnimationEnd={onAnimationEnd}
           >
             {cells.map((day, i) => {

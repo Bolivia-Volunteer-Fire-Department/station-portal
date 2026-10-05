@@ -91,14 +91,39 @@ service cloud.firestore {
     // cannot tell that apart from a rule that correctly denies - which is exactly how a missing "can_make_offers"
     // made creating an offer fail for the right-looking reason. "Not granted" is written down as false, and the role
     // editor is what keeps it that way.
+    //
+    // ONE FIELD, TWO READINGS - and this is the whole of the "I am an administrator" bug.
+    //
+    // The CLIENT already accepts a role flag written as the sheet's `"TRUE"`: `isTruthyFlag` (utils/rankEligibility.js) is
+    // `value === true || String(value).trim().toUpperCase() === 'TRUE'`, and `permissionGranted` is built on it. That
+    // tolerance exists because the roles sheet is maintained by hand and every flag on it arrived as text.
+    //
+    // These rules used to accept only the boolean. So a role document carrying the sheet's spelling - `is_admin: "TRUE"` -
+    // opened EVERY Administration tab, every panel and every button, and then refused every single write with
+    // permission-denied. The client said "administrator"; the server said "no". Nothing on screen could explain that,
+    // because from the member's side the whole module was plainly there.
+    //
+    // The server now reads a flag EXACTLY as the client does, which is the point: one definition of "granted", so the
+    // buttons a member can see are the writes the server will accept. Widening the spelling here grants nothing new -
+    // `roles` is writable only by `can_edit_roles`, so whoever can write this value could have written `true` instead.
+    // THE TYPE CHECK IS A NESTED TERNARY, not `&&`, and that is not a style choice. Written as
+    // `value == true || (value is string && value.trim().upper() == 'TRUE')`, this ERRORED on a role document holding a
+    // real boolean `false` - the `.trim()` was reached anyway, `.trim` came back undefined, and an evaluation error is
+    // indistinguishable from a refusal in the log, so every permission-gated rule in the file failed at once with no
+    // clue which line was wrong. A ternary evaluates one branch and never the other, so the method call only runs on a
+    // string. (Rules functions take a single `return` expression, so statements are not an option.)
+    function granted(value) {
+      return value == true ? true : (value is string ? value.trim().upper() == 'TRUE' : false);
+    }
+
     function permission(name) {
       let role = roleFor(viewerRole());
-      return role != null && (role.is_admin == true || role.get(name, false) == true);
+      return role != null && (granted(role.get('is_admin', false)) || granted(role.get(name, false)));
     }
 
     function isAdministrator() {
       let role = roleFor(viewerRole());
-      return role != null && role.is_admin == true;
+      return role != null && granted(role.get('is_admin', false));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -134,11 +159,20 @@ service cloud.firestore {
     // The permission table. Every client reads it to shape its navigation; only a role editor writes it. A role
     // that GRANTS administrator access is special: only an administrator may create or change one, or a role
     // editor could hand themselves the whole app.
+    //
+    // THIS GUARD USES `granted()`, NOT `== true`, and that is load-bearing rather than tidiness. It reads the flag the
+    // same way `permission()` does, so it keeps meaning the same thing after the widening above: with a bare `!= true`
+    // the string `"TRUE"` would count as "not an administrator", and any role editor could have written one and become
+    // an administrator - the exact thing these two lines exist to prevent. The escalation guard has to be written in the
+    // same dialect as the permission it is guarding, or it stops guarding anything.
+    //
+    // `.get(...)` rather than `.data.is_admin` for the same reason as everywhere else in this file: a role document with
+    // no `is_admin` key at all must read as "not an administrator", not as an evaluation error.
     match /roles/{roleId} {
       allow read: if signedIn();
       allow create, update: if permission('can_edit_roles')
-        && (request.resource.data.is_admin != true || isAdministrator());
-      allow delete: if permission('can_edit_roles') && resource.data.is_admin != true;
+        && (!granted(request.resource.data.get('is_admin', false)) || isAdministrator());
+      allow delete: if permission('can_edit_roles') && !granted(resource.data.get('is_admin', false));
     }
 
     match /ranks/{rankId} {
@@ -278,7 +312,13 @@ service cloud.firestore {
     // The coordinates are the record of where: the app restricts clocking in and out to a radius, so a resolved
     // street address was extra data to keep in step for no decision it changed. `calc_address` is gone.
     match /timeclock/{entryId} {
-      allow read: if signedIn() && (resource.data.user_id == uid() || permission('can_edit_timeclock'));
+      // The same null guard as `document_signatures`, and for the same reason: this is read as a QUERY
+      // (`where('user_id', '==', uid).where('time_out', '==', '')`, in `openClockEntryFor`), and `.data` off a null
+      // `resource` is an evaluation error a client cannot tell from a refusal. Here the member's own query IS provable
+      // from its constraint, so it never reaches the null case - the guard is the file's standard rather than a fix, and
+      // it is kept for the same reason as the other two: so that a later edit fails as a refusal rather than as an error.
+      allow read: if signedIn()
+        && ((resource != null && resource.data.user_id == uid()) || permission('can_edit_timeclock'));
       // An entry OPENS with no time_out and belongs to the caller: a member cannot open a shift for somebody else, and
       // cannot open one that is already closed.
       //
@@ -437,8 +477,19 @@ service cloud.firestore {
       // A signature belongs to the member who gave it - the same shape as training_signatures. There is no
       // `can_sign_documents` flag in the role table, and there should not be: signing is what every member does, and
       // the rule that matters is that nobody can sign as somebody else.
+      // THE NULL GUARD IS THIS FILE'S OWN RULE OF THE ROAD, and the note on announcements (above) says why: `.data` off a
+      // null `resource` is an EVALUATION ERROR, which a client cannot tell apart from a refusal. Firestore only proves
+      // `resource.data.user_id == uid()` for a query constrained by `where('user_id', '==', uid)`, and every screen that
+      // reads a document's signatures reads them BY DOCUMENT instead - so this rule is evaluated with `resource == null`
+      // on exactly the queries the back-fill panel and the verification queue make before they act.
+      //
+      // WHAT IT IS WORTH, STATED PLAINLY: removing this guard changes no outcome any check can see. A caller whose access
+      // comes from a permission below passes either way, and a caller without one is refused either way - the guard turns
+      // an evaluation error into a clean refusal, and nothing else. It stays because the error class is invisible when it
+      // happens (it reads as "you do not have permission" for an action that was never a permission question) and because
+      // a later edit that removed a permission branch would otherwise fail this way with nothing to point at.
       allow read: if signedIn()
-        && (resource.data.user_id == uid()
+        && ((resource != null && resource.data.user_id == uid())
           || permission('can_verify_documents')
           || permission('can_manage_documents'));
       // TWO SHAPES OF ROW ARE CREATED HERE, by two different people.

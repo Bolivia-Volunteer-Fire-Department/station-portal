@@ -759,6 +759,42 @@ const main = async () => {
   })();
   checkIs('and a rank that does not exist is refused rather than hiding the row', ghostRank.includes('does not exist'), ghostRank);
 
+  // "MINIMUM RANK", ROUND TRIPPED THROUGH THE REAL SAVE - and this is the assertion that matters, because the helper above
+  // takes `rankAndAbove` as an argument and so cannot tell whether the DOCUMENT save passes it. It did not: the editor has
+  // always labelled the field "Minimum rank" and both help pages have always described it as "a rank and above", but
+  // `ADMIN_SAVE_DOCUMENT` stored the single rank id. `k2` is order 1 and `k1` is order 3, so a document with a minimum of
+  // Firefighter was invisible to an Officer - the reported symptom, one rank id where a threshold belonged.
+  //
+  // Asserted through `routeWrite` on purpose: calling `audienceKeysForWrite` with the right flag would prove the helper
+  // works, and the helper was never the problem. What has to be pinned is the row that reaches the database.
+  await signIn('jane');
+  await routeWrite('ADMIN_SAVE_DOCUMENT', {
+    id: 'doc-minrank-probe',
+    title: 'Minimum Rank Probe',
+    body: 'Written by the harness.',
+    rank_id: 'k2',
+    is_published: true,
+  });
+  const probeDocument = (await getDoc(doc(firestore(), 'documents', 'doc-minrank-probe'))).data() || {};
+  // SORTED, because the list is built in whatever order the ranks collection reads in and the claim is about WHICH ranks,
+  // not which way round they arrived. Asserting the raw order would make this fail on a seed that renumbers a rank.
+  check(
+    'a document saved with a minimum rank is stored as that rank and every rank above it',
+    [...(probeDocument.audience_keys || [])].sort(),
+    ['rank:k1', 'rank:k2']
+  );
+  // ...AND AN ANNOUNCEMENT IS NOT, because announcements name the people they are for rather than the rank they apply
+  // from. Asserted because the two saves are one table and a well-meaning "make them all consistent" edit would quietly
+  // widen a broadcast channel - and because nothing else in this file would notice.
+  await routeWrite('ADMIN_SAVE_ANNOUNCEMENT', {
+    id: 'an-exact-rank-probe',
+    title: 'Exact Rank Probe',
+    body: 'Written by the harness.',
+    rank_id: 'k2',
+  });
+  const probeAnnouncement = (await getDoc(doc(firestore(), 'announcements', 'an-exact-rank-probe'))).data() || {};
+  check('while an announcement still targets that one rank exactly', probeAnnouncement.audience_keys, ['rank:k2']);
+
   // --- the badge index: the one piece of the certifications tab that makes a CLAIM about a member ---
   //
   // "This member is a paramedic" is worth being wrong about only in one direction, so the two cases that must earn

@@ -35,8 +35,26 @@ import { roleAllowsTab } from '../utils/permissions.js';
 // icon. The reader used to leave `rank_id` out, so the same member appeared with a rank after a sign-in and with a generic
 // icon after a refresh; the payload's row has always carried it (see services/liveReads.js, which builds the same three
 // fields).
+//
+// FROM THE SERVER, and that is the fix rather than a preference.
+//
+// This collection is read IMMEDIATELY AFTER a write, and the write is what makes the read interesting: the clock
+// transaction creates this row on the way in and DELETES it on the way out. A cache-first read after a delete is the trap
+// this app has already paid for twice - see `signaturesForDocument` in firestoreWrites.js, which reads its rows with
+// `source: 'server'` for exactly this reason and says so at length.
+//
+// The visible failure is the one that looks like a broken button rather than a broken write: the member presses Clock Out,
+// the transaction commits, the row is gone from the server and the audit shows it - and the dashboard re-reads the list
+// from cache, still contains them, and keeps drawing "On Duty". Pressing Clock Out a second time is then answered by the
+// SERVER, which is looking for an open entry, finds none, and says "You are not clocked in." Two halves of the app
+// disagreeing about one fact, with the member left certain the first press did nothing.
+//
+// `on_duty` is a handful of rows and this is the only read of it, so the cost of asking the server is one small query.
 const onDutyRows = async (_uid) => {
-  const [duty, users] = await Promise.all([rowsOf(collection(firestore(), 'on_duty')), readUsersOnce()]);
+  const [duty, users] = await Promise.all([
+    rowsOf(collection(firestore(), 'on_duty'), { source: 'server' }),
+    readUsersOnce(),
+  ]);
   const byId = Object.fromEntries(users.map((user) => [user.id, user]));
   const rankFor = (id) => {
     const member = byId[id] || {};
@@ -83,6 +101,42 @@ const managesWholeTimeclock = async (uid) => {
     return false;
   }
   return roleAllowsTab(role, 'clock');
+};
+
+// MAY THIS CALLER READ THE WHOLE DOCUMENTS COLLECTION?
+//
+// The "View as" picker asks for another member's paperwork, and there are two honest answers to "which documents": the
+// ones THAT MEMBER may see, or all of them. The second is the right one, because the person looking is an officer doing a
+// job - checking a new member's truck checklist, or working out what is still outstanding - and the documents missing from
+// the first answer are not the member's paperwork at all. They are paperwork the officer is entitled to read and the query
+// refused to ask for.
+//
+// This was ALREADY TRUE OF THE RULES, which put the permission branch first on `documents` (see firestore.rules) so a
+// manager or a verifier may read the collection whole - `ADMIN_GET_DOCUMENTS` depends on precisely that. The reader was
+// throwing that access away and filtering by the member's rank and role instead. The visible consequence was that an
+// officer standing next to a probationary firefighter was shown LESS than an officer standing next to a Chief, and every
+// document whose minimum rank sat above the viewed member's simply vanished from the report.
+//
+// The member's own rank still decides what THEY owe - which documents they must sign, which items are outstanding, which
+// are verified. It no longer decides what the officer standing in front of them is allowed to look at.
+//
+// `roleAllowsTab(role, 'documents')` is the tab gate, and the documents tab is the one two permissions open -
+// `can_manage_documents` and `can_verify_documents` - which are exactly the two the rules check on this collection.
+//
+// Fails CLOSED on a role that cannot be read, for the reason `managesWholeTimeclock` does: a read error must not widen
+// the query. The rules would refuse the wider one anyway; this keeps the answer honest rather than leaning on that.
+const mayReadWholeDocuments = async (uid) => {
+  if (!uid) return false;
+  const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
+  const roleId = String(me.role_id || '');
+  if (!roleId) return false;
+  let role = null;
+  try {
+    role = (await getDoc(doc(firestore(), 'roles', roleId))).data() || null;
+  } catch {
+    return false;
+  }
+  return roleAllowsTab(role, 'documents');
 };
 
 ;
@@ -623,10 +677,10 @@ export const READERS = {
   // shape as GET_DOCUMENTS, aimed at somebody else - which is what the can_verify_documents permission is for: reading
   // people's paperwork in order to confirm it.
   //
-  // The documents are filtered by the MEMBER's audience rather than the verifier's, deliberately: the verifier is looking
-  // at what this member was shown, so a document aimed at a rank they do not hold has no business appearing in their
-  // records. What stops a member reading anybody else's is the RULES: the read rule allows can_verify_documents, so this
-  // query is provable for a verifier and refused for everyone else.
+  // What stops a member reading anybody else's is the RULES: the read rule allows can_verify_documents, so this query is
+  // provable for a verifier and refused for everyone else. That is what gates the ACTION; what shapes the ANSWER is
+  // `mayReadWholeDocuments` below, and the two are deliberately different questions - a permission decides WHO may ask,
+  // and never WHAT they are shown.
   GET_MEMBER_DOCUMENT_RECORDS: async (uid, body) => {
     const memberId = String((body && body.user_id) || '').trim();
     if (!memberId) return { success: false, message: 'Which member?' };
@@ -634,15 +688,17 @@ export const READERS = {
     const member = await getDoc(doc(firestore(), 'users', memberId));
     if (!member.exists()) return { success: false, message: 'That member no longer exists.' };
 
-    const row = member.data() || {};
-    const keys = audienceKeysFor({
-      userId: memberId,
-      roleId: String(row.role_id || ''),
-      rankId: String(row.rank_id || ''),
-    });
-
+    // THE WHOLE COLLECTION FOR AN OFFICER, the member's own audience for anybody else - see `mayReadWholeDocuments`.
+    // The member's rank and role still decide what that member OWES; they no longer decide what the officer looking at
+    // their records is shown, which was the bug: a document whose minimum rank sat above the viewed member's was
+    // missing from the report, so an officer could conclude a member owed nothing when the station simply had not asked.
+    const wholeCollection = await mayReadWholeDocuments(uid);
     const [visible, signatures, summaries] = await Promise.all([
-      audienceRows('documents', keys),
+      wholeCollection ? rowsOf(collection(firestore(), 'documents')) : audienceRows('documents', audienceKeysFor({
+        userId: memberId,
+        roleId: String((member.data() || {}).role_id || ''),
+        rankId: String((member.data() || {}).rank_id || ''),
+      })),
       rowsFor('document_signatures', 'user_id', memberId),
       documentItemSummaries(memberId),
     ]);

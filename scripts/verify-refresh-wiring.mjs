@@ -668,5 +668,58 @@ check('a saved user can never carry a password', userRowSource.includes("omit: [
   check('and the clear still counts as a change, so the list is not left untouched', after !== cleared, 'the same array came back, so the table would not re-render');
 }
 
+// --- the clock card -------------------------------------------------------------------------------------------
+// The dashboard's status line is DERIVED from `onDutyUsers` rather than stored, so the clock card had no answer of its
+// own: it was redrawn only when the refresh that followed the write came back. That made the member's own action - the
+// one thing they are certain happened - the one thing the screen could not confirm. Press Clock Out, the transaction
+// commits, the row is gone from the server, and a re-read that fails, lags, or answers from a cache still holding the
+// deleted row leaves the card saying "On Duty" with a Clock Out button still under it. Pressing again is answered by the
+// SERVER, which finds no open entry and says "You are not clocked in." - two halves of the app disagreeing about one fact,
+// with nothing on screen to say which was right.
+{
+  const clockBody = extractFunction(appSource, 'const performClockAction = async');
+
+  // THE CARD ANSWERS THE ACTION, not the next re-read. Positional, because the whole point is the ORDER: applied before
+  // `refreshOnDuty`, the card has already flipped by the time that call can fail.
+  const appliedAt = clockBody.indexOf('applyClockOutcome(');
+  const refreshedAt = clockBody.indexOf('refreshOnDuty(');
+  check(
+    'a clock action applies its own outcome to the on-duty list',
+    appliedAt !== -1,
+    'performClockAction never calls applyClockOutcome, so the card waits on the re-read'
+  );
+  check(
+    'and applies it BEFORE the re-read, so a failed refresh cannot leave the card showing the old state',
+    appliedAt !== -1 && refreshedAt !== -1 && appliedAt < refreshedAt,
+    'the refresh runs first, so the card is at the mercy of it'
+  );
+  check(
+    'the outcome follows the action rather than being hard-coded',
+    /const clockedIn = actionType === 'CLOCK_IN';/.test(clockBody),
+    'the clocked-in state is not derived from the action that was taken'
+  );
+
+  // AND THE MEMBER IS TOLD. The success branch set `statusMessage`, which this file's own note on `clockNotice` records
+  // as rendered on the login screen only - so a clock action on the dashboard produced no signal at all of its own. The
+  // refusal branches toast; the success branch did not.
+  check(
+    'a successful clock action says so on the dashboard',
+    /toast\.success\(clockedIn \?/.test(clockBody),
+    'no success toast, so the only confirmation was the card changing in time'
+  );
+
+  // AND THE RE-READ ASKS THE SERVER. This is the second half of the same bug and it is a one-word difference:
+  // `rowsOf(collection(firestore(), 'on_duty'))` is cache-first, and this is the only read of a collection the clock
+  // transaction deletes from. `signaturesForDocument` in firestoreWrites.js already reads its rows with `source: 'server'`
+  // for exactly this reason and says so at length.
+  const readsSource = read('src/services/firestoreReads.js');
+  const onDuty = readsSource.slice(readsSource.indexOf('const onDutyRows ='));
+  check(
+    'the on-duty list is read from the SERVER, because it is read immediately after a write that deletes from it',
+    /rowsOf\(collection\(firestore\(\), 'on_duty'\), \{ source: 'server' \}\)/.test(onDuty),
+    'the read is cache-first, so a clock-out can be answered from a cache still holding the deleted row'
+  );
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

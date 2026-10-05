@@ -395,6 +395,93 @@ console.log('\n--- a narrow window: one day, and arrows that walk days ---');
   setViewportWidth(1024);
 }
 
+console.log('\n--- a window between a phone and the sidebar shows TWO days ---');
+{
+  // THE MIDDLE BAND. Below the 768px the sidebar collapses to a drawer, and below 640px the app calls the window a phone;
+  // between them the calendar shows two days rather than one. The pure rule is pinned in verify-month-picker, so what is
+  // asserted here is the BEHAVIOUR only a real DOM can show: how many cells are drawn, what the arrows are labelled, and
+  // how far one press moves the view.
+  //
+  // 700px is deliberately in the middle of the band rather than on either edge, so this case cannot pass by landing
+  // exactly on a breakpoint. And every expected label is built from `TODAY_DAY + n` rather than from fixed dates,
+  // because `dayLabelFor` builds a Date, which NORMALISES an overflowing day - so this reads correctly even when today is
+  // the 30th and the span crosses into the next month.
+  const spanLabel = (from) =>
+    [0, 1]
+      .map((offset) => dayLabelFor(THIS_YEAR, THIS_MONTH, from + offset))
+      .join(' – ');
+
+  setViewportWidth(700);
+  // The DOM node, not the render result: `dayCells` and `gridOf` both walk the tree, and `step` settles by ringing the
+  // grid's animation end - so every helper below takes the container.
+  const { container: tabletRoot, unmount: unmountTablet } = openCalendar({
+    [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: [],
+  });
+  await flush();
+  check('a 700px window draws two days', dayCells(tabletRoot).length, 2);
+  check('the title names both of them', title(), spanLabel(TODAY_DAY));
+  check('and the arrows say they move two days, not one', arrowLabels().includes('Next 2 days'), arrowLabels());
+
+  // ONE PRESS MOVES THE WHOLE SPAN. A two-day view whose arrows advanced a single day would show the 3rd and 4th after a
+  // press, having shown the 2nd and 3rd before - two columns that never line up, so the second one is always the day
+  // before the one that follows it, and no member ever sees "today and tomorrow" by moving.
+  await step('Next 2 days', tabletRoot);
+  check('one press moves it two days', title(), spanLabel(TODAY_DAY + 2));
+  await step('Previous 2 days', tabletRoot);
+  check('and back again', title(), spanLabel(TODAY_DAY));
+  unmountTablet();
+
+  // A SPAN THAT CROSSES A MONTH BOUNDARY, the case every other assertion in this block misses and the one that could draw
+  // an empty second column with no error anywhere.
+  //
+  // The harness's "today" is the real current date, so most runs cannot be MADE to land on the 31st - and faking the clock
+  // would move `TODAY_DAY` out from under every other case in this file, which is a much worse price. So rather than
+  // pretend, this asserts the two things a crossing span depends on that a real run CAN reach: the read still covers the
+  // month the view sits in, and the grid still draws two days. The boundary ARITHMETIC that makes it read the second month
+  // is pinned where it can be reached on any date - `spanDayDates` in verify-month-picker.
+  setViewportWidth(700);
+  const {
+    container: monthEndRoot,
+    calls: monthEndCalls,
+    unmount: unmountMonthEnd,
+  } = openCalendar({ [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: [] });
+  await flush();
+  check(
+    'the view still reads the month it sits in, which is what a crossing span rests on',
+    readMonth(monthEndCalls, THIS_YEAR, THIS_MONTH),
+    monthEndCalls.map((c) => `${c.from}..${c.to}`).join(' | ') || 'no read at all'
+  );
+  check('and draws two days whatever the date', dayCells(monthEndRoot).length, 2);
+  unmountMonthEnd();
+
+  // THE EDGES OF THE SCALE, because a rule that answered "two" for every narrow window would pass everything above. A
+  // phone goes back to one day and says so on its arrows, and a desktop window goes back to the month grid.
+  setViewportWidth(375);
+  const { container: phoneRoot, unmount: unmountPhone } = openCalendar({
+    [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: [],
+  });
+  await flush();
+  check('a phone is back to one day', dayCells(phoneRoot).length, 1);
+  check(
+    'with arrows labelled for a single day',
+    arrowLabels().includes('Next day') && !arrowLabels().includes('2 days'),
+    arrowLabels()
+  );
+  unmountPhone();
+
+  setViewportWidth(1024);
+  const { container: wideRoot, unmount: unmountWide } = openCalendar({
+    [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: [],
+  });
+  await flush();
+  check(
+    'and a desktop window is back to the month grid',
+    dayCells(wideRoot).length > 27,
+    `${dayCells(wideRoot).length} day cells on a wide window`
+  );
+  unmountWide();
+}
+
 console.log('\n--- the month picker, which a day view has and a month view does not ---');
 {
   // Reached the way a member reaches it, and the two claims that matter are about the READ: a day inside the month on

@@ -482,9 +482,16 @@ export const seed = async () => {
   //        document yet.
   await put('documents/doc2', {
     title: 'Officer Only Policy',
+    // A document whose MINIMUM rank is `k1` (Officer, order 3) - and the expansion of that minimum is the single rank
+    // `k1`, because no other rank is at or above order 3. So `['rank:k1']` is both the old buggy shape and the correct
+    // shape for this particular document, which is exactly why it is the wrong fixture to prove the fix on: it passes
+    // whether the expansion works or not. The write round trip (scripts/verify-firestore-writes.mjs) is what proves that,
+    // with a minimum low enough to expand to more than one rank. This document keeps its job of being unreadable by a
+    // firefighter, which is the privacy half of the mechanism.
     audience_keys: ['rank:k1'],
     content_revision: 1,
     is_published: true,
+    rank_id: 'k1',
   });
   await put('documents/doc3', {
     title: 'Next Year Handbook',
