@@ -905,6 +905,11 @@ exports.saveScheduleBoard = onCall(async (request) => {
       return templateId ? `${entry.fields.date_from} ${templateId}` : '';
     };
     const claimed = new Map();
+    // A slot this save gives away twice: a second, DIFFERENT member is a CONTENTION, and the SAME member twice is a
+    // DUPLICATE. Both put two rows in one slot, and the board draws one pill per slot, so neither is a schedule anybody
+    // can read. The board sends only its diff and keeps one occupant per slot, so the duplicate is a guard against a
+    // caller that does not - and it costs one comparison to keep "one row per slot" true for every write path.
+    const duplicates = new Set();
     // Every row this save touches: rewritten by an entry, or deleted. A row being rewritten keeps its identity but not
     // its position, so it must not count as an occupant below.
     const rewritten = new Set([...prepared.map((entry) => entry.id).filter(Boolean), ...deleteIds]);
@@ -913,15 +918,16 @@ exports.saveScheduleBoard = onCall(async (request) => {
       if (!entry.fields.user_id) return;
       const key = slotKey(entry);
       if (!key) return;
-      // A second, DIFFERENT member for a slot this save already gives away. The same member twice is a duplicate
-      // rather than a contention, and it is not what this check is for.
-      if (claimed.has(key) && claimed.get(key) !== entry.fields.user_id) conflicts.add(key);
+      if (claimed.has(key)) {
+        if (claimed.get(key) === entry.fields.user_id) duplicates.add(key);
+        else conflicts.add(key);
+      }
       claimed.set(key, entry.fields.user_id);
     });
 
     for (const entry of prepared) {
       const key = slotKey(entry);
-      if (!entry.fields.user_id || !key || conflicts.has(key)) continue;
+      if (!entry.fields.user_id || !key || conflicts.has(key) || duplicates.has(key)) continue;
       const sameSlot = await transaction.get(
         db
           .collection('schedule')
@@ -940,6 +946,9 @@ exports.saveScheduleBoard = onCall(async (request) => {
     }
     if (conflicts.size) {
       throw new HttpsError('failed-precondition', `Already filled by somebody else: ${[...conflicts].join(', ')}.`);
+    }
+    if (duplicates.size) {
+      throw new HttpsError('failed-precondition', `The same member is on one slot twice: ${[...duplicates].join(', ')}.`);
     }
 
     const stamped = [];

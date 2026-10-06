@@ -609,6 +609,42 @@ const main = async () => {
     0
   );
 
+  // The SAME member twice on one slot. Not a contention - nobody else is involved - but still two rows in one slot, which
+  // the board draws as a single pill, so the schedule would be unreadable rather than contested. A guard against a caller
+  // that does not keep one occupant per slot, and the shape the "one row per slot" claim rests on.
+  let duplicateClaim = '';
+  try {
+    await saveScheduleBoard({
+      entries: [
+        { date_from: '2026-06-02', date_to: '2026-06-02', schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u1' },
+        { date_from: '2026-06-02', date_to: '2026-06-02', schedule_template_id: 't1', assignment_id: 'a1', user_id: 'u1' },
+      ],
+    });
+  } catch (error) {
+    duplicateClaim = String((error && error.message) || '');
+  }
+  checkIs('and one save cannot put the same member on a slot twice', duplicateClaim.includes('same member is on one slot twice'), duplicateClaim || 'the write was allowed');
+  check(
+    'with nothing written for the duplicated save either',
+    (await getDocs(query(collection(db, 'schedule'), where('date_from', '==', '2026-06-02')))).docs.length,
+    0
+  );
+
+  // THE CHECK ITSELF, PINNED AS A SHAPE - what the behavioural cases above cannot state directly. The conflict check is a
+  // read INSIDE the save's transaction, which is the only thing that covers two officers saving at once; and it asks two
+  // questions, the request against itself and the request against the stored rows, because a swap makes each row hold the
+  // slot the other is being given. A rewrite that dropped either would quietly raise the chance of two members landing on
+  // one slot - so it fails here rather than in the field.
+  const boardSource = readFileSync('functions/index.js', 'utf8');
+  const saveBoardBody = (boardSource.match(/exports\.saveScheduleBoard = onCall\([\s\S]*?\n\}\);/) || [''])[0];
+  checkIs('the board save was located in the functions source', saveBoardBody.length > 0);
+  checkIs('its conflict check runs INSIDE the transaction, so it covers two officers saving at once', /db\.runTransaction\([\s\S]*?conflicts\.add/.test(saveBoardBody));
+  checkIs(
+    'and asks both the request-against-itself and the request-against-stored questions',
+    /claimed\.has\(key\)/.test(saveBoardBody) && /transaction\.get\(/.test(saveBoardBody)
+  );
+  checkIs('refusing a duplicated slot as well as a contested one', /duplicates\.add\(key\)/.test(saveBoardBody));
+
   // THE SWAP, in the shape the board really produces - and the operation this check broke twice over.
   //
   // The two rows are DIFFERENT TEMPLATES ON ONE DAY (t1 and t0 share "Engine 1", and the date is a Monday so both

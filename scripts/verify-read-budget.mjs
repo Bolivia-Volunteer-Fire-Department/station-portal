@@ -590,5 +590,37 @@ check('writes the count every training should hold, zeros included', backfill.pl
 check('and names every training whose stored count disagrees, a missing one included', backfill.change, ['t1', 't2', 't3']);
 check('reporting a signature whose training is gone rather than dropping it', backfill.orphaned, ['gone']);
 
+// ---------------------------------------------------------------------------
+// THE COMPOSITE INDEXES ARE EXACTLY THE ONES A QUERY NEEDS.
+// ---------------------------------------------------------------------------
+// A composite index is required only when a query combines fields in a way single-field indexes cannot serve: an equality
+// with a range/orderBy on another field, an `array-contains(-any)`/`in` with another filter, or an orderBy on more than one
+// field. Plain equality filters need none (Firestore merges single-field indexes), which is why the board's two-equality
+// slot check declares nothing. Every query that DOES need one is listed here with it - and the file is pinned to exactly
+// these, because an unused composite is write amplification and storage on every write to its collection. The emulator
+// ignores index requirements entirely, so a missing one fails only in production, which is what makes this a harness.
+const INDEXES = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')).indexes;
+const hasIndex = (collection, fieldPaths) =>
+  INDEXES.some(
+    (index) =>
+      index.collectionGroup === collection &&
+      index.fields.length === fieldPaths.length &&
+      index.fields.every((field, position) => field.fieldPath === fieldPaths[position])
+  );
+
+checkIs('schedule by member then date, for the report range', hasIndex('schedule', ['user_id', 'date_from']));
+checkIs('timeclock by member then newest-first, for the clock history', hasIndex('timeclock', ['user_id', 'time_in']));
+checkIs('schedule_offers by member then status, for the member’s offers', hasIndex('schedule_offers', ['user_id', 'status']));
+checkIs('announcements by audience then in-force, for the live bound', hasIndex('announcements', ['audience_keys', 'live_until']));
+checkIs('checklist items by document then audience, for the detail read', hasIndex('document_checklist_items', ['document_id', 'audience_keys']));
+// AND NOTHING ELSE. Five, and no index names a field nothing filters - so a re-add is caught rather than quietly paid for.
+check('and no more than the five a query needs', INDEXES.length, 5);
+const indexedFields = INDEXES.flatMap((index) => index.fields.map((field) => field.fieldPath));
+check(
+  'and no index names a field no query ever filters',
+  ['is_open', 'audience_roles', 'date_to', 'signed_at', 'end_date', 'created_at'].filter((field) => indexedFields.includes(field)),
+  []
+);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -285,9 +285,14 @@ forward — `npm run training-counts:normalize -- --apply` (the signature counte
 offline on purpose: a queued write is timestamped by the device, and that record asserts someone was
 at the station. Every other write queues and lands on reconnect.
 
-**Indexes** live in `firestore.indexes.json` and are reviewed like code. The system log is read
-through the `readSystemLog` callable and scans in memory on purpose — its counts and filter facets
-span the whole log, which an index cannot answer.
+**Indexes** live in `firestore.indexes.json` and are reviewed like code. Only the **five composite
+indexes a query actually needs** are declared — an equality combined with a range/`in`/`array-contains`
+on another field, or a multi-field order. A plain equality filter needs none (Firestore merges
+single-field indexes), so the board's two-equality slot check declares nothing; and a composite nothing
+uses is a tax on every write to its collection. `verify:read-budget` pins the exact list, so one cannot
+be dropped without a query breaking it or added without a reason. The system log is read through the
+`readSystemLog` callable and scans in memory on purpose — its counts and filter facets span the whole
+log, which an index cannot answer.
 
 **Migrating the station's data**: `npm run migration:recon` / `migration:plan` / `migration:write`
 read the original spreadsheet and write Firestore documents; `scripts/migration-map.mjs` is the
