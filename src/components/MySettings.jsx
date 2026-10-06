@@ -19,6 +19,12 @@ function isTruthySetting(value) {
   return value === true || String(value).trim().toUpperCase() === 'TRUE';
 }
 
+const FONT_SCALES = [0.9, 1, 1.1, 1.2];
+const fontScaleValue = (value) => {
+  const scale = Number(value);
+  return FONT_SCALES.includes(scale) ? scale : 1;
+};
+
 export default function UserSettings({ 
   currentUser, 
   userSettings = [], 
@@ -27,6 +33,7 @@ export default function UserSettings({
   currentRole,
   canApproveShifts = false,
   onSaveSettings,
+  onFontScalePreview,
   onPasswordChange,
   pushDeviceApi,
 }) {
@@ -44,6 +51,8 @@ export default function UserSettings({
         : (systemSettings?.is_dark_mode !== undefined ? systemSettings.is_dark_mode : true)
     ),
     hide_events_by_default: isTruthySetting(existingUserSetting?.hide_events_by_default),
+    colorblind_rank_labels: isTruthySetting(existingUserSetting?.colorblind_rank_labels),
+    font_scale: fontScaleValue(existingUserSetting?.font_scale),
     // Same ladder, resolved by the shared rule rather than re-implemented here: the member's own value, else the
     // station default, else on. A blank cell is "inherit", not "off".
     is_sounds_active: soundsActiveFrom(existingUserSetting?.is_sounds_active, systemSettings?.is_sounds_active),
@@ -63,6 +72,14 @@ export default function UserSettings({
         existingUserSetting?.hide_events_by_default !== undefined && existingUserSetting?.hide_events_by_default !== ''
           ? isTruthySetting(existingUserSetting.hide_events_by_default)
           : prev.hide_events_by_default,
+      colorblind_rank_labels:
+        existingUserSetting?.colorblind_rank_labels !== undefined && existingUserSetting?.colorblind_rank_labels !== ''
+          ? isTruthySetting(existingUserSetting.colorblind_rank_labels)
+          : prev.colorblind_rank_labels,
+      font_scale:
+        existingUserSetting?.font_scale !== undefined && existingUserSetting?.font_scale !== ''
+          ? fontScaleValue(existingUserSetting.font_scale)
+          : prev.font_scale,
       // A saved FALSE has to survive this sync, so the cell is checked for emptiness rather than truthiness.
       is_sounds_active:
         existingUserSetting?.is_sounds_active !== undefined && existingUserSetting?.is_sounds_active !== ''
@@ -70,6 +87,8 @@ export default function UserSettings({
           : prev.is_sounds_active,
     }));
   }, [existingUserSetting]);
+
+  useEffect(() => () => onFontScalePreview?.(null), [onFontScalePreview]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -81,6 +100,8 @@ export default function UserSettings({
       time_format: String(formData.time_format),
       is_dark_mode: String(formData.is_dark_mode),
       hide_events_by_default: String(formData.hide_events_by_default),
+      colorblind_rank_labels: String(formData.colorblind_rank_labels),
+      font_scale: String(formData.font_scale),
       // Always sent, never omitted: an empty string would mean "inherit the station default" on the backend, and
       // this switch is a decision either way. The member's own answer always wins.
       is_sounds_active: String(formData.is_sounds_active),
@@ -90,6 +111,7 @@ export default function UserSettings({
       if (onSaveSettings) {
         await onSaveSettings(payload);
       }
+      onFontScalePreview?.(null);
       setStatusMessage({ type: 'success', text: 'Settings updated successfully!' });
     } catch (err) {
       console.error('Failed to save user settings:', err);
@@ -111,7 +133,7 @@ export default function UserSettings({
 
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <form id="user-settings-form" onSubmit={handleSubmit} className="p-6 space-y-6">
           
           {/* Status Feedback Banner */}
           {statusMessage && (
@@ -241,28 +263,65 @@ export default function UserSettings({
             </p>
           </div>
 
-          {/* Form Actions */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-700/80 flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  <span>Save Preferences</span>
-                </>
-              )}
-            </button>
+        </form>
+      </div>
+
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+        <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Accessibility</h2>
+        </div>
+        <div className="p-6 space-y-5">
+          <ToggleSwitch
+            label="Colorblind-Friendly Rank Labels"
+            description="Show rank initials beside schedule rank markers, so rank is not conveyed by color alone."
+            enabled={formData.colorblind_rank_labels}
+            onChange={(value) => setFormData({ ...formData, colorblind_rank_labels: value })}
+          />
+
+          <div className="border-t border-slate-200 pt-4 dark:border-slate-700/80">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <label htmlFor="font-scale" className="text-sm font-medium text-slate-900 dark:text-white">
+                Font size
+              </label>
+              <output htmlFor="font-scale" className="text-sm font-semibold tabular-nums text-slate-600 dark:text-slate-300">
+                {formData.font_scale}x
+              </output>
+            </div>
+            <input
+              id="font-scale"
+              type="range"
+              min="0"
+              max={FONT_SCALES.length - 1}
+              step="1"
+              value={Math.max(0, FONT_SCALES.indexOf(Number(formData.font_scale)))}
+              aria-valuetext={`${formData.font_scale} times`}
+              onChange={(event) => {
+                const scale = FONT_SCALES[Number(event.target.value)] ?? 1;
+                setFormData({ ...formData, font_scale: scale });
+                onFontScalePreview?.(scale);
+              }}
+              className="w-full accent-red-600"
+            />
+            <div className="mt-1 flex justify-between text-xs text-slate-500 dark:text-slate-400">
+              {FONT_SCALES.map((scale) => <span key={scale}>{scale}x</span>)}
+            </div>
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              Changes preview across the app immediately and are kept when you save.
+            </p>
           </div>
 
-        </form>
+          <div className="flex justify-end border-t border-slate-200 pt-4 dark:border-slate-700/80">
+            <button
+              type="submit"
+              form="user-settings-form"
+              disabled={saving}
+              className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              <span>{saving ? 'Saving...' : 'Save Preferences'}</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <NotificationsCard

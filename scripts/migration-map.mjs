@@ -179,6 +179,9 @@ export const slotKeyFrom = (row) => {
   return dateKey && templateId ? `slot-${dateKey}-${templateId}` : '';
 };
 
+// A training's `date` is free text in the sheet; reports range-query this day key instead.
+export const trainingDateKeyFrom = (row) => parseSheetDateKey(row.date) || undefined;
+
 // --- the mapping -------------------------------------------------------------------------------------------------
 
 // tab -> what it becomes. Every header is treated as known, and the plan REPORTS anything junk, secret or dropped -
@@ -279,7 +282,7 @@ export const TAB_MAP = {
     key: 'id',
     foreignKeys: { document_id: 'documents', user_id: 'users', signed_by_user_id: 'users' },
   },
-  training: { collections: ['trainings'], key: 'id' }, // the rules and the readers say trainings
+  training: { collections: ['trainings'], derive: { date_key: trainingDateKeyFrom }, key: 'id' }, // the rules and the readers say trainings
   training_signatures: {
     collections: ['training_signatures'],
     key: 'id',

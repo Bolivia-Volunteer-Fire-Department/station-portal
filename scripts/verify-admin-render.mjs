@@ -350,6 +350,36 @@ const soundSwitchHtml = ({ userRow, systemRow }) => {
 const switchDirective = (html) => (/data-sound="(sound-o(?:n|ff))"/.exec(String(html)) || [])[1] || null;
 
 check('the switch is rendered', String(soundSwitchHtml({})).includes('Sound Effects'));
+check(
+  'User Settings offers the opt-in colorblind-friendly rank labels',
+  readFileSync('src/components/MySettings.jsx', 'utf8').includes('Colorblind-Friendly Rank Labels') &&
+    /colorblind_rank_labels: String\(formData\.colorblind_rank_labels\)/.test(readFileSync('src/components/MySettings.jsx', 'utf8')),
+  true
+);
+const mySettingsSource = readFileSync('src/components/MySettings.jsx', 'utf8');
+const appSourceForAccessibility = readFileSync('src/App.jsx', 'utf8');
+check(
+  'Accessibility offers the four supported font multiplier stops',
+  /const FONT_SCALES = \[0\.9, 1, 1\.1, 1\.2\]/.test(mySettingsSource) &&
+    /id="font-scale"/.test(mySettingsSource) &&
+    /type="range"/.test(mySettingsSource) &&
+    /max=\{FONT_SCALES\.length - 1\}/.test(mySettingsSource) &&
+    /step="1"/.test(mySettingsSource) &&
+    /FONT_SCALES\[Number\(event\.target\.value\)\]/.test(mySettingsSource),
+  true
+);
+check(
+  'slider changes preview immediately and restore the prior preview on exit',
+  /onFontScalePreview\?\.\(scale\)/.test(mySettingsSource) &&
+    /useEffect\(\(\) => \(\) => onFontScalePreview\?\.\(null\)/.test(mySettingsSource),
+  true
+);
+check(
+  'App applies the preview as a root font-size multiplier',
+  /root\.style\.fontSize = `\$\{appFontScale \* 100\}%`/.test(appSourceForAccessibility) &&
+    /'font_scale'/.test(appSourceForAccessibility),
+  true
+);
 check('and Settings offers a saved event visibility default', /label="Hide Events by Default"/.test(readFileSync('src/components/MySettings.jsx', 'utf8')) && /hide_events_by_default: String\(formData\.hide_events_by_default\)/.test(readFileSync('src/components/MySettings.jsx', 'utf8')));
 check(
   'the saved preference initializes every event-bearing calendar hidden by default',

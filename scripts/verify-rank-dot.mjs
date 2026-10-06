@@ -103,6 +103,11 @@ console.log('\n--- the dot itself ---');
     true
   );
 
+  const labeled = dotHtml({ user: officer, ranks, showLabel: true });
+  check('the opt-in mode shows rank initials beside its color', labeled.includes('OF') && sameColor(labeled, OFFICER), labeled);
+  check('the initials expose the full rank to assistive technology', labeled.includes('aria-label="Rank: Officer"'), labeled);
+  check('the text label is not hidden from screen readers', !labeled.includes('aria-hidden="true"'), labeled);
+
   // The refusals. Each one is a state a real station is in on its first day, or after a rank is deleted.
   const nothing = (props) => dotHtml(props) === '';
   const unranked = { id: 'u2', name: 'Nobody In Particular' };
@@ -330,6 +335,7 @@ console.log('\n--- the read it does not cost ---');
   const dotSource = readFileSync('src/components/RankDot.jsx', 'utf8');
   const calendarSource = readFileSync('src/components/ScheduleCalendar.jsx', 'utf8');
   const boardSource = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+  const appSource = readFileSync('src/App.jsx', 'utf8');
 
   // The strongest form of "it costs no read": the module has no way to ask for one. No service import, no firestore, no
   // collection, no fetch - so the question cannot be answered wrongly later by accident.
@@ -348,7 +354,18 @@ console.log('\n--- the read it does not cost ---');
   // assumed. A prop that arrives nowhere produces no error, only a dot that never appears.
   checkIs(
     'the member calendar draws it from the ranks it already holds',
-    /<RankDot\s+user=\{crewUser\}/.test(calendarSource) && /ranks=\{ranks\}/.test(calendarSource)
+    /<RankDot\s+user=\{crewUser\}/.test(calendarSource) &&
+      /ranks=\{ranks\}/.test(calendarSource) &&
+      /showLabel=\{colorblindRankLabels\}/.test(calendarSource)
+  );
+  checkIs(
+    'App derives the opt-in mode from the current user settings',
+    /currentUserSettings\?\.colorblind_rank_labels/.test(appSource)
+  );
+  checkIs(
+    'and passes it into the member and administrator schedules',
+    /<ScheduleCalendar[\s\S]{0,1200}colorblindRankLabels=\{colorblindRankLabels\}/.test(appSource) &&
+      /<AdminPanel[\s\S]{0,1600}colorblindRankLabels=\{colorblindRankLabels\}/.test(appSource)
   );
   // ONE PLACE ON THE BOARD DRAWS IT, which is a stronger statement than the two this used to assert - and the count
   // went DOWN by adding the certification badges, which is worth explaining rather than hiding. The board has three
@@ -358,7 +375,9 @@ console.log('\n--- the read it does not cost ---');
   // reach some of the pills and miss the rest.
   checkIs(
     'the board draws it once, in the body every kind of pill is assembled by',
-    (boardSource.match(/<RankDot/g) || []).length === 1 && /const pillBody = \(/.test(boardSource),
+    (boardSource.match(/<RankDot/g) || []).length === 1 &&
+      /const pillBody = \(/.test(boardSource) &&
+      /showLabel=\{colorblindRankLabels\}/.test(boardSource),
     `${(boardSource.match(/<RankDot/g) || []).length} RankDot(s) on the board`
   );
   checkIs(

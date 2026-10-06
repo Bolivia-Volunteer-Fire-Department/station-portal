@@ -294,6 +294,15 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // Reports are read only when the module is opened. The callables validate the global report permission, per-report
+  // role/rank audience, and the source data permission before returning aggregated rows.
+  reports: {
+    requires: ['memberPayload'],
+    writes: ['SAVE_REPORT_CONFIG', 'DELETE_REPORT_CONFIG'],
+    reads: ['GET_REPORTS', 'GET_REPORT_CONFIGS', 'RUN_REPORT'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -489,6 +498,9 @@ const READ_DISPATCH = {
     void uid;
     return ok(await callable('readDocumentVerificationCount', {}));
   },
+  GET_REPORTS: async () => ok(await callable('getReports', {})),
+  GET_REPORT_CONFIGS: async () => ok(await callable('getReportConfigurations', {})),
+  RUN_REPORT: async (_uid, body) => ok(await callable('runReport', body || {})),
 };
 
 const refuseClockOffline = () => {
@@ -496,6 +508,9 @@ const refuseClockOffline = () => {
 };
 
 const DISPATCH = {
+  SAVE_REPORT_CONFIG: async (body) => ok(await callable('saveReportConfiguration', body || {})),
+  DELETE_REPORT_CONFIG: async (body) => ok(await callable('deleteReportConfiguration', { reportId: body.reportId || body.id })),
+
   // CLOCK OUT needs the open entry's id, which the sheet backend found for itself. The Firestore side reads the
   // member's own open entry for it (`time_out == ''`), and the transaction in clockOut re-checks everything that
   // matters - it is the same document the clock-in guard watches.
@@ -771,7 +786,16 @@ const DISPATCH = {
   // and removals in one commit.
   ADMIN_BULK_SAVE_TRAINING: async (body) => {
     const { saveTrainingRows } = await writes();
-    return ok(await saveTrainingRows({ rows: body.trainings || [], deleteIds: body.deleteIds || [] }));
+    const request = body.payload || body;
+    return ok(await saveTrainingRows({ rows: request.trainings || [], deleteIds: request.deleteIds || [] }));
+  },
+
+  // The member module's save: rows only. It is NOT a document save - the request carries the rows under `payload`, and
+  // saving the request itself as a document is what put a malformed extra row in the list on every edit.
+  SAVE_TRAINING: async (body) => {
+    const { saveTrainingRows } = await writes();
+    const request = body.payload || body;
+    return ok(await saveTrainingRows({ rows: request.trainings || [] }));
   },
 
   // System settings: one document per SIDE, so a save and a delete both go through the same rule about which side a
@@ -810,7 +834,6 @@ const DOCUMENT_SAVES = {
   // the private halves keep the empty note the migration left. A note field would change this.
   ADMIN_SAVE_ASSIGNMENT: 'assignments',
   ADMIN_SAVE_SCHEDULE_TEMPLATE: 'schedule_templates',
-  SAVE_TRAINING: 'trainings',
 };
 
 // Saves whose field is only HALF the story, because they change what a badge index should say - so each of them

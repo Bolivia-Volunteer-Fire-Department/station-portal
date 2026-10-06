@@ -139,14 +139,11 @@ service cloud.firestore {
     function checklistItemMatchesParent(item) {
       let documentId = item.get('document_id', '');
       let itemAudience = item.get('audience_keys', null);
-      let parent = documentId is string && documentId != ''
-        ? (existsAfter(/databases/$(database)/documents/documents/$(documentId))
-          ? getAfter(/databases/$(database)/documents/documents/$(documentId)).data
-          : null)
-        : null;
-      return parent != null
-        && itemAudience is list
-        && itemAudience == parent.get('audience_keys', []);
+      return itemAudience is list
+        && documentId is string
+        && documentId != ''
+        && existsAfter(/databases/$(database)/documents/documents/$(documentId))
+        && itemAudience == getAfter(/databases/$(database)/documents/documents/$(documentId)).data.get('audience_keys', []);
     }
 
     function hasAvailabilityIdentity(docId, data) {
@@ -415,6 +412,19 @@ service cloud.firestore {
         && (permission('can_create_events')
           || (resource != null && resource.data.audience_keys.hasAny(viewerKeys())));
       allow write: if permission('can_create_events');
+    }
+
+    // Report definitions contain their role/rank audience materialized as `audience_keys`. All writes are currently
+    // callable-only so the server can validate the definition and audit the change; direct reads still obey the same
+    // global Reports permission plus audience intersection if a client ever reads this collection directly.
+    match /report_configs/{reportId} {
+      allow read: if signedIn()
+        && (permission('can_configure_reports')
+          || (permission('can_view_reports')
+            && resource != null
+            && resource.data.get('enabled', false) == true
+            && resource.data.get('audience_keys', []).hasAny(viewerKeys())));
+      allow write: if false;
     }
 
     // The training list is everyone's; the signatures differ by permission. The permission is a fact about the

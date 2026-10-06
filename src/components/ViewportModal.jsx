@@ -70,6 +70,8 @@ export default function ViewportModal({
   // Save then simply calls this, and formId is left off.
   onSave,
   saveLabel = 'Save',
+  // A modal that only shows something has nothing to save: the Save button goes and Cancel reads as Close.
+  readOnly = false,
   // A caller whose save is refused for a reason of its own (the Roles editor refuses to store an administrator
   // role for a non-administrator) disables the toolbar's Save without disabling the whole form: the fields stay
   // readable and the reason goes in `actions`, beside the button.
@@ -157,7 +159,7 @@ export default function ViewportModal({
               className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-slate-300 dark:hover:bg-slate-700"
             >
               <X className="h-4 w-4" />
-              Cancel
+              {readOnly ? 'Close' : 'Cancel'}
             </button>
             {/* Submits the form inside through the HTML `form` attribute, so the fields keep their native
                 behaviour: Enter in a text input still submits the document. A body that is not a form (the
@@ -167,7 +169,7 @@ export default function ViewportModal({
               form={formId}
               onClick={formId ? undefined : onSave}
               disabled={busy || saveDisabled}
-              className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
+              className={`inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50${readOnly ? ' hidden' : ''}`}
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               {saving ? busyLabel : saveLabel}

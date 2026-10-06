@@ -50,7 +50,8 @@ const DYNAMIC_WIRING = {
 const actionIsWired = (action, source) =>
   DYNAMIC_WIRING[action]
     ? source.includes(DYNAMIC_WIRING[action]) && source.includes(`'${action}'`)
-    : source.includes(`action: '${action}'`) && source.includes(`routeWrite('${action}'`);
+    : source.includes(`routeWrite('${action}'`) ||
+      (source.includes(`action: '${action}'`) && source.includes(`routeWrite('${action}'`));
 // --- the table, before any environment is set: this is the default build ----------------------------------------
 //
 // The default is ON, not off: a build with no Firebase config cannot route anything anyway (that is the gate

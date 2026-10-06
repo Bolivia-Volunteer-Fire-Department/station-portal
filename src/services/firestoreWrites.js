@@ -344,6 +344,7 @@ export const setPushDisabled = async ({ userId, disabled }) => {
 const BOOLEAN_USER_SETTINGS = new Set([
   'is_dark_mode',
   'hide_events_by_default',
+  'colorblind_rank_labels',
   'notify_new_offer',
   'notify_offer_approved',
   'notify_offer_declined',
@@ -1062,14 +1063,16 @@ export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
   const batch = writeBatch(db);
 
   rows.forEach((row) => {
-    const { action, token, row_version, id, ...fields } = row;
+    const { action, token, row_version, id, date_key, ...fields } = row;
     void action;
     void token;
     void row_version;
+    void date_key;
     const target = String(id || '').trim() || doc(collection(db, 'trainings')).id;
     // The id is written as a FIELD as well as used as the key, because the migration put it there and the app reads
     // it off every row it lists.
-    batch.set(doc(db, 'trainings', target), { ...fields, id: target }, { merge: true });
+    // `date_key` is what reports range-query; it is derived from the date here so it can never disagree with it.
+    batch.set(doc(db, 'trainings', target), { ...fields, id: target, date_key: parseSheetDateKey(fields.date) || '' }, { merge: true });
   });
   deleteIds.forEach((id) => batch.delete(doc(db, 'trainings', String(id))));
 

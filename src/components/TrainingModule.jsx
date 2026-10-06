@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Info, Loader2, Pencil, PenLine, Save } from 'lucide-react';
+import { Check, Eye, Info, Loader2, Pencil, PenLine, Save } from 'lucide-react';
 import { saveTraining, signTraining } from '../services/api';
 import TrainingBadges from './training/TrainingBadges';
 import TrainingFilters from './training/TrainingFilters';
@@ -43,6 +43,8 @@ export default function TrainingModule({
   const [editing, setEditing] = useState(null);
   // Whether the editor modal is open: "new training" and "no editor" are both `editing === null`.
   const [editorOpen, setEditorOpen] = useState(false);
+  // The open training is shown, not edited, when somebody has signed it or it is locked.
+  const viewOnly = Boolean(editing) && !trainingEditable(editing);
   const [saving, setSaving] = useState(false);
   const [savingSignatures, setSavingSignatures] = useState(false);
   const [message, setMessage] = useState(null);
@@ -125,6 +127,7 @@ export default function TrainingModule({
     }
   };
   const handleSaveTraining = async (values) => {
+    if (viewOnly) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -150,6 +153,8 @@ export default function TrainingModule({
           key={editing?.id || 'new'}
           editing={editing}
           saving={saving}
+          readOnly={viewOnly}
+          readOnlyReason={viewOnly ? trainingEditBlockedReason(editing) : ''}
           onSubmit={handleSaveTraining}
           onCancel={() => {
             setEditing(null);
@@ -268,7 +273,7 @@ export default function TrainingModule({
                 const isSigned = signedIds.has(id);
                 const isPending = pendingSignIds.has(id);
                 // Rule: a training the module may not edit - because somebody has signed it, or
-                // because it is locked - grays out its Edit button rather than failing on save.
+                // because it is locked - offers Open (read-only) in place of Edit.
                 const editable = trainingEditable(training);
                 const editBlockedReason = trainingEditBlockedReason(training);
                 return (
@@ -308,12 +313,11 @@ export default function TrainingModule({
                             setEditing(training);
                             setEditorOpen(true);
                           }}
-                          disabled={!editable}
-                          title={editable ? 'Edit this training' : editBlockedReason}
-                          className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-white"
+                          title={editable ? 'Edit this training' : `${editBlockedReason} Open it to read the details.`}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                         >
-                          <Pencil className="w-3.5 h-3.5" />
-                          Edit
+                          {editable ? <Pencil className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          {editable ? 'Edit' : 'Open'}
                         </button>
                       </td>
                     )}

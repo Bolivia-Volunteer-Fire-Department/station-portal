@@ -24,6 +24,7 @@ const loaders = {
   DocumentsModule: () => import('../components/DocumentsModule'),
   TrainingModule: () => import('../components/TrainingModule'),
   CertificationsModule: () => import('../components/CertificationsModule'),
+  ReportsModule: () => import('../components/ReportsModule'),
   UserSettings: () => import('../components/MySettings'),
   HelpGuides: () => import('../components/HelpGuides'),
   MyClockHistory: () => import('../components/MyClockHistory'),
@@ -43,6 +44,7 @@ export const MyAvailability = lazy(loaders.MyAvailability);
 export const DocumentsModule = lazy(loaders.DocumentsModule);
 export const TrainingModule = lazy(loaders.TrainingModule);
 export const CertificationsModule = lazy(loaders.CertificationsModule);
+export const ReportsModule = lazy(loaders.ReportsModule);
 export const UserSettings = lazy(loaders.UserSettings);
 export const HelpGuides = lazy(loaders.HelpGuides);
 export const MyClockHistory = lazy(loaders.MyClockHistory);
@@ -63,6 +65,7 @@ export const prefetchableFor = ({
   canEditOwnAvailability = false,
   canViewDocuments = false,
   canSignTrainings = false,
+  canViewReports = false,
   canAdminister = false,
   canViewRoster = false,
 } = {}) => {
@@ -73,6 +76,7 @@ export const prefetchableFor = ({
   if (canEditOwnAvailability) keys.push('MyAvailability');
   if (canViewDocuments) keys.push('DocumentsModule');
   if (canSignTrainings) keys.push('TrainingModule');
+  if (canViewReports) keys.push('ReportsModule');
   if (canAdminister) keys.push('AdminPanel');
   return keys;
 };

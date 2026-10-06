@@ -65,6 +65,7 @@ export default function ScheduleCalendar({
   events = [],
   eventAudience = {},
   hideEventsByDefault = false,
+  colorblindRankLabels = false,
   timeFormat = '12',
   // Used only on the printed sheet's header.
   departmentName = '',
@@ -831,7 +832,12 @@ export default function ScheduleCalendar({
                             is not a Tailwind class at all - it generated no rule, so the margin it looked like was
                             never there. A class that does nothing is worse than no class, because the next reader
                             believes it. */}
-                        <RankDot user={crewUser} ranks={ranks} className="w-2 h-2 shrink-0 ml-px" />
+                        <RankDot
+                          user={crewUser}
+                          ranks={ranks}
+                          showLabel={colorblindRankLabels}
+                          className={colorblindRankLabels ? 'ml-px shrink-0' : 'w-2 h-2 shrink-0 ml-px'}
+                        />
                         <MemberName
                           user={crewUser}
                           className="w-2.5 h-2.5"

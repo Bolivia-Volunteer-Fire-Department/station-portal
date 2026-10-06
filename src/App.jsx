@@ -77,6 +77,7 @@ import {
   MyClockHistory,
   ScheduleCalendar,
   RosterModule,
+  ReportsModule,
   TrainingModule,
   UserSettings,
   prefetchDeferredModules,
@@ -183,6 +184,7 @@ export default function App() {
   const [assignments, setAssignments] = useState([]);
   const [systemSettings, setSystemSettings] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [fontScalePreview, setFontScalePreview] = useState(null);
   // Minimal, member-visible roster (id/name/rank_id). Admins also load the full
   // directory via refreshAdminUsers; members only get this projection, and it's
   // what lets the schedule calendar name other people's shifts.
@@ -288,9 +290,22 @@ export default function App() {
   const currentUserSettings = userSettings.find(
     (s) => String(s.id ?? s.user_id) === String(currentUser?.id)
   );
+  const storedFontScale = Number(currentUserSettings?.font_scale);
+  const savedFontScale = [0.5, 1, 1.5, 2].includes(storedFontScale) ? storedFontScale : 1;
+  const appFontScale = fontScalePreview ?? (currentUser ? savedFontScale : 1);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (appFontScale === 1) root.style.removeProperty('font-size');
+    else root.style.fontSize = `${appFontScale * 100}%`;
+    return () => root.style.removeProperty('font-size');
+  }, [appFontScale]);
   const hideEventsByDefault =
     currentUserSettings?.hide_events_by_default === true ||
     String(currentUserSettings?.hide_events_by_default ?? '').trim().toUpperCase() === 'TRUE';
+  const colorblindRankLabels =
+    currentUserSettings?.colorblind_rank_labels === true ||
+    String(currentUserSettings?.colorblind_rank_labels ?? '').trim().toUpperCase() === 'TRUE';
 
   const activeTimeFormat =
     currentUserSettings?.time_format ||
@@ -345,6 +360,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   // server refuses every documents action, which is where the rule actually lives. The other two documents
   // permissions both require this one (see utils/permissions).
   const canViewDocuments = can('can_view_documents');
+  const canViewReports = can('can_view_reports');
 
   // Modules that render a seven-column calendar get the wider container.
   //
@@ -402,6 +418,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
         canEditOwnAvailability,
         canViewDocuments,
         canSignTrainings,
+        canViewReports,
         canAdminister,
         canViewRoster,
       }).join(','),
@@ -411,6 +428,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
       canEditOwnAvailability,
       canViewDocuments,
       canSignTrainings,
+      canViewReports,
       canAdminister,
       canViewRoster,
     ]
@@ -1666,6 +1684,8 @@ const getLoadingMessage = () => {
                   ? canViewDocuments
                   : activeTab === 'roster'
                     ? canViewRoster
+                    : activeTab === 'reports'
+                      ? canViewReports
                   : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
@@ -1678,6 +1698,7 @@ const getLoadingMessage = () => {
     canSignTrainings,
     canViewDocuments,
     canViewRoster,
+    canViewReports,
   ]);
 
   const handleLogout = () => {
@@ -1967,6 +1988,8 @@ const getLoadingMessage = () => {
             'time_format',
             'is_dark_mode',
             'hide_events_by_default',
+            'colorblind_rank_labels',
+            'font_scale',
             // Missing from this list means the optimistic merge drops it, so the switch would appear not to stick
             // until the refresh wave reconciled the row seconds later.
             'is_sounds_active',
@@ -2247,6 +2270,7 @@ const getLoadingMessage = () => {
             canUseTimeclock={canUseTimeclock}
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
+            canViewReports={canViewReports}
             canViewRoster={canViewRoster}
             ranks={ranks}
           />
@@ -2277,6 +2301,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'availability' && 'Availability'}
                 {activeTab === 'training' && 'Training'}
                 {activeTab === 'certifications' && 'Certifications'}
+                {activeTab === 'reports' && 'Reports'}
                 {activeTab === 'help' && 'Help'}
                 {activeTab === 'settings' && 'My Settings'}
                 {activeTab === 'admin' && 'Administration'}
@@ -2289,6 +2314,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
                 {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
                 {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
+                {activeTab === 'reports' && 'Run reports shared with your role or rank.'}
                 {activeTab === 'help' && 'Guides for using the portal. Administrators have their own set under Administration → System → Help.'}
                 {activeTab === 'settings' && 'Customize your personal account preferences.'}
                 {activeTab === 'admin' && 'Manage members, roles, ranks, and system settings.'}
@@ -2380,6 +2406,7 @@ const getLoadingMessage = () => {
                 events={events}
                 eventAudience={announcementAudience}
                 hideEventsByDefault={hideEventsByDefault}
+                colorblindRankLabels={colorblindRankLabels}
                 // Names the audience line in an event's detail popup (a role description rather than "#id").
                 roles={roles}
                 timeFormat={activeTimeFormat}
@@ -2446,6 +2473,8 @@ const getLoadingMessage = () => {
               <CertificationsModule token={authToken} />
             )}
 
+            {activeTab === 'reports' && canViewReports && <ReportsModule departmentName={departmentName} members={roster.length ? roster : users} />}
+
             {activeTab === 'settings' && (
               <UserSettings
                 currentUser={currentUser}
@@ -2453,6 +2482,7 @@ const getLoadingMessage = () => {
                 systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
                 currentRole={currentUserRole}
                 hideEventsByDefault={hideEventsByDefault}
+                onFontScalePreview={setFontScalePreview}
                 canApproveShifts={canApproveShifts}
                 onSaveSettings={handleSaveUserSettings}
                 pushDeviceApi={pushDeviceApi}
@@ -2470,6 +2500,7 @@ const getLoadingMessage = () => {
                 loading={isAdmin && !!adminSubTab && !adminWaveSettled}
                 // Used only on the printed schedule sheet's header.
                 departmentName={departmentName}
+                colorblindRankLabels={colorblindRankLabels}
                 // The open sub-tab is OWNED HERE: '' is the menu page, a tab id is that tab. The sidebar
                 // resets it to '' on every visit to Administration, which is the way back to the menu.
                 subTab={adminSubTab}

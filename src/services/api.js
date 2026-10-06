@@ -179,6 +179,28 @@ export const fetchAdminDocumentVerificationCount = async () => {
   return Math.max(0, Number(response.count) || 0);
 };
 
+export const fetchReports = async () => {
+  const response = await routeRead('GET_REPORTS');
+  if (!response?.success) throw await notAnswered('GET_REPORTS');
+  return Array.isArray(response.reports) ? response.reports : [];
+};
+
+export const fetchReportConfigurations = async () => {
+  const response = await routeRead('GET_REPORT_CONFIGS');
+  if (!response?.success) throw await notAnswered('GET_REPORT_CONFIGS');
+  return Array.isArray(response.reports) ? response.reports : [];
+};
+
+export const runConfiguredReport = async (request) => {
+  const response = await routeRead('RUN_REPORT', request || {});
+  if (!response?.success) throw await notAnswered('RUN_REPORT');
+  return response;
+};
+
+export const saveReportConfiguration = (report) => routeWrite('SAVE_REPORT_CONFIG', report || {});
+export const deleteReportConfiguration = (reportId) =>
+  routeWrite('DELETE_REPORT_CONFIG', { reportId: String(reportId || '') });
+
 export const fetchAdminSections = async (names) => {
   const wanted = (Array.isArray(names) ? names : [names]).filter(Boolean);
   const needsCertifications = wanted.includes('certificationRecords');
@@ -357,6 +379,9 @@ export const saveUserSettings = async (updatedSettings, token) =>
       is_dark_mode: updatedSettings.is_dark_mode === undefined ? undefined : String(updatedSettings.is_dark_mode),
       hide_events_by_default:
         updatedSettings.hide_events_by_default === undefined ? undefined : String(updatedSettings.hide_events_by_default),
+      colorblind_rank_labels:
+        updatedSettings.colorblind_rank_labels === undefined ? undefined : String(updatedSettings.colorblind_rank_labels),
+      font_scale: updatedSettings.font_scale === undefined ? undefined : String(updatedSettings.font_scale),
       ...notificationPrefFields(updatedSettings),
     },
   });

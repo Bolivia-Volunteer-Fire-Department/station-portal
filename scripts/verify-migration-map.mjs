@@ -296,6 +296,12 @@ check(
 );
 check('a value the parser cannot read is left alone rather than blanked', dateFixesFor({ date_from: 'whenever' }), {});
 check('and a column the document does not carry is not invented', dateFixesFor({ title: 'no dates here' }), {});
+check(
+  'a training gets a day key from its free-text date',
+  dateFixesFor({ date: '3/6/2026' }, TAB_MAP.training.derive),
+  { date_key: '2026-03-06' }
+);
+check('and one whose date cannot be read gets none', dateFixesFor({ date: 'soon' }, TAB_MAP.training.derive), {});
 check('and so does free text', typedValue('description', 'Engine'), 'Engine');
 const roleRows = [{ id: 'officer', description: 'Officer', is_admin: 'TRUE', can_edit_users: 'TRUE', can_view_my_schedule: 'FALSE' }];
 const rolePlan = planForTab({ tab: 'roles', spec: TAB_MAP.roles, rows: roleRows });

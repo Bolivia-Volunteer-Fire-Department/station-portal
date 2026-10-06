@@ -158,6 +158,13 @@ export const ADMIN_PERMISSIONS = [
     label: 'Access the debug page',
     description: 'Open Debug: fire test toasts, modals and sounds on demand, to check what the app shows and plays without waiting for a real event.',
   },
+  {
+    key: 'can_configure_reports',
+    tab: 'reports-config',
+    label: 'Configure reports',
+    description: 'Create and edit report definitions and choose which roles and ranks may use each report. Requires "View reports".',
+    requires: 'can_view_reports',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -193,6 +200,11 @@ export const MEMBER_PERMISSIONS = [
     key: 'can_view_roster',
     label: 'View roster',
     description: 'Open the Roster module to see active members, their ranks, and current certifications marked for display.',
+  },
+  {
+    key: 'can_view_reports',
+    label: 'View reports',
+    description: 'Open Reports and run reports shared with your role or rank.',
   },
   {
     key: 'can_sign_trainings',

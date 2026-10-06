@@ -78,6 +78,8 @@ const main = async () => {
   const { initializeApp, applicationDefault, cert } = await import('firebase-admin/app');
   const { getFirestore } = await import('firebase-admin/firestore');
   const apply = process.argv.includes('--apply');
+  // --only=trainings limits the pass to one collection, so a repair for one thing does not rewrite everything else.
+  const only = (process.argv.find((arg) => arg.startsWith('--only=')) || '').slice('--only='.length);
   const emulator = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || projectFromFirebaserc();
 
@@ -133,7 +135,7 @@ const main = async () => {
   const wanted = [];
   let datetimes = 0;
   let unreadable = 0;
-  for (const { name, derive } of dateRepairTargets()) {
+  for (const { name, derive } of dateRepairTargets().filter((target) => !only || target.name === only)) {
     const snapshot = await db.collection(name).get();
     snapshot.forEach((document) => {
       const data = document.data() || {};

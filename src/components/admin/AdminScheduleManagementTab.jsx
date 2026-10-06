@@ -205,6 +205,7 @@ export default function AdminScheduleManagementTab({
   // an event targeted at one rank still belongs on the board an administrator is building from.
   events = [],
   hideEventsByDefault = false,
+  colorblindRankLabels = false,
   timeFormat = '12',
   // Used only on the printed sheet's header.
   departmentName = '',
@@ -566,7 +567,12 @@ export default function AdminScheduleManagementTab({
       <RankDot
         user={user}
         ranks={ranks}
-        className={roomy ? 'w-2.5 h-2.5 shrink-0' : 'inline-block w-2 h-2 mr-0.5 -mt-px align-[-1px] shrink-0'}
+        showLabel={colorblindRankLabels}
+        className={colorblindRankLabels
+          ? 'shrink-0'
+          : roomy
+            ? 'w-2.5 h-2.5 shrink-0'
+            : 'inline-block w-2 h-2 mr-0.5 -mt-px align-[-1px] shrink-0'}
       />
     );
     // The pending-approval marker is an EMPTY SLOT's, for a vacancy somebody has offered to fill - so it leads, and it

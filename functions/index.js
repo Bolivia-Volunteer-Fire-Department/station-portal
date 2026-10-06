@@ -19,6 +19,15 @@ const {
 const { logger } = require('firebase-functions/logger');
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { countPendingDocumentVerifications } = require('./documentVerification');
+const {
+  aggregateScheduleRows,
+  aggregateTrainingRows,
+  canUseReport,
+  normalizeReportDefinition,
+  reportAudienceKeys,
+  resolveReportOptions,
+  TRAINING_CATEGORY_FLAGS,
+} = require('./reporting');
 
 // What an event MEANS: recipients, preferences and copy. Pure and separate so it can be asserted without FCM.
 const {
@@ -302,6 +311,248 @@ exports.readAdminCertificationRecords = onCall(async (request) => {
     records: recordSnapshots.map((row) => ({ ...row.data(), id: row.id })),
     activeUserIds,
   };
+});
+
+const reportActorFor = async (uid) => {
+  const userSnapshot = await db.doc(`users/${uid}`).get();
+  if (!userSnapshot.exists) throw new HttpsError('permission-denied', 'Your account is not in the roster.');
+  const roleId = String(userSnapshot.get('role_id') || '').trim();
+  const roleSnapshot = roleId ? await db.doc(`roles/${roleId}`).get() : null;
+  return {
+    roleId,
+    rankId: String(userSnapshot.get('rank_id') || '').trim(),
+    role: roleSnapshot?.exists ? roleSnapshot.data() : {},
+  };
+};
+
+const reportScopeIsAllowed = (report, role) => {
+  const admin = isGranted(role?.is_admin);
+  if (report.dataset === 'training') {
+    if (report.scope === 'mine') return admin || isGranted(role?.can_sign_trainings);
+    return admin || isGranted(role?.can_administer_trainings);
+  }
+  if (report.scope === 'mine') return admin || isGranted(role?.can_view_my_schedule);
+  return admin || isGranted(role?.can_view_full_schedule) || isGranted(role?.can_edit_schedule);
+};
+
+const reportDateKey = (value) => {
+  const key = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
+  const date = new Date(`${key}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === key ? key : '';
+};
+
+const reportAudienceForActor = (roleId, rankId) =>
+  ['*', ...reportAudienceKeys({ roleIds: [roleId], rankIds: [rankId] })];
+
+exports.getReports = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const actor = await reportActorFor(caller.uid);
+  const isAdmin = isGranted(actor.role.is_admin);
+  if (!isAdmin && !isGranted(actor.role.can_view_reports)) {
+    throw new HttpsError('permission-denied', 'You do not have permission to view reports.');
+  }
+
+  const reportsSnapshot = await db.collection('report_configs')
+    .where('audience_keys', 'array-contains-any', reportAudienceForActor(actor.roleId, actor.rankId))
+    .get();
+  const reports = reportsSnapshot.docs
+    .map((row) => ({ ...row.data(), id: row.id }))
+    .filter((report) => report.enabled === true)
+    .filter((report) => canUseReport(report, actor.roleId, actor.rankId))
+    .filter((report) => reportScopeIsAllowed(report, actor.role));
+  return { reports };
+});
+
+exports.getReportConfigurations = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_configure_reports', 'configure reports');
+  const snapshot = await db.collection('report_configs').get();
+  return { reports: snapshot.docs.map((row) => ({ ...row.data(), id: row.id })) };
+});
+
+exports.saveReportConfiguration = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_configure_reports', 'configure reports');
+
+  let report;
+  try {
+    report = normalizeReportDefinition(request.data || {});
+  } catch (error) {
+    throw new HttpsError('invalid-argument', error.message);
+  }
+
+  const [roleSnapshots, rankSnapshots] = await Promise.all([
+    Promise.all(report.audience_role_ids.map((id) => db.doc(`roles/${id}`).get())),
+    Promise.all(report.audience_rank_ids.map((id) => db.doc(`ranks/${id}`).get())),
+  ]);
+  if (roleSnapshots.some((row) => !row.exists) || rankSnapshots.some((row) => !row.exists)) {
+    throw new HttpsError('invalid-argument', 'One or more selected roles or ranks no longer exist.');
+  }
+
+  const reportId = String(request.data?.id || '').trim() || db.collection('report_configs').doc().id;
+  const reference = db.doc(`report_configs/${reportId}`);
+  const previous = await reference.get();
+  const saved = {
+    ...report,
+    created_at: previous.exists ? String(previous.get('created_at') || stationTimestamp()) : stationTimestamp(),
+    created_by: previous.exists ? String(previous.get('created_by') || caller.uid) : caller.uid,
+    updated_at: stationTimestamp(),
+    updated_by: caller.uid,
+  };
+  await reference.set(saved);
+  await audit(caller.uid, previous.exists ? 'ADMIN_UPDATE_REPORT' : 'ADMIN_CREATE_REPORT', `${saved.name} (${reportId})`);
+  return { report: { ...saved, id: reportId } };
+});
+
+exports.deleteReportConfiguration = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_configure_reports', 'delete a report');
+  const reportId = String(request.data?.reportId || '').trim();
+  if (!reportId) throw new HttpsError('invalid-argument', 'A report id is required.');
+  const reference = db.doc(`report_configs/${reportId}`);
+  const snapshot = await reference.get();
+  if (!snapshot.exists) throw new HttpsError('not-found', 'That report no longer exists.');
+  await reference.delete();
+  await audit(caller.uid, 'ADMIN_DELETE_REPORT', `${String(snapshot.get('name') || reportId)} (${reportId})`);
+  return { reportId };
+});
+
+exports.runReport = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const actor = await reportActorFor(caller.uid);
+  const isAdmin = isGranted(actor.role.is_admin);
+  if (!isAdmin && !isGranted(actor.role.can_view_reports)) {
+    throw new HttpsError('permission-denied', 'You do not have permission to view reports.');
+  }
+
+  const reportId = String(request.data?.reportId || '').trim();
+  const reportSnapshot = reportId ? await db.doc(`report_configs/${reportId}`).get() : null;
+  if (!reportSnapshot?.exists) throw new HttpsError('not-found', 'That report is unavailable.');
+  const report = { ...reportSnapshot.data(), id: reportSnapshot.id };
+  if (report.enabled !== true || !canUseReport(report, actor.roleId, actor.rankId)) {
+    throw new HttpsError('permission-denied', 'That report is not shared with your role or rank.');
+  }
+  if (!reportScopeIsAllowed(report, actor.role)) {
+    throw new HttpsError('permission-denied', 'Your role cannot read the data this report needs.');
+  }
+
+  const from = reportDateKey(request.data?.from);
+  const to = reportDateKey(request.data?.to);
+  if (!from || !to || from > to) throw new HttpsError('invalid-argument', 'Choose a valid date range.');
+  const daySpan = (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86400000;
+  if (daySpan > 366) throw new HttpsError('invalid-argument', 'Report ranges cannot exceed 367 days.');
+
+  const options = resolveReportOptions(report, request.data);
+
+  if (report.dataset === 'training') {
+    const trainings = (await db.collection('trainings')
+      .where('date_key', '>=', from).where('date_key', '<=', to).get()).docs
+      .map((row) => ({ ...row.data(), id: row.id }))
+      .filter((training) => {
+        if (!options.category) return true;
+        if (options.category !== 'none') return isGranted(training[options.category]);
+        return !TRAINING_CATEGORY_FLAGS.some((flag) => isGranted(training[flag]));
+      });
+    const signatures = [];
+    if (report.scope === 'mine') {
+      const inRange = new Set(trainings.map((training) => training.id));
+      const mine = await db.collection('training_signatures').where('user_id', '==', caller.uid).get();
+      signatures.push(...mine.docs.map((row) => row.data()).filter((row) => inRange.has(String(row.training_id))));
+    } else if (options.memberIds.length) {
+      // Signatures are indexed by member, so a member filter reads only those members' signatures.
+      const inRange = new Set(trainings.map((training) => training.id));
+      for (let start = 0; start < options.memberIds.length; start += 30) {
+        const chunk = await db.collection('training_signatures')
+          .where('user_id', 'in', options.memberIds.slice(start, start + 30)).get();
+        signatures.push(...chunk.docs.map((row) => row.data()).filter((row) => inRange.has(String(row.training_id))));
+      }
+    } else {
+      for (let start = 0; start < trainings.length; start += 30) {
+        const ids = trainings.slice(start, start + 30).map((training) => training.id);
+        const chunk = await db.collection('training_signatures').where('training_id', 'in', ids).get();
+        signatures.push(...chunk.docs.map((row) => row.data()));
+      }
+    }
+    const trainingMemberIds = options.groupBy === 'member'
+      ? [...new Set(signatures.map((row) => String(row.user_id || '').trim()).filter(Boolean))]
+      : [];
+    const trainingMembers = trainingMemberIds.length
+      ? (await db.getAll(...trainingMemberIds.map((id) => db.doc(`users/${id}`))))
+        .map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }))
+      : [];
+    return {
+      report: { id: report.id, name: report.name, visualization: options.visualization, group_by: options.groupBy, dataset: 'training', unit: 'Hours' },
+      range: { from, to },
+      rows: aggregateTrainingRows(signatures, { groupBy: options.groupBy, trainings, users: trainingMembers }),
+      truncated: false,
+    };
+  }
+
+  let scheduleRows;
+  let overLimit = false;
+  if (report.scope !== 'mine' && options.memberIds.length) {
+    scheduleRows = [];
+    for (let start = 0; start < options.memberIds.length && !overLimit; start += 30) {
+      const chunk = await db.collection('schedule')
+        .where('user_id', 'in', options.memberIds.slice(start, start + 30))
+        .where('date_from', '>=', from).where('date_from', '<=', to)
+        .limit(5001 - scheduleRows.length).get();
+      scheduleRows.push(...chunk.docs.map((row) => ({ ...row.data(), id: row.id })));
+      overLimit = scheduleRows.length > 5000;
+    }
+    scheduleRows = scheduleRows.slice(0, 5000);
+  } else {
+    let source = db.collection('schedule').where('date_from', '>=', from).where('date_from', '<=', to);
+    if (report.scope === 'mine') source = source.where('user_id', '==', caller.uid);
+    const snapshot = await source.limit(5001).get();
+    overLimit = snapshot.size > 5000;
+    scheduleRows = snapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id }));
+  }
+  // Names are only read for the grouping that draws them.
+  const assignmentIds = options.groupBy === 'assignment'
+    ? [...new Set(scheduleRows.map((row) => String(row.assignment_id || '').trim()).filter(Boolean))]
+    : [];
+  const memberIds = options.groupBy === 'member'
+    ? [...new Set(scheduleRows.map((row) => String(row.user_id || '').trim()).filter(Boolean))]
+    : [];
+  const [assignmentSnapshots, memberSnapshots] = await Promise.all([
+    assignmentIds.length ? db.getAll(...assignmentIds.map((id) => db.doc(`assignments/${id}`))) : [],
+    memberIds.length ? db.getAll(...memberIds.map((id) => db.doc(`users/${id}`))) : [],
+  ]);
+  const assignments = assignmentSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
+  const users = memberSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
+  const rows = aggregateScheduleRows(scheduleRows, { groupBy: options.groupBy, assignments, users });
+
+  return {
+    report: { id: report.id, name: report.name, visualization: options.visualization, group_by: options.groupBy, dataset: 'schedule', unit: 'Shifts' },
+    range: { from, to },
+    rows,
+    truncated: overLimit,
+  };
+});
+
+// How many members have signed each training. A member can only read their own signatures, so the "has anybody signed
+// this?" that decides whether a training is still editable has to be counted here - counts only, never who.
+exports.readTrainingSignatureCounts = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  // Only a role that can edit trainings acts on the count, so everybody else skips the read of every signature.
+  const actor = await reportActorFor(request.auth.uid);
+  if (!['is_admin', 'can_edit_trainings', 'can_administer_trainings'].some((flag) => isGranted(actor.role[flag]))) {
+    return { counts: {} };
+  }
+  const snapshot = await db.collection('training_signatures').select('training_id').get();
+  const counts = {};
+  snapshot.docs.forEach((row) => {
+    const id = String(row.get('training_id') || '');
+    if (id) counts[id] = (counts[id] || 0) + 1;
+  });
+  return { counts };
 });
 
 exports.readDocumentVerificationCount = onCall(async (request) => {

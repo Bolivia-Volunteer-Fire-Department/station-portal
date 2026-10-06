@@ -39,13 +39,39 @@ import React from 'react';
 // `className` is the GEOMETRY - the size, and how the caller's line lays it out (see CertificationBadges for the same
 // split of size from tone). The dot's own shape, ring and colour are this component's, because a dot that is not round,
 // or that does not separate from its background, is not the thing being asked for.
-export default function RankDot({ user, ranks = [], className = 'inline-block w-2 h-2 shrink-0 align-middle' }) {
+const rankInitials = (name) => {
+  const words = String(name || '').trim().split(/[\s/,&-]+/).filter(Boolean);
+  if (words.length > 1) return words.map((word) => word[0]).join('').slice(0, 3).toUpperCase();
+  return (words[0] || '?').slice(0, 2).toUpperCase();
+};
+
+export default function RankDot({
+  user,
+  ranks = [],
+  className = 'inline-block w-2 h-2 shrink-0 align-middle',
+  showLabel = false,
+}) {
   const rankId = String(user?.rank_id ?? '').trim();
   if (!rankId) return null;
   const rank = ranks.find((r) => String(r.id) === rankId);
   // `?? ''` as well as the trim: a rank with no colour field at all and one with an empty string are the same answer.
   const color = String(rank?.color ?? '').trim();
   if (!color) return null;
+  const name = String(rank?.description ?? '').trim();
+
+  if (showLabel) {
+    return (
+      <span
+        className={`inline-flex shrink-0 align-middle ${className}`}
+        title={name || undefined}
+        aria-label={`Rank: ${name || 'Unnamed rank'}`}
+      >
+        <span className="inline-flex h-3 min-w-4 items-center justify-center rounded-[3px] border border-white/80 px-0.5 text-[8px] font-bold leading-none text-white shadow-sm" style={{ backgroundColor: color }}>
+          {rankInitials(name)}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span

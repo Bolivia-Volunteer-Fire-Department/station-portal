@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2 } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3 } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -21,6 +21,7 @@ import AdminCertificationSetupTab from './AdminCertificationSetupTab';
 import AdminAnnouncementsTab from './AdminAnnouncementsTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
+import AdminReportsConfigurationTab from './AdminReportsConfigurationTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
 import { fetchAdminDocumentVerificationCount } from '../../services/api';
 import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
@@ -86,6 +87,14 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
       { id: 'documents', label: 'Documents', icon: BookText },
       { id: 'training', label: 'Training', icon: GraduationCap },
+    ],
+  },
+  {
+    id: 'catReports',
+    label: 'Reports',
+    icon: BarChart3,
+    items: [
+      { id: 'reports-config', label: 'Reports Configuration', icon: BarChart3 },
     ],
   },
   {
@@ -183,6 +192,7 @@ export default function AdminPanel({
   // Used only on the printed schedule sheet's header.
   departmentName = '',
   hideEventsByDefault = false,
+  colorblindRankLabels = false,
 }) {
   // Offers awaiting a decision. Shares the predicate with the approvals table so
   // the badge can never disagree with the rows below it.
@@ -502,6 +512,7 @@ export default function AdminPanel({
           // Non-shift entries, so the board shows the month as a whole.
           events={events}
           hideEventsByDefault={hideEventsByDefault}
+          colorblindRankLabels={colorblindRankLabels}
           timeFormat={timeFormat}
           // Used only on the printed sheet's header.
           departmentName={departmentName}
@@ -545,6 +556,10 @@ export default function AdminPanel({
           systemSettings={systemSettings}
           onDataChanged={onDataChanged}
         />
+      )}
+
+      {activeSubTab === 'reports-config' && (
+        <AdminReportsConfigurationTab roles={roles} ranks={ranks} />
       )}
 
       {activeSubTab === 'notifications' && (

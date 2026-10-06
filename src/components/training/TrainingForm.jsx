@@ -55,6 +55,9 @@ export default function TrainingForm({
   // Which flags this caller may set. The member module passes the member-facing set; the
   // Administration report passes all of them, including the external-system marker.
   allowAdminFlags = false,
+  // Shows the training without any way to change it - for one somebody has signed.
+  readOnly = false,
+  readOnlyReason = '',
 }) {
   // Seeded once per mount. Callers give the form a `key` derived from the row being edited, so
   // switching between "add" and a specific row remounts it rather than needing an effect to
@@ -62,13 +65,14 @@ export default function TrainingForm({
   const [form, setForm] = useState(() => formFromTraining(editing));
   const isEditing = Boolean(form.id);
   const locked = trainingLocked(form);
+  const frozen = locked || readOnly;
   const flags = allowAdminFlags ? TRAINING_FLAGS : MEMBER_EDITABLE_FLAGS;
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
   // A training with no date or no title is not a training - the backend drops such a row, so
   // the form refuses it here rather than appearing to save and then quietly vanishing.
-  const canSave = form.date.trim() !== '' && form.title.trim() !== '' && !saving && !locked;
+  const canSave = form.date.trim() !== '' && form.title.trim() !== '' && !saving && !frozen;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -85,7 +89,9 @@ export default function TrainingForm({
     <ViewportModal
       title={isEditing ? recordHeading('Training', form.title) : 'New training'}
       subtitle={
-        isEditing
+        readOnly
+          ? 'Details'
+          : isEditing
           ? 'Editing an existing training'
           : 'Record a training activity. Members can then sign it in their Training module.'
       }
@@ -93,9 +99,10 @@ export default function TrainingForm({
       formId={TRAINING_FORM_ID}
       saveLabel={isEditing ? 'Save training' : 'Add training'}
       saving={saving}
+      readOnly={readOnly}
       onClose={onCancel}
       actions={
-        canSave ? null : (
+        canSave || readOnly ? null : (
           <span className="mr-1 hidden text-xs text-slate-500 dark:text-slate-400 sm:inline">
             {locked ? 'This training is locked.' : 'A date and a title are required.'}
           </span>
@@ -113,7 +120,14 @@ export default function TrainingForm({
           </div>
         )}
 
-        <fieldset disabled={locked} className="space-y-4">
+        {readOnly && !locked && readOnlyReason && (
+          <div className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700">
+            <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{readOnlyReason}</span>
+          </div>
+        )}
+
+        <fieldset disabled={frozen} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Date</label>
