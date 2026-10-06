@@ -17,6 +17,7 @@ import CenteredContent from '../src/components/CenteredContent.jsx';
 // it and to every source check, and took the entire app down in the browser.
 import App from '../src/App.jsx';
 import AdminPanel, { ADMIN_NAV_CATEGORIES } from '../src/components/admin/AdminPanel.jsx';
+import AdminMenuPage from '../src/components/admin/AdminMenuPage.jsx';
 import Sidebar from '../src/components/Sidebar.jsx';
 import AdminRolesTab from '../src/components/admin/AdminRolesTab.jsx';
 import AdminScheduleTemplatesTab from '../src/components/admin/AdminScheduleTemplatesTab.jsx';
@@ -1734,6 +1735,39 @@ check('and reports selections back through it', /onSelectTab=\{setAdminSubTab\}/
 // a tab's content - which is what keeps opening Administration from paying for a tab nobody asked for.
 check('the menu page is the landing view', /allowedTabs\.includes\(subTab\) \? subTab : null/.test(adminPanelSource), true);
 check('and the menu renders the category cards', /<AdminMenuPage/.test(adminPanelSource), true);
+check(
+  'verification badge fetching requires an open menu and verifier/admin permission',
+  /if \(activeSubTab !== null \|\| !canViewDocumentVerificationCount\)/.test(adminPanelSource) &&
+    /isAdmin \|\| permissionGranted\(currentRole, 'is_admin'\) \|\| permissionGranted\(currentRole, 'can_verify_documents'\)/.test(adminPanelSource),
+  true
+);
+const EmptyMenuIcon = () => null;
+const documentsMenuMarkup = renderToStaticMarkup(
+  React.createElement(AdminMenuPage, {
+    categories: [{
+      id: 'content',
+      label: 'Content',
+      icon: EmptyMenuIcon,
+      items: [{ id: 'documents', label: 'Documents', icon: EmptyMenuIcon }],
+    }],
+    onSelectTab: () => {},
+    documentVerificationCount: 3,
+  })
+);
+check('the Documents menu item shows a positive verification badge', />3<\/span>/.test(documentsMenuMarkup), true);
+const documentsMenuWithoutQueue = renderToStaticMarkup(
+  React.createElement(AdminMenuPage, {
+    categories: [{
+      id: 'content',
+      label: 'Content',
+      icon: EmptyMenuIcon,
+      items: [{ id: 'documents', label: 'Documents', icon: EmptyMenuIcon }],
+    }],
+    onSelectTab: () => {},
+    documentVerificationCount: 0,
+  })
+);
+check('the Documents menu item hides a zero badge', !/>0<\/span>/.test(documentsMenuWithoutQueue), true);
 check(
   'and AdminPanel reports it as it changes',
   /onActiveSubTabChange\(activeSubTab \|\| ''\)/.test(adminPanelSource),

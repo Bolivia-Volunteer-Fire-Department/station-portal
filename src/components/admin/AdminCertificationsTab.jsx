@@ -1,11 +1,13 @@
-import React, { useMemo, useState } from 'react';
-import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check } from 'lucide-react';
-import { adminSaveCertification, adminDeleteCertification } from '../../services/api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download } from 'lucide-react';
+import { adminSaveCertification, adminDeleteCertification, fetchAdminCertificationRecords } from '../../services/api';
 import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
+import PrintableCertifications from '../PrintableCertifications';
 import { userLabel } from '../../utils/displayLabel';
+import { certificationRowsCsv, sortCertificationRows } from '../../utils/certificationReport';
 import {
   certificationStateLabel,
   certificationStateBadge,
@@ -27,12 +29,13 @@ const FIELD_CLASS =
   'mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
 
 const FILTERS = [
-  { id: 'all', label: 'Everyone' },
-  { id: 'attention', label: 'Expiring or expired' },
+  { id: 'all', label: 'Active members' },
+  { id: 'attention', label: 'Attention' },
   { id: 'current', label: 'Current' },
 ];
 
-const STATE_ORDER = { expiring: 0, expired: 1, active: 2, upcoming: 3 };
+const TOOLBAR_BUTTON_CLASS =
+  'inline-flex h-9 min-w-32 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500';
 
 // The Certifications tab: one row per member per certification PERIOD.
 //
@@ -42,13 +45,17 @@ const STATE_ORDER = { expiring: 0, expired: 1, active: 2, upcoming: 3 };
 //     new period, which is what leaves the station a history instead of a single current answer.
 //   * the end date is DISABLED for a certification whose setup says it cannot be renewed. One-off achievements
 //     have no expiry, and the server blanks the field too, so the rule survives somebody editing the sheet.
-export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], onDataChanged, onBadgesChanged }) {
+export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], departmentName = '', onDataChanged, onBadgesChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Whether the editor modal is open: "a new record" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [inactiveResult, setInactiveResult] = useState(null);
+  const [inactiveFailure, setInactiveFailure] = useState(null);
+  const [printOpen, setPrintOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -63,6 +70,32 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     });
     return index;
   }, [users]);
+
+  const inactiveRecords = inactiveResult?.sourceRecords === records ? inactiveResult.rows : null;
+  const inactiveError = inactiveFailure?.sourceRecords === records ? inactiveFailure.message : '';
+  const inactiveLoading = includeInactive && !inactiveRecords && !inactiveError;
+
+  useEffect(() => {
+    if (!includeInactive) return undefined;
+
+    let cancelled = false;
+    fetchAdminCertificationRecords({ includeInactive: true })
+      .then((rows) => {
+        if (!cancelled) setInactiveResult({ sourceRecords: records, rows });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setInactiveFailure({
+            sourceRecords: records,
+            message: error.message || 'Could not load inactive members.',
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [includeInactive, records]);
 
   const selectedType = useMemo(
     () => setup.find((type) => type.id === formData.certification_id) || null,
@@ -150,26 +183,47 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     }
   };
 
-  // Attention first, then by how soon the date is: the reason to open this tab is almost always "who is running
-  // out", so that is the order it opens in.
+  const recordsForView = includeInactive && inactiveRecords ? inactiveRecords : records;
+
+  // Non-current certifications first, then member and certification names for a stable, scannable roster.
   const visible = useMemo(() => {
-    const rows = records.filter((row) => {
+    const rows = recordsForView.filter((row) => {
       if (filter === 'attention') return row.state === 'expiring' || row.state === 'expired';
       if (filter === 'current') return row.state === 'active' || row.state === 'upcoming';
       return true;
     });
 
-    return rows.slice().sort((a, b) => {
-      const byState = (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9);
-      if (byState !== 0) return byState;
-      return String(a.end_date || '9999').localeCompare(String(b.end_date || '9999'));
-    });
-  }, [records, filter]);
+    return sortCertificationRows(rows, (row) => userLabel(usersById[row.user_id]));
+  }, [recordsForView, filter, usersById]);
 
-  const attentionCount = records.filter((row) => row.state === 'expiring' || row.state === 'expired').length;
+  const attentionCount = recordsForView.filter((row) => row.state === 'expiring' || row.state === 'expired').length;
+  const printableRows = visible.map((row) => ({
+    ...row,
+    member_name: userLabel(usersById[row.user_id]),
+  }));
+
+  const handleExportCsv = () => {
+    const content = certificationRowsCsv(visible, (row) => userLabel(usersById[row.user_id]));
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `certifications-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
+      {printOpen && (
+        <PrintableCertifications
+          rows={printableRows}
+          departmentName={departmentName}
+          onDone={() => setPrintOpen(false)}
+        />
+      )}
       {/* The editor, in the viewport modal every New card in this module now uses. Its body is a div rather than a
           <form>, so the toolbar's Save calls handleSave through onSave instead of submitting anything. */}
       {editorOpen && (
@@ -280,33 +334,73 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         </ViewportModal>
       )}
 
-      {/* The records, with the New button in the filter row - the only header this card has. */}
+      {/* The records and their filters share one toolbar. */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-4 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={startNew}
-            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
-          >
-            <Plus className="h-4 w-4" />
-            New record
-          </button>
           {FILTERS.map((option) => (
             <button
               key={option.id}
               type="button"
               onClick={() => setFilter(option.id)}
-              className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+              aria-pressed={filter === option.id}
+              className={`${TOOLBAR_BUTTON_CLASS} border ${
                 filter === option.id
-                  ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700'
+                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
+                  : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700'
               }`}
             >
               {option.label}
               {option.id === 'attention' && attentionCount > 0 ? ` (${attentionCount})` : ''}
             </button>
           ))}
+          <label className="inline-flex h-9 items-center gap-2 px-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(event) => {
+                setIncludeInactive(event.target.checked);
+                setInactiveResult(null);
+                setInactiveFailure(null);
+              }}
+              className="h-4 w-4 accent-red-600"
+            />
+            Include inactive members
+            {inactiveLoading && <Loader2 aria-label="Loading inactive records" className="h-3.5 w-3.5 animate-spin" />}
+          </label>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={startNew}
+              className={`${TOOLBAR_BUTTON_CLASS} bg-red-600 text-white hover:bg-red-500`}
+            >
+              <Plus className="h-4 w-4" /> New record
+            </button>
+            <button
+              type="button"
+              onClick={() => setPrintOpen(true)}
+              disabled={visible.length === 0}
+              title={visible.length ? 'Print the filtered certification records' : 'No certifications match these filters'}
+              className={`${TOOLBAR_BUTTON_CLASS} border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700`}
+            >
+              <Printer className="h-4 w-4" /> Print
+            </button>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={visible.length === 0}
+              title={visible.length ? 'Export the filtered certification records as CSV' : 'No certifications match these filters'}
+              className={`${TOOLBAR_BUTTON_CLASS} border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </button>
+          </div>
         </div>
+
+        {inactiveError && (
+          <div role="alert" className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+            {inactiveError}
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -334,6 +428,11 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                     <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
                       <span className="flex items-center gap-1.5">
                         {userLabel(usersById[row.user_id])}
+                        {row.member_status === 'inactive' && (
+                          <span className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500 dark:border-slate-600 dark:text-slate-400">
+                            Inactive
+                          </span>
+                        )}
                         <CertificationBadges userId={row.user_id} />
                       </span>
                     </td>

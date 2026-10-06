@@ -33,6 +33,7 @@ import { setViewportWidth } from './dom-env.mjs';
 import React from 'react';
 import { render, fireEvent, act, cleanup } from '@testing-library/react';
 import AdminScheduleManagementTab from '../src/components/admin/AdminScheduleManagementTab.jsx';
+import { viewportPopoverPosition } from '../src/utils/viewportPopover.js';
 
 let failures = 0;
 const check = (label, condition, detail) => {
@@ -802,8 +803,20 @@ console.log('\n--- a narrow screen: the day picker, and one press to any day ---
   await flush();
   const widePill = shiftPills(container).find((el) => String(el.textContent).includes(MEMBERS.thisMonth.name));
   check('the calendar draws the same day as one of the month again', Boolean(widePill), text(container).slice(0, 140));
+  let anchorRect = { left: 980, right: 1012, top: 720, bottom: 744, width: 32, height: 24 };
+  Object.defineProperty(widePill, 'getBoundingClientRect', { configurable: true, value: () => anchorRect });
   fireEvent.click(widePill);
   await flush();
+  let positionedPopover = document.body.querySelector('.animate-popoverIn');
+  const desktopLeft = Number.parseFloat(positionedPopover?.style.left || 'NaN');
+  const desktopTop = Number.parseFloat(positionedPopover?.style.top || 'NaN');
+  const desktopWidth = Number.parseFloat(positionedPopover?.style.width || 'NaN');
+  const desktopHeight = Number.parseFloat(positionedPopover?.style.maxHeight || 'NaN');
+  check(
+    'a bottom-right assignment popover fits the desktop viewport',
+    desktopLeft >= 0 && desktopTop >= 0 && desktopLeft + desktopWidth <= window.innerWidth && desktopTop + desktopHeight <= window.innerHeight,
+    positionedPopover?.getAttribute('style') || 'no positioned popover'
+  );
   check(
     'and widening the window puts the picker back on the pill it belongs to',
     !document.body.querySelector('[role="dialog"]') && Boolean(document.body.querySelector('.animate-popoverIn')),
@@ -815,7 +828,57 @@ console.log('\n--- a narrow screen: the day picker, and one press to any day ---
     'a picker over a month view says what the month already says'
   );
 
+  anchorRect = { left: 980, right: 1012, top: 200, bottom: 220, width: 32, height: 20 };
+  window.innerHeight = 240;
+  await act(async () => window.dispatchEvent(new Event('resize')));
+  await flush();
+  positionedPopover = document.body.querySelector('.animate-popoverIn');
+  const shortLeft = Number.parseFloat(positionedPopover?.style.left || 'NaN');
+  const shortTop = Number.parseFloat(positionedPopover?.style.top || 'NaN');
+  const shortWidth = Number.parseFloat(positionedPopover?.style.width || 'NaN');
+  const shortHeight = Number.parseFloat(positionedPopover?.style.maxHeight || 'NaN');
+  check(
+    'the open assignment popover repositions after the viewport shrinks',
+    shortLeft >= 0 && shortTop >= 0 && shortLeft + shortWidth <= window.innerWidth && shortTop + shortHeight <= window.innerHeight,
+    positionedPopover?.getAttribute('style') || 'no positioned popover'
+  );
+  fireEvent.click(document.body.querySelector('div.fixed.inset-0.z-40'));
+  await flush();
+
+  window.innerHeight = 768;
+  await act(async () => window.dispatchEvent(new Event('resize')));
+  const quickAddButton = [...container.querySelectorAll('button')].find((button) => button.textContent.includes('Quick Add'));
+  Object.defineProperty(quickAddButton, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ left: 980, right: 1012, top: 720, bottom: 744, width: 32, height: 24 }),
+  });
+  fireEvent.click(quickAddButton);
+  await flush();
+  const quickAddMenu = [...document.body.querySelectorAll('div.fixed')].find((element) =>
+    element.textContent.includes('Pick a member, then click any empty slot')
+  );
+  const quickLeft = Number.parseFloat(quickAddMenu?.style.left || 'NaN');
+  const quickTop = Number.parseFloat(quickAddMenu?.style.top || 'NaN');
+  const quickWidth = Number.parseFloat(quickAddMenu?.style.width || 'NaN');
+  const quickHeight = Number.parseFloat(quickAddMenu?.style.maxHeight || 'NaN');
+  check(
+    'Quick Add is portaled and fits the viewport at the bottom-right edge',
+    Boolean(quickAddMenu) && quickLeft >= 0 && quickTop >= 0 && quickLeft + quickWidth <= window.innerWidth && quickTop + quickHeight <= window.innerHeight,
+    quickAddMenu?.getAttribute('style') || 'no Quick Add menu'
+  );
+  fireEvent.mouseDown(quickAddMenu);
+  check('interacting inside the portaled Quick Add menu keeps it open', Boolean(
+    [...document.body.querySelectorAll('div.fixed')].find((element) =>
+      element.textContent.includes('Pick a member, then click any empty slot')
+    )
+  ));
+  fireEvent.mouseDown(document.body);
+  check('clicking outside the portaled Quick Add menu closes it', ![...document.body.querySelectorAll('div.fixed')].some((element) =>
+    element.textContent.includes('Pick a member, then click any empty slot')
+  ));
+
   cleanup();
+  window.innerHeight = 768;
   setViewportWidth(1024);
 }
 
@@ -908,6 +971,44 @@ console.log('\n--- the viewport question, and who is listening ---');
   check('while an unsubscribed listener is not woken again', woken === 2, `${woken} wake-up(s)`);
   setViewportWidth(1024);
 
+
+console.log('\n--- popovers stay inside the viewport ---');
+for (const { label, width, height, anchor } of [
+  {
+    label: 'bottom-right trigger on a standard desktop',
+    width: 1280,
+    height: 720,
+    anchor: { left: 1230, top: 680, bottom: 704 },
+  },
+  {
+    label: 'bottom-right trigger on a short viewport',
+    width: 320,
+    height: 240,
+    anchor: { left: 285, top: 212, bottom: 232 },
+  },
+  {
+    label: 'tiny viewport narrower than the default panel',
+    width: 200,
+    height: 150,
+    anchor: { left: 180, top: 130, bottom: 146 },
+  },
+]) {
+  const position = viewportPopoverPosition({
+    anchor,
+    viewportWidth: width,
+    viewportHeight: height,
+  });
+  check(
+    `${label}: width and horizontal position fit`,
+    position.width <= width && position.left >= 0 && position.left + position.width <= width,
+    JSON.stringify(position)
+  );
+  check(
+    `${label}: height and vertical position fit`,
+    position.maxHeight <= height && position.top >= 0 && position.top + position.maxHeight <= height,
+    JSON.stringify(position)
+  );
+}
   // THE THRESHOLD IS THE SHELL'S, which is why the module holds it rather than each screen writing its own number: the
   // sidebar is a drawer below `md` and a column at `md`, so a board that switched at a different width would rearrange
   // out of step with the layout around it.

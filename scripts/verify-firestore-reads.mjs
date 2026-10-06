@@ -11,7 +11,7 @@
  */
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, seed } from './seed-emulator.mjs';
-import { fetchAdminPayload, fetchMemberPayload, readAdminSections, readUsersOnce } from '../src/services/firestorePayload.js';
+import { ADMIN_SECTION_NAMES, fetchAdminPayload, fetchMemberPayload, readAdminSections, readUsersOnce } from '../src/services/firestorePayload.js';
 // The live reads, driven for real against the emulator: a listener has to be proven to FIRE, not inspected in the source.
 import { subscribeLive } from '../src/services/liveReads.js';
 // The decision the score-repair script makes, tested here against a real text score in the emulator rather than in isolation.
@@ -353,11 +353,10 @@ checkIs(
   // board's slot flags are built from. The declined one is not an officer's business either - the member has been told, and
   // the slot is open again - so `of3` is absent here as well as `of2`.
   check('and the offers still waiting, not the whole table', boardSections.scheduleOffers.map((row) => row.id).sort(), ['of1']);
-  // ...and the certification RECORDS are not carried either, for the same reason as the directory: every member's records, read by
-  // the one tab that shows what is expiring next. Asserted through that section, which is what the tab receives.
-  checkIs('and no certification records: their own tab reads them', asAdmin.certificationRecords === undefined, JSON.stringify(asAdmin.certificationRecords));
-  const records = await readAdminSections(['certificationRecords']);
-  check('the records that tab reads are every member’s, not only their own', records.certificationRecords.map((row) => row.id), ['cr1']);
+  // Certification rows are deliberately absent from direct client sections: their reader is the permission-checked
+  // callable, which starts with active user IDs rather than scanning the collection.
+  checkIs('certification records are not an unrestricted client section', !ADMIN_SECTION_NAMES.includes('certificationRecords'));
+  checkIs('and the admin payload does not carry certification records', asAdmin.certificationRecords === undefined);
 
   // --- and a member's payload does not carry any of them ---
   await signOut(auth);

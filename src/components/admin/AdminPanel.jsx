@@ -22,6 +22,7 @@ import AdminAnnouncementsTab from './AdminAnnouncementsTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
+import { fetchAdminDocumentVerificationCount } from '../../services/api';
 import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
 import AdminMenuPage from './AdminMenuPage';
 
@@ -185,6 +186,11 @@ export default function AdminPanel({
   // Offers awaiting a decision. Shares the predicate with the approvals table so
   // the badge can never disagree with the rows below it.
   const pendingApprovalsCount = pendingOffersOnly(offers).length;
+  const [documentVerificationBadge, setDocumentVerificationBadge] = useState({ userId: '', count: 0 });
+  const documentVerificationCount =
+    documentVerificationBadge.userId === currentUserId ? documentVerificationBadge.count : 0;
+  const canViewDocumentVerificationCount =
+    isAdmin || permissionGranted(currentRole, 'is_admin') || permissionGranted(currentRole, 'can_verify_documents');
 
   // The tabs this role may use, which drives BOTH the nav entries and the panel
   // that can render. One list means a tab can never be selected without being
@@ -244,6 +250,19 @@ export default function AdminPanel({
     }
   }, [pendingApprovalsCount, allowedTabs, activeSubTab, onSelectTab]);
 
+  useEffect(() => {
+    if (activeSubTab !== null || !canViewDocumentVerificationCount) return undefined;
+    let cancelled = false;
+    fetchAdminDocumentVerificationCount()
+      .then((count) => {
+        if (!cancelled) setDocumentVerificationBadge({ userId: currentUserId, count });
+      })
+      .catch((error) => console.error('[admin] could not read pending document verification count', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSubTab, canViewDocumentVerificationCount, currentUserId]);
+
   const closeMenus = () => setOpenCategory(null);
 
   // Close the dropdowns when the user clicks outside the bar or presses Escape.
@@ -299,6 +318,7 @@ export default function AdminPanel({
         categories={visibleCategories}
         onSelectTab={selectItem}
         pendingCount={pendingApprovalsCount}
+        documentVerificationCount={canViewDocumentVerificationCount ? documentVerificationCount : 0}
       />
     );
   }
@@ -415,6 +435,7 @@ export default function AdminPanel({
           users={nameRows}
           setup={certificationSetup}
           records={certificationRecords}
+          departmentName={departmentName}
           onDataChanged={onAdminDataChanged}
           onBadgesChanged={onBadgesChanged}
         />

@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { renderInViewport } from '../../utils/viewportLayer';
+import { viewportPopoverPosition } from '../../utils/viewportPopover';
 import {
   AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, CalendarDays,
     Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2, UserPlus, UserMinus, X, CheckCircle2, XCircle, Printer, Eye
@@ -291,6 +292,7 @@ export default function AdminScheduleManagementTab({
   // phone-sized screen a 300px panel anchored to a pill covers the day it is about, and there is no wide margin to
   // hang it in. One piece of state either way, so the two views cannot disagree about what is open.
   const [popover, setPopover] = useState(null);
+  const popoverAnchorRef = useRef(null);
   // Whether the month picker is up. Only ever opened from a day view (see the toolbar).
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragKey, setDragKey] = useState(null);
@@ -302,6 +304,8 @@ export default function AdminScheduleManagementTab({
   const [quickAddUserId, setQuickAddUserId] = useState(null);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const quickAddRef = useRef(null);
+  const quickAddMenuRef = useRef(null);
+  const [quickAddPosition, setQuickAddPosition] = useState(null);
   const tmpCounter = useRef(0);
   // The dragged row's key, readable during a drag. The state is right for rendering, but a dragover can arrive
   // before React has re-rendered with it - and `dataTransfer.getData` is not readable during a drag, only on drop -
@@ -1275,21 +1279,17 @@ export default function AdminScheduleManagementTab({
 
   // Positions the popover next to the clicked element, flipping above/beside it
   // when there isn't room below.
-  const popoverPosition = (rect) => {
-    const margin = 8;
-    let left = rect.left;
-    if (left + POPOVER_WIDTH > window.innerWidth - margin) {
-      left = Math.max(margin, window.innerWidth - POPOVER_WIDTH - margin);
-    }
-    let top = rect.bottom + 6;
-    if (top + POPOVER_MAX_HEIGHT > window.innerHeight - margin) {
-      const above = rect.top - POPOVER_MAX_HEIGHT - 6;
-      top = above >= margin ? above : Math.max(margin, window.innerHeight - POPOVER_MAX_HEIGHT - margin);
-    }
-    return { top, left, width: POPOVER_WIDTH, maxHeight: POPOVER_MAX_HEIGHT };
-  };
+  const popoverPosition = (rect, width = POPOVER_WIDTH, maxHeight = POPOVER_MAX_HEIGHT) =>
+    viewportPopoverPosition({
+      anchor: rect,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      width,
+      maxHeight,
+    });
 
   const closePopover = () => {
+    popoverAnchorRef.current = null;
     setPopover(null);
     setSelectedKey(null);
   };
@@ -1302,6 +1302,7 @@ export default function AdminScheduleManagementTab({
       return;
     }
     setSelectedKey(entry._key);
+    popoverAnchorRef.current = event.currentTarget;
     setPopover({
       kind: 'entry',
       key: entry._key,
@@ -1315,6 +1316,7 @@ export default function AdminScheduleManagementTab({
   const openSlotPopover = (event, slot) => {
     event.stopPropagation();
     setSelectedKey(null);
+    popoverAnchorRef.current = event.currentTarget;
     const pending = pendingOffersForSlot(slot);
     if (pending.length) {
       setPopover({
@@ -1431,7 +1433,12 @@ export default function AdminScheduleManagementTab({
   useEffect(() => {
     if (!quickAddOpen) return undefined;
     const onDown = (e) => {
-      if (quickAddRef.current && !quickAddRef.current.contains(e.target)) setQuickAddOpen(false);
+      if (
+        !quickAddRef.current?.contains(e.target) &&
+        !quickAddMenuRef.current?.contains(e.target)
+      ) {
+        setQuickAddOpen(false);
+      }
     };
     const onKey = (e) => {
       if (e.key === 'Escape') setQuickAddOpen(false);
@@ -1441,6 +1448,29 @@ export default function AdminScheduleManagementTab({
     return () => {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
+    };
+  }, [quickAddOpen]);
+
+  useEffect(() => {
+    if (!quickAddOpen) return undefined;
+    const reposition = () => {
+      const anchor = quickAddRef.current;
+      if (!anchor?.isConnected) {
+        setQuickAddOpen(false);
+        return;
+      }
+      const next = popoverPosition(anchor.getBoundingClientRect(), 256, 320);
+      setQuickAddPosition((current) =>
+        current && current.top === next.top && current.left === next.left && current.width === next.width && current.maxHeight === next.maxHeight
+          ? current
+          : next
+      );
+    };
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
   }, [quickAddOpen]);
 
@@ -1486,8 +1516,28 @@ export default function AdminScheduleManagementTab({
     const onKey = (e) => {
       if (e.key === 'Escape') closePopover();
     };
+    const reposition = () => {
+      const anchor = popoverAnchorRef.current;
+      if (!anchor?.isConnected) {
+        closePopover();
+        return;
+      }
+      setPopover((current) => {
+        if (!current) return null;
+        const next = popoverPosition(anchor.getBoundingClientRect(), current.width, current.maxHeight);
+        return current.top === next.top && current.left === next.left && current.width === next.width && current.maxHeight === next.maxHeight
+          ? current
+          : { ...current, ...next };
+      });
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
   }, [popover, dayView]);
 
   // Diff the working copy against the loaded server data. Only the delta is
@@ -1774,7 +1824,14 @@ export default function AdminScheduleManagementTab({
             <div className="relative" ref={quickAddRef}>
               <button
                 type="button"
-                onClick={() => setQuickAddOpen((o) => !o)}
+                onClick={(event) => {
+                  if (quickAddOpen) {
+                    setQuickAddOpen(false);
+                    return;
+                  }
+                  setQuickAddPosition(popoverPosition(event.currentTarget.getBoundingClientRect(), 256, 320));
+                  setQuickAddOpen(true);
+                }}
                 className={`flex items-center gap-2 font-medium text-sm px-3 py-2.5 rounded-xl transition border ${
                   quickAddUser
                     ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-500 shadow-lg shadow-emerald-600/20'
@@ -1812,8 +1869,17 @@ export default function AdminScheduleManagementTab({
                 <ChevronDown className={`w-4 h-4 transition-transform ${quickAddOpen ? 'rotate-180' : ''}`} />
               </button>
 
-              {quickAddOpen && (
-                <div className="absolute right-0 z-50 mt-1 w-64 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl origin-top-right animate-popoverIn">
+              {quickAddOpen && quickAddPosition && renderInViewport(
+                <div
+                  ref={quickAddMenuRef}
+                  className="fixed z-50 overflow-y-auto overscroll-contain bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl origin-top-right animate-popoverIn"
+                  style={{
+                    top: quickAddPosition.top,
+                    left: quickAddPosition.left,
+                    width: quickAddPosition.width,
+                    maxHeight: quickAddPosition.maxHeight,
+                  }}
+                >
                   <p className="px-3 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
                     Pick a member, then click any empty slot on the calendar to assign them.
                   </p>
@@ -2293,8 +2359,8 @@ export default function AdminScheduleManagementTab({
               <>
                 <div className="fixed inset-0 z-40" onClick={closePopover} />
                 <div
-                  className="fixed z-50 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-xl shadow-2xl overflow-hidden origin-top animate-popoverIn"
-                  style={{ top: popover.top, left: popover.left, width: popover.width }}
+                  className="fixed z-50 max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-xl shadow-2xl origin-top animate-popoverIn"
+                  style={{ top: popover.top, left: popover.left, width: popover.width, maxHeight: popover.maxHeight }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-start gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700">
@@ -2360,7 +2426,7 @@ export default function AdminScheduleManagementTab({
 
           const memberPickerBody = (
             <>
-              <div className={`overflow-y-auto ${dayView ? 'max-h-[55dvh]' : ''}`} style={dayView ? undefined : { maxHeight: popover.maxHeight }}>
+              <div>
                 {options.map(({ u, note }) => {
                   const selected = isEntry && String(u.id) === String(currentUserId);
                   return (
@@ -2436,8 +2502,8 @@ export default function AdminScheduleManagementTab({
             <>
               <div className="fixed inset-0 z-40" onClick={closePopover} />
               <div
-                className="fixed z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden origin-top animate-popoverIn"
-                style={{ top: popover.top, left: popover.left, width: popover.width }}
+                className="fixed z-50 max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl origin-top animate-popoverIn"
+                style={{ top: popover.top, left: popover.left, width: popover.width, maxHeight: popover.maxHeight }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-start gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700">

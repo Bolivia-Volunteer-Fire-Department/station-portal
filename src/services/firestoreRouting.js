@@ -299,14 +299,12 @@ export const ROUTED_FEATURES = {
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
   // is why the rules had to grow an officer branch before any of this could work.
   //
-  // NOTHING IS LEFT ON THE SHEET. The three actions that used to be named here - ADMIN_GET_USERS,
-  // ADMIN_GET_CERTIFICATIONS, ADMIN_GET_SCHEDULE_TEMPLATES - had no caller anywhere in the app, so they have been
-  // deleted from api.js rather than left as a promise: the routing table's job is to say what is routed, and a
-  // `switchReads` entry that names a function nobody calls is a note, not a route. See the README's data-model section.
+  // Certification records are the exception to direct section reads: the callable checks the certification permission,
+  // resolves active member IDs server-side, and queries only those records unless the user opts into inactive members.
   adminReads: {
     requires: ['adminPayload'],
     writes: [],
-    reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS', 'ADMIN_GET_SYSTEM_LOG', 'ADMIN_GET_SCHEDULE_OFFERS'],
+    reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS', 'ADMIN_GET_SYSTEM_LOG', 'ADMIN_GET_SCHEDULE_OFFERS', 'ADMIN_GET_CERTIFICATIONS', 'ADMIN_GET_DOCUMENT_VERIFICATION_COUNT'],
     switchReads: [],
   },
 
@@ -482,6 +480,14 @@ const READ_DISPATCH = {
   ADMIN_GET_BOOTSTRAP: async (uid) => {
     const { fetchAdminPayload } = await import('./firestorePayload.js');
     return ok(await fetchAdminPayload({ userId: uid }));
+  },
+  ADMIN_GET_CERTIFICATIONS: async (uid, body) => {
+    void uid;
+    return ok(await callable('readAdminCertificationRecords', { includeInactive: body?.includeInactive === true }));
+  },
+  ADMIN_GET_DOCUMENT_VERIFICATION_COUNT: async (uid) => {
+    void uid;
+    return ok(await callable('readDocumentVerificationCount', {}));
   },
 };
 

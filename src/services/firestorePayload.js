@@ -415,17 +415,6 @@ const ADMIN_SECTIONS = {
     };
   },
 
-  // The administration table draws `state` and `days_until_end` beside every record, and filters and sorts on
-  // them - so this section decorates exactly as the member's read does. The setup rows are the join; the badge
-  // index writer refreshes separately after a save (see firestoreWrites).
-  certificationRecords: async (db) => {
-    const [records, setup] = await Promise.all([
-      rowsOf(collection(db, 'certifications')),
-      rowsOf(collection(db, 'certification_setup')),
-    ]);
-    return { certificationRecords: decorateCertifications(records, setup, stationTodayKey()) };
-  },
-
   certificationSetup: async (db) => ({ certificationSetup: await rowsOf(collection(db, 'certification_setup')) }),
 
   trainings: async (db) => ({ trainings: await rowsOf(collection(db, 'trainings')) }),

@@ -7,7 +7,9 @@ import { rankFieldsFromForm } from '../utils/ranks';
 import { isReadAction } from '../utils/readCoalescing';
 import { routeRead, routeWrite, routingBlocker } from './firestoreRouting.js';
 // The payload's section readers, so the refresh after a save reads the same shapes a sign-in does.
-import { readAdminSections } from './firestorePayload.js';
+import { readAdminSection, readAdminSections } from './firestorePayload.js';
+import { decorateCertifications } from '../utils/certifications.js';
+import { stationTodayKey } from '../utils/scheduleDate.js';
 import {
   changeOwnPassword,
   createMember,
@@ -160,7 +162,33 @@ export const adminFetchBootstrap = async () => {
 // sections, through the same readers the payload itself uses - so a scoped refresh cannot answer with a different shape
 // than a sign-in. An unknown name throws rather than quietly refreshing nothing, because a screen that failed to update
 // looks exactly like a scoped refresh that did not run.
-export const fetchAdminSections = (names) => readAdminSections(names);
+export const fetchAdminCertificationRecords = async ({ includeInactive = false } = {}) => {
+  const response = await routeRead('ADMIN_GET_CERTIFICATIONS', { includeInactive });
+  if (!response?.success) throw await notAnswered('ADMIN_GET_CERTIFICATIONS');
+  const { certificationSetup = [] } = await readAdminSection('certificationSetup');
+  const activeIds = new Set(response.activeUserIds || []);
+  return decorateCertifications(response.records || [], certificationSetup, stationTodayKey()).map((row) => ({
+    ...row,
+    member_status: activeIds.has(row.user_id) ? 'active' : 'inactive',
+  }));
+};
+
+export const fetchAdminDocumentVerificationCount = async () => {
+  const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  if (!response?.success) throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  return Math.max(0, Number(response.count) || 0);
+};
+
+export const fetchAdminSections = async (names) => {
+  const wanted = (Array.isArray(names) ? names : [names]).filter(Boolean);
+  const needsCertifications = wanted.includes('certificationRecords');
+  const otherSections = wanted.filter((name) => name !== 'certificationRecords');
+  const [sections, certificationRecords] = await Promise.all([
+    otherSections.length ? readAdminSections(otherSections) : {},
+    needsCertifications ? fetchAdminCertificationRecords() : null,
+  ]);
+  return needsCertifications ? { ...sections, certificationRecords } : sections;
+};
 
 export const loginUser = async (username, password) => {
   // FIREBASE, AND ONLY FIREBASE.

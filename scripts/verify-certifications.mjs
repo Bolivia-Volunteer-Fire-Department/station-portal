@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 // The badge rule, from the pure module the app's rebuild AND scripts/normalize-certification-badges.mjs both use - plus
 // that script's plan, so the decision that deletes badge documents is tested without a database.
 import { badgeForRecord, badgeIndexFor } from '../src/utils/certificationBadges.js';
+import { certificationRowsCsv, sortCertificationRows } from '../src/utils/certificationReport.js';
 import { badgeRebuildPlan, refuseOnInvisibleRecords } from './normalize-certification-badges.mjs';
 
 let failures = 0;
@@ -139,6 +140,33 @@ console.log('\n--- the decoration the screens draw ---');
   }).map((row) => row.id), ['rb', 'ra']);
 }
 
+console.log('\n--- the admin list order and export ---');
+{
+  const rows = [
+    { id: 'active-mira', user_id: 'u1', name: 'EMT', state: 'active' },
+    { id: 'expired-mira', user_id: 'u1', name: 'EMT', state: 'expired' },
+    { id: 'expired-amir', user_id: 'u2', name: 'EMT', state: 'expired' },
+    { id: 'expiring', user_id: 'u3', name: 'CPR', state: 'expiring' },
+    { id: 'upcoming', user_id: 'u3', name: 'CPR', state: 'upcoming' },
+    { id: 'active-emt', user_id: 'u2', name: 'EMT', state: 'active' },
+    { id: 'active-als', user_id: 'u2', name: 'ALS', state: 'active' },
+  ];
+  const nameById = { u1: 'Mira', u2: 'Amir', u3: 'Bea' };
+  const sorted = sortCertificationRows(rows, (row) => nameById[row.user_id]);
+  check(
+    'non-current states sort before current, then member and certification names',
+    sorted.map((row) => row.id),
+    ['expired-amir', 'expired-mira', 'expiring', 'upcoming', 'active-als', 'active-emt', 'active-mira']
+  );
+  check('sorting does not mutate the input rows', rows[0].id, 'active-mira');
+
+  const csv = certificationRowsCsv(
+    [{ member_status: 'inactive', name: 'EMT', state: 'expired', effective_date: '2025-01-01', notes: 'Needs, renew\n"soon"' }],
+    () => 'Doe, Jane'
+  );
+  checkIs('CSV exports names, member status and escaped notes', csv.includes('"Doe, Jane",Inactive,EMT,2025-01-01,,Expired,"Needs, renew\n""soon"""'));
+}
+
 console.log('\n--- a missing sheet is empty, not a crash ---');
 check('no types and no records reads as nothing', decorate({ setup: [], records: [] }), []);
 check('the index builder survives an empty setup', certificationTypeIndex([]), {});
@@ -163,6 +191,9 @@ const adminTab = readFileSync('src/components/admin/AdminCertificationsTab.jsx',
 const setupTab = readFileSync('src/components/admin/AdminCertificationSetupTab.jsx', 'utf8');
 const rankIcon = readFileSync('src/components/RankIcon.jsx', 'utf8');
 const iconPicker = readFileSync('src/components/IconPicker.jsx', 'utf8');
+const functionsSource = readFileSync('functions/index.js', 'utf8');
+const routingSource = readFileSync('src/services/firestoreRouting.js', 'utf8');
+const apiSource = readFileSync('src/services/api.js', 'utf8');
 
 checkIs(
   'there is no member permission gating your own certifications',
@@ -176,7 +207,6 @@ checkIs('Certification Setup includes the separate Show on Roster switch', /key:
 
 // The six actions, and who each one answers to - the reader and the writer functions in api.js, checked
 // against the routes they map to.
-const apiSource = readFileSync('src/services/api.js', 'utf8');
 checkIs('the switch is restored when editing and sent when saving', /show_on_roster: !!row\.show_on_roster/.test(setupTab) && /show_on_roster: certification\.show_on_roster === true/.test(apiSource));
 checkIs('the member read is unprivileged', /export const fetchCertifications = /.test(apiSource));
 ['adminSaveCertification', 'adminDeleteCertification'].forEach((fn) => {
@@ -190,6 +220,30 @@ checkIs('the member read is unprivileged', /export const fetchCertifications = /
 checkIs('the client disables that field for a type that cannot be renewed', /disabled=\{endDateOff\}/.test(adminTab) && /const endDateOff = !selectedType \|\| !selectedType\.is_renewable/.test(adminTab));
 
 checkIs('the member module reads its own rows', /fetchCertifications\(token\)/.test(memberModule));
+checkIs(
+  'the admin reader checks certification permission before querying',
+  /exports\.readAdminCertificationRecords = onCall[\s\S]*?requirePermission\(caller\.uid, 'can_manage_certifications'/.test(functionsSource)
+);
+checkIs(
+  'the default reader starts with active private accounts',
+  /request\.data\?\.includeInactive === true[\s\S]*?where\('status', '==', 'active'\)/.test(functionsSource)
+);
+checkIs(
+  'certification records are queried by member IDs in bounded batches',
+  /start \+= 30[\s\S]*?where\('user_id', 'in', batch\)/.test(functionsSource)
+);
+checkIs('the app routes certification queries through the callable', /ADMIN_GET_CERTIFICATIONS[\s\S]{0,120}readAdminCertificationRecords/.test(routingSource));
+checkIs('the admin section loader intercepts certification records', /needsCertifications[\s\S]{0,250}fetchAdminCertificationRecords/.test(apiSource));
+checkIs('the inactive filter requests the expanded result only when enabled', /fetchAdminCertificationRecords\(\{ includeInactive: true \}\)/.test(adminTab));
+checkIs(
+  'the default filter is active members only',
+  /\{ id: 'all', label: 'Active members' \}/.test(adminTab) &&
+    /const \[includeInactive, setIncludeInactive\] = useState\(false\)/.test(adminTab)
+);
+checkIs('all toolbar actions share a fixed height and width', /const TOOLBAR_BUTTON_CLASS =[\s\S]{0,120}h-9 min-w-32/.test(adminTab));
+checkIs('print and CSV controls are present', /Print the filtered certification records/.test(adminTab) && /Export the filtered certification records as CSV/.test(adminTab));
+checkIs('print and CSV use the same filtered rows as the table', /const printableRows = visible\.map/.test(adminTab) && /certificationRowsCsv\(visible/.test(adminTab) && /rows=\{printableRows\}/.test(adminTab));
+checkIs('the user status action supports the UI inactive state', /\['active', 'inactive', 'suspended'\]/.test(functionsSource) && /disabled: status !== 'active'/.test(functionsSource));
 
 // ---------------------------------------------------------------------------------------------------------
 // THE ICON SET, AND THE PICKER THAT CHOOSES FROM IT.

@@ -18,6 +18,7 @@ const {
 // searchable in the Firebase console. See the note on `audit` below.
 const { logger } = require('firebase-functions/logger');
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { countPendingDocumentVerifications } = require('./documentVerification');
 
 // What an event MEANS: recipients, preferences and copy. Pure and separate so it can be asserted without FCM.
 const {
@@ -270,6 +271,73 @@ exports.readRosterModule = onCall(async (request) => {
   });
 
   return { members, certificationTypes, memberCertificationIds };
+});
+
+exports.readAdminCertificationRecords = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_manage_certifications', 'view certification records');
+
+  const includeInactive = request.data?.includeInactive === true;
+  const memberSnapshot = includeInactive
+    ? await db.collection('users_private').get()
+    : await db.collection('users_private').where('status', '==', 'active').get();
+  const activeUserIds = memberSnapshot.docs
+    .filter((row) => String(row.get('status') || '').trim().toLowerCase() === 'active')
+    .map((row) => row.id);
+  const userIds = includeInactive
+    ? memberSnapshot.docs
+        .filter((row) => ['active', 'inactive'].includes(String(row.get('status') || '').trim().toLowerCase()))
+        .map((row) => row.id)
+    : activeUserIds;
+  const recordSnapshots = [];
+
+  for (let start = 0; start < userIds.length; start += 30) {
+    const batch = userIds.slice(start, start + 30);
+    const snapshot = await db.collection('certifications').where('user_id', 'in', batch).get();
+    recordSnapshots.push(...snapshot.docs);
+  }
+
+  return {
+    records: recordSnapshots.map((row) => ({ ...row.data(), id: row.id })),
+    activeUserIds,
+  };
+});
+
+exports.readDocumentVerificationCount = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_verify_documents', 'view pending document verifications');
+
+  const documentSnapshot = await db.collection('documents').get();
+  const documents = documentSnapshot.docs
+    .map((row) => ({ ...row.data(), id: row.id }))
+    .filter((document) => {
+      const type = String(document.doc_type || '').trim().toLowerCase();
+      return type === 'checklist' || (isGranted(document.is_sign_required) && isGranted(document.requires_verification));
+    });
+  if (!documents.length) return { count: 0 };
+
+  const items = [];
+  const signatures = [];
+  for (let start = 0; start < documents.length; start += 30) {
+    const documentIds = documents.slice(start, start + 30).map((document) => document.id);
+    const [itemSnapshot, signatureSnapshot] = await Promise.all([
+      db.collection('document_checklist_items').where('document_id', 'in', documentIds).get(),
+      db.collection('document_signatures').where('document_id', 'in', documentIds).get(),
+    ]);
+    items.push(...itemSnapshot.docs.map((row) => ({ ...row.data(), id: row.id })));
+    signatures.push(...signatureSnapshot.docs.map((row) => ({ ...row.data(), id: row.id })));
+  }
+
+  return {
+    count: countPendingDocumentVerifications({
+      documents,
+      items,
+      signatures,
+      verifierUserId: caller.uid,
+    }),
+  };
 });
 
 // Adding a member. The username IS the synthetic address, so a taken username is a taken email address - which is
@@ -630,8 +698,7 @@ exports.declineOffer = onCall(async (request) => {
   return result;
 });
 
-// Suspending somebody has to disable the Auth account too, or the suspension is only as good as the app's own
-// checks - and whatever reads the database next would not check.
+// Inactive and suspended accounts must be disabled in Auth too, or the status is only as good as the app's own checks.
 exports.setMemberStatus = onCall(async (request) => {
   const caller = request.auth;
   if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
@@ -640,8 +707,8 @@ exports.setMemberStatus = onCall(async (request) => {
   const data = request.data || {};
   const userId = String(data.userId || '');
   const status = String(data.status || '');
-  if (!['active', 'suspended'].includes(status)) {
-    throw new HttpsError('invalid-argument', 'A status is either active or suspended.');
+  if (!['active', 'inactive', 'suspended'].includes(status)) {
+    throw new HttpsError('invalid-argument', 'A status is active, inactive or suspended.');
   }
 
   await auth.updateUser(userId, { disabled: status !== 'active' });

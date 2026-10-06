@@ -331,6 +331,9 @@ const sectionNames = [
     .slice(source.indexOf('const ADMIN_SECTIONS = {'))
     .matchAll(/\n  ([a-zA-Z]+): async \(/g),
 ].map((match) => match[1]);
+// Certifications is intentionally not a direct collection reader: fetchAdminSections obtains it through the
+// permission-checked callable so the server can scope the query to active member IDs.
+sectionNames.push('certificationRecords');
 checkIs('the section readers were found', sectionNames.length >= 8, `only found ${sectionNames.join(', ')}`);
 
 const appSource = readFileSync('src/App.jsx', 'utf8');

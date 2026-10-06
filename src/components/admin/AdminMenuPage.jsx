@@ -10,7 +10,14 @@ import React from 'react';
 //
 // The cards mirror ADMIN_NAV_CATEGORIES (the same source the dropdown bar renders), so a category
 // can never exist on the menu and be missing from the bar, or the other way round.
-export default function AdminMenuPage({ categories, onSelectTab, pendingCount = 0, pendingTabId = 'approvals' }) {
+export default function AdminMenuPage({
+  categories,
+  onSelectTab,
+  pendingCount = 0,
+  pendingTabId = 'approvals',
+  documentVerificationCount = 0,
+  verificationTabId = 'documents',
+}) {
   if (categories.length === 0) {
     return (
       <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -56,7 +63,12 @@ export default function AdminMenuPage({ categories, onSelectTab, pendingCount = 
 
               <div className="mt-4 flex flex-col gap-1 border-t border-slate-100 dark:border-slate-700/60 pt-3">
                 {items.map(({ id: itemId, label: itemLabel, icon: ItemIcon }) => {
-                  const badge = itemId === pendingTabId ? pendingCount : 0;
+                  const badge =
+                    itemId === pendingTabId
+                      ? pendingCount
+                      : itemId === verificationTabId
+                        ? documentVerificationCount
+                        : 0;
                   return (
                     <button
                       key={itemId}

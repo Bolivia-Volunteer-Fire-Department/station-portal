@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { connectFirestoreEmulator, doc, getDoc, getFirestore, getDocs, collection, setDoc } from 'firebase/firestore';
+import { connectFirestoreEmulator, deleteDoc, doc, getDoc, getFirestore, getDocs, collection, setDoc } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail, updateMemberAccount } from '../src/services/firebaseAuth.js';
 import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
@@ -119,6 +119,25 @@ const main = async () => {
   ]);
   check('with the account active', privateRow.data().status, 'active');
 
+  // The certification query starts from active private-account rows. An inactive member's record is fetched only when
+  // the Certifications tab explicitly asks to include inactive members.
+  await call('setMemberStatus', { userId: created.userId, status: 'inactive' });
+  await setDoc(doc(db, 'certifications', 'inactive-certification-probe'), {
+    user_id: created.userId,
+    certification_id: 'c1',
+    effective_date: '2025-01-01',
+    end_date: '2027-01-01',
+  });
+  const activeCertifications = await call('readAdminCertificationRecords');
+  checkIs('the default certification query excludes inactive members', !activeCertifications.records.some((row) => row.id === 'inactive-certification-probe'));
+  const allCertifications = await call('readAdminCertificationRecords', { includeInactive: true });
+  checkIs('the explicit inactive filter includes their records', allCertifications.records.some((row) => row.id === 'inactive-certification-probe'));
+  await call('setMemberStatus', { userId: created.userId, status: 'suspended' });
+  const activeAndInactiveCertifications = await call('readAdminCertificationRecords', { includeInactive: true });
+  checkIs('the inactive filter does not include suspended accounts', !activeAndInactiveCertifications.records.some((row) => row.id === 'inactive-certification-probe'));
+  await deleteDoc(doc(db, 'certifications', 'inactive-certification-probe'));
+  await call('setMemberStatus', { userId: created.userId, status: 'active' });
+
   // --- the member signs in, and reads the dashboard from Firestore ---
   await signOut(auth);
   console.log('\n--- the member signs in and reads the dashboard ---');
@@ -131,6 +150,7 @@ const main = async () => {
     () => call('completePasswordChange', { newPassword: 'unrequested-passw0rd' }),
     'functions/failed-precondition'
   );
+  await refused('a member without Verify signatures cannot read the badge count', () => call('readDocumentVerificationCount'));
   await refused('a member without View roster cannot read the roster module', () => call('readRosterModule'));
   await signOut(auth);
   await signIn('jane');
@@ -162,6 +182,21 @@ const main = async () => {
   await signOut(auth);
   await signIn('jane');
   console.log('\n--- an officer resets the password ---');
+  await setDoc(doc(db, 'documents', 'doc1'), { requires_verification: true }, { merge: true });
+  const pendingVerification = await call('readDocumentVerificationCount');
+  check('the verifier-only badge counts a pending whole-document signature', pendingVerification.count, 1);
+  await setDoc(doc(db, 'document_signatures', 'verification-badge-probe'), {
+    document_id: 'doc1',
+    user_id: 'u2',
+    signed_by_user_id: 'u1',
+    checklist_item_id: '',
+    signature_role: 'verifier',
+    signed_at: '2026-03-01 10:00:00',
+  });
+  const clearedVerification = await call('readDocumentVerificationCount');
+  check('verifying that signature clears the document from the badge count', clearedVerification.count, 0);
+  await deleteDoc(doc(db, 'document_signatures', 'verification-badge-probe'));
+  await setDoc(doc(db, 'documents', 'doc1'), { requires_verification: false }, { merge: true });
   await call('resetMemberPassword', { userId: created.userId, temporaryPassword: 'temporary-passw0rd' });
   await signOut(auth);
   checkIs(
