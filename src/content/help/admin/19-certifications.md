@@ -37,7 +37,7 @@ The **Status** column comes from the dates and the setup, never from a screen's 
 
 The filter above the table opens on **Everyone**, and **Expiring or expired** is the one to press when the question is "who is running out" — it counts them in the button.
 
-The **Notes** column is a tick: it says whether a record has notes at all, not what they are. A paragraph does not belong in a table row, and what you usually need from the list is "which of these have something written against them" — open the record to read them. An em dash means there is nothing there.
+The **Notes** column is a check: it says whether a record has notes at all, not what they are. A paragraph does not belong in a table row, and what you usually need from the list is "which of these have something written against them" — open the record to read them. An em dash means there is nothing there.
 
 ## The names beside the icons
 

@@ -32,8 +32,8 @@ A repeating event is described by a **start date**, an **amount** and a **freque
 Some worked examples:
 
 - Daily, every `2` → **every other day**, starting on the repeat start date.
-- Weekly, every `1`, ticking Monday and Thursday → **every Monday and every Thursday**.
-- Weekly, every `2`, ticking Monday and Thursday → **every other week**, on both of those days.
+- Weekly, every `1`, checking Monday and Thursday → **every Monday and every Thursday**.
+- Weekly, every `2`, checking Monday and Thursday → **every other week**, on both of those days.
 - Monthly, every `1`, day of the month `15` → the **15th of every month**.
 - Monthly with day `31` → **months without a 31st are skipped**, rather than moving the event to the 30th. February is skipped most years.
 
@@ -41,7 +41,7 @@ Some worked examples:
 > For a repeating event, **Starts** and **Ends** supply only the times. A repeating event covers one day (or one night) per occurrence; it cannot span several days the way a single all-day event can.
 
 > [!IMPORTANT]
-> The repeat start is the **anchor, not the first occurrence**. A Tuesday repeat anchored on a Thursday first appears on the **following Tuesday** — anchor Thu Sep 24, tick Tuesday, and it lands on Tue Sep 29. That is why the form shows **First appears:** once you pick a frequency, and why the list shows a **Next:** line. Trust those two lines over the repeat start date.
+> The repeat start is the **anchor, not the first occurrence**. A Tuesday repeat anchored on a Thursday first appears on the **following Tuesday** — anchor Thu Sep 24, check Tuesday, and it lands on Tue Sep 29. That is why the form shows **First appears:** once you pick a frequency, and why the list shows a **Next:** line. Trust those two lines over the repeat start date.
 
 > [!NOTE]
 > A repeating event stores an anchor date alongside the times it runs at. Only the times decide when it lands, so do not read the anchor as the day the event runs.

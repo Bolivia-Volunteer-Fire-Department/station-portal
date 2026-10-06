@@ -93,7 +93,7 @@ export default function AdminAvailabilityTab({
           <p className="ml-auto text-xs text-slate-500 dark:text-slate-400">
             {showingAll
               ? 'Who has marked themselves available for each window.'
-              : 'Tick the windows this member could work, then save.'}
+              : 'Check the windows this member could work, then save.'}
           </p>
         </div>
       </div>

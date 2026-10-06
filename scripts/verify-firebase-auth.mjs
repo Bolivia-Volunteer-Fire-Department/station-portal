@@ -413,7 +413,7 @@ const main = async () => {
   await signInAsMember('bo-renamed', DEMO_PASSWORD);
   const boState = await accountState();
   check('and the claim an officer sets turns the member\u2019s own gate on', boState.mustChangePassword, true);
-  // ...and off again, which is what un-ticking the box has to do: with the claim left behind, an officer clearing the
+  // ...and off again, which is what un-checking the box has to do: with the claim left behind, an officer clearing the
   // flag would watch the member be held at the modal every sign-in - the reported bug, mirrored.
   await signIn('jane');
   await updateMemberAccount({ userId: 'u2', isChangePasswordOnLogin: false });

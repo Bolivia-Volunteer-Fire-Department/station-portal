@@ -48,7 +48,7 @@ A shift is open either because a template slot has nobody on it, or because some
 
 ## Being told about new offers
 
-Tick **New shift requests** in *User Settings → Notifications* to be pushed a notification each time a member offers. It is the same permission as this tab, so anyone who can approve can opt into the notification — and if you approve shifts, tick that switch, because offers arrive whenever members happen to look at their schedule rather than at a convenient time.
+Check **New shift requests** in *User Settings → Notifications* to be pushed a notification each time a member offers. It is the same permission as this tab, so anyone who can approve can opt into the notification — and if you approve shifts, check that switch, because offers arrive whenever members happen to look at their schedule rather than at a convenient time.
 
 ## If a decision looks like it did not take
 

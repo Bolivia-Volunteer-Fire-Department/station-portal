@@ -254,7 +254,7 @@ export const eventValidation = (values = {}) => {
     }
 
     if (frequency === 'weekly' && !EVENT_WEEKDAYS.some((day) => eventFlag(values[day.key]))) {
-      return 'Tick at least one day of the week for a weekly event, or it would never appear.';
+      return 'Check at least one day of the week for a weekly event, or it would never appear.';
     }
 
     if (frequency === 'monthly') {

@@ -224,7 +224,7 @@ export default function TrainingForm({
               good - so it warns before the fact rather than after. */}
           {allowAdminFlags && (
             <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-              <strong>Entered into an external system</strong> is permanent: ticking it locks this training
+              <strong>Entered into an external system</strong> is permanent: checking it locks this training
               and its signatures for everyone, including administrators. Only the training sheet can undo it.
             </p>
           )}

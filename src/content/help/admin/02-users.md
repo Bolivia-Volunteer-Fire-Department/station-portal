@@ -37,12 +37,12 @@ Use it for anyone who is not on the roster — new recruits in training, someone
 
 ## Handing over a password the member has to replace
 
-Tick **Must change password at next login** when you set someone's password for them — a new member, or anyone who has forgotten theirs. They sign in with that password once and land straight on a *Choose a new password* popup; until they save a new one they cannot open any other part of the portal. They can sign out instead, but signing back in brings the same popup until a new password is saved.
+Check **Must change password at next login** when you set someone's password for them — a new member, or anyone who has forgotten theirs. They sign in with that password once and land straight on a *Choose a new password* popup; until they save a new one they cannot open any other part of the portal. They can sign out instead, but signing back in brings the same popup until a new password is saved.
 
 The flag clears itself the moment they set their own password, so nothing has to be unticked afterwards. Until they do, the member stands out on the Users list with a **Password change due** badge — worth checking there before you phone somebody about a problem signing in.
 
 > [!NOTE]
-> **The tick and the password belong together.** Unticking the box does not change anybody's password; it only says the current one may be kept. If you set a password, type it, and leave the box unticked, the member keeps that password for as long as they like.
+> **The check and the password belong together.** Unchecking the box does not change anybody's password; it only says the current one may be kept. If you set a password, type it, and leave the box unticked, the member keeps that password for as long as they like.
 
 ## Deactivating rather than deleting
 

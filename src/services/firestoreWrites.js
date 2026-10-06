@@ -411,7 +411,7 @@ export const signDocument = async ({ userId, documentId }) => {
   if (String(document.doc_type || '').trim().toLowerCase() === 'checklist') {
     // A checklist is signed ITEM BY ITEM, so signing the document would record an acknowledgment that means nothing
     // and clear the "to sign" badge while every item was still outstanding.
-    return { success: false, message: 'A checklist is signed item by item. Tick and save the items instead.' };
+    return { success: false, message: 'A checklist is signed item by item. Check and save the items instead.' };
   }
   if (document.is_sign_required !== true && String(document.is_sign_required || '').trim().toUpperCase() !== 'TRUE') {
     return { success: false, message: 'That document does not need a signature.' };

@@ -276,7 +276,7 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
                 ))}
               </div>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Tick every day this window runs on. Each ticked day is a day a member can claim it for.
+                Check every day this window runs on. Each ticked day is a day a member can claim it for.
               </p>
             </div>
 

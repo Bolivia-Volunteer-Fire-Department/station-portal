@@ -253,10 +253,12 @@ export default function AvailabilityCalendar({
         isCurrentMonth={isCurrentMonth}
       />
 
-      {/* Events switch. Shown only when there is something to show, so a station that uses no events never
-          sees a control for them. Not persisted: a temporary view choice. */}
-      {normalizedEvents.length > 0 && (
-        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 flex items-center">
+      {/* One strip holds both the temporary events switch and the batch save, so they read as the screen's controls
+          rather than as two stacked rows. It wraps as a whole, so a narrow screen stacks the two groups instead of
+          squeezing them onto one line. The switch is shown only when there is something to show, so a station that
+          uses no events never sees a control for them. Not persisted: a temporary view choice. */}
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 flex flex-wrap items-center gap-3">
+        {normalizedEvents.length > 0 && (
           <ViewToggle
             noun="events"
             description="Include non-shift entries such as trainings. Your availability is not affected."
@@ -264,8 +266,53 @@ export default function AvailabilityCalendar({
             enabled={showEvents}
             onChange={setShowEvents}
           />
+        )}
+
+        {/* Save row. The count is the number of slots whose intent differs from the server, so a tick that was
+            undone does not count as a change. The status sits with the buttons - matching the schedule board's
+            toolbar - and `ml-auto` holds the pair at the far end, where it wraps rather than overlapping. */}
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          {dirty && (
+            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 rounded-full px-2.5 py-1">
+              {changeCount} unsaved change{changeCount === 1 ? '' : 's'}
+            </span>
+          )}
+          {message && (
+            <span
+              className={`text-xs font-medium ${message.type === 'error'
+                  ? 'text-red-600 dark:text-red-400'
+                  : message.type === 'warn'
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-emerald-700 dark:text-emerald-400'
+                }`}
+            >
+              {message.text}
+            </span>
+          )}
+          {dirty && (
+            <button
+              type="button"
+              onClick={() => {
+                setOverrides(new Map());
+                setMessage(null);
+              }}
+              disabled={saving}
+              className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-40"
+            >
+              Discard
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save availability
+          </button>
         </div>
-      )}
+      </div>
 
       <div className="px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
@@ -331,18 +378,16 @@ export default function AvailabilityCalendar({
             return (
               <div
                 key={dateKey}
-                className={`min-h-[76px] rounded-lg flex flex-col items-stretch ${
-                  past
-                    ? 'bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/40'
-                    : dayItems.length
-                      ? 'bg-emerald-50/40 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700'
-                      : 'bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/40'
-                }`}
+                className={`min-h-[76px] rounded-lg flex flex-col items-stretch ${past
+                  ? 'bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/40'
+                  : dayItems.length
+                    ? 'bg-emerald-50/40 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700'
+                    : 'bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/40'
+                  }`}
               >
                 <span
-                  className={`text-[11px] leading-none px-1 pt-0.5 ${
-                    isToday ? 'text-emerald-600 font-bold' : 'text-slate-500 dark:text-slate-400'
-                  }`}
+                  className={`text-[11px] leading-none px-1 pt-0.5 ${isToday ? 'text-emerald-600 font-bold' : 'text-slate-500 dark:text-slate-400'
+                    }`}
                 >
                   {day.getDate()}
                 </span>
@@ -377,24 +422,20 @@ export default function AvailabilityCalendar({
                       type="button"
                       disabled={past || !monthLoaded}
                       onClick={() => toggleItem(item)}
-                      title={`${label || 'Availability'}${timing && label !== timing ? ` · ${timing}` : ''} — ${
-                        marked ? 'marked available' : 'not marked'
-                      }${
-                        !monthLoaded
+                      title={`${label || 'Availability'}${timing && label !== timing ? ` · ${timing}` : ''} — ${marked ? 'marked available' : 'not marked'
+                        }${!monthLoaded
                           ? ' (load this month first)'
                           : past
                             ? ' (this date has passed)'
                             : ` — click to ${marked ? 'remove' : 'mark'}`
-                      }`}
-                      className={`mt-0.5 w-full overflow-hidden text-left px-1.5 py-0.5 rounded-md text-[10px] leading-tight font-semibold transition ${
-                        marked
-                          ? 'bg-emerald-600 text-white'
-                          : 'border border-dashed bg-white/70 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400'
-                      } ${
-                        past || !monthLoaded
+                        }`}
+                      className={`mt-0.5 w-full overflow-hidden text-left px-1.5 py-0.5 rounded-md text-[10px] leading-tight font-semibold transition ${marked
+                        ? 'bg-emerald-600 text-white'
+                        : 'border border-dashed bg-white/70 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400'
+                        } ${past || !monthLoaded
                           ? 'opacity-40'
                           : 'cursor-pointer hover:ring-1 hover:ring-emerald-400/70'
-                      }`}
+                        }`}
                     >
                       <span className="flex items-center gap-1">
                         {marked ? <Check className="w-2.5 h-2.5 shrink-0" /> : null}
@@ -406,54 +447,6 @@ export default function AvailabilityCalendar({
               </div>
             );
           })}
-        </div>
-      </div>
-
-      {/* Save row. The count is the number of slots whose intent differs from the server,
-          so a tick that was undone does not count as a change. */}
-      <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-t border-slate-200 dark:border-slate-700">
-        {dirty && (
-          <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 rounded-full px-2.5 py-1">
-            {changeCount} unsaved change{changeCount === 1 ? '' : 's'}
-          </span>
-        )}
-        {message && (
-          <span
-            className={`text-xs font-medium ${
-              message.type === 'error'
-                ? 'text-red-600 dark:text-red-400'
-                : message.type === 'warn'
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-emerald-700 dark:text-emerald-400'
-            }`}
-          >
-            {message.text}
-          </span>
-        )}
-
-        <div className="ml-auto flex items-center gap-3">
-          {dirty && (
-            <button
-              type="button"
-              onClick={() => {
-                setOverrides(new Map());
-                setMessage(null);
-              }}
-              disabled={saving}
-              className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-40"
-            >
-              Discard
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save availability
-          </button>
         </div>
       </div>
     </div>

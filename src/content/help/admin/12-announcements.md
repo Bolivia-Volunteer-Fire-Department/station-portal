@@ -26,7 +26,7 @@ At least one place must be chosen, or the announcement would be saved and never 
 - **Sidebar** — below the name card, above the menu.
 
 > [!IMPORTANT]
-> **There is no longer a login-screen placement.** An announcement used to be postable to the login screen, where it could only ever be aimed at everyone: nobody is signed in yet, so a role, a rank or a person cannot be resolved. That made it the one thing the app had to read before anyone signed in, and anything that has to be read at that point belongs in the app's own code rather than in a form. If you were using it for something that genuinely matters — a hall closure, a burn ban — say so and it can be built into the login screen properly. An old announcement that still has the login screen ticked shows now on **neither** screen: open it, tick the dashboard or the sidebar, and save.
+> **There is no longer a login-screen placement.** An announcement used to be postable to the login screen, where it could only ever be aimed at everyone: nobody is signed in yet, so a role, a rank or a person cannot be resolved. That made it the one thing the app had to read before anyone signed in, and anything that has to be read at that point belongs in the app's own code rather than in a form. If you were using it for something that genuinely matters — a hall closure, a burn ban — say so and it can be built into the login screen properly. An old announcement that still has the login screen ticked shows now on **neither** screen: open it, check the dashboard or the sidebar, and save.
 
 > **An announcement arrives as soon as you save it.** The app keeps an eye out for new ones, so a member who is already signed in sees it within moments rather than at their next sign-in — which is what makes an announcement worth writing in a hurry.
 
@@ -48,7 +48,7 @@ If the combination matches nobody, the announcement is **refused** rather than s
 
 ## Push notifications
 
-Tick **Also send a push notification** and the announcement also goes to the registered devices of everyone it matches, as well as being visible in the app.
+Check **Also send a push notification** and the announcement also goes to the registered devices of everyone it matches, as well as being visible in the app.
 
 Members can turn announcement pushes off for themselves in *User Settings → Notifications*, and the station default sits beside the other notification switches in *System → Notifications*.
 
@@ -59,7 +59,7 @@ The list shows a **Push** badge on announcements sent that way. A member with no
 
 ## Dismissing
 
-Tick **Let members dismiss it** and a member can close it; otherwise it stays until it expires. Dismissal is remembered **on that device only**, so a member who dismisses on a phone still sees it on the station terminal. It has no effect on the push notification.
+Check **Let members dismiss it** and a member can close it; otherwise it stays until it expires. Dismissal is remembered **on that device only**, so a member who dismisses on a phone still sees it on the station terminal. It has no effect on the push notification.
 
 Use dismissal for something a member has read and acted on. Leave it off for anything they may need to refer back to — a drill time, a policy change — because a dismissable announcement is one tap from never being seen again on that device.
 

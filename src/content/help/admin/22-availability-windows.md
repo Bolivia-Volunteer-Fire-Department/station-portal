@@ -10,7 +10,7 @@ A window is a recurring weekly block of time with a name:
 
 - **Nickname** — what a member sees on the pill in their own calendar. Keep it short: it has to fit in a day cell.
 - **Starts** and **Ends** — the hours the window covers.
-- **Days** — tick every day the window runs on.
+- **Days** — check every day the window runs on.
 - **Effective date** and **End date** — when this *configuration* is in force.
 
 > [!IMPORTANT]

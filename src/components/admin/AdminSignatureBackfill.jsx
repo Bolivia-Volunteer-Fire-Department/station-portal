@@ -274,7 +274,7 @@ const handleSave = async ({ advance = false } = {}) => {
     // A plain document is one row, so the member IS the selection. A checklist with nothing ticked has nothing to write,
     // and saying so is better than a save that reports zero.
     if (isChecklist && pending.length === 0) {
-      toast.error('Tick the items that member has done, then save.');
+      toast.error('Check the items that member has done, then save.');
       return;
     }
     if (!isChecklist && !wholeDocumentPending) {
@@ -349,7 +349,7 @@ const handleSave = async ({ advance = false } = {}) => {
       <div className="space-y-4 p-4">
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Record what a member&rsquo;s paper file says without them re-doing any of it: pick the checklist, pick the
-          person, tick what they have done, and save once. <strong>Save &amp; next</strong> moves down the pile with the
+          person, check what they have done, and save once. <strong>Save &amp; next</strong> moves down the pile with the
           same date and note. Every row is stamped with your name and marked as recorded from paper, so nobody can
           mistake it later for something the member ticked themselves.
         </p>

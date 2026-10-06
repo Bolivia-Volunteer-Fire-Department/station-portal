@@ -42,4 +42,4 @@ The same box also takes a **number or roman numeral** (`1`, `2`, `III`): nothing
 The set includes the rank and badge icons the rest of the app uses, plus emergency-services ones: a medical cross, hearts (plain, pulse and plus), an ambulance, a medical briefcase, a heart with a scan line, an activity monitor, a germ, a hazmat mark, a radiation trefoil, a stethoscope, a syringe, a fire extinguisher, a van, a toolbox, a life-buoy, a sailboat, a ship, an ID card and more.
 
 > [!WARNING]
-> Ticking **Display icon next to user name** puts that icon beside the member's name *wherever it appears* in the app — and only while the certification is current. Two small glyphs beside a name do not explain themselves: hover them to see which certifications they stand for.
+> Checking **Display icon next to user name** puts that icon beside the member's name *wherever it appears* in the app — and only while the certification is current. Two small glyphs beside a name do not explain themselves: hover them to see which certifications they stand for.

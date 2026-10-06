@@ -51,7 +51,7 @@ The totals are **Trainings shown**, **Training hours**, and how many of those yo
 
 ## The Ext. column
 
-The **Ext.** column shows a tick when a training has been recorded in an external system, such as a state or county reporting system. That is administrative bookkeeping you do not set or change — and once it is ticked, the training and its signatures are **completely locked**, for everyone including administrators. You will still see it in the list and can still read it; nothing about it will change again.
+The **Ext.** column shows a check when a training has been recorded in an external system, such as a state or county reporting system. That is administrative bookkeeping you do not set or change — and once it is ticked, the training and its signatures are **completely locked**, for everyone including administrators. You will still see it in the list and can still read it; nothing about it will change again.
 
 ## If something looks wrong
 

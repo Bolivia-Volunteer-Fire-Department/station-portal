@@ -590,7 +590,7 @@ check(
   ['b3']
 );
 check('an item the officer did not tick is not written', backfillableItemIds(backfillItems, [anaOwn, anaFilled], ana, ['b3']), ['b3']);
-check('ticking nothing writes nothing', backfillableItemIds(backfillItems, [], ana, []), []);
+check('checking nothing writes nothing', backfillableItemIds(backfillItems, [], ana, []), []);
 check(
   'an item another checklist owns is refused',
   backfillableItemIds(backfillItems, [], ana, ['b1', 'somebody-elses-item']),
@@ -1886,10 +1886,10 @@ checkIs(
   'the panel has no data of its own'
 );
 
-// Ticking an item: the row itself is the control. The report was "clicking checklist items does nothing", and a
+// Checking an item: the row itself is the control. The report was "clicking checklist items does nothing", and a
 // 16px button that only its own square responds to is exactly that - so the button is the whole row and the box is
 // drawn inside it.
-console.log('\n--- ticking an item ---');
+console.log('\n--- checking an item ---');
 checkIs(
   'the whole row is the control, not just the box',
   /const tickable = Boolean\(onToggle\) && canTick && !state\.signed;/.test(moduleSource) &&

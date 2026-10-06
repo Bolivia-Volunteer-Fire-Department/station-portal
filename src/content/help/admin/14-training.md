@@ -50,7 +50,7 @@ Press **Add training** at the right of the report toolbar, and the editor opens 
 
 ## The external-system marker locks a training for good
 
-Ticking **Entered into an external system** is permanent. It should be set once the training has been filed in whatever external system records it, and doing so:
+Checking **Entered into an external system** is permanent. It should be set once the training has been filed in whatever external system records it, and doing so:
 
 - **locks the training itself** — no field can be changed again, by anyone,
 - **locks its signatures** — none can be removed, added or altered,

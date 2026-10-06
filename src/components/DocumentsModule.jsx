@@ -171,7 +171,7 @@ function ChecklistItemRow({ item, state, ticked, canTick, onToggle, footer, veri
           type="button"
           onClick={() => onToggle(item, state)}
           aria-pressed={Boolean(marked)}
-          aria-label={ticked ? `Untick ${item.label}` : `Tick ${item.label}`}
+          aria-label={ticked ? `Untick ${item.label}` : `Check ${item.label}`}
           className="group flex w-full items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/20"
         >
           {body}
@@ -786,7 +786,7 @@ export default function DocumentsModule({
     // here would be a claim about their work - which is the one thing this mode must never produce.
     if (viewingSomeoneElse) {
       toast.warning(`These are ${viewAsMember.label}'s items.`, {
-        description: 'Only they can tick them, from their own sign-in. A verifier confirms what they have signed.',
+        description: 'Only they can check them, from their own sign-in. A verifier confirms what they have signed.',
       });
       return;
     }

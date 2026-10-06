@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound, ListChecks, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
 import RankIcon from '../RankIcon';
 import { adminSaveUser, adminDeleteUser } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
@@ -9,6 +9,20 @@ import { recordHeading } from '../../utils/displayLabel';
 
 // The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
 const USER_FORM_ID = 'user-editor-form';
+const BULK_FORM_ID = 'user-bulk-editor-form';
+
+// Every bulk field starts as '' = leave alone; only a field the officer changes is written, for every selected member.
+const BULK_EMPTY = { password: '', is_change_password_on_login: '', status: '', role_id: '', rank_id: '', exclude_from_scheduling: '' };
+const BULK_FIELD_CLASS = 'w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
+const BULK_LABEL_CLASS = 'block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5';
+const BULK_CHANGE_LABELS = {
+  password: 'password',
+  is_change_password_on_login: 'must change password at next login',
+  status: 'status',
+  role_id: 'role',
+  rank_id: 'rank',
+  exclude_from_scheduling: 'scheduling',
+};
 
 const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
 
@@ -26,6 +40,15 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
   const [sortField, setSortField] = useState('user_name');
   const [sortDirection, setSortDirection] = useState('asc');
   const [filterStatus, setFilterStatus] = useState('');
+  // Bulk edit: the table gains a selection column, and the chosen members are edited together.
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState(BULK_EMPTY);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState('');
+  const [bulkError, setBulkError] = useState('');
+  const [pendingBulk, setPendingBulk] = useState(false);
 
   const sortedUsers = useMemo(() => {
     let filtered = [...users];
@@ -44,6 +67,103 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
   }, [users, sortField, sortDirection, filterStatus]);
 
   const isEditing = !!formData.id;
+
+  const exitBulkMode = () => {
+    setBulkMode(false);
+    setSelectedIds(new Set());
+    setBulkOpen(false);
+    setBulkForm(BULK_EMPTY);
+    setBulkError('');
+  };
+
+  const toggleSelected = (id) =>
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const allVisibleSelected = sortedUsers.length > 0 && sortedUsers.every((user) => selectedIds.has(user.id));
+  const toggleAllVisible = () =>
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      sortedUsers.forEach((user) => (allVisibleSelected ? next.delete(user.id) : next.add(user.id)));
+      return next;
+    });
+
+  // Only the fields that were changed. An untouched field is absent, which is what leaves it alone on every member.
+  const bulkChanges = () => {
+    const changes = {};
+    Object.entries(bulkForm).forEach(([key, value]) => {
+      if (value !== '') changes[key] = value;
+    });
+    return changes;
+  };
+  const bulkChangeNames = Object.keys(bulkChanges()).map((key) => BULK_CHANGE_LABELS[key]);
+
+  const handleBulkSubmit = (e) => {
+    e.preventDefault();
+    setBulkError('');
+    if (!bulkChangeNames.length) {
+      setBulkError('Change at least one field - anything left alone is not saved.');
+      return;
+    }
+    if (bulkForm.password && bulkForm.password.length < 8) {
+      setBulkError('A password must be at least 8 characters.');
+      return;
+    }
+    setPendingBulk(true);
+  };
+
+  const runBulkSave = async () => {
+    setPendingBulk(false);
+    const changes = bulkChanges();
+    const targets = users.filter((user) => selectedIds.has(user.id));
+    const failures = [];
+    setBulkSaving(true);
+    setBulkError('');
+    for (let index = 0; index < targets.length; index += 1) {
+      const user = targets[index];
+      setBulkProgress(`Updating ${index + 1} of ${targets.length}…`);
+      try {
+        // The member's own values for everything not changed: the save replaces the roster document, so it has to be
+        // handed what is already there. user_name is left out, which is what keeps the username from being touched.
+        const result = await adminSaveUser({
+          id: user.id,
+          name: user.name,
+          rank_id: changes.rank_id ?? String(user.rank_id ?? ''),
+          role_id: changes.role_id ?? String(user.role_id ?? ''),
+          exclude_from_scheduling: changes.exclude_from_scheduling ?? String(user.exclude_from_scheduling ?? ''),
+          runner_sound_profile: user.runner_sound_profile || '',
+          status: changes.status,
+          password: changes.password,
+          is_change_password_on_login: changes.is_change_password_on_login,
+        }, token);
+        if (!result?.success) throw new Error(result?.message || 'Failed to save.');
+        const { password: _password, ...visible } = changes;
+        void _password;
+        onRowSaved?.('users', { ...user, ...visible, id: user.id });
+      } catch (err) {
+        failures.push({ user, message: err.message || 'Failed to save.' });
+      }
+    }
+    setBulkSaving(false);
+    setBulkProgress('');
+    setRefreshing(true);
+    Promise.resolve(onDataChanged?.('users')).finally(() => setRefreshing(false));
+
+    if (!failures.length) {
+      exitBulkMode();
+      return;
+    }
+    // The ones that did not save stay selected, so fixing the cause and pressing Save again retries only them.
+    setSelectedIds(new Set(failures.map((failure) => failure.user.id)));
+    setBulkError(
+      `${targets.length - failures.length} saved, ${failures.length} failed: ` +
+        failures.map((failure) => `${failure.user.name} (${failure.message})`).join('; ')
+    );
+  };
 
   const resetForm = () => {
     setFormData(EMPTY_FORM);
@@ -245,7 +365,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
               </select>
             </div>
 
-            <div>
+            {/* <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Scheduling</label>
               <label className="flex items-center gap-2 h-[46px] px-4 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer select-none">
                 <input
@@ -259,7 +379,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
                 Excluded members can't be assigned to shifts in Schedule Management.
               </p>
-            </div>
+            </div> */}
 
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Role</label>
@@ -329,6 +449,86 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         </ViewportModal>
       )}
 
+      {/* Bulk edit: one form for every selected member, and only what is changed here is written. */}
+      {bulkOpen && (
+        <ViewportModal
+          size="small"
+          title={`Edit ${selectedIds.size} member${selectedIds.size === 1 ? '' : 's'}`}
+          subtitle="Only the fields you change are saved. Everything else stays as it is for each person."
+          icon={<ListChecks className="h-4 w-4" />}
+          formId={BULK_FORM_ID}
+          saveLabel="Apply changes"
+          saving={bulkSaving}
+          busy={bulkSaving}
+          busyLabel={bulkProgress || 'Saving…'}
+          onClose={() => setBulkOpen(false)}
+        >
+          <form id={BULK_FORM_ID} onSubmit={handleBulkSubmit} className="space-y-4 p-4 sm:p-6">
+            {bulkError && (
+              <div role="alert" className="p-3 rounded-xl flex items-start gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{bulkError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className={BULK_LABEL_CLASS}>New password <span className="text-slate-500">(blank = unchanged)</span></label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={bulkForm.password}
+                  onChange={(e) => setBulkForm({ ...bulkForm, password: e.target.value })}
+                  className={BULK_FIELD_CLASS}
+                />
+              </div>
+              <div>
+                <label className={BULK_LABEL_CLASS}>Must change password at next login</label>
+                <select value={bulkForm.is_change_password_on_login} onChange={(e) => setBulkForm({ ...bulkForm, is_change_password_on_login: e.target.value })} className={BULK_FIELD_CLASS}>
+                  <option value="">No change</option>
+                  <option value="TRUE">Yes</option>
+                  <option value="FALSE">No</option>
+                </select>
+              </div>
+              <div>
+                <label className={BULK_LABEL_CLASS}>Status</label>
+                <select value={bulkForm.status} onChange={(e) => setBulkForm({ ...bulkForm, status: e.target.value })} className={BULK_FIELD_CLASS}>
+                  <option value="">No change</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <div>
+                <label className={BULK_LABEL_CLASS}>Scheduling</label>
+                <select value={bulkForm.exclude_from_scheduling} onChange={(e) => setBulkForm({ ...bulkForm, exclude_from_scheduling: e.target.value })} className={BULK_FIELD_CLASS}>
+                  <option value="">No change</option>
+                  <option value="TRUE">Exclude from scheduling</option>
+                  <option value="FALSE">Include in scheduling</option>
+                </select>
+              </div>
+              <div>
+                <label className={BULK_LABEL_CLASS}>Role</label>
+                <select value={bulkForm.role_id} onChange={(e) => setBulkForm({ ...bulkForm, role_id: e.target.value })} className={BULK_FIELD_CLASS}>
+                  <option value="">No change</option>
+                  {roles.map((r) => <option key={r.id} value={r.id}>{r.description}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={BULK_LABEL_CLASS}>Rank</label>
+                <select value={bulkForm.rank_id} onChange={(e) => setBulkForm({ ...bulkForm, rank_id: e.target.value })} className={BULK_FIELD_CLASS}>
+                  <option value="">No change</option>
+                  {ranks.map((r) => <option key={r.id} value={r.id}>{r.description}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {bulkChangeNames.length ? `Will change: ${bulkChangeNames.join(', ')}.` : 'Nothing is changed yet.'}
+            </p>
+          </form>
+        </ViewportModal>
+      )}
+
       {/* The roster, with New member where somebody looks for another one. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
@@ -348,6 +548,35 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
           <button
             type="button"
+            onClick={() => (bulkMode ? exitBulkMode() : setBulkMode(true))}
+            className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition ${
+              bulkMode
+                ? 'border-red-500 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40'
+                : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700'
+            }`}
+          >
+            <ListChecks className="h-4 w-4" />
+            {bulkMode ? 'Cancel bulk edit' : 'Bulk edit'}
+          </button>
+
+          {bulkMode && (
+            <button
+              type="button"
+              disabled={selectedIds.size === 0}
+              onClick={() => {
+                setBulkError('');
+                setBulkForm(BULK_EMPTY);
+                setBulkOpen(true);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit selected ({selectedIds.size})
+            </button>
+          )}
+
+          <button
+            type="button"
             onClick={() => {
               resetForm();
               setEditorOpen(true);
@@ -361,6 +590,11 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
             <tr>
+              {bulkMode && (
+                <th className="w-10 px-4 py-3">
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Select all shown" className="h-4 w-4 accent-red-600" />
+                </th>
+              )}
               {[
                 { field: 'user_name', label: 'Username' },
                 { field: 'name', label: 'Name' },
@@ -397,7 +631,16 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
             {sortedUsers.map((user) => (
-              <tr key={user.id} className="text-slate-700 dark:text-slate-200">
+              <tr
+                key={user.id}
+                onClick={bulkMode ? () => toggleSelected(user.id) : undefined}
+                className={`text-slate-700 dark:text-slate-200 ${bulkMode ? `cursor-pointer ${selectedIds.has(user.id) ? 'bg-red-50/60 dark:bg-red-950/20' : ''}` : ''}`}
+              >
+                {bulkMode && (
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selectedIds.has(user.id)} onChange={() => {}} aria-label={`Select ${user.name}`} className="h-4 w-4 accent-red-600" />
+                  </td>
+                )}
                 <td className="px-4 py-3 font-mono text-slate-500 dark:text-slate-400">{user.user_name}</td>
                 <td className="px-4 py-3 font-medium"><MemberName user={user} /></td>
                 <td className="px-4 py-3">
@@ -413,7 +656,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 </td>
                 <td className="px-4 py-3">{roleLabel(user.role_id)}</td>
                 <td className="px-4 py-3">{rankLabel(user.rank_id)}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-2">
                     <button onClick={() => handleEdit(user)} className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700">
                       <Pencil className="w-4 h-4" />
@@ -431,12 +674,22 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             ))}
             {sortedUsers.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">No members found.</td>
+                <td colSpan={bulkMode ? 7 : 6} className="px-4 py-6 text-center text-slate-500">No members found.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {pendingBulk && (
+        <ConfirmModal
+          title={`Change ${selectedIds.size} member${selectedIds.size === 1 ? '' : 's'}?`}
+          message={`This will change ${bulkChangeNames.join(', ')} for every selected member. It cannot be undone in one step.`}
+          confirmLabel="Apply"
+          onConfirm={runBulkSave}
+          onCancel={() => setPendingBulk(false)}
+        />
+      )}
 
       {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
           (ConfirmModal plays the tone), and it names what is about to be deleted. */}

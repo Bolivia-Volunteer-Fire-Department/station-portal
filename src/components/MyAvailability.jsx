@@ -45,7 +45,7 @@ export default function MyAvailability({
         <div className="flex items-start gap-2">
           <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Tick every window you could work, then press <span className="font-medium">Save</span>.
+            Check every window you could work, then press <span className="font-medium">Save</span>.
             This is what administrators check when they build the schedule — marking yourself
             available does not commit you to the shift, and you can change it at any time.
           </p>

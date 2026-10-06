@@ -159,7 +159,7 @@ New documents are **visible to members straight away**, so untick *Visible to me
 
 ## Signatures
 
-Tick **Members must sign this** and the document appears in each member's list as **to sign**, until they sign it. Signed documents show **Signed** with the date beside the title.
+Check **Members must sign this** and the document appears in each member's list as **to sign**, until they sign it. Signed documents show **Signed** with the date beside the title.
 
 Selecting a document shows a **Signatures** panel below its fields, in the same editor:
 
@@ -183,7 +183,7 @@ On a checklist, **each item appears once per member**. A signature and a verific
 
 A signature records that a member said they read something. **A verifier must confirm the signature** adds the other half, exactly as a checklist does for its items: somebody with the **Verify signatures** permission reads what was signed and confirms it, in their own name.
 
-It is **optional, per document**, and it only appears where it can mean something. Tick it on a policy acknowledgement that has to be countersigned; leave it off on a notice that members simply acknowledge. The rules, which are worth knowing because they are why the box behaves as it does:
+It is **optional, per document**, and it only appears where it can mean something. Check it on a policy acknowledgement that has to be countersigned; leave it off on a notice that members simply acknowledge. The rules, which are worth knowing because they are why the box behaves as it does:
 
 | The box | Why |
 |---|---|
@@ -242,7 +242,7 @@ The list shows each item's order as `#0`, `#1` and so on, so you can see what a 
 > Editing an item **keeps its signatures attached to it** — a signature points at the item's identity, not at its wording, so fixing a typo does not throw away somebody's work. Changing any item does mark signatures taken earlier as **before the last edit**, exactly as editing a document's text does.
 > An item that has been signed **cannot be removed**. The app refuses and tells you how many signatures it has. That is deliberate: a signature must never outlive the thing it was about.
 
-Members tick the items they have done and save them in one go, so a forty-line checklist is still one press. Signing the document itself is separate from signing its items — a checklist that needs both shows both.
+Members check the items they have done and save them in one go, so a forty-line checklist is still one press. Signing the document itself is separate from signing its items — a checklist that needs both shows both.
 
 ## Back-filling from paper records
 
@@ -252,7 +252,7 @@ The shape of the screen follows the shape of the paper. An officer sits down wit
 
 1. Pick the **checklist or document**.
 2. Pick the **member** — their first name from the file in your hand.
-3. Tick the items **their** file says they have done. **All** on a section, or **Select everything left** for the lot, means the whole thing is one click rather than forty.
+3. Check the items **their** file says they have done. **All** on a section, or **Select everything left** for the lot, means the whole thing is one click rather than forty.
 4. Set the **date this was done** — the date off the paper, not today. Then press **Save & next member**.
 
 **Save & next member** keeps the checklist, the date and the note and moves to the next name down the list, so a stack of thirty files is one pass with nothing to find again. **Save** on its own is for a file you are part-way through.
@@ -271,7 +271,7 @@ But it never pretends the member tapped it. Every row entered this way is stampe
 **Also confirm these as verified** is ticked by default. It records a second row saying you confirmed what you entered — which is what the supervisor's initials on the paper already meant. Untick it if you would rather these went through the ordinary **Verify signatures** queue for a second pair of eyes, and they will appear there like anything else.
 
 > [!NOTE]
-> **No item is required.** A document that members must sign (a policy acknowledgement, say) is back-filled with a single tick per member rather than a list of items — there is only one acknowledgment to record. And you cannot back-fill your own record: enter your own items from your own checklist.
+> **No item is required.** A document that members must sign (a policy acknowledgement, say) is back-filled with a single check per member rather than a list of items — there is only one acknowledgment to record. And you cannot back-fill your own record: enter your own items from your own checklist.
 
 > [!NOTE]
 > **The member list is everybody except you.** If it is empty, the panel says so rather than leaving you with a blank box: either the crew list could not be read (reload the tab), or you are the only member on it — and a back-fill is somebody else recording what they found, so your own name is never offered.

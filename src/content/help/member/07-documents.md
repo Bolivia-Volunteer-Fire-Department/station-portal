@@ -51,20 +51,20 @@ If a document is **edited after you signed it**, it will tell you so. That is no
 
 ## Checklists
 
-A **checklist** is a document signed line by line: *check the tire pressure*, *check the lights*, and so on. They are grouped under headings, and each line has its own tick box.
+A **checklist** is a document signed line by line: *check the tire pressure*, *check the lights*, and so on. They are grouped under headings, and each line has its own check box.
 
-Tick the lines you have done — several at once is fine — and press **Save signatures** when you are done. Each line is recorded against your name and the date, with one date for the whole batch, because saving them is one act.
+Check the lines you have done — several at once is fine — and press **Save signatures** when you are done. Each line is recorded against your name and the date, with one date for the whole batch, because saving them is one act.
 
-**Tick anywhere on the line**, not just in the small square: the whole row is the target, which matters most on a phone. Ticking is a selection you can change your mind about — nothing is recorded until you press **Save signatures**, so ticking the wrong line and unticking it again costs nothing. Ticking is always available on a checklist: it is what the type is for.
+**Check anywhere on the line**, not just in the small square: the whole row is the target, which matters most on a phone. Checking is a selection you can change your mind about — nothing is recorded until you press **Save signatures**, so checking the wrong line and unchecking it again costs nothing. Checking is always available on a checklist: it is what the type is for.
 
 **A checklist is never signed as a whole.** The *lines* are the acknowledgment — there is no **Sign this document** button on a checklist, however it is set up, because "I did these specific things" is a stronger statement than "I read this" and a second signature would only muddle which one applied.
 
 | What you see | What it means |
 |---|---|
-| A filled tick | You have signed that line. It cannot be unticked from here |
+| A filled check | You have signed that line. It cannot be unticked from here |
 | **Awaiting verification** | You have signed it; somebody still has to confirm it |
 | **Verified by …** | Somebody has confirmed it, with their name and the date they did it. On a phone the word **Verified** is a button: tap it and the name and date appear under the line, so the wording of the item keeps the whole row to itself |
-| A line in blue-gray, unticked | Not signed yet. Tick it and save |
+| A line in blue-gray, unticked | Not signed yet. Check it and save |
 
 If a line has been confirmed by more than one officer it says *Verified by 2 people* rather than naming one, because two confirmations is a fact about the line and neither officer is more right than the other.
 
@@ -85,4 +85,4 @@ It is a reader, not a way to act as somebody else:
 - Nothing can be ticked or signed while you are looking at another member's — those are theirs to do from their own sign-in, and the panel says so.
 - The card says **Viewing Jane Doe's records — read only** at the top of the document, in amber, so the mode is never a guess. Choose **Myself** to go back.
 
-If a line is **edited after you signed it**, the line says so. It means your signature covers the earlier wording — read it again, and tick it once more if you are happy with the change.
+If a line is **edited after you signed it**, the line says so. It means your signature covers the earlier wording — read it again, and check it once more if you are happy with the change.
