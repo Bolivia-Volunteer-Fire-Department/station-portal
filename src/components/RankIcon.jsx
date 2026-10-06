@@ -10,8 +10,20 @@ import {
   HandHelping, BadgePlus, ClipboardCheck, FileCheck, IdCard, BookMarked,
   Ribbon, Hash, Microscope, Beaker, TestTube, RefreshCw, Clock,
   HeartPlus, BriefcaseMedical, ScanHeart, SquareActivity, Germ, Van, Toolbox,
-  Radiation, Sailboat, Ship,
+  Radiation, Sailboat, Ship, Megaphone, createLucideIcon,
 } from 'lucide-react';
+
+// Lucide has no bugle, so this is drawn with the same factory (24px grid, 2px round stroke): a pair of fire bugles, each a
+// flared mouthpiece, a band and a tapering body ending in a wide bell. It then behaves like any other icon in the map.
+const Bugle = createLucideIcon(
+  'bugle',
+  [6.5, 17.5].flatMap((cx) => [
+    ['path', { d: `M${cx - 2} 2h4l-1.2 4h-1.6z`, key: `mouth-${cx}` }],
+    ['path', { d: `M${cx - 1.5} 7h3`, key: `band-${cx}` }],
+    ['path', { d: `M${cx - 1.2} 8l-.8 9.5h4l-.8-9.5`, key: `body-${cx}` }],
+    ['path', { d: `M${cx - 2} 17.5L${cx - 4} 22h8l-2-4.5`, key: `bell-${cx}` }],
+  ])
+);
 
 // Curated, tree-shakable subset of lucide icons commonly used for ranks/badges
 export const RANK_ICON_MAP = {
@@ -96,6 +108,8 @@ export const RANK_ICON_MAP = {
   radiation: Radiation,
   sailboat: Sailboat,
   ship: Ship,
+  bugle: Bugle,
+  megaphone: Megaphone,
 };
 
 // An icon NAME that is a number or a roman numeral is drawn as that text rather than as a glyph.

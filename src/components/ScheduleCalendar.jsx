@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Loader2, Printer, Users } from 'lucide-react';
+import { CalendarDays, CalendarPlus, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Loader2, Printer, Users } from 'lucide-react';
 import { toDateKey, parseSheetDateKey, displayDate } from '../utils/scheduleDate';
 import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
@@ -30,6 +30,7 @@ import ScheduleItemModal from './ScheduleItemModal';
 import MonthPickerModal from './MonthPickerModal';
 import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
 import PrintableSchedule from './PrintableSchedule';
+import { buildScheduleIcs, downloadTextFile } from '../utils/scheduleIcs';
 import MemberName from './MemberName';
 import RankDot from './RankDot';
 import { unnamedLabel } from '../utils/displayLabel';
@@ -638,6 +639,24 @@ export default function ScheduleCalendar({
           >
             <Printer className="w-4 h-4" />
             Print
+          </button>
+
+          {/* Always the member's own shifts, whether or not Show everyone is on: the file is for THEIR calendar app. */}
+          <button
+            type="button"
+            onClick={() =>
+              downloadTextFile(
+                buildScheduleIcs(myAssignments, { calendarName: `${currentUser?.name || 'My'} schedule${departmentName ? ` - ${departmentName}` : ''}` }),
+                'my-schedule.ics',
+                'text/calendar;charset=utf-8'
+              )
+            }
+            disabled={myAssignments.length === 0}
+            title={myAssignments.length ? 'Download your shifts as a calendar file (.ics) for Google Calendar, Apple Calendar or Outlook' : 'You have no shifts loaded to export'}
+            className="ml-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <CalendarPlus className="w-4 h-4" />
+            <span className="hidden sm:inline">Export</span>
           </button>
         </div>
 

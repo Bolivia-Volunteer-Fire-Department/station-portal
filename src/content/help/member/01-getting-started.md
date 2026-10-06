@@ -45,6 +45,8 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added the Reports Configuration tab to the Administration module.
 * Added Accessibility settings to the My Settings module.
 * Fixed an issue where Schedule Management would say someone isn't available during a time when they said they were available.
+* Added an export button to the Schedule module, allowing members to export their schedule to something like Google Calendar.
+* Added a bugles icon to the icon library for Captains.
 
 ### Version 1.2x
 * Added the Roster module
