@@ -3,9 +3,11 @@ import { AlertCircle, FileText, Loader2, Pencil, Plus, Trash2 } from 'lucide-rea
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import { deleteFormTemplate, fetchAdminFormTemplates, saveFormTemplate } from '../../services/api';
-import { FIELD_KINDS, SOURCE_KINDS } from '../../utils/formDefinition';
+import { FIELD_KINDS, SOURCE_KINDS, groupLinkages, sourceLinkages } from '../../utils/formDefinition';
 import { FORM_BLANKS, loadBundledBlank } from '../../utils/formCatalog';
 import { listFormFields } from '../../utils/formFill';
+import { TRAINING_FLAGS } from '../../utils/training';
+import { categoryPairsFrom } from '../../utils/trainingSummary';
 
 // Printable form definitions: which blank PDF a form fills, which data feeds it, and where each value goes.
 //
@@ -173,6 +175,10 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
   };
 
   const mappedCount = Object.keys(form.fields || {}).length;
+  // The paths the chosen source offers, straight from its own registry entry. The categories go in because this source
+  // widens to one `totals.<flag>` per category the station uses, so a category added later appears here on its own.
+  const linkages = sourceLinkages(form.source, { categories: categoryPairsFrom(TRAINING_FLAGS) });
+  const linkageGroups = groupLinkages(linkages);
 
   return (
     <div className="space-y-4">
@@ -305,6 +311,48 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
 
             <fieldset className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700">
               <legend className="text-xs font-semibold text-slate-700 dark:text-slate-200">Where each value goes</legend>
+              {linkages.length > 0 && (
+                // THE PATHS ON OFFER, taken from the source's own registry entry rather than a list kept here - so what
+                // this names and what the source can actually fill stay the same thing, because the list lives beside
+                // the `contextFor` that produces it. scripts/verify-forms asserts every path here resolves.
+                //
+                // It sits above the mapper rather than behind a disclosure: this app has no `<details>` anywhere, and a
+                // React `<details open>` re-asserts itself on every render, which would snap it open under the officer
+                // as they typed. A compact panel is duller and behaves.
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    Values that come from this source{' '}
+                    <span className="font-normal text-slate-500 dark:text-slate-400">({linkages.length})</span>
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {linkageGroups.map((group) => (
+                      <div key={group.group}>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          {group.group}
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {group.values.map((linkage) => (
+                            <li key={linkage.from} className="text-xs leading-snug">
+                              <code className="font-mono text-[11px] text-red-700 dark:text-red-300">{linkage.from}</code>
+                              <span className="text-slate-500 dark:text-slate-400"> — {linkage.label}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    Anything left unmapped prints blank; the start and end of the period are only filled in when the form is
+                    run with a period. For text that is not from the data, type <code className="font-mono">literal:</code>{' '}
+                    then the text - for example <code className="font-mono">literal:Station copy</code>.
+                  </p>
+                </div>
+              )}
+              <datalist id="form-linkage-options">
+                {linkages.map((linkage) => (
+                  <option key={linkage.from} value={linkage.from}>{linkage.label}</option>
+                ))}
+              </datalist>
               {form.template.id === '' ? (
                 <p className="text-xs text-slate-500 dark:text-slate-400">Choose a blank and its fields appear here to be filled.</p>
               ) : readingFields ? (
@@ -331,6 +379,7 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
                         <input
                           value={entry.from || ''}
                           onChange={(event) => mapField(field.name, { from: event.target.value })}
+                          list="form-linkage-options"
                           placeholder="e.g. totals.is_hazmat"
                           aria-label={`Value for ${field.name}`}
                           className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"

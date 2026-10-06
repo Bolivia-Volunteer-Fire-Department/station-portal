@@ -63,10 +63,58 @@ export const SOURCE_KINDS = {
         count: summary.count,
       };
     },
+    // WHAT A FIELD MAP MAY READ, named for the config screen so an officer mapping a PDF is OFFERED the paths rather than
+    // having to guess at them. It sits beside `contextFor` deliberately: these are the keys that function returns, and
+    // scripts/verify-forms asserts every one of them resolves against a real context - so the list cannot drift away from
+    // what the source actually provides, which is the failure this feature would otherwise invite.
+    linkages({ categories = [] } = {}) {
+      const pairs = Array.isArray(categories) ? categories : [];
+      return [
+        { group: 'The member', from: 'member.name', label: 'Full name' },
+        { group: 'The member', from: 'member.rank_id', label: 'Rank id' },
+        { group: 'The member', from: 'member.id', label: 'Member id' },
+        { group: 'The station', from: 'station.name', label: 'Station name (this is the department)' },
+        { group: 'The station', from: 'station.department_name', label: 'The same name, for a blank that asks for a department' },
+        { group: 'The period', from: 'range.from', label: 'Start of the period' },
+        { group: 'The period', from: 'range.to', label: 'End of the period' },
+        { group: 'The period', from: 'today', label: 'Today’s date' },
+        { group: 'The totals', from: 'total', label: 'Every hour, counted once' },
+        { group: 'The totals', from: 'count', label: 'How many trainings are counted' },
+        // One per category the station actually uses, so a category added later appears here without a code change.
+        ...pairs.map(([flag, label]) => ({
+          group: 'By category',
+          from: `totals.${flag}`,
+          label: `${label} hours`,
+        })),
+        { group: 'By category', from: 'totals.none', label: 'Hours that fall into no category' },
+      ];
+    },
   },
 };
 
 export const sourceFor = (key) => SOURCE_KINDS[String(key || '').trim()] || null;
+
+// The values a source offers a field map, for the config screen to list. The options are the same ones `contextFor` is
+// given, because a source can offer different paths depending on them - this one widens `totals.*` to the categories the
+// station actually uses. Returns `[]` for an unknown source rather than throwing: the screen calls it as the officer is
+// still typing the key.
+export const sourceLinkages = (key, options) => {
+  const source = sourceFor(key);
+  return source && typeof source.linkages === 'function' ? source.linkages(options || {}) : [];
+};
+
+// The linkages grouped for display, in the order the source declared them - so the screen renders what it is handed and
+// decides nothing about what belongs together.
+export const groupLinkages = (linkages = []) => {
+  const groups = [];
+  (Array.isArray(linkages) ? linkages : []).forEach((linkage) => {
+    const group = String(linkage.group || 'Values');
+    const existing = groups.find((entry) => entry.group === group);
+    if (existing) existing.values.push(linkage);
+    else groups.push({ group, values: [linkage] });
+  });
+  return groups;
+};
 
 // The audience a definition is shared with, as the `audience_keys` the rules and readers compare against - the SAME shape
 // functions/reporting.reportAudienceKeys builds, character for character, because a form is read the way a report is.

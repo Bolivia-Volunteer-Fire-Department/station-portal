@@ -22,6 +22,8 @@
 
 Each value is a short path, not code, so a definition can be edited freely and can only ever name data that is already there:
 
+The screen **lists every path the chosen data source offers**, grouped into the member, the station, the period and the totals — including **one entry per training category your station uses**, so a category you add later appears there by itself. The box autocompletes from that same list, so you can pick a path rather than recall it. The list is not a suggestion: every path on it is checked to read real data, so it cannot offer you something the form would print blank.
+
 | Value | Reads |
 |---|---|
 | `member.name` | The member's name |

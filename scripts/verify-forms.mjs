@@ -19,7 +19,7 @@ import reporting from '../functions/reporting.js';
 import { summarizeTrainingByCategory, categoryPairsFrom } from '../src/utils/trainingSummary.js';
 import { readFrom, resolveFormValues } from '../src/utils/formValues.js';
 import { listFormFields, fillPdfForm } from '../src/utils/formFill.js';
-import { normalizeFormDefinition, formAudienceKeys, sourceFor } from '../src/utils/formDefinition.js';
+import { normalizeFormDefinition, formAudienceKeys, groupLinkages, sourceFor, sourceLinkages } from '../src/utils/formDefinition.js';
 import { generateForm, buildFormContext } from '../src/utils/generateForm.js';
 import { findFormBlank, loadBundledBlank } from '../src/utils/formCatalog.js';
 import { formPdfFileName } from '../src/utils/formExport.js';
@@ -335,6 +335,61 @@ check(
   'state-training-record-jane-smith-2026-10-06.pdf'
 );
 check('and a nameless one still saves as something', formPdfFileName({}), 'form.pdf');
+
+// --- the linkages the config screen offers ------------------------------------------------------
+//
+// A screen that lists the values a source offers is only worth having if the list is TRUE, and the way this goes wrong is
+// quiet: an officer points a field at a path the source never fills, the form still generates, and that box prints empty.
+// So every path the source offers is READ against a real context here - one built so every category has hours AND
+// something falls outside all of them, which is what makes each `totals.*` present. A path added to a source's `linkages`
+// with no matching key in its `contextFor` fails this, and that is exactly what it is for.
+console.log('\n--- the linkages the config screen offers ---');
+const richCategories = reporting.TRAINING_CATEGORY_FLAGS.map((flag) => [flag, flag]);
+const richTrainings = richCategories.map(([flag], index) => ({ id: `c${index}`, duration: '1', [flag]: 'TRUE' }));
+richTrainings.push({ id: 'uncategorised', duration: '1' });
+const richContext = buildFormContext({
+  source: 'training_summary',
+  data: {
+    // The subject is a ROSTER row, which is what the run screen hands over - so `member.id` and `member.rank_id` are
+    // real, and would fail this check if they were not.
+    subject: { id: 'm1', name: 'Jane Smith', rank_id: 'r1' },
+    station: { name: 'Bolivia Fire Department', department_name: 'Bolivia Fire Department' },
+    categories: richCategories,
+    trainings: richTrainings,
+    signatures: richTrainings.map((training) => ({ training_id: training.id })),
+    today: '2026-10-06',
+    range: { from: '2026-01-01', to: '2026-12-31' },
+  },
+});
+const offered = sourceLinkages('training_summary', { categories: richCategories });
+checkIs('the source offers a list of paths', offered.length > 0);
+check(
+  'and every path it offers reads something from a real context',
+  offered.filter((linkage) => readFrom(richContext, linkage.from) === undefined).map((linkage) => linkage.from),
+  []
+);
+checkIs(
+  'a category the station uses is offered as a total of its own',
+  offered.some((linkage) => linkage.from === `totals.${richCategories[0][0]}`)
+);
+checkIs('and the hours in no category are offered as well', offered.some((linkage) => linkage.from === 'totals.none'));
+checkIs(
+  'a path that is not a path - a category nobody uses - is not offered',
+  !offered.some((linkage) => linkage.from === 'totals.is_not_a_category')
+);
+check('an unknown source offers nothing rather than throwing', sourceLinkages('nope'), []);
+check('and neither does a source named by nothing at all', sourceLinkages(''), []);
+check(
+  'the paths are grouped for the screen without losing any of them',
+  groupLinkages(offered).reduce((sum, group) => sum + group.values.length, 0),
+  offered.length
+);
+check(
+  'and each group is named once, however the list is ordered',
+  groupLinkages(offered).map((group) => group.group).length,
+  new Set(groupLinkages(offered).map((group) => group.group)).size
+);
+checkIs('every path carries a label to show beside it', offered.every((linkage) => !!linkage.label));
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
