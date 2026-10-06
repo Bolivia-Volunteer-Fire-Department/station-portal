@@ -224,7 +224,9 @@ const MUTATIONS = [
     label: 'a tab that forgets the dialog',
     source: userTab,
     passes: rendersDialog,
-    breakIt: (s) => s.replace('<ConfirmModal', '<SomethingElse'),
+    // EVERY dialog, not just the first: a tab may render more than one (a bulk change beside a delete), and replacing
+    // only the first left the check passing on the one that remained - a mutation with no teeth.
+    breakIt: (s) => s.replace(/<ConfirmModal/g, '<SomethingElse'),
   },
   {
     label: 'a row dropped instead of held',

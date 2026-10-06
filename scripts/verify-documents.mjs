@@ -1903,7 +1903,7 @@ checkIs(
 );
 checkIs(
   'the label says which item it ticks',
-  /aria-label=\{ticked \? `Untick \$\{item\.label\}` : `Tick \$\{item\.label\}`\}/.test(moduleSource),
+  /aria-label=\{ticked \? `Untick \$\{item\.label\}` : `Check \$\{item\.label\}`\}/.test(moduleSource),
   'a screen reader would hear only "button"'
 );
 checkIs(

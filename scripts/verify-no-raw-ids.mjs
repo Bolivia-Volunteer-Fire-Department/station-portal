@@ -59,7 +59,12 @@ const hasIdHash = (line) => /#\$\{[^}]*\b(id|_id)\b[^}]*\}/.test(line);
 // An `ID` column, which is what two of the admin tables had.
 const hasIdColumn = (line) => /<th[^>]*>\s*[Ii][Dd]\s*<\/th>/.test(line);
 // An id as the text of an element: `<td>{assignment.id}</td>`.
-const rendersIdText = (line) => />\s*\{[^}]*\.(id|user_id|[a-z]+_id)\s*\}/.test(line);
+//
+// The expression between the braces is a SIMPLE PATH - letters, digits, dots, `?`, `[`, `]` and spaces. That is the whole
+// point: a loose `[^}]*` matched across a `.map()` callback whose option carried `key={r.id}`, so `>` + `{roles.map((r) =>
+// <option key={r.id}` was reported as an id on screen when the text rendered was the option's description. Excluding
+// parentheses and angle brackets keeps the shape this exists to catch and drops the callback.
+const rendersIdText = (line) => />\s*\{\s*[A-Za-z0-9_$.?\[\] ]*\.(id|user_id|[a-z]+_id)\s*\}/.test(line);
 // A name falling back to an id, which is how it came back everywhere else - a table cell, a filter option, a
 // printed sheet. Each one looked like a local decision.
 // The FALLBACK VALUE has to BE the id, not merely an id somewhere else on the same line. `name: nameById[row.id] || ''`

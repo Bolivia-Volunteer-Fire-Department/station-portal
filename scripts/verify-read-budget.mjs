@@ -22,6 +22,8 @@
 //
 // Run with: npm run verify:read-budget
 import { readFileSync, readdirSync } from 'node:fs';
+// The backfill's pure plan, exercised here beside the readers whose scans it replaces.
+import { signatureCountPlan } from './normalize-training-signature-counts.mjs';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -507,6 +509,86 @@ console.log('  runner leaderboard - the most repeated screen in the app - used t
 console.log('  now (25 rows plus one count), the watched collections bill per CHANGE rather than per visit - and `events` is not');
 console.log('  watched at sign-in at all: its read and its listener follow the calendar screens that draw it. `schedule` is read a');
 console.log('  month at a time, and the clock history only when its own screen opens.');
+
+// ---------------------------------------------------------------------------
+// THE READERS THAT USED TO SCAN A GROWING COLLECTION.
+// ---------------------------------------------------------------------------
+// Two append-only collections were read WHOLE to answer a question that needs one number or one member's rows, on a
+// screen's own open - so the cost grew with the station's AGE rather than its size:
+//
+//   * `certifications` - the Roster module counted each member's live certifications by reading every record ever
+//     recorded, including departed members'. It now reads only the ACTIVE members' rows, in batches of thirty (the `in`
+//     ceiling), which is what readAdminCertificationRecords already did.
+//   * `training_signatures` - the Training module counted signatures by scanning the whole collection. The count is now
+//     a COUNTER on each training (`signature_count`), kept by a trigger as signatures are added and removed, so the field
+//     rides on a row the screen already reads.
+//
+// This is the shape to DEFEND: a reader that answers a per-member question must NAME the members, and a reader that needs
+// a count must read a STORED one - never scan the children.
+const functionsSource = readFileSync('functions/index.js', 'utf8');
+
+// 1. The Roster module names the members it reads certifications for.
+const rosterBody = (functionsSource.match(/exports\.readRosterModule[\s\S]*?\n\}\);/) || [''])[0];
+checkIs('the Roster module was located', rosterBody.length > 0);
+checkIs(
+  'and reads certifications only for the active members, in batches',
+  /collection\('certifications'\)\.where\('user_id', 'in', batch\)/.test(rosterBody)
+);
+checkIs('never the whole collection', !/db\.collection\('certifications'\)\.get\(\)/.test(rosterBody));
+
+// 2. The training count is a stored counter, kept by a trigger on both directions.
+checkIs(
+  'the training count is kept as an incrementing counter, on add and on remove',
+  /onDocumentCreated\('training_signatures\/\{signatureId\}'[\s\S]{0,400}?adjustTrainingSignatureCount\(row\.training_id, 1\)/.test(functionsSource) &&
+    /onDocumentDeleted\('training_signatures\/\{signatureId\}'[\s\S]{0,400}?adjustTrainingSignatureCount\(row\.training_id, -1\)/.test(functionsSource)
+);
+checkIs(
+  'which is an atomic increment rather than a read-modify-write',
+  /update\(\{ signature_count: FieldValue\.increment\(delta\) \}\)/.test(functionsSource)
+);
+// The count callable no longer scans signatures: it is a compatibility shim that reads the stored field.
+checkIs(
+  'and the count callable no longer scans the signatures',
+  !/collection\('training_signatures'\)\.select\('training_id'\)/.test(functionsSource)
+);
+
+// 3. The app's own training reader reads the stored field and does NOT call the callable.
+checkIs(
+  'the app reads the stored count rather than calling the count callable',
+  !/readTrainingSignatureCounts/.test(readFileSync('src/services/firestoreReads.js', 'utf8'))
+);
+
+// 4. The client readers name the member rather than reading everyone's rows.
+checkIs(
+  'GET_CERTIFICATIONS stays scoped to the member',
+  /GET_CERTIFICATIONS: async \(uid\) => \{[\s\S]{0,200}?rowsFor\('certifications', 'user_id', uid\)/.test(readsSource)
+);
+checkIs(
+  'and the reader table reads no collection of certifications whole',
+  !/rowsOf\(collection\(firestore\(\), 'certifications'\)\)/.test(readsSource)
+);
+
+// 5. A push resolves its audience by QUERY, not by scanning the directory.
+checkIs(
+  'an offer push reads only the approver roles rather than the whole directory',
+  /const offerAudience = async[\s\S]{0,2000}?where\('role_id', 'in', batch\)/.test(functionsSource)
+);
+checkIs(
+  'and an announcement push gathers only the accounts its audience names',
+  /const accountsForAudience = async[\s\S]{0,2000}?where\('role_id', 'in', batch\)/.test(functionsSource)
+);
+
+// 6. The backfill seeds the counter, and its plan is correct.
+const backfill = signatureCountPlan(
+  [{ training_id: 't1' }, { training_id: 't1' }, { training_id: 't2' }, { training_id: 'gone' }],
+  [{ id: 't1', signature_count: 1 }, { id: 't2' }, { id: 't3', signature_count: 5 }]
+);
+check('the backfill counts signatures per training', backfill.counts, { t1: 2, t2: 1, gone: 1 });
+check('writes the count every training should hold, zeros included', backfill.plan, { t1: 2, t2: 1, t3: 0 });
+// A MISSING count is a change too: a training signed before the counter existed reads as 0 without it, so the backfill has
+// to seed it - and a stored count with no signatures behind it (t3) has to be brought back down.
+check('and names every training whose stored count disagrees, a missing one included', backfill.change, ['t1', 't2', 't3']);
+check('reporting a signature whose training is gone rather than dropping it', backfill.orphaned, ['gone']);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

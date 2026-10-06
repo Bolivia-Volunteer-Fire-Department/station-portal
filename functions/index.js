@@ -3,7 +3,7 @@
 // accept ESM; the emulator is what we develop and test against, so CJS it is.
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
-const { getFirestore } = require('firebase-admin/firestore');
+const { FieldValue, getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
 // The audit trail's filter, sorts and row mapping: pure, no dependencies, and tested without an emulator.
@@ -17,7 +17,7 @@ const {
 // The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
 // searchable in the Firebase console. See the note on `audit` below.
 const { logger } = require('firebase-functions/logger');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { countPendingDocumentVerifications } = require('./documentVerification');
 const {
   aggregateScheduleRows,
@@ -32,11 +32,13 @@ const {
 // What an event MEANS: recipients, preferences and copy. Pure and separate so it can be asserted without FCM.
 const {
   text,
+  isTruthy,
   notificationEnabled,
   offerEventFromStatus,
   offerRecipients,
   offerCopy,
   announcementRecipients,
+  audienceTargetsFrom,
 } = require('./pushAudience');
 
 // WHAT BELONGS IN A FUNCTION, and why:
@@ -230,11 +232,10 @@ exports.readRosterModule = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   await requirePermission(request.auth.uid, 'can_view_roster', 'view the roster');
 
-  const [usersSnapshot, privateSnapshot, setupSnapshot, certificationsSnapshot] = await Promise.all([
+  const [usersSnapshot, privateSnapshot, setupSnapshot] = await Promise.all([
     db.collection('users').get(),
     db.collection('users_private').get(),
     db.collection('certification_setup').get(),
-    db.collection('certifications').get(),
   ]);
   const privateById = new Map(privateSnapshot.docs.map((row) => [row.id, row.data()]));
   const members = usersSnapshot.docs
@@ -259,7 +260,21 @@ exports.readRosterModule = onCall(async (request) => {
   const memberCertificationIds = Object.fromEntries(members.map((member) => [member.id, []]));
   const today = stationTimestamp().slice(0, 10);
 
-  certificationsSnapshot.docs.forEach((row) => {
+  // ONLY THE ACTIVE MEMBERS' RECORDS, in batches of thirty - never the whole collection.
+  //
+  // `certifications` is append-only: one row per member per certificate period, accumulated for the station's whole life.
+  // Reading it whole made every open of the Roster module pay for every record ever recorded, including the ones belonging
+  // to members who have left. The active ids are already in hand, so the query names them - the same batched `in` read
+  // readAdminCertificationRecords makes, and the same thirty-per-request ceiling Firestore puts on `in`.
+  const certificationRows = [];
+  const memberIdList = [...memberIds];
+  for (let start = 0; start < memberIdList.length; start += 30) {
+    const batch = memberIdList.slice(start, start + 30);
+    const snapshot = await db.collection('certifications').where('user_id', 'in', batch).get();
+    certificationRows.push(...snapshot.docs);
+  }
+
+  certificationRows.forEach((row) => {
     const record = row.data();
     const memberId = String(record.user_id || '');
     const typeId = String(record.certification_id || '');
@@ -539,20 +554,76 @@ exports.runReport = onCall(async (request) => {
 
 // How many members have signed each training. A member can only read their own signatures, so the "has anybody signed
 // this?" that decides whether a training is still editable has to be counted here - counts only, never who.
+// How many members have signed each training.
+//
+// THE COUNT IS STORED ON THE TRAINING NOW - see onTrainingSignatureCreated / onTrainingSignatureDeleted below, which keep
+// it there - so this reads the trainings and answers from that field. It used to SELECT EVERY training_signature to count
+// them, on an append-only collection that grows for the station's whole life, every time a role that can edit trainings
+// opened the Training module.
+//
+// IT IS KEPT AS A COMPATIBILITY SHIM, deliberately: an app bundle already open in a browser still asks this callable, and
+// until that bundle is replaced it has to keep answering - dropping it here while the old bundle is live would make every
+// training read as unsigned (and so editable). The app's own reader (GET_TRAINING) reads the stored field directly and no
+// longer calls this at all; the callable can be deleted once no supported client calls it.
 exports.readTrainingSignatureCounts = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
-  // Only a role that can edit trainings acts on the count, so everybody else skips the read of every signature.
+  // Only a role that can edit trainings acts on the count, so everybody else skips the read.
   const actor = await reportActorFor(request.auth.uid);
   if (!['is_admin', 'can_edit_trainings', 'can_administer_trainings'].some((flag) => isGranted(actor.role[flag]))) {
     return { counts: {} };
   }
-  const snapshot = await db.collection('training_signatures').select('training_id').get();
+  const snapshot = await db.collection('trainings').get();
   const counts = {};
   snapshot.docs.forEach((row) => {
-    const id = String(row.get('training_id') || '');
-    if (id) counts[id] = (counts[id] || 0) + 1;
+    counts[row.id] = Number(row.get('signature_count') || 0);
   });
   return { counts };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// The training signature COUNT, materialized on the training it belongs to.
+// -------------------------------------------------------------------------------------------------------------
+//
+// WHY IT LIVES ON THE TRAINING. The Training module needs "how many members have signed this" for every row it draws -
+// the running "1 of 3 signed", and the rule that a training with ANY signature is no longer editable. A member may only
+// read their OWN signatures (the rules say so), so that count cannot be computed in the browser; computing it on the
+// server by scanning `training_signatures` read an append-only collection that grows forever, on every open of the module.
+// A COUNTER on the training document turns that whole-collection scan into a field on a row the screen already reads.
+//
+// A TRIGGER, not a call from the write path, for the same reason the push notifications are triggers: signing is a DIRECT
+// CLIENT WRITE (firestore.rules lets a member create their own row), and an administrator's removal is a direct delete -
+// there is no single callable either path must remember to go through. A trigger sees both, and a future write path cannot
+// forget it.
+//
+// IT NEVER THROWS. A trigger that throws is RETRIED by the platform, and a retried increment is a second increment - so
+// the only thing this does is a single atomic write, and a failure that is not "the training is gone" is logged rather
+// than raised.
+const adjustTrainingSignatureCount = async (trainingId, delta) => {
+  const id = String(trainingId || '').trim();
+  if (!id) return;
+  try {
+    // `increment` treats a missing field as zero, so the first signature starts the count and a training written before
+    // this counter existed is repaired rather than skipped. `update` rather than `set(merge)` ON PURPOSE: a signature whose
+    // training has since been deleted must NOT conjure a phantom training document back into the collection.
+    await db.doc(`trainings/${id}`).update({ signature_count: FieldValue.increment(delta) });
+  } catch (error) {
+    const detail = `${(error && error.code) || ''} ${(error && error.message) || ''}`;
+    // not-found is the expected case when a training was deleted out from under its signatures. Anything else is a real
+    // fault and is worth a line in the log.
+    if (!/not-?found|no document to update/i.test(detail)) {
+      console.error(`[training] could not adjust signature_count for ${id}: ${detail.trim()}`);
+    }
+  }
+};
+
+exports.onTrainingSignatureCreated = onDocumentCreated('training_signatures/{signatureId}', async (event) => {
+  const row = (event.data && event.data.data()) || {};
+  await adjustTrainingSignatureCount(row.training_id, 1);
+});
+
+exports.onTrainingSignatureDeleted = onDocumentDeleted('training_signatures/{signatureId}', async (event) => {
+  const row = (event.data && event.data.data()) || {};
+  await adjustTrainingSignatureCount(row.training_id, -1);
 });
 
 exports.readDocumentVerificationCount = onCall(async (request) => {
@@ -1366,11 +1437,30 @@ const deliverPush = async ({ action, actor, recipients, preference, title, body,
   return { recipients: unique.length, delivered: answer.successCount };
 };
 
-// The two reads every offer push needs: the roles (who can approve) and the users (who holds them).
+// The two reads every offer push needs: the roles (which of them can approve) and the members who hold those roles.
+//
+// IT USED TO READ THE WHOLE DIRECTORY. An offer's audience is the APPROVERS, so the members worth reading are the ones
+// whose role can approve - not all thirty-odd people on the roster. `roles` stays a whole read because it is a handful of
+// rows and every role has to be judged; `users` is narrowed to the approver roles, in batches of thirty (the ceiling on
+// `in`). The answer is identical - approverIds() still filters by the same role set - but it reads the people who matter
+// rather than everyone.
 const offerAudience = async () => {
-  const [roles, users] = await Promise.all([db.collection('roles').get(), db.collection('users').get()]);
-  const rows = (snapshot) => snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
-  return { roles: rows(roles), users: rows(users) };
+  const rolesSnapshot = await db.collection('roles').get();
+  const roles = rolesSnapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  const approverRoleIds = roles
+    // The SAME predicate approverIds() uses (isTruthy), so the roles named here are exactly the roles it will accept a
+    // member of - a narrower test would drop an approver the push then never reaches.
+    .filter((role) => isTruthy(role.is_admin) || isTruthy(role.can_approve_shifts))
+    .map((role) => String(role.id).trim())
+    .filter(Boolean);
+
+  const users = [];
+  for (let start = 0; start < approverRoleIds.length; start += 30) {
+    const batch = approverRoleIds.slice(start, start + 30);
+    const snapshot = await db.collection('users').where('role_id', 'in', batch).get();
+    snapshot.docs.forEach((entry) => users.push({ id: entry.id, ...entry.data() }));
+  }
+  return { roles, users };
 };
 
 // A new offer: the approvers hear about it, because they are the ones with something to do.
@@ -1431,17 +1521,56 @@ exports.onShiftOfferDecided = onDocumentUpdated('schedule_offers/{offerId}', asy
   }
 });
 
+// The candidate accounts an audience could reach, gathered by QUERY rather than by reading the whole directory.
+//
+// The audience keys are the SAME ones the rules check with hasAny (`*`, `role:<id>`, `rank:<id>`, `user:<id>`), so the
+// narrowing here cannot widen who is reachable: role and rank keys become an `in` query on that field, a user key is a
+// direct read, and only the `*` case still reads the collection - which is exactly the case that MEANS everyone. The final
+// filter is still announcementRecipients(), so a query that over-returns is narrowed back to the same answer.
+const accountsForAudience = async (audienceKeys) => {
+  const targets = audienceTargetsFrom(audienceKeys);
+  const toAccount = (entry) => ({
+    userId: entry.id,
+    roleId: (entry.data() || {}).role_id,
+    rankId: (entry.data() || {}).rank_id,
+  });
+  if (targets.everyone) {
+    const all = await db.collection('users').get();
+    return all.docs.map(toAccount);
+  }
+
+  const byId = new Map();
+  const gather = (docs) => docs.forEach((entry) => byId.set(entry.id, toAccount(entry)));
+  const chunks = (ids) => {
+    const out = [];
+    for (let start = 0; start < ids.length; start += 30) out.push(ids.slice(start, start + 30));
+    return out;
+  };
+
+  await Promise.all([
+    ...chunks(targets.roleIds).map((batch) =>
+      db.collection('users').where('role_id', 'in', batch).get().then((snapshot) => gather(snapshot.docs))
+    ),
+    ...chunks(targets.rankIds).map((batch) =>
+      db.collection('users').where('rank_id', 'in', batch).get().then((snapshot) => gather(snapshot.docs))
+    ),
+  ]);
+
+  if (targets.userIds.length) {
+    const named = await db.getAll(...targets.userIds.map((id) => db.doc(`users/${id}`)));
+    named.forEach((entry) => {
+      if (entry.exists) byId.set(entry.id, toAccount(entry));
+    });
+  }
+  return [...byId.values()];
+};
+
 // An announcement: whoever the audience names, by the same keys the rules check with hasAny - so an audience cannot mean
 // one thing to the rules and another thing to the push.
 exports.onAnnouncementCreated = onDocumentCreated('announcements/{announcementId}', async (event) => {
   try {
     const announcement = (event.data && event.data.data()) || {};
-    const users = await db.collection('users').get();
-    const accounts = users.docs.map((entry) => ({
-      userId: entry.id,
-      roleId: (entry.data() || {}).role_id,
-      rankId: (entry.data() || {}).rank_id,
-    }));
+    const accounts = await accountsForAudience(announcement.audience_keys);
 
     const message = text(announcement.message);
     await deliverPush({

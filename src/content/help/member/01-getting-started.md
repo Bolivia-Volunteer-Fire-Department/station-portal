@@ -49,6 +49,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added a bugles icon to the icon library for Captains.
 * Movied the position of the Availability toolbar buttons to be consistent with other modules.
 * Normalized some language across the app.
+* Added a ton of Firestore optimizations to reduce read & write costs.
 
 ### Version 1.2x
 * Added the Roster module

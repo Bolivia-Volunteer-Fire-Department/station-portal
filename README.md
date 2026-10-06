@@ -264,13 +264,22 @@ Five rules keep one-source-of-truth true in a database that cannot join or proje
 | configuration | `settings/public` · `settings/private` · `shifts` · `assignments` + `assignment_private` (officer notes) · `schedule_templates` + `schedule_template_private` | private halves hold officer-only fields; written in the same batch as the public row |
 | schedule | `schedule` (empty `user_id` = open shift, derived `is_open`) · `availability_windows` · `availability_months/{uid}_{YYYY-MM}` (one document per member per month) · `schedule_offers` (derived `slot_key`) | `schedule` grows without limit, so it is **never read at sign-in** — calendars ask for the month they show |
 | timeclock | `timeclock` · `on_duty` (one document per member whose shift is open, written by the clock transaction) | the dashboard's "am I clocked in" is answered by `on_duty`, not by scanning history |
-| training & certs | `trainings` · `training_signatures` · `certifications` · `certification_setup` · `certification_badges` (materialized per member) | the badge index keeps the roster honest; certification *state* is derived at read time and never stored |
+| training & certs | `trainings` (carries `signature_count`, kept by a trigger) · `training_signatures` · `certifications` · `certification_setup` · `certification_badges` (materialized per member) | the badge index keeps the roster honest; certification *state* is derived at read time and never stored; the training signature count is a **counter on the training**, so the module never scans the signatures (see the read-budget note below) |
 | documents | `documents` · `document_checklist_items` · `document_signatures` (per member, per item, or per document when `checklist_item_id` is empty; `signed_by_user_id` names who gave it and `backfilled` + `backfilled_at` + `backfill_note` mark one an officer entered from the paper file) | signatures are per member, per item, verifier-attributed. A back-filled row is a `member` row on purpose — every screen reads progress off that role — and the `backfilled` flag is what the rules require before an officer may write one for somebody else. A document may also ask (`requires_verification`) for its **whole** signature to be confirmed, the same way a checklist does for its items: the confirmation is a `verifier` row carrying the empty item id, so the two signatures stand beside each other. `verify:rules` tests both directions |
 | communication & audit | `announcements` · `events` (materialized `audience_keys`) · `system_log` (**Functions only** — an audit row a browser could forge is not an audit row) | |
 
 **Reads are audience- and time-bounded.** The member payload is one parallel wave gated by the
 role's permissions; `schedule`, the clock history, events and every admin tab load when their screen
 opens. `verify:read-budget` holds that line.
+
+**A count is stored, not scanned, and a per-member question names the members.** The two append-only
+collections that used to be read WHOLE to answer a question about one member or one number are gone:
+the Roster module now reads `certifications` only for the active members (batched `in`, as the
+certification tab already did), and the Training module reads a `signature_count` counter on each
+training instead of scanning `training_signatures`. `verify:read-budget` pins both, and the push
+audiences are resolved by query too. Two backfills seed state the triggers can only maintain going
+forward — `npm run training-counts:normalize -- --apply` (the signature counter) and
+`npm run badges:normalize -- --apply` (the badge index).
 
 **Offline.** Firestore's local cache means reads work with no signal. Clocking in/out refuses while
 offline on purpose: a queued write is timestamped by the device, and that record asserts someone was

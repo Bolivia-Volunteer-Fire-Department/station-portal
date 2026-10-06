@@ -23,6 +23,7 @@
     "verify:schedule-window": "node scripts/verify-schedule-window.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
     "badges:normalize": "node scripts/normalize-certification-badges.mjs",
+    "training-counts:normalize": "node scripts/normalize-training-signature-counts.mjs",
     "scores:normalize": "node scripts/normalize-runner-scores.mjs",
     "docs:audience:verify": "firebase emulators:exec --project demo-station-portal --only firestore,auth \"node scripts/verify-document-audience-repair.mjs\"",
     "docs:audience": "node scripts/normalize-document-audience.mjs",

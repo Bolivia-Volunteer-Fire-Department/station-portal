@@ -380,7 +380,7 @@ check('a non-numeric amount is refused', eventValidation({
 // A weekly event with no day ticked would render NOTHING, which is the hardest kind of bug to spot.
 check('a weekly event needs at least one day', eventValidation({
   ...validRecurring, recurring_frequency: 'weekly',
-}), 'Tick at least one day of the week for a weekly event, or it would never appear.');
+}), 'Check at least one day of the week for a weekly event, or it would never appear.');
 check('a ticked day satisfies it', eventValidation({
   ...validRecurring, recurring_frequency: 'weekly', is_monday: 'TRUE',
 }), '');

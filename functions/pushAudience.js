@@ -98,6 +98,32 @@ const announcementRecipients = ({ audienceKeys, accounts }) =>
     .map((account) => text(account.userId))
     .filter(Boolean);
 
+// An audience's keys split into the things a QUERY can be narrowed by, plus the wildcard.
+//
+// The caller uses this to fetch only the members an audience can reach, instead of reading the whole directory: a push is
+// rare enough that the scan was never the headline cost, but "resolve by query, not by scan" is the same rule the reads
+// follow, and it is what keeps a push flat as a station grows. `everyone` is the one case that still reads the collection,
+// because `*` genuinely means everybody.
+const audienceTargetsFrom = (audienceKeys = []) => {
+  const targets = { everyone: false, roleIds: [], rankIds: [], userIds: [] };
+  (Array.isArray(audienceKeys) ? audienceKeys : []).forEach((rawKey) => {
+    const key = text(rawKey);
+    if (key === '*') {
+      targets.everyone = true;
+      return;
+    }
+    const [kind, id] = key.split(':');
+    if (!id) return;
+    if (kind === 'role') targets.roleIds.push(id);
+    else if (kind === 'rank') targets.rankIds.push(id);
+    else if (kind === 'user') targets.userIds.push(id);
+  });
+  targets.roleIds = [...new Set(targets.roleIds)];
+  targets.rankIds = [...new Set(targets.rankIds)];
+  targets.userIds = [...new Set(targets.userIds)];
+  return targets;
+};
+
 module.exports = {
   text,
   isTruthy,
@@ -108,4 +134,5 @@ module.exports = {
   offerRecipients,
   offerCopy,
   announcementRecipients,
+  audienceTargetsFrom,
 };

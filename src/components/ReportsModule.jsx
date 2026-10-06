@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, BarChart3, Download, Loader2, PieChart as PieIcon, Printer, Rocket, Table2, TrendingUp } from 'lucide-react';
 import { fetchAdminSections, fetchReports, runConfiguredReport } from '../services/api';
 import { toDateKey } from '../utils/scheduleDate';
+import { userLabel } from '../utils/displayLabel';
 import { downloadCsv, reportCsvFileName, reportResultCsv } from '../utils/reportExport';
 import {
   REPORT_GROUPINGS,
@@ -90,7 +91,7 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
         member_ids: memberIds,
       });
       // What was chosen is kept with the result, because the printed copy has to say what it is a copy of.
-      const names = members.filter((member) => memberIds.includes(String(member.id))).map((member) => member.name || member.id);
+      const names = members.filter((member) => memberIds.includes(String(member.id))).map((member) => userLabel(member));
       setResult({
         ...answer,
         parameters: [
@@ -217,7 +218,7 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                     {visibleMembers.map((member) => (
                       <label key={member.id} className="flex items-center gap-2 py-1 text-sm text-slate-700 dark:text-slate-200">
                         <input type="checkbox" checked={memberIds.includes(String(member.id))} onChange={() => toggleMember(String(member.id))} className="accent-red-600" />
-                        {member.name || member.id}
+                        {userLabel(member)}
                       </label>
                     ))}
                     {visibleMembers.length === 0 && <p className="py-2 text-xs text-slate-500">No members match.</p>}

@@ -551,17 +551,16 @@ export const READERS = {
   // The signatures are part of THIS read rather than a second action because the module always wants both together, and the
   // client's refresher already expects them in one answer (App#refreshTraining sets them side by side).
   GET_TRAINING: async (uid) => {
-    const [trainings, signatures, counts] = await Promise.all([
+    const [trainings, signatures] = await Promise.all([
       rowsOf(collection(firestore(), 'trainings')),
       rowsFor('training_signatures', 'user_id', uid),
-      // Only the function can count everybody's signatures - the rules show a member their own - and it answers with
-      // counts, not who. Without them every training reads as unsigned and so as editable.
-      httpsCallable(firebaseFunctions(), 'readTrainingSignatureCounts')({}).then((answer) => answer.data?.counts || {}),
     ]);
-    return {
-      trainings: trainings.map((training) => ({ ...training, signature_count: Number(counts[training.id]) || 0 })),
-      signatures,
-    };
+    // THE COUNT RIDES ON THE TRAINING, and no callable is needed for it any more: `signature_count` is materialized on
+    // each training document by functions/index.js (the trigger keeps it in step with every signature added or removed),
+    // so it arrives with the row. Without it every training would read as unsigned and so as editable - which is why
+    // normalizeTraining (utils/training.js) treats a missing field as 0, covering any training written before the
+    // counter existed.
+    return { trainings, signatures };
   },
   // DECORATED, exactly as the sign-in payload decorates them: the state and the day count are derived at read
   // time (they would go stale if stored), and the modules filter and sort on them. The setup read is the join.
