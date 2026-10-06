@@ -1475,9 +1475,12 @@ check('an editor gets an Add training button', String(editorView).includes('Add 
 check('but not the form itself until it is asked for', !String(editorView).includes('training-editor-form'));
 check('and an Edit action per row', String(editorView).includes('>Edit<'));
 check('but still no delete', !String(editorView).toLowerCase().includes('delete'));
-// Rule: a training anybody has signed, or one that is locked, cannot be edited from the module.
-check('the Edit button is disabled for a signed training', /disabled=""[^>]*title="Somebody has already signed/.test(String(editorView)));
-check('and for a locked one', /disabled=""[^>]*title="This training has been entered into an external/.test(String(editorView)));
+// Rule: a training anybody has signed, or one that is locked, cannot be edited from the module - but it is not a
+// greyed-out Edit button any more. The row offers "Open" instead, which reads the training in the modal with every
+// field frozen, and its tooltip names the reason. Asserted on that tooltip sentence, so what is checked is the block
+// being VISIBLE and explained rather than the presence of a particular disabled attribute.
+check('a signed training is blocked from editing, with the reason offered as Read-only', /title="Somebody has already signed this training, so it can only be changed in the Administration module\. Open it to read the details\."/.test(String(editorView)));
+check('and a locked one likewise', /title="This training has been entered into an external system, so it is locked and cannot be changed\. Open it to read the details\."/.test(String(editorView)));
 check('the external column exists', String(editorView).includes('>Ext.<'));
 
 console.log('\n--- the training editor modal ---');
@@ -1496,10 +1499,11 @@ check('the fields are all there', ['Start time', 'Duration', 'Location', 'Instru
 // report gets everything including the external-system marker.
 check('the member set by default', /allowAdminFlags \? TRAINING_FLAGS : MEMBER_EDITABLE_FLAGS/.test(trainingFormSource), true);
 check('and a warning that the external marker is permanent', /is permanent/.test(trainingFormSource), true);
-// A locked training is read-only even for an administrator, and says why.
-check('a locked training is read-only', /<fieldset disabled=\{locked\}/.test(trainingFormSource), true);
+// A locked training is read-only even for an administrator, and says why. The freeze is `frozen` - `locked` OR the
+// caller opening it read-only - so a signed training opened to read is frozen the same way a locked one is.
+check('a locked training is read-only', /const frozen = locked \|\| readOnly/.test(trainingFormSource) && /<fieldset disabled=\{frozen\}/.test(trainingFormSource), true);
 check('with an explanation', /entered into an external system, so it is locked/.test(trainingFormSource), true);
-check('and cannot be saved', /const canSave = [^;]*!locked/.test(trainingFormSource), true);
+check('and cannot be saved', /const canSave = [^;]*!frozen/.test(trainingFormSource), true);
 check('and the reason sits beside the Save button', /This training is locked\.|A date and a title are required\./.test(trainingFormSource), true);
 
 // A training with no date or title cannot be saved either - the backend would drop it.
