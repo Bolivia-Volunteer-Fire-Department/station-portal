@@ -15,8 +15,10 @@ export const PAGE_BAR_LABELS = {
   training: 'Training',
   documents: 'Documents',
   certifications: 'Certifications',
-  reports: 'Reports',
-  forms: 'Forms',
+  // The tab id is still `reports`: ids are code identifiers, and this one is used by the router, the sidebar, the
+  // prefetch and every harness that pins them. Only the words a member reads changed, when Forms moved in beside
+  // Reports on the same screen.
+  reports: 'Reports & Forms',
   help: 'Help',
   settings: 'My Settings',
   admin: 'Administration',

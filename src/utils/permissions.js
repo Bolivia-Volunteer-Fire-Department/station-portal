@@ -210,7 +210,7 @@ export const MEMBER_PERMISSIONS = [
   {
     key: 'can_view_reports',
     label: 'View reports',
-    description: 'Open Reports and run reports shared with your role or rank.',
+    description: 'Open Reports & Forms and run the reports shared with your role or rank.',
   },
   {
     key: 'can_sign_trainings',
@@ -273,7 +273,7 @@ export const MEMBER_PERMISSIONS = [
     // is one flag for the module, and the audience does the rest.
     key: 'can_generate_forms',
     label: 'Generate forms',
-    description: 'Open Forms and generate the printable PDFs shared with their role or rank.',
+    description: 'Open Reports & Forms and generate the printable PDFs shared with their role or rank.',
   },
 ];
 

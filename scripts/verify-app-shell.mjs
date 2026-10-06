@@ -657,6 +657,30 @@ const baseKeys = /const keys = \[([^\]]*)\]/.exec(deferred)?.[1] || '';
 checkIs('and never as a default', !/AdminPanel/.test(baseKeys), baseKeys);
 checkIs('the hidden Runner is never warmed at all', !/keys\.push\('FirefighterRunner'\)/.test(deferred));
 
+// Reports and Forms are ONE screen now, and the merge is where the promise above quietly broke: importing the two
+// halves into the merged module would put them in its chunk, so a member holding only `can_generate_forms` would
+// download the Reports half as well - and the Reports half carries recharts, ~120 kB gzipped, which is most of it.
+// The halves are handed in as ELEMENTS instead, so React fetches only the one it renders.
+//
+// Both halves of that are pinned here, because both are invisible in a diff: a tidy-up that moves two imports to the
+// top of the file reads like housekeeping, and a prefetch that warms both halves for everybody reads like symmetry.
+const mergedScreen = readFileSync('src/components/ReportsAndFormsModule.jsx', 'utf8');
+checkIs(
+  'the merged screen does not import the halves it is handed',
+  !/^import .*(ReportsModule|FormsModule) from/m.test(mergedScreen),
+  'importing them puts both in one chunk, and a forms-only member downloads recharts'
+);
+checkIs('so they arrive as props instead', /reportsScreen = null[\s\S]{0,80}formsScreen = null/.test(mergedScreen));
+checkIs(
+  'and each half is warmed only for the permission that opens it',
+  /if \(canViewReports\) keys\.push\('ReportsModule'\);/.test(deferred) &&
+    /if \(canGenerateForms\) keys\.push\('FormsModule'\);/.test(deferred)
+);
+checkIs(
+  'while the wrapper behind both is warmed for anybody who can open the screen',
+  /if \(canViewReports \|\| canGenerateForms\) keys\.push\('ReportsAndFormsModule'\);/.test(deferred)
+);
+
 // ---------------------------------------------------------------------------
 // 9. The React Compiler is on, and it is actually running
 // ---------------------------------------------------------------------------

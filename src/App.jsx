@@ -77,6 +77,9 @@ import {
   MyClockHistory,
   ScheduleCalendar,
   RosterModule,
+  ReportsAndFormsModule,
+  // Built as elements and handed to the wrapper above; only the half that is on screen is ever rendered, so only that
+  // half's chunk is fetched.
   ReportsModule,
   FormsModule,
   TrainingModule,
@@ -1689,9 +1692,9 @@ const getLoadingMessage = () => {
                   : activeTab === 'roster'
                     ? canViewRoster
                     : activeTab === 'reports'
-                      ? canViewReports
-                      : activeTab === 'forms'
-                        ? canGenerateForms
+                      // Reports and Forms share one tab id now, so this is the same OR the sidebar and the prefetch
+                      // use. Holding only `can_generate_forms` still opens the screen - it shows the Forms half.
+                      ? canViewReports || canGenerateForms
                   : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
@@ -2309,8 +2312,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'availability' && 'Availability'}
                 {activeTab === 'training' && 'Training'}
                 {activeTab === 'certifications' && 'Certifications'}
-                {activeTab === 'reports' && 'Reports'}
-                {activeTab === 'forms' && 'Forms'}
+                {activeTab === 'reports' && 'Reports & Forms'}
                 {activeTab === 'help' && 'Help'}
                 {activeTab === 'settings' && 'My Settings'}
                 {activeTab === 'admin' && 'Administration'}
@@ -2323,7 +2325,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
                 {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
                 {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
-                {activeTab === 'reports' && 'Run reports shared with your role or rank.'}
+                {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
                 {activeTab === 'help' && 'Guides for using the portal. Administrators have their own set under Administration → System → Help.'}
                 {activeTab === 'settings' && 'Customize your personal account preferences.'}
                 {activeTab === 'admin' && 'Manage members, roles, ranks, and system settings.'}
@@ -2482,14 +2484,24 @@ const getLoadingMessage = () => {
               <CertificationsModule token={authToken} />
             )}
 
-            {activeTab === 'reports' && canViewReports && <ReportsModule departmentName={departmentName} members={roster.length ? roster : users} />}
-
-            {activeTab === 'forms' && canGenerateForms && (
-              <FormsModule
-                departmentName={departmentName}
-                currentUser={currentUser}
-                users={roster.length ? roster : users}
-                canPickMembers={can('can_administer_trainings')}
+            {/* Reports and Forms are one module behind one sidebar entry. Both screens are built here but only the one
+                the member is looking at is RENDERED, which is what keeps each half its own chunk: an unrendered element
+                is a description, not a fetch. See ReportsAndFormsModule for why. */}
+            {activeTab === 'reports' && (canViewReports || canGenerateForms) && (
+              <ReportsAndFormsModule
+                canViewReports={canViewReports}
+                canGenerateForms={canGenerateForms}
+                reportsScreen={
+                  <ReportsModule departmentName={departmentName} members={roster.length ? roster : users} />
+                }
+                formsScreen={
+                  <FormsModule
+                    departmentName={departmentName}
+                    currentUser={currentUser}
+                    users={roster.length ? roster : users}
+                    canPickMembers={can('can_administer_trainings')}
+                  />
+                }
               />
             )}
 

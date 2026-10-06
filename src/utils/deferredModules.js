@@ -24,6 +24,11 @@ const loaders = {
   DocumentsModule: () => import('../components/DocumentsModule'),
   TrainingModule: () => import('../components/TrainingModule'),
   CertificationsModule: () => import('../components/CertificationsModule'),
+  // The merged Reports & Forms screen, and its two halves. The wrapper is deliberately TINY - it holds the switcher and
+  // decides which half to show - and the halves stay separate chunks: merging them would hand the charting library
+  // (recharts, most of the Reports half) to a member who only holds `can_generate_forms`, which is the download the
+  // permission-derived list below exists to prevent.
+  ReportsAndFormsModule: () => import('../components/ReportsAndFormsModule'),
   ReportsModule: () => import('../components/ReportsModule'),
   FormsModule: () => import('../components/FormsModule'),
   UserSettings: () => import('../components/MySettings'),
@@ -45,6 +50,9 @@ export const MyAvailability = lazy(loaders.MyAvailability);
 export const DocumentsModule = lazy(loaders.DocumentsModule);
 export const TrainingModule = lazy(loaders.TrainingModule);
 export const CertificationsModule = lazy(loaders.CertificationsModule);
+export const ReportsAndFormsModule = lazy(loaders.ReportsAndFormsModule);
+// App imports these to build the elements it hands the wrapper; only the half that is CHOSEN is ever rendered, so only
+// that half's chunk is fetched. They are loaders all the same, so the prefetch walks them by this one list.
 export const ReportsModule = lazy(loaders.ReportsModule);
 export const FormsModule = lazy(loaders.FormsModule);
 export const UserSettings = lazy(loaders.UserSettings);
@@ -79,6 +87,10 @@ export const prefetchableFor = ({
   if (canEditOwnAvailability) keys.push('MyAvailability');
   if (canViewDocuments) keys.push('DocumentsModule');
   if (canSignTrainings) keys.push('TrainingModule');
+  // The merged screen's wrapper for anybody who can open it, plus ONLY the half they hold: the same `||` the sidebar
+  // and the render gate in App.jsx use, and the same promise as before the merge - nobody downloads a screen they
+  // cannot open.
+  if (canViewReports || canGenerateForms) keys.push('ReportsAndFormsModule');
   if (canViewReports) keys.push('ReportsModule');
   if (canGenerateForms) keys.push('FormsModule');
   if (canAdminister) keys.push('AdminPanel');

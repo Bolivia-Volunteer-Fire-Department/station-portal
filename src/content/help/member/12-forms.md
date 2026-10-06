@@ -2,6 +2,8 @@
 
 **Forms** turns the app's own records into a **printable PDF, already filled in** — so the same details are typed once, not copied out onto a sheet by hand.
 
+**Forms is one half of the *Reports & Forms* screen.** If your role allows reports as well, a switch at the top moves between the two; if it allows only forms, this is the screen you get and there is no switch to read.
+
 > [!NOTE]
 > Which forms you see here is chosen for you: each one is shared with particular **roles and ranks**, and the app only offers the ones that are meant for you.
 
