@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { CalendarRange, Users } from 'lucide-react';
+import { CalendarRange, Eye, Users } from 'lucide-react';
 import { adminSetAvailability } from '../../services/api';
 import AvailabilityCalendar, { MonthNav } from '../AvailabilityCalendar';
+import ViewToggle from '../ViewToggle';
 import CenteredContent from '../CenteredContent';
 import MemberName from '../MemberName';
 import RankIcon from '../RankIcon';
@@ -35,6 +36,7 @@ export default function AdminAvailabilityTab({
   onLoadMonth,
   ranks = [],
   timeFormat = '12',
+  hideEventsByDefault = false,
   // Non-shift entries, drawn on BOTH views: on the single-member grid so an administrator sees the same month the member
   // does, and in each day's heading of the All Members list, which is where they were before the availability model moved
   // to windows. The audience filter is the grid's alone: the list is an administrator's view of the whole crew, so an event
@@ -112,6 +114,7 @@ export default function AdminAvailabilityTab({
             // fewer of them are - so it belongs beside the day, not only on the single-member grid below.
             events={events}
             timeFormat={timeFormat}
+            hideEventsByDefault={hideEventsByDefault}
           />
         </CenteredContent>
       ) : selectedMember ? (
@@ -127,6 +130,7 @@ export default function AdminAvailabilityTab({
           // The audience is the MEMBER being edited, so an administrator sees the month that member sees.
           events={events}
           eventAudience={{ roleId: selectedMember?.role_id, rankId: selectedMember?.rank_id, userId: selectedMember?.id }}
+          hideEventsByDefault={hideEventsByDefault}
           onSave={save}
         />
       ) : (
@@ -158,10 +162,12 @@ function AvailabilityRoster({
   // SHOWN ONCE PER DATE RATHER THAN PER WINDOW, for the reason the original gave and it is still the right one: an event
   // belongs to the DAY, and repeating it down every window under it would bury the names this view exists to show.
   events = [],
+  hideEventsByDefault = false,
   timeFormat = '12',
 }) {
   const now = new Date();
   const [viewDate, setViewDate] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+  const [showEvents, setShowEvents] = useState(() => !hideEventsByDefault);
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
@@ -182,9 +188,10 @@ function AvailabilityRoster({
   // manual `useMemo` is written here it reports `react(preserve-manual-memoization)` - four warnings saying the memo it
   // cannot keep is being thrown away, which is the opposite of what writing one was for. The derivation is a single pass
   // over the month's events, so there is nothing to be clever about either way.
-  const eventsByDay = eventSegmentsByDay(normalizeEventList(events), monthStart, monthEnd, { ranks });
+  const allEventsByDay = eventSegmentsByDay(normalizeEventList(events), monthStart, monthEnd, { ranks });
+  const eventsByDay = showEvents ? allEventsByDay : new Map();
   // Counted as well as shown, because an event is very often WHY fewer people are free that night.
-  const eventCount = days.reduce((sum, day) => sum + (eventsByDay.get(day.dateKey) || []).length, 0);
+  const eventCount = showEvents ? days.reduce((sum, day) => sum + (eventsByDay.get(day.dateKey) || []).length, 0) : 0;
 
   const rankOf = (rankId) =>
     ranks.find((rank) => String(rank?.id ?? '').trim() === String(rankId ?? '').trim()) || null;
@@ -201,6 +208,17 @@ function AvailabilityRoster({
       />
 
       <div className="px-4 py-3 space-y-4">
+        {events.length > 0 && (
+          <div className="flex items-center">
+            <ViewToggle
+              noun="events"
+              description="Include non-shift entries such as trainings. Availability is not affected."
+              icon={Eye}
+              enabled={showEvents}
+              onChange={setShowEvents}
+            />
+          </div>
+        )}
         {/* The month's events, counted as well as listed per day - an officer reading "3 members available" wants to know
             whether that is because nobody claimed it or because the drill night took them. Counted over the days this
             list actually draws, so a recurring event is counted once per occurrence it puts on the calendar. */}

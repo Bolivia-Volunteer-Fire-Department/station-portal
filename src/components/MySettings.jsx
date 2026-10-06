@@ -43,6 +43,7 @@ export default function UserSettings({
         ? existingUserSetting.is_dark_mode
         : (systemSettings?.is_dark_mode !== undefined ? systemSettings.is_dark_mode : true)
     ),
+    hide_events_by_default: isTruthySetting(existingUserSetting?.hide_events_by_default),
     // Same ladder, resolved by the shared rule rather than re-implemented here: the member's own value, else the
     // station default, else on. A blank cell is "inherit", not "off".
     is_sounds_active: soundsActiveFrom(existingUserSetting?.is_sounds_active, systemSettings?.is_sounds_active),
@@ -58,6 +59,10 @@ export default function UserSettings({
       is_dark_mode: existingUserSetting?.is_dark_mode !== undefined && existingUserSetting?.is_dark_mode !== ''
         ? isTruthySetting(existingUserSetting.is_dark_mode)
         : prev.is_dark_mode,
+      hide_events_by_default:
+        existingUserSetting?.hide_events_by_default !== undefined && existingUserSetting?.hide_events_by_default !== ''
+          ? isTruthySetting(existingUserSetting.hide_events_by_default)
+          : prev.hide_events_by_default,
       // A saved FALSE has to survive this sync, so the cell is checked for emptiness rather than truthiness.
       is_sounds_active:
         existingUserSetting?.is_sounds_active !== undefined && existingUserSetting?.is_sounds_active !== ''
@@ -75,6 +80,7 @@ export default function UserSettings({
       id: currentUser.id,
       time_format: String(formData.time_format),
       is_dark_mode: String(formData.is_dark_mode),
+      hide_events_by_default: String(formData.hide_events_by_default),
       // Always sent, never omitted: an empty string would mean "inherit the station default" on the backend, and
       // this switch is a decision either way. The member's own answer always wins.
       is_sounds_active: String(formData.is_sounds_active),
@@ -203,6 +209,15 @@ export default function UserSettings({
               description="Use the dark station theme for your account."
               enabled={formData.is_dark_mode}
               onChange={(value) => setFormData({ ...formData, is_dark_mode: value })}
+            />
+          </div>
+
+          <div className="border-t border-slate-200 dark:border-slate-700/80 pt-4">
+            <ToggleSwitch
+              label="Hide Events by Default"
+              description="Start Schedule and Availability views with non-shift events hidden. Use each view's events toggle to show them temporarily."
+              enabled={formData.hide_events_by_default}
+              onChange={(value) => setFormData({ ...formData, hide_events_by_default: value })}
             />
           </div>
 

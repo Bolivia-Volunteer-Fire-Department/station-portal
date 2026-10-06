@@ -1445,16 +1445,23 @@ const main = async () => {
   // booleans rather than the strings the form sends, and a device token must not be copied into this document.
   await signIn('bo');
   await routeWrite('UPDATE_USER_SETTINGS', {
-    payload: { id: 'u2', time_format: '24', is_dark_mode: 'true', notify_announcements: 'FALSE' },
+    payload: {
+      id: 'u2',
+      time_format: '24',
+      is_dark_mode: 'true',
+      hide_events_by_default: 'true',
+      notify_announcements: 'FALSE',
+    },
   });
   const boSettings = (await getDoc(doc(firestore(), 'user_settings', 'u2'))).data();
-  check('the settings form writes the member own row', [boSettings.time_format, boSettings.is_dark_mode, boSettings.notify_announcements], ['24', true, false]);
-  check('with the flags as real booleans, not the strings the form sends', [typeof boSettings.is_dark_mode, typeof boSettings.notify_announcements], ['boolean', 'boolean']);
+  check('the settings form writes the member own row', [boSettings.time_format, boSettings.is_dark_mode, boSettings.hide_events_by_default, boSettings.notify_announcements], ['24', true, true, false]);
+  check('with the flags as real booleans, not the strings the form sends', [typeof boSettings.is_dark_mode, typeof boSettings.hide_events_by_default, typeof boSettings.notify_announcements], ['boolean', 'boolean', 'boolean']);
 
   await routeWrite('UPDATE_USER_SETTINGS', { payload: { id: 'u2', time_format: '12' } });
   const boAfter = (await getDoc(doc(firestore(), 'user_settings', 'u2'))).data();
   check('a second save changes only what it sent', boAfter.time_format, '12');
   check('and an earlier preference survives it', boAfter.notify_announcements, false);
+  check('and the event visibility preference survives it', boAfter.hide_events_by_default, true);
   check('while a preference nobody ever mentioned is not invented', Object.keys(boAfter).includes('notify_offer_approved'), false);
 
   await routeWrite('UPDATE_USER_SETTINGS', { payload: { id: 'u2', fcm_token: 'a-device-token' } });

@@ -182,6 +182,7 @@ export default function AdminPanel({
   onRowSaved,
   // Used only on the printed schedule sheet's header.
   departmentName = '',
+  hideEventsByDefault = false,
 }) {
   // Offers awaiting a decision. Shares the predicate with the approvals table so
   // the badge can never disagree with the rows below it.
@@ -500,6 +501,7 @@ export default function AdminPanel({
           onAdminDataChanged={onAdminDataChanged}
           // Non-shift entries, so the board shows the month as a whole.
           events={events}
+          hideEventsByDefault={hideEventsByDefault}
           timeFormat={timeFormat}
           // Used only on the printed sheet's header.
           departmentName={departmentName}
@@ -520,6 +522,7 @@ export default function AdminPanel({
           ranks={ranks}
           timeFormat={timeFormat}
           events={events}
+          hideEventsByDefault={hideEventsByDefault}
           onDataChanged={onAvailabilityChanged}
         />
       )}

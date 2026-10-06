@@ -288,6 +288,9 @@ export default function App() {
   const currentUserSettings = userSettings.find(
     (s) => String(s.id ?? s.user_id) === String(currentUser?.id)
   );
+  const hideEventsByDefault =
+    currentUserSettings?.hide_events_by_default === true ||
+    String(currentUserSettings?.hide_events_by_default ?? '').trim().toUpperCase() === 'TRUE';
 
   const activeTimeFormat =
     currentUserSettings?.time_format ||
@@ -1963,6 +1966,7 @@ const getLoadingMessage = () => {
           [
             'time_format',
             'is_dark_mode',
+            'hide_events_by_default',
             // Missing from this list means the optimistic merge drops it, so the switch would appear not to stick
             // until the refresh wave reconciled the row seconds later.
             'is_sounds_active',
@@ -2375,6 +2379,7 @@ const getLoadingMessage = () => {
                 // Non-shift entries, already audience-filtered by the server.
                 events={events}
                 eventAudience={announcementAudience}
+                hideEventsByDefault={hideEventsByDefault}
                 // Names the audience line in an event's detail popup (a role description rather than "#id").
                 roles={roles}
                 timeFormat={activeTimeFormat}
@@ -2402,6 +2407,7 @@ const getLoadingMessage = () => {
                 // Non-shift entries, so the month reads the same here as on My Schedule.
                 events={events}
                 eventAudience={announcementAudience}
+                hideEventsByDefault={hideEventsByDefault}
                 onChanged={refreshAvailability}
               />
             )}
@@ -2446,6 +2452,7 @@ const getLoadingMessage = () => {
                 userSettings={userSettings}
                 systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
                 currentRole={currentUserRole}
+                hideEventsByDefault={hideEventsByDefault}
                 canApproveShifts={canApproveShifts}
                 onSaveSettings={handleSaveUserSettings}
                 pushDeviceApi={pushDeviceApi}

@@ -204,6 +204,7 @@ export default function AdminScheduleManagementTab({
   // Non-shift calendar entries. The board's audience is EVERYONE, because it draws the whole crew's month -
   // an event targeted at one rank still belongs on the board an administrator is building from.
   events = [],
+  hideEventsByDefault = false,
   timeFormat = '12',
   // Used only on the printed sheet's header.
   departmentName = '',
@@ -342,7 +343,7 @@ export default function AdminScheduleManagementTab({
   const dayLabel = spanDates.map((day) => displayDate(toDateKey(day))).join(' – ');
   const todayKey = toDateKey(now);
   // Events are visible by default. Not persisted: a temporary view choice, like "Show everyone".
-  const [showEvents, setShowEvents] = useState(true);
+  const [showEvents, setShowEvents] = useState(() => !hideEventsByDefault);
 
   // THE READER IS HELD IN A REF, NOT A DEPENDENCY, and this is the difference between one read and an unbounded loop.
   // `loadScheduleWindow` is a plain function in App's body, so App re-creates it on EVERY render - and an effect that
@@ -2659,7 +2660,7 @@ export default function AdminScheduleManagementTab({
                     return (
                       <React.Fragment key={`custom-${e._key}`}>
                         {separatorBefore && (
-                          <div aria-hidden="true" className={`mx-1 h-px shrink-0 bg-slate-300 dark:bg-slate-600 ${roomy ? 'my-1.5' : 'my-0.5'}`} />
+                          <div aria-hidden="true" className="mx-1 my-1.5 h-px shrink-0 bg-slate-300 dark:bg-slate-600" />
                         )}
                         <div
                           draggable={!isOccurred(e)}
@@ -2713,7 +2714,7 @@ export default function AdminScheduleManagementTab({
                     return (
                       <React.Fragment key={`slot-${slot.slotKey}`}>
                         {separatorBefore && (
-                          <div aria-hidden="true" className={`mx-1 h-px shrink-0 bg-slate-300 dark:bg-slate-600 ${roomy ? 'my-1.5' : 'my-0.5'}`} />
+                          <div aria-hidden="true" className="mx-1 my-1.5 h-px shrink-0 bg-slate-300 dark:bg-slate-600" />
                         )}
                         <div
                         draggable={!occurred}
@@ -2766,7 +2767,7 @@ export default function AdminScheduleManagementTab({
                   return (
                     <React.Fragment key={`open-slot-${slot.slotKey}`}>
                     {separatorBefore && (
-                      <div aria-hidden="true" className={`mx-1 h-px shrink-0 bg-slate-300 dark:bg-slate-600 ${roomy ? 'my-1.5' : 'my-0.5'}`} />
+                      <div aria-hidden="true" className="mx-1 my-1.5 h-px shrink-0 bg-slate-300 dark:bg-slate-600" />
                     )}
                     <div
                       // An empty slot is a control - it opens the assignment popover, or takes a quick-add -

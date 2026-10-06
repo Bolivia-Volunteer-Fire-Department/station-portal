@@ -474,12 +474,13 @@ check(
   /mergeDayItems\(dayAssignments, eventSegmentsByDate\.get\(key\)/.test(calendarSource),
   true
 );
-// The hide toggle is a view choice, not a setting: nothing about it may be persisted.
+// The saved per-user preference chooses the initial view; this toggle remains a temporary override for the current view.
 check('the events switch exists', /noun="events"/.test(calendarSource), true);
-// The switch defaults ON, and the verb follows the STATE rather than being fixed: while the events are shown
-// the button reads "Hide events", and it flips to "Show events" when they are hidden. A button still reading
-// "Show events" while it is showing them reads as a promise it has already kept.
-check('the switch defaults to showing', /const \[showEvents, setShowEvents\] = useState\(true\)/.test(calendarSource), true);
+check(
+  'events show by default unless the saved preference says to hide them',
+  /const \[showEvents, setShowEvents\] = useState\(\(\) => !hideEventsByDefault\)/.test(calendarSource),
+  true
+);
 check('and passes showEvents straight through', /enabled=\{showEvents\}/.test(calendarSource), true);
 check('so no label inverts it', /enabled=\{!showEvents\}/.test(calendarSource), false);
 // Both view toggles share one container on My Schedule, rather than two separate rows.

@@ -343,6 +343,7 @@ export const setPushDisabled = async ({ userId, disabled }) => {
 // store has no columns to match, so the honest rule is: store what the form sent, and know which keys mean something.
 const BOOLEAN_USER_SETTINGS = new Set([
   'is_dark_mode',
+  'hide_events_by_default',
   'notify_new_offer',
   'notify_offer_approved',
   'notify_offer_declined',

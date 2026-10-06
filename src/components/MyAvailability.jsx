@@ -21,6 +21,7 @@ export default function MyAvailability({
   onLoadMonth,
   ranks = [],
   timeFormat = '12',
+  hideEventsByDefault = false,
   events = [],
   eventAudience = {},
   onChanged,
@@ -60,6 +61,7 @@ export default function MyAvailability({
         onLoadMonth={onLoadMonth}
         ranks={ranks}
         timeFormat={timeFormat}
+        hideEventsByDefault={hideEventsByDefault}
         // Non-shift entries, so the member sees training and meetings alongside the windows they can mark.
         events={events}
         eventAudience={eventAudience}

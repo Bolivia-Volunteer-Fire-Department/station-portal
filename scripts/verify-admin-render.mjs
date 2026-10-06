@@ -350,6 +350,15 @@ const soundSwitchHtml = ({ userRow, systemRow }) => {
 const switchDirective = (html) => (/data-sound="(sound-o(?:n|ff))"/.exec(String(html)) || [])[1] || null;
 
 check('the switch is rendered', String(soundSwitchHtml({})).includes('Sound Effects'));
+check('and Settings offers a saved event visibility default', /label="Hide Events by Default"/.test(readFileSync('src/components/MySettings.jsx', 'utf8')) && /hide_events_by_default: String\(formData\.hide_events_by_default\)/.test(readFileSync('src/components/MySettings.jsx', 'utf8')));
+check(
+  'the saved preference initializes every event-bearing calendar hidden by default',
+  /useState\(\(\) => !hideEventsByDefault\)/.test(readFileSync('src/components/ScheduleCalendar.jsx', 'utf8')) &&
+    /useState\(\(\) => !hideEventsByDefault\)/.test(readFileSync('src/components/AvailabilityCalendar.jsx', 'utf8')) &&
+    /useState\(\(\) => !hideEventsByDefault\)/.test(readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8')) &&
+    /const eventsByDay = showEvents \? allEventsByDay : new Map\(\)/.test(readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8')),
+  true
+);
 // Nothing set anywhere: on, so pressing it will turn them off.
 check('with nothing configured it is on, so the switch offers to turn them off', switchDirective(soundSwitchHtml({})), 'sound-off');
 // The member's own FALSE wins: off, so pressing it will turn them on.

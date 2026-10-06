@@ -64,6 +64,7 @@ export default function ScheduleCalendar({
   // and never mixed into them: an event is not a shift and must never look offerable.
   events = [],
   eventAudience = {},
+  hideEventsByDefault = false,
   timeFormat = '12',
   // Used only on the printed sheet's header.
   departmentName = '',
@@ -101,9 +102,8 @@ export default function ScheduleCalendar({
   // While a print is being prepared the sheet is mounted (see PrintableSchedule); it prints itself and
   // calls back when the browser is done, so nothing is left behind.
   const [printOpen, setPrintOpen] = useState(false);
-  // Events default to visible, and the toggle is deliberately NOT persisted: it is a "get these off my
-  // screen for a moment" control, the same way "Show everyone" behaves.
-  const [showEvents, setShowEvents] = useState(true);
+  // The saved preference chooses the initial view; the toggle remains a temporary per-view override.
+  const [showEvents, setShowEvents] = useState(() => !hideEventsByDefault);
   // Default off, and local to this component: the calendar opens on the
   // signed-in member's own shifts and only expands to the whole crew on demand.
   const [showEveryone, setShowEveryone] = useState(false);

@@ -82,6 +82,7 @@ export default function AvailabilityCalendar({
   // See utils/events.
   events = [],
   eventAudience = {},
+  hideEventsByDefault = false,
   ranks = [],
 }) {
   const now = new Date();
@@ -91,9 +92,8 @@ export default function AvailabilityCalendar({
   const [overrides, setOverrides] = useState(() => new Map());
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
-  // Events are visible by default, and this is deliberately not persisted - it is a "get these off my
-  // screen for a moment" control, exactly like "Show everyone".
-  const [showEvents, setShowEvents] = useState(true);
+  // The saved preference chooses the initial view; the toggle remains a temporary per-view override.
+  const [showEvents, setShowEvents] = useState(() => !hideEventsByDefault);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
