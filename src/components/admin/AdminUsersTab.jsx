@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound, ListChecks, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
 import RankIcon from '../RankIcon';
-import { adminSaveUser, adminDeleteUser } from '../../services/api';
+import { adminSaveUser, adminDeleteUser, saveFemaStudentId } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import MemberName from '../MemberName';
@@ -24,10 +24,13 @@ const BULK_CHANGE_LABELS = {
   exclude_from_scheduling: 'scheduling',
 };
 
-const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE' };
+const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE', fema_student_id: '' };
 
 export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // What the member's FEMA student id WAS when the editor opened. It lives on the member's private record rather than on
+  // the roster row, so it is saved as its own write - and only when this differs, so an ordinary save stays one request.
+  const [savedFemaId, setSavedFemaId] = useState('');
   // Whether the editor modal is open: "a new member" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -167,12 +170,14 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
   const resetForm = () => {
     setFormData(EMPTY_FORM);
+    setSavedFemaId('');
     setEditorOpen(false);
   };
 
   const handleEdit = (user) => {
     setEditorOpen(true);
     setError(null);
+    setSavedFemaId(user.fema_student_id || '');
     setFormData({
       id: user.id,
       // Carried through the form so the backend can refuse a save built on a stale copy.
@@ -186,6 +191,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       exclude_from_scheduling:
         String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
       runner_sound_profile: user.runner_sound_profile || '',
+      fema_student_id: user.fema_student_id || '',
       // Normalized on the way in, so the checkbox is never in doubt about what the sheet holds.
       is_change_password_on_login:
         String(user.is_change_password_on_login ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
@@ -201,6 +207,18 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       // ignores it unless the caller is an administrator.
       const result = await adminSaveUser(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save user.');
+
+      // The FEMA student id is its OWN write: it lives on the member's private record, not the roster row this save
+      // writes, and the rules allow exactly that one key there. SKIPPED when the officer did not touch it, so an ordinary
+      // save is still the single request it has always been.
+      const savedId = result.id || formData.id;
+      const femaId = String(formData.fema_student_id || '').trim();
+      if (savedId && femaId !== String(savedFemaId || '').trim()) {
+        const femaResult = await saveFemaStudentId(femaId, savedId);
+        if (!femaResult?.success) {
+          throw new Error(femaResult?.message || 'The member saved, but the FEMA student ID did not.');
+        }
+      }
 
       // Show the saved values in the list NOW. The refresh below is authoritative but cannot be
       // waited on, and until it lands the list still holds the pre-save row - so re-opening the
@@ -409,6 +427,25 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* The member's FEMA student id. It lives on the PRIVATE half of the account rather than the roster row (a
+              roster is readable by every member), and it is written as its own one-key field - see the note in
+              firestore.rules. Offered on the new-member form too, so an officer can record it while adding somebody. */}
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">FEMA Student ID</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={40}
+              value={formData.fema_student_id}
+              onChange={(e) => setFormData({ ...formData, fema_student_id: e.target.value })}
+              placeholder="e.g. 1234567 (optional)"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              From FEMA’s training system. Kept on the member’s private record, not the station roster.
+            </p>
           </div>
 
           {/* The Firefighter Runner sound set. Shown to anyone who can manage users so the value

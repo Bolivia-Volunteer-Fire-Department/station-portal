@@ -67,7 +67,7 @@ jobs:
       # fails the build rather than the bill. (The render harnesses stay local: several of their assertions are relative
       # to today, per the README's note on the suite.)
       - name: Guard the read budget and the training counter
-        run: npm run verify:read-budget && npm run verify:training && npm run verify:push-audience
+        run: npm run verify:read-budget && npm run verify:training && npm run verify:push-audience && npm run verify:forms
 
       - name: Build
         # The Firebase values are the web app's PUBLIC config, passed through as repository secrets because a CI build

@@ -235,7 +235,10 @@ checkIs(
   check(
     'and no password, because there is none to leak',
     [...new Set(directory.users.flatMap((user) => Object.keys(user)))].sort(),
-    ['id', 'is_change_password_on_login', 'name', 'rank_id', 'role_id', 'status', 'user_name']
+    // `fema_student_id` joined the list when the Users tab needed it: a personal number from FEMA's training system,
+    // kept on the member's PRIVATE record so it is not on the roster every member reads. Named here like the rest, so
+    // the friction described above still applies to whatever is added next.
+    ['fema_student_id', 'id', 'is_change_password_on_login', 'name', 'rank_id', 'role_id', 'status', 'user_name']
   );
   // THE BOARD'S SECTIONS ARE NOT CARRIED EITHER - the assignments and templates with their private notes, the offers still waiting,
   // the shift definitions - because each of them belongs to a sub-tab that reads it when opened. They are read here the way those

@@ -973,6 +973,33 @@ export const READERS = {
     return answer.data || {};
   },
 
+  // THE FORM DEFINITIONS this caller may generate, from the audience they carry. One question, asked the way
+  // announcements are asked: the rules prove the SAME array-contains-any over the viewer's own keys, so the read works
+  // exactly because the rule does. `enabled` is filtered HERE rather than in the rule, because a rule condition the
+  // query does not filter on would make the query unprovable and the read would fail as a whole.
+  GET_FORM_TEMPLATES: async (uid) => ({
+    forms: (await audienceRows('form_templates', await keysFor(uid))).filter((form) => form.enabled !== false),
+  }),
+  // The officer's list: every definition, disabled ones included, because whoever configures them has to see what they
+  // are working on. Gated by `can_configure_forms` - the same flag the tab and the rule use.
+  ADMIN_GET_FORM_TEMPLATES: async () => ({
+    forms: (await rowsOf(collection(firestore(), 'form_templates'))).sort((left, right) =>
+      String(left.name || '').localeCompare(String(right.name || ''))
+    ),
+  }),
+  // One member's training, for a form's `training_summary` source: the catalogue every signed-in member may read, and
+  // THAT member's signatures. The subject is scoped IN THE QUERY (`user_id ==`), so the rules can prove it - a member
+  // reads their own, and an officer with `can_administer_trainings` reads anybody's, which is the branch the rule
+  // already carried. Asking for somebody else without that permission is refused by the rules, as it should be.
+  GET_MEMBER_TRAINING: async (uid, body) => {
+    const subject = String((body && body.userId) || '').trim() || uid;
+    const [trainings, signatures] = await Promise.all([
+      rowsOf(collection(firestore(), 'trainings')),
+      rowsFor('training_signatures', 'user_id', subject),
+    ]);
+    return { trainings, signatures };
+  },
+
 // The pre-login payload: what the loading and login screens need before anybody has signed in.
 //
 // IT IS ONE DOCUMENT, and that is the whole point. The rules let anybody read `settings/public` and deliberately refuse

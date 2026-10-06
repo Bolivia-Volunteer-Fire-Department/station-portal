@@ -89,7 +89,7 @@ checkIs('and that there is no reset link', /no reset link/.test(passwordChangeCo
 // 3. The checkbox reaches the sheet
 // ---------------------------------------------------------------------------
 console.log('\n--- the administrator\'s checkbox ---');
-checkIs('the form starts with the flag off', /is_change_password_on_login: 'FALSE' \};/.test(usersTabSource));
+checkIs('the form starts with the flag off', /is_change_password_on_login: 'FALSE'/.test(usersTabSource));
 checkIs(
   'opening a row normalizes it to TRUE or FALSE',
   /is_change_password_on_login:\s*\n\s*String\(user\.is_change_password_on_login \?\? ''\)\.trim\(\)\.toUpperCase\(\) === 'TRUE' \? 'TRUE' : 'FALSE'/.test(

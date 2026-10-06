@@ -263,7 +263,10 @@ export const ROUTED_FEATURES = {
   // updateUserPassword in api.js, which no longer has a second path at all.
   memberSettings: {
     requires: ['memberPayload'],
-    writes: ['UPDATE_USER_SETTINGS'],
+    // A FEMA student id lives on the member's PRIVATE row rather than with the preferences, but it belongs to this
+    // feature: the same screen edits it, the rules allow exactly that one key (the member's own, or an officer's), and
+    // the read it depends on is the same member payload.
+    writes: ['UPDATE_USER_SETTINGS', 'SAVE_FEMA_STUDENT_ID'],
     switchReads: [],
   },
 
@@ -300,6 +303,17 @@ export const ROUTED_FEATURES = {
     requires: ['memberPayload'],
     writes: ['SAVE_REPORT_CONFIG', 'DELETE_REPORT_CONFIG'],
     reads: ['GET_REPORTS', 'GET_REPORT_CONFIGS', 'RUN_REPORT'],
+    switchReads: [],
+  },
+
+  // Form definitions and the printable PDFs they describe. NO CALLABLE ANYWHERE: a definition is validated and its
+  // audience expanded by PURE client code (utils/formDefinition), the rules gate who may write one, and the blank PDFs
+  // are bundled files the browser fills - so the whole feature is the client and the database, and it works with no
+  // server and no signal.
+  forms: {
+    requires: ['memberPayload'],
+    writes: ['SAVE_FORM_TEMPLATE', 'DELETE_FORM_TEMPLATE'],
+    reads: ['GET_FORM_TEMPLATES', 'ADMIN_GET_FORM_TEMPLATES', 'GET_MEMBER_TRAINING'],
     switchReads: [],
   },
 
@@ -511,6 +525,18 @@ const DISPATCH = {
   SAVE_REPORT_CONFIG: async (body) => ok(await callable('saveReportConfiguration', body || {})),
   DELETE_REPORT_CONFIG: async (body) => ok(await callable('deleteReportConfiguration', { reportId: body.reportId || body.id })),
 
+  // A form definition, written straight to Firestore. No callable: there is nothing here a browser must not be trusted
+  // with that `can_configure_forms` and the rule do not already enforce, and the writer normalises through the same pure
+  // function the admin screen uses.
+  SAVE_FORM_TEMPLATE: async (body, uid) => {
+    const { saveFormTemplate } = await writes();
+    return ok(await saveFormTemplate({ id: body?.id, definition: body?.definition, authorId: uid }));
+  },
+  DELETE_FORM_TEMPLATE: async (body) => {
+    const { deleteFormTemplate } = await writes();
+    return ok(await deleteFormTemplate({ id: body?.id || body?.formId }));
+  },
+
   // CLOCK OUT needs the open entry's id, which the sheet backend found for itself. The Firestore side reads the
   // member's own open entry for it (`time_out == ''`), and the transaction in clockOut re-checks everything that
   // matters - it is the same document the clock-in guard watches.
@@ -602,6 +628,14 @@ const DISPATCH = {
     // The session's own row unless the form named another - which is how an officer edits a member through the same
     // call. A member sending somebody else's id is refused by the RULES rather than here, which is where that belongs.
     return ok(await saveMemberSettings({ userId: payload.id || uid, fields: payload }));
+  },
+
+  // A FEMA student id, which lives on the member's PRIVATE row rather than with the preferences - so it is its own call.
+  // The session's own row unless the form named another, and a member naming somebody else is refused by the RULES,
+  // which allow exactly that one key and no other part of that document.
+  SAVE_FEMA_STUDENT_ID: async (body, uid) => {
+    const { saveFemaStudentId } = await writes();
+    return ok(await saveFemaStudentId({ userId: body?.userId || uid, value: body?.value }));
   },
 
   // Signing and verifying. EVERY IDENTITY COMES FROM THE SESSION, and the request only ever names the SUBJECT: `uid`

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, FileText } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl } from '../utils/assets';
@@ -21,6 +21,7 @@ export default function Sidebar({
     canSignTrainings,
     canViewDocuments,
     canViewReports = false,
+    canGenerateForms = false,
     canViewRoster = false,
     ranks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
@@ -216,6 +217,22 @@ export default function Sidebar({
                     >
                         <BarChart3 className="w-5 h-5" />
                         <span>Reports</span>
+                    </button>
+                    )}
+
+                    {/* Forms is gated on can_generate_forms. WHICH forms appear inside is decided by each
+                        definition's own audience, which the server proves against the member's role and rank - this
+                        only decides whether the module is offered at all. */}
+                    {canGenerateForms && (
+                    <button
+                        onClick={() => { setActiveTab('forms'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'forms'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <FileText className="w-5 h-5" />
+                        <span>Forms</span>
                     </button>
                     )}
 

@@ -340,6 +340,29 @@ column mapping the tools execute, and `verify:migration-map` holds it against th
   `document.body` via `utils/viewportLayer` (fixed positioning against a transformed ancestor was
   clipping a calendar popup), and the dismiss animation is sequenced in `utils/motion` because CSS
   cannot animate an element the parent is about to unmount.
+- **Printing & PDF forms.** Print sheets are pure builders (`utils/printSchedule`, `utils/printTraining`)
+  rendered by a `Printable*.jsx` portal that mounts into `<body>`, calls `window.print()` and unmounts
+  itself. Official *fillable* PDFs take a second path: `utils/formValues` turns a **declarative** field map
+  (`{ 'Hazmat Hours': { from: 'totals.is_hazmat' } }` — data, never `eval`) into values, `utils/formFill`
+  fills a template with **pdf-lib** (`getFields()` lists a template's own field names to be mapped;
+  `flatten()` bakes the values in), and `utils/trainingSummary` totals a member's trainings by category to
+  feed it. pdf-lib is `await import()`-ed only when a form is generated, so the ~1 MB engine never enters
+  the main bundle; the summary's arithmetic is a **deliberate second copy** of the server reducer, pinned
+  to it by `verify:forms` (which builds its own template in memory — no binary fixture). Blanks are
+  **bundled** in `public/forms/` rather than hosted (the site is public and they are public state forms),
+  so generating works offline.
+
+  **Three pluggable parts, so a new sheet is data rather than a pipeline:** a *blank*
+  (`utils/formCatalog` — a bundled file, by id), a *source* (`utils/formDefinition`'s `SOURCE_KINDS` — how the
+  station's rows become the flat context a map reads, e.g. `totals.is_hazmat`), and a *map* (which PDF field
+  reads which value). `utils/generateForm` joins them — validate → build context → resolve → fill bytes — and
+  takes the blank **as a function**, so the app passes a bundled fetch and a harness passes a template it built
+  in memory: the engine never knows what a PDF is. The definitions live in `form_templates`, edited under
+  **Reports → Forms**: written straight to Firestore under `can_configure_forms` (no callable — the client
+  validates and expands the audience), read by their audience through the same materialized `audience_keys`
+  announcements use, and mapped on a screen that **lists the chosen blank's own fields** so nobody types a
+  field name. Running a form from a screen — and a record-side "Generate form" — comes next; nothing is
+  wired to a real blank until one is registered in `utils/formCatalog`.
 
 ## Deployment (GitHub Pages)
 

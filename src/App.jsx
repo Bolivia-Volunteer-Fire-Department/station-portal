@@ -78,6 +78,7 @@ import {
   ScheduleCalendar,
   RosterModule,
   ReportsModule,
+  FormsModule,
   TrainingModule,
   UserSettings,
   prefetchDeferredModules,
@@ -361,6 +362,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   // permissions both require this one (see utils/permissions).
   const canViewDocuments = can('can_view_documents');
   const canViewReports = can('can_view_reports');
+  const canGenerateForms = can('can_generate_forms');
 
   // Modules that render a seven-column calendar get the wider container.
   //
@@ -419,6 +421,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
         canViewDocuments,
         canSignTrainings,
         canViewReports,
+        canGenerateForms,
         canAdminister,
         canViewRoster,
       }).join(','),
@@ -429,6 +432,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
       canViewDocuments,
       canSignTrainings,
       canViewReports,
+      canGenerateForms,
       canAdminister,
       canViewRoster,
     ]
@@ -1686,6 +1690,8 @@ const getLoadingMessage = () => {
                     ? canViewRoster
                     : activeTab === 'reports'
                       ? canViewReports
+                      : activeTab === 'forms'
+                        ? canGenerateForms
                   : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
@@ -1699,6 +1705,7 @@ const getLoadingMessage = () => {
     canViewDocuments,
     canViewRoster,
     canViewReports,
+    canGenerateForms,
   ]);
 
   const handleLogout = () => {
@@ -2271,6 +2278,7 @@ const getLoadingMessage = () => {
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
             canViewReports={canViewReports}
+            canGenerateForms={canGenerateForms}
             canViewRoster={canViewRoster}
             ranks={ranks}
           />
@@ -2302,6 +2310,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'training' && 'Training'}
                 {activeTab === 'certifications' && 'Certifications'}
                 {activeTab === 'reports' && 'Reports'}
+                {activeTab === 'forms' && 'Forms'}
                 {activeTab === 'help' && 'Help'}
                 {activeTab === 'settings' && 'My Settings'}
                 {activeTab === 'admin' && 'Administration'}
@@ -2474,6 +2483,15 @@ const getLoadingMessage = () => {
             )}
 
             {activeTab === 'reports' && canViewReports && <ReportsModule departmentName={departmentName} members={roster.length ? roster : users} />}
+
+            {activeTab === 'forms' && canGenerateForms && (
+              <FormsModule
+                departmentName={departmentName}
+                currentUser={currentUser}
+                users={roster.length ? roster : users}
+                canPickMembers={can('can_administer_trainings')}
+              />
+            )}
 
             {activeTab === 'settings' && (
               <UserSettings

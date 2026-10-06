@@ -16,6 +16,7 @@ export const PAGE_BAR_LABELS = {
   documents: 'Documents',
   certifications: 'Certifications',
   reports: 'Reports',
+  forms: 'Forms',
   help: 'Help',
   settings: 'My Settings',
   admin: 'Administration',
@@ -46,6 +47,7 @@ export const ADMIN_BAR_LABELS = {
   documents: 'Documents',
   system: 'Settings',
   'reports-config': 'Reports',
+  'forms-config': 'Forms',
   notifications: 'Notifications',
   // The audit log's tab id is `system-log`, unchanged from when its rows lived in a collection: an id-based lookup has
   // to match the navigation exactly, and a test asserts every id in ADMIN_NAV_CATEGORIES has an entry here. The LABEL is

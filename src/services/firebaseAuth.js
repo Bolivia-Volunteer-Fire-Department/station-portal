@@ -96,6 +96,9 @@ export const signInAsMember = async (username, password) => {
       rank_id: row.rank_id || '',
       user_name: secret.username || String(username || ''),
       status: secret.status || 'active',
+      // The FEMA student id, read with the rest of the private half rather than at sign-in for itself: this document is
+      // ALREADY fetched here, so the field costs nothing, and My Settings is the one place that draws it.
+      fema_student_id: String(secret.fema_student_id || ''),
       // EITHER COPY IS ENOUGH TO ASK, and that is the whole point of asking both. See `passwordChangeRequired` for why
       // the rule is an OR and why it fails closed: the column is fetched by a read that is allowed to fail, and `false`
       // is the answer that lets somebody past a forced password change.

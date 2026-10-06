@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3 } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -22,6 +22,7 @@ import AdminAnnouncementsTab from './AdminAnnouncementsTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
 import AdminReportsConfigurationTab from './AdminReportsConfigurationTab';
+import AdminFormsTab from './AdminFormsTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
 import { fetchAdminDocumentVerificationCount } from '../../services/api';
 import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
@@ -95,6 +96,7 @@ export const ADMIN_NAV_CATEGORIES = [
     icon: BarChart3,
     items: [
       { id: 'reports-config', label: 'Reports Configuration', icon: BarChart3 },
+      { id: 'forms-config', label: 'Forms', icon: FileText },
     ],
   },
   {
@@ -560,6 +562,10 @@ export default function AdminPanel({
 
       {activeSubTab === 'reports-config' && (
         <AdminReportsConfigurationTab roles={roles} ranks={ranks} />
+      )}
+
+      {activeSubTab === 'forms-config' && (
+        <AdminFormsTab roles={roles} ranks={ranks} />
       )}
 
       {activeSubTab === 'notifications' && (

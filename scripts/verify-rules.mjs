@@ -95,9 +95,14 @@ const main = async () => {
   await read('but not another member account record', false, doc(db, 'users_private', 'u1'));
   // Nobody writes this collection from a client, not even their own row: creating an account and changing a
   // username or a status goes through a callable function, so a browser cannot un-suspend itself.
+  //
+  // THE VALUES HERE ARE DELIBERATELY NOT THE STORED ONES. This used to write back exactly what the seed holds, which was
+  // a no-op - and a no-op passes an `affectedKeys().hasOnly(...)` rule vacuously, so it stopped proving anything the
+  // moment the FEMA student id became the one key a member MAY write. A changed status is the fact that actually has to
+  // be refused, so that is what it tries.
   await write('writes its own account record', false, doc(db, 'users_private', 'u2'), {
     username: 'bo',
-    status: 'active',
+    status: 'suspended',
     created_at: '2026-01-01 08:00:00',
   });
   await read('reads the private half of an assignment', false, doc(db, 'assignment_private', 'a1'));
@@ -674,6 +679,80 @@ const main = async () => {
   await asUser('u1');
   await setDoc(doc(db, 'roles', 'r1'), originalRole);
   await setDoc(doc(db, 'roles', 'r2'), { can_edit_users: false }, { merge: true });
+
+  // --- form definitions: written by the permission, READ BY THE AUDIENCE -------------------------
+  //
+  // A definition carries its audience as the materialized `audience_keys`, exactly as an announcement does, so a member's
+  // query (array-contains-any over their own keys) is the SAME question the rule answers with hasAny - which is the only
+  // reason Firestore can prove it. Asserted as a PAIR for that reason: a correct rule beside a query it cannot prove
+  // reads as a refusal, and that is the failure this file exists for.
+  console.log('\n--- form definitions ---');
+  await asUser('u1'); // the administrator: `is_admin` implies every permission
+  await setDoc(doc(db, 'form_templates', 'form-open'), {
+    name: 'State training record',
+    source: 'training_summary',
+    fields: { 'Member Name': { from: 'member.name', as: 'text' } },
+    audience_keys: ['role:r2'],
+    enabled: true,
+  });
+  await setDoc(doc(db, 'form_templates', 'form-closed'), {
+    name: 'Officers only',
+    source: 'training_summary',
+    fields: { 'Member Name': { from: 'member.name', as: 'text' } },
+    audience_keys: ['role:r1'],
+    enabled: true,
+  });
+  await read('an officer reads a form definition', true, doc(db, 'form_templates', 'form-closed'));
+  const allForms = await getDocs(collection(db, 'form_templates'));
+  checkIs('and reads every one of them, which is what the config tab does', allForms.size >= 2, `${allForms.size} form(s)`);
+
+  await asUser('u2'); // the firefighter, whose role is form-open's audience
+  await read('a member reads a form aimed at their role', true, doc(db, 'form_templates', 'form-open'));
+  await read('but not one aimed at another role', false, doc(db, 'form_templates', 'form-closed'));
+  await write('and does not write one', false, doc(db, 'form_templates', 'form-sneaky'), {
+    name: 'Sneaky',
+    source: 'training_summary',
+    fields: { 'Member Name': { from: 'member.name' } },
+    audience_keys: ['role:r2'],
+    enabled: true,
+  });
+  const myForms = await getDocs(
+    query(
+      collection(db, 'form_templates'),
+      where('audience_keys', 'array-contains-any', ['*', 'user:u2', 'role:r2', 'rank:k2'])
+    )
+  );
+  checkIs('and asks for its own forms as ONE provable query', myForms.size === 1, `${myForms.size} form(s)`);
+
+  // --- the FEMA student id: the ONE key a browser may write on the private half -----------------
+  //
+  // The private half is otherwise written by nobody, so this branch has to be proved narrow rather than trusted: the
+  // member's own id, an officer's correction of anybody's, and NOTHING ELSE on that document. The status is the one that
+  // matters - a write that carried a status alongside the id would be a browser unsuspending itself.
+  console.log('\n--- the FEMA student id ---');
+  const writeMerged = async (label, allowed, path, data) => {
+    try {
+      await setDoc(doc(db, path), data, { merge: true });
+      checkIs(label, allowed, allowed ? '' : 'the write was allowed');
+    } catch (error) {
+      checkIs(label, !allowed && error.code === 'permission-denied', `threw ${error.code}`);
+    }
+  };
+  await asUser('u2'); // the firefighter, editing their own record
+  await writeMerged('a member sets their OWN FEMA student id', true, 'users_private/u2', { fema_student_id: '1234567' });
+  await writeMerged('but not another member’s', false, 'users_private/u1', { fema_student_id: '7654321' });
+  await writeMerged('and cannot smuggle a status change beside it', false, 'users_private/u2', {
+    fema_student_id: '1234567',
+    status: 'suspended',
+  });
+  await asUser('u1'); // the administrator, correcting somebody else's
+  await writeMerged('an officer corrects a member’s FEMA student id', true, 'users_private/u2', { fema_student_id: '2222222' });
+  await asUser('u2');
+  checkIs(
+    'and the correction is what is on file',
+    (await getDoc(doc(db, 'users_private', 'u2'))).data().fema_student_id,
+    '2222222'
+  );
 
   checkIs('every case ran', cases >= 27, `only ${cases} cases: a section has stopped running`);
 };

@@ -201,6 +201,32 @@ export const saveReportConfiguration = (report) => routeWrite('SAVE_REPORT_CONFI
 export const deleteReportConfiguration = (reportId) =>
   routeWrite('DELETE_REPORT_CONFIG', { reportId: String(reportId || '') });
 
+// Form definitions: the ones this caller may generate (audience-filtered), and - for the config tab - every one of them.
+export const fetchFormTemplates = async () => {
+  const response = await routeRead('GET_FORM_TEMPLATES');
+  if (!response?.success) throw await notAnswered('GET_FORM_TEMPLATES');
+  return Array.isArray(response.forms) ? response.forms : [];
+};
+
+export const fetchAdminFormTemplates = async () => {
+  const response = await routeRead('ADMIN_GET_FORM_TEMPLATES');
+  if (!response?.success) throw await notAnswered('ADMIN_GET_FORM_TEMPLATES');
+  return Array.isArray(response.forms) ? response.forms : [];
+};
+
+export const saveFormTemplate = (request) => routeWrite('SAVE_FORM_TEMPLATE', request || {});
+export const deleteFormTemplate = (formId) => routeWrite('DELETE_FORM_TEMPLATE', { id: String(formId || '') });
+
+// One member's training - the catalogue and their signatures - which is what a training-based form is filled from.
+export const fetchMemberTraining = async (userId) => {
+  const response = await routeRead('GET_MEMBER_TRAINING', { userId: String(userId || '') });
+  if (!response?.success) throw await notAnswered('GET_MEMBER_TRAINING');
+  return {
+    trainings: Array.isArray(response.trainings) ? response.trainings : [],
+    signatures: Array.isArray(response.signatures) ? response.signatures : [],
+  };
+};
+
 export const fetchAdminSections = async (names) => {
   const wanted = (Array.isArray(names) ? names : [names]).filter(Boolean);
   const needsCertifications = wanted.includes('certificationRecords');
@@ -369,6 +395,13 @@ export const adminDeleteCertification = async (id, token) =>
 // The notification preferences travel INCLUDING their absences, which is the part that matters: a field the form did not
 // send must not arrive as `false`, because "not stated" means "inherit the station default" - and writing false is how a
 // member ends up silently unsubscribed by a form that never asked about it.
+// The member's FEMA student id - their own, or, for a user administrator, anybody's (the rules decide which).
+//
+// Its OWN call rather than riding along with UPDATE_USER_SETTINGS, because it lives on the PRIVATE half of an account
+// rather than with the preferences: that is what lets the rules keep every other key of that document callable-only.
+export const saveFemaStudentId = (value, userId = '') =>
+  routeWrite('SAVE_FEMA_STUDENT_ID', { value: String(value ?? ''), userId: String(userId || '') });
+
 export const saveUserSettings = async (updatedSettings, token) =>
   dispatchRequest({
     action: 'UPDATE_USER_SETTINGS',

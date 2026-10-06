@@ -71,3 +71,10 @@ Misbehaving? Work through the checks in order:
 
 - **A preference did not stick.** The change is saved to the server; a failure shows a message. If you see no message and the setting reverts, tell an administrator.
 - **Notifications never arrive, but the card says registered.** Check your operating system's notification settings for the browser — many platforms let a browser be silenced even when the site is allowed.
+
+## FEMA Student ID
+
+Your **FEMA Student ID** is the *Student Identification* number on your FEMA training transcript. It has its own card on this page, with its own **Save**, because it is kept separately from your preferences — type it and save; clearing the box and saving removes it.
+
+> [!NOTE]
+> It is **not shown to other members**. Only you and the administrators who manage accounts can see it.

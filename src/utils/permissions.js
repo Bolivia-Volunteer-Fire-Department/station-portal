@@ -165,6 +165,12 @@ export const ADMIN_PERMISSIONS = [
     description: 'Create and edit report definitions and choose which roles and ranks may use each report. Requires "View reports".',
     requires: 'can_view_reports',
   },
+  {
+    key: 'can_configure_forms',
+    tab: 'forms-config',
+    label: 'Configure forms',
+    description: 'Create and edit printable form definitions: which blank PDF a form fills, which data it draws from, and where each value goes. Choose which roles and ranks may generate each one.',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -260,6 +266,14 @@ export const MEMBER_PERMISSIONS = [
     description:
       'Enter and change an assessment score for another member, with the date it was taken, from Documents. Members can read their own score but can never change it, including their own - this permission is the only way any score is written. Requires "View documents".',
     requires: 'can_view_documents',
+  },
+  {
+    // Generating a printable form. WHO may generate WHICH form is decided by each definition's own AUDIENCE, not by a
+    // permission - a permission cannot say "this rank, not that one", and every form needs a different answer. So this
+    // is one flag for the module, and the audience does the rest.
+    key: 'can_generate_forms',
+    label: 'Generate forms',
+    description: 'Open Forms and generate the printable PDFs shared with their role or rank.',
   },
 ];
 

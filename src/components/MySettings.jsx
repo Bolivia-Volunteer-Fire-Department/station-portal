@@ -14,6 +14,7 @@ import {
   currentDeviceToken,
   deviceLabelFromUserAgent,
 } from '../utils/pushNotifications';
+import { saveFemaStudentId } from '../services/api';
 
 function isTruthySetting(value) {
   return value === true || String(value).trim().toUpperCase() === 'TRUE';
@@ -334,6 +335,8 @@ export default function UserSettings({
       />
 
       <PasswordChangeCard onPasswordChange={onPasswordChange} />
+
+      <FemaStudentIdCard currentUser={currentUser} />
 
       <AccessCard currentRole={currentRole} />
     </div>
@@ -1037,6 +1040,85 @@ function AccessCard({ currentRole }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// The member's FEMA Student Identification number.
+//
+// ITS OWN CARD AND ITS OWN SAVE, because it is stored differently from everything else on this screen: the preferences
+// go to the member's settings document, this goes to the PRIVATE half of their account (see firestore.rules - it is the
+// one key a browser may write there). Folding it into the settings form would save it through a call that cannot reach
+// it, which is exactly the "checkbox that quietly did nothing" this file has been bitten by before.
+//
+// It is not shown to other members: the private half is readable by the member and by officers with the user permission,
+// and by nobody else.
+function FemaStudentIdCard({ currentUser }) {
+  const [value, setValue] = useState(currentUser?.fema_student_id || '');
+  const [saving, setSaving] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
+
+  const save = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setStatusMessage(null);
+    try {
+      // The row is the session's own unless a user id is passed, so a member saves theirs and nobody else's.
+      const result = await saveFemaStudentId(value);
+      if (!result?.success) throw new Error(result?.message || 'Could not save your FEMA Student ID.');
+      setStatusMessage({ type: 'success', text: 'Saved.' });
+    } catch (failure) {
+      setStatusMessage({ type: 'error', text: failure.message || 'Could not save your FEMA Student ID.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">FEMA Student ID</h2>
+      </div>
+      <form onSubmit={save} className="space-y-4 p-6">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Your FEMA Student Identification number, from FEMA’s training system. It is kept on your record and is not shown
+          to other members.
+        </p>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300">FEMA Student ID</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={40}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder="e.g. 1234567"
+            className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          />
+        </label>
+        {statusMessage && (
+          <p
+            className={`text-xs font-medium ${
+              statusMessage.type === 'success'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-red-600 dark:text-red-400'
+            }`}
+          >
+            {statusMessage.text}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            <span>{saving ? 'Saving...' : 'Save'}</span>
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

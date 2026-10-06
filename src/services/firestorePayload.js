@@ -378,6 +378,9 @@ const ADMIN_SECTIONS = {
         ...user,
         user_name: (privateById[user.id] || {}).username || '',
         status: (privateById[user.id] || {}).status || '',
+        // The FEMA student id rides with the other private fields - this document is already joined for the username and
+        // the status, so the field costs no extra read and the Users tab can show and edit it.
+        fema_student_id: (privateById[user.id] || {}).fema_student_id || '',
         // The password-change flag: the edit form has a checkbox AND a "Password change due" badge for it, so it
         // is read here with the other two private fields rather than at sign-in. A member with no private row yet
         // is treated as not waiting for a change, the same default the username join uses for a missing row.

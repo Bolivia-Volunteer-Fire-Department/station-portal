@@ -14,6 +14,7 @@ import { firebaseFunctions, firestore } from './firebase.js';
 import { rowsFor, rowsOf } from './firestorePayload.js';
 // The badge rule, shared with the repair script that rebuilds the index (scripts/normalize-certification-badges.mjs).
 import { badgeForRecord, badgeIndexFor, badgeToday } from '../utils/certificationBadges.js';
+import { normalizeFormDefinition } from '../utils/formDefinition.js';
 // The SAME visibility test the readers apply, imported rather than copied: this is what decides whether a document
 // exists as far as a member is concerned, and two implementations of that would drift.
 import { visibleDocumentFor } from './firestoreReads.js';
@@ -941,6 +942,57 @@ export const removeTrainingSignature = async ({ id }) => {
   if (!wanted) throw new Error('A signature id is required.');
   await deleteDoc(doc(firestore(), 'training_signatures', wanted));
   return { removed: 1 };
+};
+
+// A member's FEMA student id: the ONE key on the private half a browser may write.
+//
+// The rules are what decide who - the member on their own row, or an officer with `can_edit_users` on anybody's - and
+// they allow exactly this field, so this does not repeat the permission where it could drift. MERGED rather than
+// replaced, so writing an id cannot disturb the username, the status or the password flag sitting beside it.
+export const saveFemaStudentId = async ({ userId, value } = {}) => {
+  const target = String(userId || '').trim();
+  if (!target) throw new Error('Which member is this FEMA student id for?');
+  const clean = String(value ?? '').trim();
+  await setDoc(doc(firestore(), 'users_private', target), { fema_student_id: clean }, { merge: true });
+  return { userId: target, fema_student_id: clean };
+};
+
+// A form definition: which blank, which source, and where each value goes.
+//
+// WRITTEN FROM THE BROWSER, and the rules are what decide whether it may be (`can_configure_forms`) - this does not
+// repeat that check where it could drift. What it does do is NORMALISE, through the same pure function the admin screen
+// uses, so a definition that reaches Firestore is one `utils/formDefinition` has already accepted - and the audience is
+// materialized on the way in, exactly as an announcement's is, because that is the column the reader queries and the
+// rule proves.
+//
+// `created_by` is stamped once and never overwritten, so "who made this form" survives an edit by somebody else.
+export const saveFormTemplate = async ({ id, definition, authorId = '' } = {}) => {
+  const normalized = normalizeFormDefinition(definition || {});
+  const documentId = String(id || '').trim() || doc(collection(firestore(), 'form_templates')).id;
+  const reference = doc(firestore(), 'form_templates', documentId);
+  const previous = await getDoc(reference);
+  const createdBy = previous.exists() ? String(previous.get('created_by') || '') : String(authorId || '');
+  await setDoc(
+    reference,
+    {
+      ...normalized,
+      created_by: createdBy,
+      created_at: previous.exists() ? String(previous.get('created_at') || '') || stationTimestamp() : stationTimestamp(),
+      updated_at: stationTimestamp(),
+      updated_by: String(authorId || ''),
+    },
+    { merge: true }
+  );
+  return { id: documentId };
+};
+
+// A definition gone. The rules decide who may (the same permission that let them write it); nothing else references a
+// definition by id, so there is no dangling row to clean up - a generated sheet already lives in somebody's hand.
+export const deleteFormTemplate = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which form?');
+  await deleteDoc(doc(firestore(), 'form_templates', wanted));
+  return { id: wanted };
 };
 
 // The officer's clock management: correcting a member's entry, or removing one.

@@ -189,7 +189,20 @@ service cloud.firestore {
     // Admin SDK bypasses this file - that is the point.
     match /users_private/{userId} {
       allow read: if signedIn() && (uid() == userId || permission('can_edit_users'));
-      allow write: if false;
+      // THE PRIVATE HALF IS OTHERWISE WRITTEN BY NOBODY, and it stays that way for the username, the status and the
+      // password-change flag - which is the whole point of this collection being write-denied: a browser must not be
+      // able to unsuspend itself by rewriting its own row.
+      //
+      // A FEMA STUDENT ID IS THE ONE EXCEPTION, and it is narrow rather than a hole. A member keeps their own up to date
+      // and an officer with the user permission may correct anybody's, but `affectedKeys().hasOnly(...)` means BOTH of
+      // them can change exactly that one key and nothing else: a crafted request cannot move a status or a username
+      // through this branch, so every other fact still requires the callable.
+      allow update: if signedIn()
+        && (uid() == userId || permission('can_edit_users'))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fema_student_id'])
+        && request.resource.data.get('fema_student_id', '') is string
+        && request.resource.data.get('fema_student_id', '').size() <= 40;
+      allow create, delete: if false;
     }
 
     // The permission table. Every client reads it to shape its navigation; only a role editor writes it. A role
@@ -425,6 +438,29 @@ service cloud.firestore {
             && resource.data.get('enabled', false) == true
             && resource.data.get('audience_keys', []).hasAny(viewerKeys())));
       allow write: if false;
+    }
+
+    // A form definition: which blank PDF, which data feeds it, and which value goes in which field.
+    //
+    // WRITTEN DIRECTLY, unlike a report definition: there is no server-side work to do that the client's
+    // `normalizeFormDefinition` does not already do, no audience to expand that `formAudienceKeys` does not already
+    // build, and no audit row a definition needs. So the rule is the permission, and the writer is the browser.
+    //
+    // READ BY ITS AUDIENCE, through the same materialized `audience_keys` list announcements use - so the member's query
+    // (array-contains-any over their own keys) is the SAME question the rule answers with hasAny, and Firestore can
+    // prove it. `enabled` is deliberately NOT checked here: a condition the query does not filter on would make the
+    // query unprovable, so a disabled form is filtered by the reader instead (see firestoreReads#GET_FORM_TEMPLATES).
+    match /form_templates/{formId} {
+      allow read: if signedIn()
+        && (permission('can_configure_forms')
+          || (resource != null && resource.data.get('audience_keys', []).hasAny(viewerKeys())));
+      allow create, update: if permission('can_configure_forms')
+        && request.resource.data.get('name', '') != ''
+        && request.resource.data.get('fields', {}).size() > 0
+        // A form aims at someone: an empty audience would be readable by nobody, which is a definition to fix rather
+        // than to save.
+        && request.resource.data.get('audience_keys', []).size() > 0;
+      allow delete: if permission('can_configure_forms');
     }
 
     // The training list is everyone's; the signatures differ by permission. The permission is a fact about the

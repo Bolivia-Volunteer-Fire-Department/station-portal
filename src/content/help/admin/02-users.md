@@ -50,3 +50,9 @@ Setting **Status** to *Inactive* is usually better than deleting. An inactive me
 
 > [!CAUTION]
 > Only delete users that have no information related to them, or are duplicated.
+
+## FEMA Student ID
+
+Each member has a **FEMA Student ID** field on their editor — the *Student Identification* number from FEMA's training system. It is offered when adding a member too, so it can be recorded as they join.
+
+It is kept on the member's **private record** rather than the roster: a roster is readable by every member, and this is a personal number, so only the member themselves and the officers who manage accounts can see it. Members can keep their own up to date from **My Settings → FEMA Student ID**.
