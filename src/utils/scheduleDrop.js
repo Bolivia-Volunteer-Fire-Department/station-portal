@@ -35,7 +35,7 @@ export const planSwapHover = ({
 // (leaving the other shift vacant), "swap them", or a slip - and none of those should happen on a gesture nobody
 // has been taught. Holding is a second, deliberate signal, and the blinking pill is what makes it discoverable.
 // ── Hold-to-swap ─────────────────────────────────────────────────────────────
-export const SWAP_DWELL_MS = 1500;
+export const SWAP_DWELL_MS = 750;
 
 // How long the exchange (and its reversal) is animated for. The stylesheet's swapPop keyframe is the same length;
 // the verifier checks the two agree, because a JS timer that outlives its animation leaves a class stuck on.

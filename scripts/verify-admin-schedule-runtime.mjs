@@ -624,6 +624,45 @@ const dayCells = (scope) =>
   setViewportWidth(1024);
 }
 
+console.log('\n--- day and overnight shift blocks ---');
+{
+  setViewportWidth(375);
+  const date = new Date(THIS_YEAR, THIS_MONTH, TODAY_DAY);
+  const dayOfWeek = WEEKDAYS[date.getDay()];
+  const templates = [
+    { id: 'day-a', day_of_week: dayOfWeek, start_time: '08:00', end_time: '17:00', assignment_id: 'a1', nickname: 'Day A' },
+    { id: 'day-b', day_of_week: dayOfWeek, start_time: '08:00', end_time: '17:00', assignment_id: 'a1', nickname: 'Day B' },
+    { id: 'night-a', day_of_week: dayOfWeek, start_time: '17:00', end_time: '08:00', assignment_id: 'a1', nickname: 'Night A' },
+    { id: 'night-b', day_of_week: dayOfWeek, start_time: '17:00', end_time: '08:00', assignment_id: 'a1', nickname: 'Night B' },
+  ];
+  const { read } = makeReader({});
+  const { container } = render(
+    React.createElement(
+      AdminScheduleManagementTab,
+      boardProps({
+        onNeedSchedule: read,
+        scheduleTemplates: templates,
+      })
+    )
+  );
+  await flush();
+
+  const dividers = [...container.querySelectorAll('[aria-hidden="true"].h-px')];
+  check('two assignments per window produce one divider', dividers.length === 1, `${dividers.length} divider(s)`);
+  const dayCellChildren = dividers[0] ? [...dividers[0].parentElement.children] : [];
+  const dividerIndex = dividers[0] ? dayCellChildren.indexOf(dividers[0]) : -1;
+  check(
+    'the divider separates the day block from the overnight block',
+    dividerIndex > 0 &&
+      dayCellChildren.slice(0, dividerIndex).map((child) => child.textContent).join(' ').includes('Day B') &&
+      dayCellChildren.slice(dividerIndex + 1).map((child) => child.textContent).join(' ').includes('Night A'),
+    dayCellChildren.map((child) => child.textContent).join(' | ')
+  );
+
+  cleanup();
+  setViewportWidth(1024);
+}
+
 // ---------------------------------------------------------------------------
 // 6b. A day nobody is on: the vacancy's own shape, and the facts said once
 // ---------------------------------------------------------------------------

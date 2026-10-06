@@ -22,7 +22,7 @@ import MonthPickerModal from '../MonthPickerModal';
 // The same picker, as a DIALOG, in the day view. One component, two frames - see the file for why the split matters.
 import ScheduleAssignmentModal from '../ScheduleAssignmentModal';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
-import { mergeDayItems } from '../../utils/dayOrder';
+import { mergeDayItems, separateShiftTimeBlocks } from '../../utils/dayOrder';
 // THE SAME SLIDE the member's calendar uses, so a change of view on this screen is not a different experience from one
 // on the other. See utils/motion for the two phases and why the swap happens off the edge.
 import { useMonthSlide } from '../../utils/motion';
@@ -637,6 +637,10 @@ export default function AdminScheduleManagementTab({
     const template = entryTemplate(entry);
     return timeToMinutes(template ? template.start_time : entry?.start_time);
   };
+  const entryEndMinute = (entry) => {
+    const template = entryTemplate(entry);
+    return timeToMinutes(template ? template.end_time : entry?.end_time);
+  };
 
   // WHETHER THE MEMBER MARKED ANYTHING AVAILABLE THAT DAY - and that is the honest question this board can ask.
   //
@@ -725,6 +729,7 @@ export default function AdminScheduleManagementTab({
           dateKey,
           template: t,
           startMin: timeToMinutes(t.start_time) ?? 0,
+          endMin: timeToMinutes(t.end_time),
           // The two keys the day's order is decided by, attached here so the slot carries its own ordering rather than
           // depending on where it sat in the payload: the shift's required rank (from its ASSIGNMENT, not from whoever
           // fills it) and a name to break a tie that the rank could not.
@@ -2588,8 +2593,15 @@ export default function AdminScheduleManagementTab({
             // for a shift whose template AND times are both gone.
             const dayRows = [
               ...daySlots,
-              ...extraPills.map((entry) => ({ entry, startMin: entryStartMinute(entry) })),
+              ...extraPills.map((entry) => ({
+                entry,
+                startMin: entryStartMinute(entry),
+                endMin: entryEndMinute(entry),
+              })),
             ];
+            const dayItems = separateShiftTimeBlocks(
+              mergeDayItems(dayRows, eventSegmentsByDate.get(dateKey) || [])
+            );
 
             return (
               <div
@@ -2620,7 +2632,7 @@ export default function AdminScheduleManagementTab({
                     utils/dayOrder. Events stay plain divs, so they carry none of the board's selection or drag
                     behavior; only their position changes. */}
 
-                {mergeDayItems(dayRows, eventSegmentsByDate.get(dateKey) || []).map(({ kind, value }) => {
+                {dayItems.map(({ kind, value, separatorBefore }) => {
                   if (kind === 'event') {
                     const segment = value;
                     return (
@@ -2645,33 +2657,37 @@ export default function AdminScheduleManagementTab({
                     // nickname; a custom shift has none, so it shows its own times.
                     const pillTime = shiftTimeLabel(entryTemplate(e), entryTimeRangeOf(e));
                     return (
-                      <div
-                        key={e._key}
-                        draggable={!isOccurred(e)}
-                        // Same reason as the shift pill below: a past event is not draggable but is still clickable.
-                        data-sound="click"
-                        onDragStart={(e2) => handlePillDragStart(e2, e, dateKey)}
-                        onDragEnd={handleDragEndPill}
-                        onClick={(ev) => openEntryPopover(ev, e)}
-                        // A custom shift accepts the drag so it can say why it will not take it: it is not a board
-                        // slot, so there is no slot for the moved shift to adopt.
-                        onDragOver={(e2) => e2.preventDefault()}
-                        onDrop={(e2) => handlePillDrop(e2, e)}
-                        title={`${occupantLabel(e, entryTemplate(e))} · ${assignmentById(e.assignment_id)?.description || 'No assignment'}${entryTimeRangeOf(e) ? ` · ${entryTimeRangeOf(e)}` : ''}${isOccurred(e) ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'}`}
-                        className={`${pillShapeClass(vacant, roomy)} cursor-grab active:cursor-grabbing ${
-                          isOccurred(e) ? 'opacity-40 saturate-50' : ''
-                        } ${selectedKey === e._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''}`}
-                        style={vacant ? undefined : { backgroundColor: assignmentColor(e.assignment_id, assignments) }}
-                      >
-                        {pillBody({
-                          label: occupantLabel(e, entryTemplate(e)),
-                          icon: assignmentIcon(e.assignment_id),
-                          memberId: e.user_id,
-                          user: occupantUser(e),
-                          time: pillTime,
-                          roomy,
-                        })}
-                      </div>
+                      <React.Fragment key={`custom-${e._key}`}>
+                        {separatorBefore && (
+                          <div aria-hidden="true" className={`mx-1 h-px shrink-0 bg-slate-300 dark:bg-slate-600 ${roomy ? 'my-1.5' : 'my-0.5'}`} />
+                        )}
+                        <div
+                          draggable={!isOccurred(e)}
+                          // Same reason as the shift pill below: a past event is not draggable but is still clickable.
+                          data-sound="click"
+                          onDragStart={(e2) => handlePillDragStart(e2, e, dateKey)}
+                          onDragEnd={handleDragEndPill}
+                          onClick={(ev) => openEntryPopover(ev, e)}
+                          // A custom shift accepts the drag so it can say why it will not take it: it is not a board
+                          // slot, so there is no slot for the moved shift to adopt.
+                          onDragOver={(e2) => e2.preventDefault()}
+                          onDrop={(e2) => handlePillDrop(e2, e)}
+                          title={`${occupantLabel(e, entryTemplate(e))} · ${assignmentById(e.assignment_id)?.description || 'No assignment'}${entryTimeRangeOf(e) ? ` · ${entryTimeRangeOf(e)}` : ''}${isOccurred(e) ? ' (past — locked)' : vacant ? ' — click to assign a member' : ' — click to change member'}`}
+                          className={`${pillShapeClass(vacant, roomy)} cursor-grab active:cursor-grabbing ${
+                            isOccurred(e) ? 'opacity-40 saturate-50' : ''
+                          } ${selectedKey === e._key ? 'ring-2 ring-slate-900 dark:ring-white ring-offset-1 ring-offset-transparent' : ''}`}
+                          style={vacant ? undefined : { backgroundColor: assignmentColor(e.assignment_id, assignments) }}
+                        >
+                          {pillBody({
+                            label: occupantLabel(e, entryTemplate(e)),
+                            icon: assignmentIcon(e.assignment_id),
+                            memberId: e.user_id,
+                            user: occupantUser(e),
+                            time: pillTime,
+                            roomy,
+                          })}
+                        </div>
+                      </React.Fragment>
                     );
                   }
 
@@ -2695,8 +2711,11 @@ export default function AdminScheduleManagementTab({
                     // spells out the window.
                     const pillTime = shiftTimeLabel(slot.template, timeRangeOf(slot.template));
                     return (
-                      <div
-                        key={slot.slotKey}
+                      <React.Fragment key={`slot-${slot.slotKey}`}>
+                        {separatorBefore && (
+                          <div aria-hidden="true" className={`mx-1 h-px shrink-0 bg-slate-300 dark:bg-slate-600 ${roomy ? 'my-1.5' : 'my-0.5'}`} />
+                        )}
+                        <div
                         draggable={!occurred}
                         // data-sound because a pill is a div, and once a shift has occurred it is no longer
                         // draggable - without this, clicking a locked pill would be the one silent control on the
@@ -2737,15 +2756,19 @@ export default function AdminScheduleManagementTab({
                           time: pillTime,
                           roomy,
                         })}
-                      </div>
+                        </div>
+                      </React.Fragment>
                     );
                   }
 
                   const droppable = !isPast;
                   const slotPending = pendingOffersForSlot(slot);
                   return (
+                    <React.Fragment key={`open-slot-${slot.slotKey}`}>
+                    {separatorBefore && (
+                      <div aria-hidden="true" className={`mx-1 h-px shrink-0 bg-slate-300 dark:bg-slate-600 ${roomy ? 'my-1.5' : 'my-0.5'}`} />
+                    )}
                     <div
-                      key={slot.slotKey}
                       // An empty slot is a control - it opens the assignment popover, or takes a quick-add -
                       // and a div with no role is invisible to the click selector. See utils/uiSounds.
                       data-sound="click"
@@ -2792,6 +2815,7 @@ export default function AdminScheduleManagementTab({
                         roomy,
                       })}
                     </div>
+                    </React.Fragment>
                   );
                 })}
               </div>

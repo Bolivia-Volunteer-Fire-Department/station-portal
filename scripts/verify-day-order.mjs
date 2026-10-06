@@ -19,7 +19,7 @@
  * Run with: npm run verify:day-order
  */
 import { readFileSync } from 'node:fs';
-import { mergeDayItems } from '../src/utils/dayOrder.js';
+import { mergeDayItems, separateShiftTimeBlocks } from '../src/utils/dayOrder.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -179,6 +179,26 @@ check('shifts only', order([shift('A', 540)], []), ['A']);
 check('events only', order([], [event('A', 540)]), ['A']);
 check('a null shift list is safe', mergeDayItems(null, [event('A', 540)]).length, 1);
 check('a null event list is safe', mergeDayItems([shift('A', 540)], null).length, 1);
+const rawTimeBlockItems = [
+  { kind: 'shift', value: { name: 'Day A', startMin: 480, endMin: 1020 } },
+  { kind: 'shift', value: { name: 'Day B', startMin: 480, endMin: 1020 } },
+  { kind: 'event', value: { name: 'Changeover', startMinutes: 1020 } },
+  { kind: 'shift', value: { name: 'Night A', startMin: 1020, endMin: 480 } },
+  { kind: 'shift', value: { name: 'Night B', startMin: 1020, endMin: 480 } },
+];
+const timeBlockItems = separateShiftTimeBlocks(rawTimeBlockItems);
+check(
+  'one separator marks the change from day shifts to overnight shifts',
+  timeBlockItems.map(({ value, separatorBefore }) => [value.name, separatorBefore]),
+  [
+    ['Day A', false],
+    ['Day B', false],
+    ['Changeover', false],
+    ['Night A', true],
+    ['Night B', false],
+  ]
+);
+check('the time-block annotator does not mutate its input', rawTimeBlockItems.every((item) => !('separatorBefore' in item)), true);
 const shiftsIn = [shift('B', 600), shift('A', 540)];
 const eventsIn = [event('Late', 900), event('Early', 300)];
 const shiftsCopy = shiftsIn.slice();
@@ -213,11 +233,14 @@ for (const { file, where } of CALENDARS) {
 // here: a custom row is built with a start minute and fed INTO the merge, and is not drawn a second time.
 const board = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
 checkIs('the board merges the slots AND the rows without a slot together', /mergeDayItems\(dayRows,/.test(board));
+checkIs('the board marks the merged shift time blocks', /separateShiftTimeBlocks\(\s*mergeDayItems\(dayRows,/.test(board));
+checkIs('slots and custom shifts carry end minutes for grouping', /endMin: timeToMinutes\(t\.end_time\)/.test(board) && /endMin: entryEndMinute\(entry\)/.test(board));
+checkIs('a new time block draws a horizontal separator', /separatorBefore && \([\s\S]{0,180}aria-hidden="true"[\s\S]{0,120}h-px/.test(board));
 // Each of those rows is given a start minute, taken from its own template-or-row times. Without it the
 // merge has nothing to order by and every custom shift ties at the end - the symptom, one layer down.
 checkIs(
   'and each row without a slot is given a start minute from its own times',
-  /extraPills\.map\(\(entry\) => \(\{ entry, startMin: entryStartMinute\(entry\) \}\)\)/.test(board),
+  /extraPills\.map\(\(entry\) => \(\{\s*entry,\s*startMin: entryStartMinute\(entry\),\s*endMin: entryEndMinute\(entry\)/.test(board),
   'a custom row reaches the merge with no time to sort by'
 );
 // The second block is GONE, not copied. Leaving it would draw every custom shift twice, which is why this

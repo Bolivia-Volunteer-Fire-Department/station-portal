@@ -223,7 +223,7 @@ checkIs(
 console.log('\n--- holding on a filled slot, to swap ---');
 // The dwell is the second, deliberate signal: long enough that a slip cannot do it, short enough that it is not a
 // chore. See SWAP_DWELL_MS.
-checkIs('the dwell is a deliberate hold, not a slip', SWAP_DWELL_MS >= 1000 && SWAP_DWELL_MS <= 2500, `${SWAP_DWELL_MS}ms`);
+checkIs('the dwell is a deliberate hold, not a slip', SWAP_DWELL_MS >= 500 && SWAP_DWELL_MS <= 1000, `${SWAP_DWELL_MS}ms`);
 
 const mine = row({ _key: 'db-1', user_id: 'u1', _from: '2026-03-10', _to: '2026-03-10' });
 const theirsOnSlot = row({ _key: 'db-7', user_id: 'u2', _from: '2026-03-17', _to: '2026-03-17' });

@@ -68,3 +68,19 @@ export const mergeDayItems = (shifts, events) => {
   while (event < eventRows.length) merged.push({ kind: 'event', value: eventRows[event++] });
   return merged;
 };
+
+// Mark the first shift in each distinct start/end window for a thin visual separator in day cells. Events do not reset
+// the prior shift block: they are context placed among shifts, not a separate time block in the schedule.
+export const separateShiftTimeBlocks = (items) => {
+  let previousWindow = null;
+  return (Array.isArray(items) ? items : []).map((item) => {
+    if (item?.kind !== 'shift') return { ...item, separatorBefore: false };
+
+    const start = minutesOf(item.value?.startMin);
+    const end = minutesOf(item.value?.endMin);
+    const window = start === MISSING || end === MISSING ? null : `${start}:${end}`;
+    const separatorBefore = window !== null && previousWindow !== null && window !== previousWindow;
+    if (window !== null) previousWindow = window;
+    return { ...item, separatorBefore };
+  });
+};
