@@ -19,7 +19,7 @@ import { templateIsActiveOn } from '../utils/scheduleTemplates';
 import { assignmentIsActiveOn } from '../utils/assignmentDates';
 import { parseRankOrder, memberCanFillAssignment } from '../utils/rankEligibility';
 import { compareCrewOrder } from '../utils/crewOrder';
-import { mergeDayItems } from '../utils/dayOrder';
+import { mergeDayItems, separateShiftTimeBlocks } from '../utils/dayOrder';
 // Whether the window the schedule arrived in covers the month on screen: the difference between "this month is empty" and
 // "I have not asked for this month".
 import { windowCoversMonth } from '../utils/scheduleWindow';
@@ -256,6 +256,7 @@ export default function ScheduleCalendar({
         to,
         // Sort key for the day cell - earliest start first.
         startMin: timeToMinutes(template ? template.start_time : row.start_time),
+        endMin: timeToMinutes(template ? template.end_time : row.end_time),
         isMine: userId !== '' && userId === String(currentUser?.id ?? ''),
         name: userId === '' ? OPEN_SHIFT_LABEL : memberName(userId),
         requiredRankOrder: assignmentRankOrder(row.assignment_id),
@@ -366,6 +367,7 @@ export default function ScheduleCalendar({
         from: dateKey,
         to: dateKey,
         startMin: timeToMinutes(template.start_time),
+        endMin: timeToMinutes(template.end_time),
         isMine: false,
         name: OPEN_SHIFT_LABEL,
         requiredRankOrder: assignmentRankOrder(template.assignment_id),
@@ -743,6 +745,9 @@ export default function ScheduleCalendar({
               // dashed outline, so your own days still stand out.
               const hasMine = dayAssignments.some((a) => a.isMine);
               const hasFilled = dayAssignments.some((a) => !a.isOpen);
+              const dayItems = separateShiftTimeBlocks(
+                mergeDayItems(dayAssignments, eventSegmentsByDate.get(key) || [])
+              );
 
               return (
                 <div
@@ -781,7 +786,7 @@ export default function ScheduleCalendar({
                 {/* Chronological, with events placed among the shifts rather than above them all - see
                       utils/dayOrder. Events stay visually distinct (outlined, never offerable): the order decides
                       where a pill sits, not what it looks like. */}
-                  {mergeDayItems(dayAssignments, eventSegmentsByDate.get(key) || []).map(({ kind, value }) => {
+                  {dayItems.map(({ kind, value, separatorBefore }) => {
                     if (kind === 'event') {
                       const segment = value;
                       return (
@@ -874,43 +879,51 @@ export default function ScheduleCalendar({
                       // A filled shift has no action, but it still has facts the tooltip cannot hold - so it
                       // opens the same detail modal as an event.
                       return (
-                        <button
-                          key={a.key}
-                          type="button"
-                          onClick={() => setDetailTarget({ kind: 'shift', item: a })}
-                          className={`${baseClass} block text-left text-white transition hover:brightness-110 ${
-                            showEveryone && a.isMine ? 'ring-1 ring-white/70 dark:ring-red-300' : ''
-                          }`}
-                          style={{ backgroundColor: a.color }}
-                          title={`${describe(a)} — click for details`}
-                        >
-                          {lines}
-                        </button>
+                        <React.Fragment key={a.key}>
+                          {separatorBefore && (
+                            <div aria-hidden="true" className="mx-1 my-1.5 h-px shrink-0 bg-slate-300 dark:bg-slate-600" />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDetailTarget({ kind: 'shift', item: a })}
+                            className={`${baseClass} block text-left text-white transition hover:brightness-110 ${
+                              showEveryone && a.isMine ? 'ring-1 ring-white/70 dark:ring-red-300' : ''
+                            }`}
+                            style={{ backgroundColor: a.color }}
+                            title={`${describe(a)} — click for details`}
+                          >
+                            {lines}
+                          </button>
+                        </React.Fragment>
                       );
                     }
 
                     return (
-                      <button
-                        key={a.key}
-                        type="button"
-                        disabled={offerState !== '' || !canMakeOffers}
-                        onClick={() => openOfferModal(a)}
-                        title={offerTitleFor(a, offerState)}
-                        className={`${baseClass} text-left transition ${
-                          !canMakeOffers
-                            ? 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-default'
-                            : offerState === 'pending'
-                              ? 'border border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 cursor-default'
-                              : offerState === 'declined'
-                                ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-default'
-                                : 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-pointer hover:ring-1 hover:ring-slate-400/70'
-                        }`}
-                        // Open pills carry the assignment color; pending/declined
-                        // pills use their state colors instead.
-                        style={offerState === '' ? { borderColor: a.color, color: a.color } : undefined}
-                      >
-                        {lines}
-                      </button>
+                      <React.Fragment key={a.key}>
+                        {separatorBefore && (
+                          <div aria-hidden="true" className="mx-1 my-1.5 h-px shrink-0 bg-slate-300 dark:bg-slate-600" />
+                        )}
+                        <button
+                          type="button"
+                          disabled={offerState !== '' || !canMakeOffers}
+                          onClick={() => openOfferModal(a)}
+                          title={offerTitleFor(a, offerState)}
+                          className={`${baseClass} text-left transition ${
+                            !canMakeOffers
+                              ? 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-default'
+                              : offerState === 'pending'
+                                ? 'border border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 cursor-default'
+                                : offerState === 'declined'
+                                  ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-default'
+                                  : 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-pointer hover:ring-1 hover:ring-slate-400/70'
+                          }`}
+                          // Open pills carry the assignment color; pending/declined
+                          // pills use their state colors instead.
+                          style={offerState === '' ? { borderColor: a.color, color: a.color } : undefined}
+                        >
+                          {lines}
+                        </button>
+                      </React.Fragment>
                     );
                   })}
                 </div>

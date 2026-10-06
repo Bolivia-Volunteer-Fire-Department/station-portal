@@ -474,6 +474,13 @@ check(
   /mergeDayItems\(dayAssignments, eventSegmentsByDate\.get\(key\)/.test(calendarSource),
   true
 );
+check(
+  'and separates distinct shift time windows without moving events',
+  /separateShiftTimeBlocks\(\s*mergeDayItems\(dayAssignments, eventSegmentsByDate\.get\(key\)/.test(calendarSource) &&
+    /endMin: timeToMinutes\(template \? template\.end_time : row\.end_time\)/.test(calendarSource) &&
+    /endMin: timeToMinutes\(template\.end_time\)/.test(calendarSource),
+  true
+);
 // The saved per-user preference chooses the initial view; this toggle remains a temporary override for the current view.
 check('the events switch exists', /noun="events"/.test(calendarSource), true);
 check(

@@ -250,8 +250,8 @@ checkIs('and the rows without a slot are not drawn in a block of their own', !/\
 console.log('\n--- the wiring checks themselves ---');
 const calendarSource = readFileSync('src/components/ScheduleCalendar.jsx', 'utf8');
 const broken = calendarSource.replace(
-  '{mergeDayItems(dayAssignments,',
-  '{(eventSegmentsByDate.get(key) || []).map(() => null)}{mergeDayItems(dayAssignments,'
+  '{dayItems.map(',
+  '{(eventSegmentsByDate.get(key) || []).map(() => null)}{dayItems.map('
 );
 checkIs('the mutation applied', broken !== calendarSource);
 checkIs('the real source passes', !rendersEventsSeparately(calendarSource));

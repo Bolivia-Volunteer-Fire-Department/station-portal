@@ -657,12 +657,11 @@ export default function AdminScheduleManagementTab({
   // counted as members who "marked no availability", from data that had never been fetched: an accusation made of an
   // empty array. `dayCovered` is the boundary - a claim is only counted where its day was read - and the banner says
   // which month's claims are missing instead of listing names.
+  const hasRosterClaimsScope = Boolean(rosterClaimsFrom && rosterClaimsTo);
   const dayCovered = (dateKey) =>
-    Boolean(dateKey) &&
-    (!rosterClaimsFrom || dateKey >= rosterClaimsFrom) &&
-    (!rosterClaimsTo || dateKey <= rosterClaimsTo);
+    hasRosterClaimsScope && Boolean(dateKey) && dateKey >= rosterClaimsFrom && dateKey <= rosterClaimsTo;
   const claimsMonthLoaded =
-    (!rosterClaimsFrom || monthStartKey >= rosterClaimsFrom) && (!rosterClaimsTo || monthEndKey <= rosterClaimsTo);
+    hasRosterClaimsScope && monthStartKey >= rosterClaimsFrom && monthEndKey <= rosterClaimsTo;
   const claimedDays = useMemo(() => memberDayKeys(rosterAvailability), [rosterAvailability]);
 
   const entryIsAvailable = (entry) => {

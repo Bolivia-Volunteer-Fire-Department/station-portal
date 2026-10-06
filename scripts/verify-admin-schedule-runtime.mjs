@@ -249,10 +249,61 @@ console.log('\n--- the board reads the month on screen ---');
   check('having read the month a bounded number of times', calls.length <= 2, `${calls.length} reads`);
   check(
     'and asked for the crew claims over that month only',
-    rosterCalls.length <= 1 && rosterCalls.every((c) => c.year === THIS_YEAR && c.month === THIS_MONTH),
+    rosterCalls.length === 1 && rosterCalls.every((c) => c.year === THIS_YEAR && c.month === THIS_MONTH),
     JSON.stringify(rosterCalls)
   );
 
+  cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// 1b. An empty claims scope is unknown, not a clear month
+// ---------------------------------------------------------------------------
+console.log('\n--- the availability warning waits for the claims read ---');
+{
+  setViewportWidth(1024);
+  const rowsByMonth = {
+    [`${THIS_YEAR}-${pad(THIS_MONTH + 1)}`]: rowsFor(THIS_YEAR, THIS_MONTH, MEMBERS.thisMonth),
+  };
+  const { read } = makeReader(rowsByMonth);
+  const claimRequests = [];
+  const board = render(
+    React.createElement(
+      AdminScheduleManagementTab,
+      boardProps({
+        onNeedSchedule: read,
+        onRosterMonth: (year, month) => {
+          claimRequests.push({ year, month });
+          return Promise.resolve([]);
+        },
+      })
+    )
+  );
+  await flush();
+  check('the board asks for the visible month claims when scope is empty', claimRequests.length === 1, JSON.stringify(claimRequests));
+  check(
+    'an unscoped empty claim array does not accuse the scheduled member',
+    !text(board.container).includes('scheduled shift on a day the member has marked no availability'),
+    text(board.container).slice(0, 240)
+  );
+
+  board.rerender(
+    React.createElement(
+      AdminScheduleManagementTab,
+      boardProps({
+        onNeedSchedule: read,
+        rosterAvailability: [{ user_id: MEMBERS.thisMonth.id, date_from: dayKey(THIS_YEAR, THIS_MONTH, 15) }],
+        rosterClaimsFrom: monthStart(THIS_YEAR, THIS_MONTH),
+        rosterClaimsTo: monthEnd(THIS_YEAR, THIS_MONTH),
+      })
+    )
+  );
+  await flush();
+  check(
+    'a matching claim in the loaded scope keeps the warning hidden',
+    !text(board.container).includes('scheduled shift on a day the member has marked no availability'),
+    text(board.container).slice(0, 240)
+  );
   cleanup();
 }
 
