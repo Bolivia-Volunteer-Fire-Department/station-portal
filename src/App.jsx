@@ -2380,6 +2380,9 @@ const getLoadingMessage = () => {
                 logs={logs}
                 timeFormat={activeTimeFormat}
                 shifts={shifts}
+                // THE ROUNDING STEP the page reports hours by, from System Settings > Clock Settings - the same setting
+                // the Clocked-vs-scheduled report uses, so the two cannot disagree about an hour that was worked.
+                systemSettings={systemSettings}
                 // WHAT IS LOADED, so the screen can say so and offer to go further back. The page opens on the last twelve
                 // months rather than on a member's whole history - see the note on `logsScope` above.
                 loadedFrom={logsScope ? logsScope.from : ''}

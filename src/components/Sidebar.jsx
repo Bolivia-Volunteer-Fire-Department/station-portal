@@ -80,7 +80,7 @@ export default function Sidebar({
                     </div>
                     <div className="overflow-hidden">
                         <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{currentUser.name}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">Status: {isClockedIn ? 'Clocked In' : 'Clocked Out'}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">Status: {isClockedIn ? 'On Duty' : 'Off Duty'}</p>
                     </div>
                 </div>
 

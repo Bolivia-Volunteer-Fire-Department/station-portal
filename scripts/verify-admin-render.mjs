@@ -1344,7 +1344,7 @@ check(
 // The retired Shifts tab stays out of the nav.
 check('the retired Shifts tab is still absent', categoryOf('shifts') === null);
 
-console.log('\n--- the Clock Location settings card ---');
+console.log('\n--- the Clock Settings card ---');
 // It writes three keys at once and reports its own state, so rendering it proves the card mounts
 // and that the two states read differently - an unconfigured station must NOT be told its clocks
 // are restricted.
@@ -1372,6 +1372,26 @@ check('the card renders with the keys unset', typeof unconfiguredCard === 'strin
 check('and says clocking is not restricted', String(unconfiguredCard).includes('Not enforced'));
 check('and still offers the three fields', String(unconfiguredCard).includes('Margin (feet)'));
 check('and lists what is still blank', String(unconfiguredCard).includes('Still blank'));
+// THE ROUNDING STEP IS THE OTHER HALF OF THIS CARD, and it is offered whether or not the fence is configured - the two are
+// independent policies that happen to live together. Its value is read from settings and echoed back into the select.
+check(
+  'and offers the rounding steps',
+  ['Nearest 15 minutes', 'Nearest 30 minutes', 'Nearest hour'].every((label) => String(unconfiguredCard).includes(label)),
+  true
+);
+check('with the default step shown when the station has never chosen', String(unconfiguredCard).includes('value="15"'), true);
+check(
+  'and the step the station chose read back',
+  String(
+    clockLocationCard([
+      { key: 'required_clock_latitude', value: '39.277157' },
+      { key: 'required_clock_longitude', value: '-78.238330' },
+      { key: 'gps_margin_of_error', value: '1000' },
+      { key: 'clock_hours_rounding', value: '30' },
+    ])
+  ).includes('value="30"'),
+  true
+);
 
 const configuredCard = clockLocationCard([
   { key: 'required_clock_latitude', value: '39.277157' },

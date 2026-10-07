@@ -5,7 +5,7 @@ import { storedRequiresVerification } from '../utils/documents.js';
 import { systemLogRequest } from '../utils/systemLog';
 import { rankFieldsFromForm } from '../utils/ranks';
 import { isReadAction } from '../utils/readCoalescing';
-import { routeRead, routeWrite, routingBlocker } from './firestoreRouting.js';
+import { routeRead, routeWrite, routingBlocker, lastReadFailureFor } from './firestoreRouting.js';
 // The payload's section readers, so the refresh after a save reads the same shapes a sign-in does.
 import { readAdminSection, readAdminSections } from './firestorePayload.js';
 import { decorateCertifications } from '../utils/certifications.js';
@@ -83,13 +83,18 @@ export const notificationPrefFields = (settings) => {
 // console line that says which route is off.
 const notAnswered = async (action) => {
   const blocker = await routingBlocker(action);
+  // THE REASON, WHEN WE HAVE ONE. A blocked route is a route that is missing; a route that RAN and threw is a different
+  // answer entirely, and the app knows which it is - so it says so rather than describing both as "did not answer".
+  const failed = blocker ? '' : lastReadFailureFor(action);
   const error = new Error(
     blocker
       ? `${action} was not routed (${blocker}), and there is no sheet behind it any more, so nothing answered it.` +
         (blocker === 'feature-off'
           ? ' VITE_FIRESTORE_FEATURES pins a list of routes when it is set, and this route is not in it - leave it unset for every route.'
           : '')
-      : `Firestore did not answer ${action}. The console says which read failed.`
+      : failed
+        ? `${action} failed: ${failed}`
+        : `Firestore did not answer ${action}. The console says which read failed.`
   );
   error.code = blocker ? 'ROUTE_NOT_TAKEN' : 'READ_FAILED';
   return error;

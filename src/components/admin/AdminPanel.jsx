@@ -555,6 +555,8 @@ export default function AdminPanel({
           shifts={shifts}
           logs={logs}
           timeFormat={timeFormat}
+          // The rounding step, so the hours in this table are the hours the report an officer reconciles it against pays.
+          systemSettings={systemSettings}
           onDataChanged={onLogsChanged}
         />
       )}

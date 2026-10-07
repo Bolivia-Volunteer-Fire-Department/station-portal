@@ -20,7 +20,7 @@ import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { connectFirestoreEmulator, deleteDoc, doc, getDoc, getFirestore, getDocs, collection, setDoc } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signOutAlongside, syntheticEmail, updateMemberAccount } from '../src/services/firebaseAuth.js';
+import { EMAIL_DOMAIN, accountState, signInAlongside, signInAsMember, signInRefusalMessage, signOutAlongside, syntheticEmail, updateMemberAccount } from '../src/services/firebaseAuth.js';
 import { DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
 
 let failures = 0;
@@ -71,6 +71,45 @@ const main = async () => {
   check('the claims name the role', jane.roleId, 'r1');
   check('and the administrator switch', jane.isAdmin, true);
   check('with no password change pending', jane.mustChangePassword, false);
+  // --- what a refused sign-in says ---
+  // THE REPORTED BUG: a mistyped password was answered with "Unable to connect to authentication server", because the Auth
+  // SDK THROWS for a refusal and the only thing catching it was the login screen's catch-all. A refusal has to come back as
+  // an answer the screen can print, and the sentence has to name the credentials rather than the network.
+  console.log('\n--- a refused sign-in ---');
+  const refusedSignIn = await signInAsMember('jane', 'not-the-password');
+  check('a refusal comes back as a refusal rather than throwing', refusedSignIn.success, false);
+  check(
+    'and says the credentials were wrong, not that the server could not be reached',
+    refusedSignIn.message,
+    "You didn't use the correct username/password."
+  );
+  check('so nobody is sent to check their wifi over a typo', refusedSignIn.message.includes('Unable to connect'), false);
+  const unknownAccount = await signInAsMember('nobody-here-at-all', 'not-the-password');
+  check(
+    'and a username with no account says exactly the same thing, so the screen cannot be used to probe for one',
+    unknownAccount.message,
+    refusedSignIn.message
+  );
+  // The mapping itself, over the codes the SDK actually raises - including the one that is NOT about credentials, which
+  // must not be answered as though it were.
+  check(
+    'every code the SDK raises for bad credentials reads the same',
+    ['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-email'].map((code) =>
+      signInRefusalMessage({ code })
+    ),
+    Array(4).fill("You didn't use the correct username/password.")
+  );
+  check(
+    'a disabled account is told so rather than being told its password is wrong',
+    signInRefusalMessage({ code: 'auth/user-disabled' }),
+    'That account has been disabled. Ask an administrator to help.'
+  );
+  check(
+    'and a genuine failure to reach the service still says so',
+    signInRefusalMessage({ code: 'auth/network-request-failed' }),
+    'Unable to connect to authentication server.'
+  );
+
   await setDoc(doc(db, 'roles', 'r3'), { can_edit_users: true }, { merge: true });
   await signOut(auth);
   await signIn('rae');
@@ -316,17 +355,22 @@ const main = async () => {
     login.token ? 'a token' : 'empty'
   );
 
-  // A password Firebase does not accept must THROW. This used to be stated the other way round: the throw was what
-  // made loginUser fall back to the sheet for every member whose Auth account still held the migration's temporary
-  // password. There is no sheet now, so the refusal IS the member's answer and nothing downstream softens it.
+  // A password Firebase does not accept must NOT sign anybody in, and the refusal must come back as the member's answer
+  // rather than as a thrown error.
+  //
+  // This used to be stated as "must THROW", because the throw was what made loginUser fall back to the sheet for every
+  // member whose Auth account still held the migration's temporary password. There is no sheet now, and a throw is exactly
+  // what the login screen could only render as "unable to connect to the authentication server" - so the refusal is
+  // RETURNED, and what is asserted is that it is a refusal with its own reason: not a success, and not a network complaint.
   const refusedLogin = await signInAsMember('jane', 'not-the-password').then(
-    () => 'accepted',
-    (error) => String(error.code || '')
+    (result) => result,
+    () => ({ threw: true })
   );
+  check('and a password it does not accept is refused rather than signing anybody in', refusedLogin.success, false);
   checkIs(
-    'and a password it does not accept throws, so the sheet can answer',
-    refusedLogin.includes('invalid-credential') || refusedLogin.includes('auth/'),
-    refusedLogin
+    'with the credentials named as the reason rather than the connection',
+    refusedLogin.message === "You didn't use the correct username/password.",
+    refusedLogin.message || 'it threw'
   );
 
   await signOutAlongside();

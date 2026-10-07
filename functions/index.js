@@ -24,6 +24,8 @@ const {
   aggregateScheduleRows,
   aggregateTrainingRows,
   canUseReport,
+  CLOCK_ROUNDING_KEY,
+  clockRoundingStep,
   normalizeReportDefinition,
   reportAudienceKeys,
   resolveReportOptions,
@@ -558,9 +560,20 @@ exports.runReport = onCall(async (request) => {
     // CLOCK ENTRIES, and the bound is the fiddly part. `time_in` is a DATETIME ("yyyy-MM-dd HH:mm:ss") while `to` is a
     // bare date key, so the upper bound is the day AFTER it, EXCLUSIVE - the same bound GET_TIMECLOCK_LOGS uses, and the
     // bug recorded there is exactly this: comparing "2026-01-31 14:00:00" against "2026-01-31" drops the whole last day.
+    //
+    // AND THE RANGE FIELD IS NAMED IN ITS OWN ORDER, which is the OTHER half of that note and the reason this report
+    // arrived as "Firestore did not answer RUN_REPORT". The declared index is (user_id ASC, time_in DESC); a query that
+    // leaves the order implied asks for an ASCENDING scan on `time_in`, which that index cannot serve. THE EMULATOR
+    // ANSWERS ANYWAY and production refuses with failed-precondition - so the suite was green, the deploy was fine, and
+    // the screen still failed. This is the same trap Clock History fell into (see scripts/verify-read-budget.mjs), and
+    // the fix is the same one: say the order out loud.
     const dayAfter = new Date(Date.parse(`${to}T00:00:00.000Z`) + 86400000).toISOString().slice(0, 10);
     const clockRead = await readInRange((ids) => {
-      const base = db.collection('timeclock').where('time_in', '>=', from).where('time_in', '<', dayAfter);
+      const base = db
+        .collection('timeclock')
+        .where('time_in', '>=', from)
+        .where('time_in', '<', dayAfter)
+        .orderBy('time_in', 'DESC');
       return ids ? base.where('user_id', 'in', ids) : base;
     });
     const clockRows = clockRead.rows;
@@ -582,6 +595,11 @@ exports.runReport = onCall(async (request) => {
     ]);
     const users = memberSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
     const templates = templateSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
+    // HOW THE STATION ROUNDS THE HOURS IT REPORTS. One public document holds it, and it is the same setting the member's
+    // own Clock History rounds by - so the hours a member reads are the hours this report pays for. Read per run rather
+    // than cached, because an officer changing the pay structure expects the next run to use it.
+    const stationSettings = await db.doc('settings/public').get();
+    const roundingMinutes = clockRoundingStep((stationSettings.data() || {})[CLOCK_ROUNDING_KEY]);
 
     return {
       report: {
@@ -602,6 +620,7 @@ exports.runReport = onCall(async (request) => {
         assignmentIds: options.assignmentIds,
         templateIds: options.templateIds,
         orderBy: options.orderBy,
+        roundingMinutes,
       }),
       // The axis that was actually compared, echoed back so the runner can say what these numbers are against rather
       // than leaving an officer to remember which boxes they ticked.

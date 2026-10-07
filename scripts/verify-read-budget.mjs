@@ -616,22 +616,216 @@ check('reporting a signature whose training is gone rather than dropping it', ba
 // these, because an unused composite is write amplification and storage on every write to its collection. The emulator
 // ignores index requirements entirely, so a missing one fails only in production, which is what makes this a harness.
 const INDEXES = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')).indexes;
-const hasIndex = (collection, fieldPaths) =>
+// AND THE ORDER, WHEN THE CALLER NAMES ONE. Comparing field paths alone is how `(user_id, time_in)` passed everything while
+// the query that uses it needed ASCENDING and the file declared DESCENDING: the paths match, the index cannot serve the
+// scan, and production refuses it. An `arrayConfig` field has no order to compare, so `null` means "whatever is declared".
+const hasIndex = (collection, fieldPaths, orders = null) =>
   INDEXES.some(
     (index) =>
       index.collectionGroup === collection &&
       index.fields.length === fieldPaths.length &&
-      index.fields.every((field, position) => field.fieldPath === fieldPaths[position])
+      index.fields.every((field, position) => field.fieldPath === fieldPaths[position]) &&
+      (!orders ||
+        index.fields.every(
+          (field, position) => !orders[position] || (field.order || 'CONTAINS') === orders[position]
+        ))
   );
 
-checkIs('schedule by member then date, for the report range', hasIndex('schedule', ['user_id', 'date_from']));
-checkIs('timeclock by member then newest-first, for the clock history', hasIndex('timeclock', ['user_id', 'time_in']));
-checkIs('schedule_offers by member then status, for the member’s offers', hasIndex('schedule_offers', ['user_id', 'status']));
-checkIs('announcements by audience then in-force, for the live bound', hasIndex('announcements', ['audience_keys', 'live_until']));
-checkIs('checklist items by document then audience, for the detail read', hasIndex('document_checklist_items', ['document_id', 'audience_keys']));
+checkIs('schedule by member then date, for the report range', hasIndex('schedule', ['user_id', 'date_from'], [null, 'ASCENDING']));
+checkIs('timeclock by member then newest-first, for the clock history', hasIndex('timeclock', ['user_id', 'time_in'], [null, 'DESCENDING']));
+checkIs('schedule_offers by member then status, for the member’s offers', hasIndex('schedule_offers', ['user_id', 'status'], [null, 'ASCENDING']));
+checkIs('announcements by audience then in-force, for the live bound', hasIndex('announcements', ['audience_keys', 'live_until'], [null, 'ASCENDING']));
+checkIs('checklist items by document then audience, for the detail read', hasIndex('document_checklist_items', ['document_id', 'audience_keys'], [null, null]));
 // AND NOTHING ELSE. Five, and no index names a field nothing filters - so a re-add is caught rather than quietly paid for.
 check('and no more than the five a query needs', INDEXES.length, 5);
 const indexedFields = INDEXES.flatMap((index) => index.fields.map((field) => field.fieldPath));
+// ---------------------------------------------------------------------------
+// AND EVERY OTHER QUERY IN THE CODEBASE IS SERVED BY ONE OF THE FIVE.
+// ---------------------------------------------------------------------------
+// The pins above are the queries somebody remembered to write down. This walks the code and finds the rest, because both
+// failures this file records arrived the same way: a query nobody re-checked, refused by production while the whole suite
+// passed. The emulator answers ANY query, so nothing else here can see it.
+//
+// The rule implemented is Firestore's, and no more than Firestore's:
+//   * equality filters (`==`) alone need NO composite, however many there are - single-field indexes are merged;
+//   * add ONE filter that is not a plain `==` - a range, an `orderBy`, an `in`, an `array-contains` - and a composite IS
+//     required: the equality fields first, then that field;
+//   * and that field's direction is its own `orderBy`, or ASCENDING when the order is implied. GETTING THIS WRONG IS THE
+//     FAILURE THIS EXISTS FOR: the Clocked-vs-scheduled report ranged over `time_in` with the order left implied, asked
+//     for an ASCENDING scan, and the declared `(user_id ASC, time_in DESC)` index could not serve it.
+//
+// It reads the two ways queries are written here - the chained admin API on the server, the modular `query(...)` form in
+// src/services - and it COUNTS EVERY FILTER CALL IT DID NOT READ, so a query style it cannot parse fails the suite
+// instead of passing quietly. That count is the difference between a scanner and a guess.
+const stripComments = (source) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\w/])\/\/[^\n]*/g, '$1');
+// A filter call, chained (`.where(...)`) or modular (`where(...)`), which is the whole difference between the two APIs.
+// For `where` the last captured group is the OPERATOR; for `orderBy` it is the DIRECTION, and both travel together in `op`.
+const FILTER_CALL = /(?:\.|\b)(where|orderBy)\(\s*'([A-Za-z_]+)'\s*(?:,\s*'([^']+)')?/g;
+const filterCallsIn = (text) => {
+  const calls = [];
+  FILTER_CALL.lastIndex = 0;
+  let match;
+  while ((match = FILTER_CALL.exec(text))) {
+    calls.push({
+      at: match.index,
+      kind: match[1],
+      field: match[2],
+      op: match[1] === 'where' ? match[3] : /desc/i.test(match[3] || '') ? 'DESCENDING' : 'ASCENDING'
+    });
+  }
+  return calls;
+};
+// The text inside the parentheses opening at `openIndex`, and where that call ends, so a `where(...)` can be stepped over
+// whole rather than guessed at from its first argument.
+const balancedFrom = (source, openIndex) => {
+  let depth = 0;
+  for (let position = openIndex; position < source.length; position += 1) {
+    if (source[position] === '(') depth += 1;
+    else if (source[position] === ')') {
+      depth -= 1;
+      if (depth === 0) return { text: source.slice(openIndex + 1, position), end: position };
+    }
+  }
+  return { text: '', end: source.length };
+};
+
+const QUERY_FILES = [
+  'functions/index.js',
+  ...readdirSync('src/services')
+    .filter((name) => name.endsWith('.js') && !name.includes('.test.'))
+    .map((name) => `src/services/${name}`),
+];
+const scanned = [];
+const unread = [];
+for (const file of QUERY_FILES) {
+  const source = stripComments(readFileSync(file, 'utf8'));
+  const claimed = new Set();
+  // A QUERY IS A COLLECTION CALL PLUS THE FILTERS THAT FOLLOW IT, written either way: chained (`.where(...)`, the admin API
+  // the Cloud Functions use) or as arguments (`query(collection(db, 'x'), where(...), orderBy(...))`, the modular form the
+  // client uses). Read together, one rule covers both - and it does not matter whether the call sits in an assignment, in a
+  // `Promise.all` array, or behind a `return`, which is where the first version of this missed half the queries.
+  const assignments = [...source.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)].map((found) => ({
+    name: found[1],
+    at: found.index
+  }));
+  // A `query(...)` CALL IS READ WHOLE, filters and all, because its filters are a LIST rather than a chain: they can be
+  // spread out of a condition - `...(managesAll ? [] : [where('user_id', '==', uid)])` on the Clock History read - which no
+  // character-by-character walk can follow, and the collection itself is only one of the arguments.
+  const modularSpans = [];
+  const modular = /\bquery\(/g;
+  let match;
+  while ((match = modular.exec(source))) {
+    const args = balancedFrom(source, match.index + match[0].length - 1);
+    const name = /collection\(\s*(?:[^,']*,\s*)?(?:(?:'([A-Za-z_]+)')|([A-Za-z_$][\w$]*))\s*\)/.exec(args.text);
+    const filters = filterCallsIn(args.text);
+    filters.forEach((call) => claimed.add(match.index + match[0].length + call.at));
+    modularSpans.push({ start: match.index, end: args.end, filters });
+    scanned.push({ file, collection: name ? name[1] || name[2] : '', at: match.index, name: '', filters });
+  }
+  const collections = /collection\(\s*(?:[^,']*,\s*)?(?:(?:'([A-Za-z_]+)')|([A-Za-z_$][\w$]*))\s*\)/g;
+  while ((match = collections.exec(source))) {
+    // one already read above as part of a `query(...)`, so walking it again would only add a half-read copy of it
+    if (modularSpans.some((span) => match.index > span.start && match.index < span.end)) continue;
+    const filters = [];
+    let cursor = match.index + match[0].length;
+    for (;;) {
+      // STEP OVER WHATEVER SEPARATES THE FILTERS - a `.`, a `,`, and any whitespace or comments between them, which is
+      // wider than it looks: a chain broken by a three-line comment leaves thirty characters of whitespace to cross. `;`
+      // is deliberately NOT skipped, because it ends a statement and the next query's first filter is not this query's.
+      const separator = /^[\s.,\])}{]*/.exec(source.slice(cursor, cursor + 96))[0];
+      const start = cursor + separator.length;
+      const head = /^(where|orderBy)\(/.exec(source.slice(start, start + 9));
+      if (!head) break;
+      const args = balancedFrom(source, start + head[0].length - 1);
+      const call = filterCallsIn(source.slice(start, args.end + 1));
+      if (call.length !== 1) break;
+      filters.push(call[0]);
+      // CLAIM THE POSITION THE WHOLE-FILE SCAN BELOW WILL REPORT, which begins one character earlier for a chained call:
+      // the `.` in `.where(` is part of that match, and it was consumed here as the separator.
+      claimed.add((source[start - 1] === '.' ? start - 1 : start) + call[0].at);
+      cursor = args.end + 1;
+    }
+    // THE NAME THE QUERY IS BOUND TO, so the scope filter below can find it: the nearest assignment before it, which makes a
+    // chain built inside `const clockRead = ... (ids) => { const base = db.collection(...) }` known as `base` - the name that
+    // continuation actually uses. A collection named by a variable (firestorePayload's audience helpers take the collection
+    // as a parameter) is recorded as that variable, so its filters are still read and its shape still judged.
+    const owner = assignments.filter((entry) => entry.at < match.index).pop();
+    scanned.push({ file, collection: match[1] || match[2], at: match.index, name: owner ? owner.name : '', filters });
+  }
+  // THE TWO CONTINUATION SHAPES THIS CODEBASE USES, and both are load-bearing: a scope filter is added to a read that a
+  // member and an officer share, either as `ids ? base.where('user_id', 'in', ids) : base` or by reassigning -
+  // `if (report.scope === 'mine') source = source.where('user_id', '==', caller.uid)`. It belongs to the nearest PRECEDING
+  // query bound to that name, because `base` names two different collections in runReport and attaching a filter to the
+  // wrong one is how a scanner reports a confident wrong answer.
+  const continuation = /([A-Za-z_$][\w$]*)\s*\.where\(\s*'user_id'\s*,\s*'(in|==)'/g;
+  while ((match = continuation.exec(source))) {
+    claimed.add(match.index + match[0].indexOf('.where'));
+    const owner = scanned
+      .filter((query) => query.file === file && query.name === match[1] && query.at < match.index)
+      .pop();
+    if (!owner) unread.push(`${file}: ${match[0]}`);
+    else owner.filters.push({ kind: 'where', field: 'user_id', op: match[2] });
+  }
+  // Anything the scan did not read is REPORTED, never ignored: a filter this parser cannot see is a query whose index
+  // requirement nobody is checking, and passing quietly is the failure mode this whole section exists to prevent.
+  for (const call of filterCallsIn(source)) {
+    if (!claimed.has(call.at)) unread.push(`${file}: ${source.slice(call.at, call.at + 48).split('\n')[0]}`);
+  }
+}
+
+// The index Firestore would require to serve a query - or null, when single-field indexes can.
+//
+// PLACEMENT IS THE PART THAT IS EASY TO GET WRONG: `in` and `array-contains` count as equalities for the ORDER of the index
+// (they ask for a set of values on one field), so they go before the range, and `time_in` before `user_id` is not the same
+// index as `user_id` before `time_in`.
+const EQUALITY_ORDERED = new Set(['==', 'in', 'array-contains', 'array-contains-any']);
+const requiredFor = (query) => {
+  const filters = query.filters;
+  // equalities alone need nothing at all: Firestore merges single-field indexes to serve them
+  if (!filters.some((filter) => filter.kind === 'orderBy' || filter.op !== '==')) return null;
+  const first = [];
+  const last = [];
+  for (const filter of filters) {
+    if (filter.kind === 'where' && EQUALITY_ORDERED.has(filter.op)) first.push(filter.field);
+    else if (!last.includes(filter.field)) last.push(filter.field);
+  }
+  const fields = [...new Set(first), ...last];
+  if (fields.length < 2) return null;
+  const final = fields[fields.length - 1];
+  const ordered = [...filters].reverse().find((filter) => filter.field === final && filter.kind === 'orderBy');
+  return { fields, direction: ordered ? ordered.op : 'ASCENDING' };
+};
+const servedBy = (query, required) =>
+  INDEXES.some(
+    (index) =>
+      index.collectionGroup === query.collection &&
+      index.fields.length === required.fields.length &&
+      index.fields.every((field, position) => field.fieldPath === required.fields[position]) &&
+      // an `arrayConfig` field carries no order at all, so there is nothing for a direction to disagree with
+      (!index.fields[index.fields.length - 1].order ||
+        index.fields[index.fields.length - 1].order === required.direction)
+  );
+const needing = scanned.map((query) => ({ query, required: requiredFor(query) })).filter((entry) => entry.required);
+// `check`, not `checkIs`, and the difference is the whole point: `checkIs` takes a CONDITION, and an array passed to it is
+// truthy whether it is empty or not - so a check written that way reports ok forever. This one compares, and prints the
+// queries it could not serve.
+check(
+  'every query that needs a composite index has one that can serve it, order included',
+  needing
+    .filter(({ query, required }) => !servedBy(query, required))
+    .map(({ query, required }) => `${query.file} ${query.collection} (${required.fields.join(', ')}) ${required.direction}`),
+  []
+);
+check(
+  'and every filter call in the codebase was read, so an unknown query shape cannot slip past',
+  unread,
+  []
+);
+// AND THE SCANNER IS LOOKING AT SOMETHING. A parser that stopped finding queries would satisfy both checks above by finding
+// nothing at all, which is the quietest possible way for this to stop protecting anything.
+check('and the scan found queries that need an index at all', needing.length >= 2, true);
+
 check(
   'and no index names a field no query ever filters',
   ['is_open', 'audience_roles', 'date_to', 'signed_at', 'end_date', 'created_at'].filter((field) => indexedFields.includes(field)),

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2 } from 'lucide-react';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
+import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
 import { getCurrentCoordinates } from '../../utils/geolocation';
 import {
@@ -25,6 +26,7 @@ const KNOWN_KEYS = [
   'required_clock_latitude',
   'required_clock_longitude',
   'gps_margin_of_error',
+  CLOCK_ROUNDING_KEY,
   'session_timeout',
   ...LOADING_MESSAGE_KEYS,
 ];
@@ -39,7 +41,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
   return (
     <CenteredContent className="space-y-6">
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
-      <ClockLocationCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -125,19 +127,21 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
 }
 
 /**
- * Clock-in geofence.
+ * Clock Settings: the two station-wide policies about the timeclock - how hours are rounded when they are reported, and
+ * whether clocking in and out is restricted to the station.
  *
- * All three keys must be filled in for the fence to apply; any blank one leaves clocking exactly
- * as it is today, so a half-finished setup cannot lock the station out of its own timeclock. The
- * card says which state it is in so the behavior is never a guess.
+ * The rounding field is first because it always applies, while the fence only applies once all three of its keys are
+ * filled in: any blank one leaves clocking exactly as it is today, so a half-finished setup cannot lock the station out
+ * of its own timeclock. The card says which state the fence is in so the behavior is never a guess.
  *
- * "Use my current location" exists because typing a latitude and longitude by hand is the most
- * error-prone part of this, and the person configuring it is usually standing at the station.
+ * "Use my current location" exists because typing a latitude and longitude by hand is the most error-prone part of this,
+ * and the person configuring it is usually standing at the station.
  */
-function ClockLocationCard({ token, systemSettings, onDataChanged }) {
+function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
   const [latitude, setLatitude] = useState(getSettingValue(systemSettings, 'required_clock_latitude', ''));
   const [longitude, setLongitude] = useState(getSettingValue(systemSettings, 'required_clock_longitude', ''));
   const [margin, setMargin] = useState(getSettingValue(systemSettings, 'gps_margin_of_error', ''));
+  const [rounding, setRounding] = useState(String(clockRoundingMinutes(systemSettings)));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
@@ -147,6 +151,7 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
     setLatitude(getSettingValue(systemSettings, 'required_clock_latitude', ''));
     setLongitude(getSettingValue(systemSettings, 'required_clock_longitude', ''));
     setMargin(getSettingValue(systemSettings, 'gps_margin_of_error', ''));
+    setRounding(String(clockRoundingMinutes(systemSettings)));
   }, [systemSettings]);
 
   // Evaluated live on the typed values, so the card reports what the next clock action will do
@@ -180,6 +185,9 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
       // Saved in sequence rather than in parallel: each key is one Apps Script round trip, and a
       // partial write is easier to reason about when the failure names the key that failed.
       const entries = [
+        // The rounding first: it is the one that always applies, so a name-and-value list that fails on it should not
+        // leave the other three looking saved.
+        [CLOCK_ROUNDING_KEY, rounding],
         ['required_clock_latitude', latitude],
         ['required_clock_longitude', longitude],
         ['gps_margin_of_error', margin],
@@ -205,9 +213,9 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
             <MapPin className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Clock Location</h3>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Clock Settings</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Restrict clocking in and out to the station.
+              How reported hours are rounded, and whether clocking is restricted to the station.
             </p>
           </div>
           <span
@@ -227,6 +235,33 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
             <span>{error}</span>
           </div>
         )}
+
+        {/* ONE SETTING, TWO SCREENS. The member's own Clock History and the Clocked vs scheduled report both round by
+            this, so the hours a member reads are the hours an officer pays for. Recorded times are never touched - only
+            the hours the app reports. */}
+        <div>
+          <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+            Round reported hours
+          </label>
+          <select
+            value={rounding}
+            onChange={(e) => setRounding(e.target.value)}
+            className="w-full sm:w-72 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            {CLOCK_ROUNDING_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+            Applies to Clock History — each entry's hours, the shift it fell in, and the totals — and to the Clocked vs
+            scheduled report. Change it when the station's pay structure changes; no recorded time is affected.
+          </p>
+        </div>
+
+        <div className="pt-3 border-t border-slate-200 dark:border-slate-700/80">
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Clock-in location</p>
 
         <p className="text-sm text-slate-500 dark:text-slate-400">
           {preview.configured ? (
@@ -297,6 +332,8 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
           </p>
         )}
 
+        </div>
+
         <div className="flex flex-wrap justify-end items-center gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/80 mt-2">
           <button
             type="button"
@@ -314,7 +351,7 @@ function ClockLocationCard({ token, systemSettings, onDataChanged }) {
             className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save Clock Location
+            Save Clock Settings
           </button>
         </div>
       </form>

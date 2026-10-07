@@ -3,9 +3,10 @@ import { MapPin, Clock } from 'lucide-react';
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
 import { clockLogHours } from '../../utils/clockLogs';
+import { roundClockHours } from '../../utils/clockRounding';
 import { unnamedLabel } from '../../utils/displayLabel';
 
-export default function ClockTableRow({ log, showUserColumn = false, timeFormat = '12', shifts = [] }) {
+export default function ClockTableRow({ log, showUserColumn = false, timeFormat = '12', shifts = [], roundingMinutes = 0 }) {
   // THE DURATION COMES FROM THE SHARED RULE, not from `calc_hours` on its own.
   //
   // This cell used to read `log.calc_hours ? ... : '--'`, and `calc_hours` is a LEGACY SPREADSHEET COLUMN that nothing in
@@ -21,10 +22,16 @@ export default function ClockTableRow({ log, showUserColumn = false, timeFormat 
   //
   // An entry still clocked in has no end yet, and neither has a duration to state - that stays `--`, which is why the
   // totals skip it too (an unfinished shift is not zero hours, it is an unknown number).
-  const hours = clockLogHours(log);
+  // THE HOURS ARE ROUNDED BY THE STATION'S CLOCK SETTINGS, which is one setting with the Clocked-vs-scheduled report - so
+  // the hours a member reads here are the hours an officer pays for. The measured value is untouched: only what is shown
+  // is rounded, and the same step is applied to each cell of the Shift Time column and to the totals card above.
+  const hours = roundClockHours(clockLogHours(log), roundingMinutes);
   const formattedHours = hours === null ? '--' : hours.toFixed(2);
 
-  const breakdown = computeShiftBreakdown(log, shifts);
+  const breakdown = computeShiftBreakdown(log, shifts).map((part) => ({
+    ...part,
+    hours: roundClockHours(part.hours, roundingMinutes),
+  }));
   const shiftTimeDisplay =
     log.time_in && shifts.length > 0
       ? breakdown.length > 0

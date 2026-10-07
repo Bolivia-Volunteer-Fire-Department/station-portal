@@ -39,6 +39,7 @@ import { describeShiftOffer } from '../src/utils/shiftOfferRow.js';
 import { checklistProgress } from '../src/utils/checklists.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
+import { CLOCK_ROUNDING_KEY } from '../src/utils/clockRounding.js';
 import { OFFLINE_CLOCK_MESSAGE } from '../src/utils/connectivity.js';
 import { rankFieldsFromForm } from '../src/utils/ranks.js';
 // The document order helper, for the round trip at the documents section below: the reply the drag route really sends,
@@ -923,6 +924,10 @@ const main = async () => {
   console.log('\n--- which side a setting belongs on ---');
   check('a setting the browser draws is public', settingSide('loading_message3'), 'public');
   check('and so is the fence the browser checks', settingSide('required_clock_latitude'), 'public');
+  // THE ROUNDING STEP HAS TO BE PUBLIC, or the feature silently does nothing: a member's own Clock History rounds by it in
+  // the browser, and the reconciliation report reads the same document server-side. Private would mean both falling back
+  // to the default while the settings screen happily saved a value nobody could read.
+  check('and the rounding step, which the history and the report both read', settingSide(CLOCK_ROUNDING_KEY), 'public');
   check('a setting nobody outside the office needs is private', settingSide('some_officer_thing'), 'private');
   check('and a setting added later starts private, which is the safe way round', settingSide('a_key_nobody_named_yet'), 'private');
   check('whitespace does not change the answer', settingSide('  station_name  '), 'public');

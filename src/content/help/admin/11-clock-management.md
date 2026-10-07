@@ -43,7 +43,7 @@ Sorting by member name keeps each person's own entries in date order rather than
 Location comes from the member's device at the time of the clock action, and is only captured if they allowed the location prompt. Two consequences:
 
 - A blank location is normal, not an error — it means the device did not provide one.
-- The department can optionally restrict clocking to within a set distance of the station, in *System → System Settings → Clock Location*. That check happens before the entry is ever created, so a rejected clock action leaves **nothing** in this table — there is no row to correct, and the member simply needs to try again from closer, or with location allowed.
+- The department can optionally restrict clocking to within a set distance of the station, in *System → System Settings → Clock Settings*. That check happens before the entry is ever created, so a rejected clock action leaves **nothing** in this table — there is no row to correct, and the member simply needs to try again from closer, or with location allowed.
 
 ## Exporting
 

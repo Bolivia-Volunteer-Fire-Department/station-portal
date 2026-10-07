@@ -10,6 +10,7 @@
 // round-tripping through Date and picking up the browser's timezone.
 
 import { parseSheetDateKey } from './scheduleDate';
+import { roundClockHours } from './clockRounding';
 
 export const DEFAULT_CLOCK_LOG_SORT = 'time_in_desc';
 
@@ -140,14 +141,19 @@ export const filterAndSortClockLogs = (logs, filters = {}, { users = [] } = {}) 
 // What the filtered entries add up to. `hours` is the number the summary cards show, and it is computed
 // from the SAME rows the table lists - a total over a different set than the one on screen would be
 // worse than no total.
-export const clockLogTotals = (logs) => {
+// Totals for the cards above the list, which total WHAT IS SHOWING rather than everything ever recorded.
+//
+// `roundingMinutes` is the station's Clock Settings step, and it is applied to EACH ENTRY before they are added up - the
+// same value the rows themselves show, so the card can never disagree with the column beside it. Omitting it (or passing
+// 0) totals the measured hours exactly, which is what the harness checks the rule against.
+export const clockLogTotals = (logs, { roundingMinutes = 0 } = {}) => {
   const list = (Array.isArray(logs) ? logs : []).filter(Boolean);
   let hours = 0;
   let activeCount = 0;
 
   list.forEach((log) => {
     const value = clockLogHours(log);
-    if (value !== null) hours += value;
+    if (value !== null) hours += roundClockHours(value, roundingMinutes);
     if (!log.time_out) activeCount++;
   });
 

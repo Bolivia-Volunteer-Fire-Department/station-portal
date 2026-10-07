@@ -4,6 +4,7 @@ import { adminSaveTimeclockEntry, adminDeleteTimeclockEntry } from '../../servic
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
 import { CLOCK_LOG_SORT_OPTIONS, filterAndSortClockLogs } from '../../utils/clockLogs';
+import { clockRoundingMinutes, roundClockHours } from '../../utils/clockRounding';
 import RankIcon from '../RankIcon';
 import ViewportModal from '../ViewportModal';
 
@@ -116,7 +117,15 @@ function computeDurationHours(log) {
   return '--';
 }
 
-export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [] }) {
+// The duration as a NUMBER, or null when there is none to state - rounded to the station's step from Clock Settings, so
+// this table reads the same hours as the report it is reconciled against. `computeDurationHours` above answers in display
+// text ('--' for an entry that is still open), which is why this cannot simply wrap it.
+function durationHoursFor(log, roundingMinutes) {
+  const hours = Number(computeDurationHours(log));
+  return Number.isFinite(hours) ? roundClockHours(hours, roundingMinutes) : null;
+}
+
+export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [], systemSettings = [] }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Whether the editor modal is open: "a new entry" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
@@ -199,6 +208,10 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
     }
   };
 
+  // THE STATION'S ROUNDING STEP, from System Settings > Clock Settings: the same value the member's own history and the
+  // Clocked-vs-scheduled report use, so an officer correcting an entry here is looking at the hours that get paid.
+  const roundingMinutes = useMemo(() => clockRoundingMinutes(systemSettings), [systemSettings]);
+
   const filteredSortedLogs = useMemo(
     () =>
       filterAndSortClockLogs(
@@ -224,8 +237,15 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
         rank?.description || '',
         log.time_in || '',
         log.time_out || '',
-        computeDurationHours(log),
-        shifts.length && log.time_in ? formatShiftBreakdown(computeShiftBreakdown(log, shifts)) : '',
+        durationHoursFor(log, roundingMinutes) ?? computeDurationHours(log),
+        shifts.length && log.time_in
+          ? formatShiftBreakdown(
+              computeShiftBreakdown(log, shifts).map((part) => ({
+                ...part,
+                hours: roundClockHours(part.hours, roundingMinutes),
+              }))
+            )
+          : '',
         isTruthy(log.is_manual) ? 'Yes' : 'No',
         log.calc_address || '',
         log.calc_address_out || '',
@@ -455,8 +475,17 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800 font-sans">Active</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">{computeDurationHours(log)} hrs</td>
-                  <td className="px-4 py-3">{shifts.length && log.time_in ? formatShiftBreakdown(computeShiftBreakdown(log, shifts)) || '0 hrs' : '—'}</td>
+                  <td className="px-4 py-3">{durationHoursFor(log, roundingMinutes) ?? computeDurationHours(log)} hrs</td>
+                  <td className="px-4 py-3">
+                    {shifts.length && log.time_in
+                      ? formatShiftBreakdown(
+                          computeShiftBreakdown(log, shifts).map((part) => ({
+                            ...part,
+                            hours: roundClockHours(part.hours, roundingMinutes),
+                          }))
+                        ) || '0 hrs'
+                      : '—'}
+                  </td>
                   <td className="px-4 py-3">{isTruthy(log.is_manual) ? 'Yes' : 'No'}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">

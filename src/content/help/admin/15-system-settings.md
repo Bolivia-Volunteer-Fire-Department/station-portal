@@ -1,4 +1,4 @@
-*System → System Settings* holds the station-wide configuration. Three of the cards are straightforward; **Clock Location** and **Session Timeout** are the two with real consequences for members.
+*System → System Settings* holds the station-wide configuration. Three of the cards are straightforward; **Clock Settings** and **Session Timeout** are the two with real consequences for members.
 
 > [!IMPORTANT]
 > You must have the **Manage system settings** role permission to edit system settings.
@@ -11,7 +11,26 @@
 
 It is the first thing a member sees, so use the name they would recognize.
 
-## Clock Location
+## Clock Settings
+
+Two station-wide policies about the timeclock, in one card: **how reported hours are rounded**, and **whether clocking in and out is restricted to the station**.
+
+### Round reported hours
+
+| Choice | What it does |
+|---|---|
+| **Nearest 15 minutes** | 14.75 hrs stays 14.75; 14.8 becomes 15.00 |
+| **Nearest 30 minutes** | 14.75 becomes 15.00; 14.25 becomes 14.50 |
+| **Nearest hour** | 14.75 becomes 15.00; 14.25 becomes 14.00 |
+
+This is the station's pay structure, so it is used in **two** places and they always agree:
+
+- Every hour on a member's own **Clock History** — each entry's duration, the shift it fell in, and the totals at the top.
+- The **Clocked vs scheduled** report an officer reconciles against, where each shift's clocked hours are rounded before the difference is worked out.
+
+The default is **Nearest 15 minutes**, which is the finest step, so a station that has never chosen rounds as little as possible. Change it whenever the pay structure changes — **no recorded time is ever altered**, only the hours the app reports. The exact timestamps stay on every entry, so moving to a coarser step (or back) is always available.
+
+### Clock-in location
 
 An optional check that restricts clocking in and out to the station, within a radius you choose.
 

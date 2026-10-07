@@ -10,15 +10,21 @@ import {
   formatClockHours,
   hasClockLogFilters,
 } from '../utils/clockLogs';
+import { clockRoundingMinutes } from '../utils/clockRounding';
 
 const SELECT_CLASS =
   'w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
 
 const LABEL_CLASS = 'block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 mb-1.5';
 
-export default function MyClockHistory({ currentUser, logs = [], timeFormat, shifts = [], loadedFrom = '', onLoadOlder }) {
+export default function MyClockHistory({ currentUser, logs = [], timeFormat, shifts = [], systemSettings = [], loadedFrom = '', onLoadOlder }) {
   const [filters, setFilters] = useState(emptyClockLogFilters);
   const [loadingOlder, setLoadingOlder] = useState(false);
+
+  // THE STATION'S ROUNDING STEP, from System Settings > Clock Settings, applied to every hour on this page - the rows, the
+  // shift each entry fell in, and the totals. It is the same setting the Clocked-vs-scheduled report rounds by, so what a
+  // member reads here is what an officer pays for. See utils/clockRounding.
+  const roundingMinutes = useMemo(() => clockRoundingMinutes(systemSettings), [systemSettings]);
 
   // This member's entries, then their filters and chosen order applied. Both the table and the summary
   // cards below read from this one list, so a total can never disagree with what is on screen.
@@ -32,7 +38,7 @@ export default function MyClockHistory({ currentUser, logs = [], timeFormat, shi
     [logs, currentUser.id]
   );
 
-  const totals = useMemo(() => clockLogTotals(visibleLogs), [visibleLogs]);
+  const totals = useMemo(() => clockLogTotals(visibleLogs, { roundingMinutes }), [visibleLogs, roundingMinutes]);
   const isFiltered = hasClockLogFilters(filters);
   const setFilter = (key) => (event) => setFilters((prev) => ({ ...prev, [key]: event.target.value }));
 
@@ -173,6 +179,7 @@ export default function MyClockHistory({ currentUser, logs = [], timeFormat, shi
         }
         timeFormat={timeFormat}
         shifts={shifts}
+        roundingMinutes={roundingMinutes}
       />
     </div>
   );

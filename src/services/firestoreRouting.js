@@ -380,6 +380,15 @@ const FAILURE_MESSAGES = {
 //
 // `body` travels with it because a read can have parameters: the device card asks "whose is THIS token", and a
 // reader that cannot see the request cannot answer it.
+// WHAT EACH READ LAST FAILED WITH, so a caller can say MORE than "nothing answered".
+//
+// A routed read that threw is not a route that is missing, and the difference is the whole story: "failed-precondition:
+// The query requires an index" is something somebody can act on, while "did not answer" sends them looking for an outage,
+// a bad deploy or a restart. One of those cost two deploys and a server restart to work out, which is the argument for
+// keeping the reason rather than only the fact.
+const lastReadFailure = new Map();
+export const lastReadFailureFor = (action) => lastReadFailure.get(String(action || '')) || '';
+
 export const routeRead = async (action, body = {}) => {
   const blocker = await routingBlocker(action);
   if (blocker) {
@@ -410,10 +419,18 @@ export const routeRead = async (action, body = {}) => {
     console.error(`[firestore] ${action} is routed but has no reader, so it is being read from the sheet.`);
     return null;
   } catch (error) {
-    // LOUD on purpose. A routed read that fails is a step of the migration not working, and the fallback that keeps
-    // the app usable is exactly what hides it - a console.info nobody reads is how "still using Apps Script" becomes
-    // a mystery. So this says what failed, and then asks the reader which collection refused.
-    console.error(`[firestore] ${action} could not be read from Firestore (${(error && error.code) || error.message}). The sheet is being used instead, so the app still works - but this read has NOT moved.`);
+    // LOUD on purpose, and HONEST about what happened. This used to say the sheet was being used instead and the app
+    // still worked, which stopped being true when the sheet went away - and that word "instead" is what turns a server
+    // refusal into a shrug. So: what failed, and what it said.
+    lastReadFailure.set(
+      action,
+      `${(error && error.code) || 'failed'}${error && error.message ? `: ${error.message}` : ''}`
+    );
+    console.error(
+      `[firestore] ${action} could not be read from Firestore (${(error && error.code) || error.message}): ${
+        (error && error.message) || ''
+      }`
+    );
     if (action === 'GET_BOOTSTRAP') {
       const { diagnoseMemberPayload } = await import('./firestorePayload.js');
       const { refused, failed } = await diagnoseMemberPayload(uid);

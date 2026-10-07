@@ -341,16 +341,25 @@ const minutesOfDay = (value) => {
   return hours * 60 + minutes;
 };
 
-// The hours a scheduled shift is worth: its TEMPLATE's times, or - for a one-off shift, which has no template - the times
-// stored on the row itself. An end at or before the start runs past midnight rather than being an error, and equal times
-// are a full day, which is what utils/shiftHours says on the client.
-const shiftRowHours = (row, templateById) => {
+// WHERE A SCHEDULED SHIFT RUNS: its TEMPLATE's times, or - for a one-off shift, which has no template - the times stored
+// on the row itself. An end at or before the start runs past midnight rather than being an error, and equal times are a
+// full day, which is what utils/shiftHours says on the client. Kept in one place because a shift's own hours and the
+// question "did this clock entry happen during it" are the same window read two ways.
+const shiftWindowOf = (row, templateById) => {
   const template = templateById.get(String(row.schedule_template_id || '').trim()) || null;
-  const start = minutesOfDay(template ? template.start_time : row.start_time);
-  const end = minutesOfDay(template ? template.end_time : row.end_time);
-  if (start === null || end === null) return 0;
-  return (end <= start ? end + 1440 - start : end - start) / 60;
+  const startMin = minutesOfDay(template ? template.start_time : row.start_time);
+  const endMin = minutesOfDay(template ? template.end_time : row.end_time);
+  if (startMin === null || endMin === null) return null;
+  return {
+    startMin,
+    endMin,
+    wraps: endMin <= startMin,
+    hours: (endMin <= startMin ? endMin + 1440 - startMin : endMin - startMin) / 60,
+  };
 };
+
+// The hours a scheduled shift is worth.
+const shiftRowHours = (row, templateById) => shiftWindowOf(row, templateById)?.hours ?? 0;
 
 // How long a clock entry was: the SERVER'S COPY of the rule the member's own clock history uses
 // (src/utils/clockLogs.js#clockLogHours) - `calc_hours` when it is a usable number, otherwise measured from the two
@@ -376,6 +385,106 @@ const clockEntryHours = (entry) => {
 
 const round2 = (value) => Math.round(value * 100) / 100;
 
+// HOW THE STATION ROUNDS THE HOURS IT REPORTS, which is one setting in System Settings -> Clock Settings.
+//
+// THE SERVER'S COPY of src/utils/clockRounding.js, for the same reason the two hour rules above exist twice: the member's
+// Clock History rounds in the browser and a report is summed here, and the two must round the same way or the hours a
+// member reads would not be the hours an officer pays for. scripts/verify-reporting runs both copies over the same hours
+// and fails on any drift.
+//
+// The setting lives in `settings/public`, but nothing here reads it: the runner reads that one document and hands the
+// step in, so this file has no opinion about where settings are kept. A step that is not one of the three on offer - a
+// typo, a stray value somebody added by hand - falls back to the finest step rather than rounding by something nobody
+// chose.
+const CLOCK_ROUNDING_KEY = 'clock_hours_rounding';
+const DEFAULT_CLOCK_ROUNDING_MINUTES = 15;
+const clockRoundingStep = (value) => {
+  const step = Number(String(value ?? '').trim());
+  return [15, 30, 60].includes(step) ? step : DEFAULT_CLOCK_ROUNDING_MINUTES;
+};
+// Hours rounded to the nearest step, a half rounded up.
+const roundToStep = (hours, step) => (Math.round((hours * 60) / step) * step) / 60;
+
+// THE STATION'S OWN CLOCK, for the same reason utils/scheduleIcs names a zone: shift times are wall-clock values with no
+// zone of their own, so 07:00 means seven in the morning at the station whatever timezone this runs in.
+const STATION_TZ = 'America/New_York';
+
+// A date and a time of day, read the way the member's own screen reads them: the app's own text ("2026-10-06 17:00:00")
+// is ALREADY station wall-clock and is taken as written, while a real instant ('2026-10-02T04:00:00.000Z', from the
+// migration) is converted onto the station's clock. `trainingDateKey` draws the same line in the same place.
+const stationWallClockOf = (value) => {
+  const text = String(value ?? '').trim();
+  const pad = (part) => String(part).padStart(2, '0');
+  const dashed = /^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{2})/.exec(text);
+  if (dashed && !/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+    return { dateKey: `${dashed[1]}-${pad(dashed[2])}-${pad(dashed[3])}`, minutes: Number(dashed[4]) * 60 + Number(dashed[5]) };
+  }
+  const slashed = /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})/.exec(text);
+  if (slashed) {
+    return { dateKey: `${slashed[3]}-${pad(slashed[1])}-${pad(slashed[2])}`, minutes: Number(slashed[4]) * 60 + Number(slashed[5]) };
+  }
+  const instant = dashed ? new Date(text) : NaN;
+  if (Number.isNaN(Number(instant))) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: STATION_TZ,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(instant);
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  if (!get('year')) return null;
+  return { dateKey: `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute')) };
+};
+
+// A wall-clock moment as one number - minutes on from 1970-01-01 - so a shift window and a clock entry can be compared by
+// subtracting them and nothing has to think about timezones twice. Summer time is deliberately not modelled: a shift is a
+// wall-clock range (17:00 to 07:00, in the station's own clock) and the client's split reads it the same way.
+const wallMinutes = ({ dateKey, minutes }) => Date.parse(`${dateKey}T00:00:00Z`) / 60000 + minutes;
+
+// WHO WORKED DURING A SCHEDULED SHIFT, AND WHO DID NOT. For one clock entry and the member's own shifts in range, this
+// returns the overlap with each shift that it touches, in minutes. The entry's remaining minutes are the hours that
+// happened while NOTHING was scheduled - which is the other half of the question a reconciliation is asked, and the reason
+// this exists: "13.75 hours of the night shift was worked, and an hour of it was not during a shift at all".
+//
+// THE SHIFTS ARE THE WINDOWS. Not the station's list of shift patterns: THOSE ARE A DIFFERENT COLLECTION (`shifts`), and
+// they answer a different question - which pattern somebody's hours fell in - which is what the member's own Clock History
+// prints in its Shift Time column. A reconciliation is about the shifts that were actually scheduled, so the row in front
+// of it is the window: its template's times, or its own times for a one-off shift (see `shiftWindowOf`). That also means
+// there is nothing to look up and nothing to keep in step - the window is on the row.
+//
+// EXACT HOURS, NOT ROUNDED TO THE HALF HOUR. The history rounds each window it prints to the nearest half hour, so its
+// Shift Time column can add up to more than the entry's own duration; a report that pays people does not have that
+// luxury, so the minutes are carried through and the parts always add back up to the entry.
+const splitClockEntry = (entry, shiftRows, templateById) => {
+  const start = stationWallClockOf(entry?.time_in);
+  const end = stationWallClockOf(entry?.time_out);
+  if (!start || !end) return null;
+  const startAt = wallMinutes(start);
+  const endAt = wallMinutes(end);
+  if (!(endAt > startAt)) return null;
+
+  const portions = [];
+  for (const row of Array.isArray(shiftRows) ? shiftRows : []) {
+    const window = shiftWindowOf(row, templateById);
+    const dateKey = String(row?.date_from || '').slice(0, 10);
+    if (!window || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) continue;
+    // the shift's own day, as a wall-clock number, so the window can be lined up against the entry by subtraction
+    const dayNumber = wallMinutes({ dateKey, minutes: 0 }) / 1440;
+    const windowStart = dayNumber * 1440 + window.startMin;
+    const windowEnd = dayNumber * 1440 + window.endMin + (window.wraps ? 1440 : 0);
+    const overlap = Math.max(0, Math.min(endAt, windowEnd) - Math.max(startAt, windowStart));
+    if (overlap <= 0) continue;
+    portions.push({
+      templateId: String(row.schedule_template_id || '').trim(),
+      dateKey,
+      minutes: overlap,
+    });
+  }
+  return portions;
+};
 // A RECONCILIATION: for each member, the hours they were SCHEDULED for against the hours they were actually CLOCKED IN
 // for, and the difference between the two.
 //
@@ -397,6 +506,7 @@ const aggregateReconciliation = ({
   assignmentIds = [],
   templateIds = [],
   orderBy = [],
+  roundingMinutes = DEFAULT_CLOCK_ROUNDING_MINUTES,
 } = {}) => {
   const userNames = new Map(users.map((row) => [String(row.id), String(row.name || '').trim()]));
   const templateById = new Map(templates.map((row) => [String(row.id), row]));
@@ -415,10 +525,12 @@ const aggregateReconciliation = ({
   const levels = reportGroupingLevels(groupBy, 'member');
   const { buckets, forParts } = makeBuckets();
 
-  // A level's key and label for one row. THE TEMPLATE LEVEL IS ONLY ANSWERABLE BY A SHIFT: a clock entry does not record
-  // which pattern somebody was on, so a clock entry lands in a "No shift" bucket at that level. That is the honest
-  // reading - those are exactly the hours nobody scheduled - and it means a template grouping answers "what was I
-  // supposed to pay for?", leaving the clocked total to the No-shift row.
+  // A level's key and label for one row. THE TEMPLATE LEVEL IS FILLED IN BY THE SPLIT ABOVE: a clock entry does not
+  // record which pattern somebody was on, but the shift they were scheduled for is a window with two ends, so the entry's
+  // hours are measured against the shifts around it and filed under the template of the one they fall in. So "No shift" is
+  // not "we declined to attribute these hours": it is the hours that fell outside every shift they were scheduled for,
+  // which is exactly the time nobody booked them for. A template grouping answers "what was I supposed to pay for?", and
+  // the No-shift row is the one to look at first - it is where somebody working outside their roster shows up.
   const partFor = (level, userId, dateKey, templateId) => {
     if (level === 'member') {
       const id = userId || 'unknown';
@@ -435,7 +547,16 @@ const aggregateReconciliation = ({
   const bucketFor = (userId, dateKey, templateId) =>
     forParts(levels.map((level) => partFor(level, userId, dateKey, templateId)));
 
+  // EVERY SHIFT, GROUPED BY WHOSE IT IS, and collected BEFORE the tick boxes narrow anything: the clocked side is never
+  // narrowed by them (see the note above), so a member who worked a shift the officer did not tick still needs that
+  // shift's hours as a window to be measured against. Filing those hours as "No shift" would say nobody had scheduled
+  // them when somebody had.
+  const shiftsByMember = new Map();
   (Array.isArray(scheduleRows) ? scheduleRows : []).forEach((row) => {
+    const owner = String(row.user_id || '').trim();
+    if (!shiftsByMember.has(owner)) shiftsByMember.set(owner, []);
+    shiftsByMember.get(owner).push(row);
+
     if (wanted.size && !wanted.has(String(row.assignment_id || '').trim())) return;
     const templateId = String(row.schedule_template_id || '').trim();
     if (wantedTemplate.size && !wantedTemplate.has(templateId)) return;
@@ -446,15 +567,38 @@ const aggregateReconciliation = ({
   });
 
   (Array.isArray(clockRows) ? clockRows : []).forEach((row) => {
-    // The grouping date comes from the timestamp, read in STATION time by the same rule the training report uses for its
-    // own timestamps - a clock entry stored as an instant must not land on the wrong day for the station reading it.
-    const bucket = bucketFor(String(row.user_id || '').trim(), trainingDateKey(row.time_in), '');
+    const userId = String(row.user_id || '').trim();
     const hours = clockEntryHours(row);
     if (hours === null) {
+      // AN OPEN ENTRY CANNOT BE SPLIT - there is no end to split to - so it is counted where it always was, against the
+      // day it started, and the reader is told how many of those there are rather than being handed a wrong number.
+      const bucket = bucketFor(userId, trainingDateKey(row.time_in), '');
       bucket.open = (bucket.open || 0) + 1;
       return;
     }
-    bucket.clocked = round2((bucket.clocked || 0) + hours);
+    // THE HOURS ARE SPLIT ACROSS THE SHIFTS THIS MEMBER WAS ACTUALLY SCHEDULED FOR. A clock entry cannot name the shift
+    // somebody was on, but it does not have to: their own shifts are in front of us, with the hours each one covers, so
+    // the entry is divided by overlap and the remainder is the time nobody scheduled them for. That is the two numbers a
+    // reconciliation is read for - "13.75 of the night shift was worked, and an hour of it was not during a shift".
+    const portions = splitClockEntry(row, shiftsByMember.get(userId) || [], templateById) || [];
+    const step = clockRoundingStep(roundingMinutes);
+    let placed = 0;
+    portions.forEach((portion) => {
+      placed += portion.minutes;
+      const bucket = bucketFor(userId, portion.dateKey, portion.templateId);
+      // ROUNDED PER SHIFT, not once for the whole entry: a pay period rounds what it pays for, and what it pays for is
+      // the hours inside a shift. So a night that runs 15 minutes over is 15 minutes over, not a rounding of the day.
+      bucket.clocked = round2((bucket.clocked || 0) + roundToStep(portion.minutes / 60, step));
+    });
+    // WHATEVER HAPPENED OUTSIDE EVERY SHIFT IS THE HOURS NOBODY SCHEDULED, and that is exactly what the No-shift bucket is
+    // for. Measured in minutes so the parts add back up to the entry rather than drifting from it by a rounding.
+    const leftover = Math.max(0, hours - placed / 60);
+    if (leftover > 0.0001 || !portions.length) {
+      // The day for what is left comes from the timestamp, read in STATION time by the same rule the training report uses
+      // for its own timestamps - an entry stored as an instant must not land on the wrong day for the station reading it.
+      const bucket = bucketFor(userId, trainingDateKey(row.time_in), '');
+      bucket.clocked = round2((bucket.clocked || 0) + roundToStep(leftover, step));
+    }
   });
 
   // Worst differences first when there is one level - an officer reconciling is looking for the rows that do not match -
@@ -645,6 +789,10 @@ module.exports = {
   REPORT_VISUALIZATIONS,
   aggregateScheduleRows,
   clockEntryHours,
+  splitClockEntry,
+  CLOCK_ROUNDING_KEY,
+  clockRoundingStep,
+  roundToStep,
   minutesOfDay,
   shiftRowHours,
   canUseReport,

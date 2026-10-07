@@ -71,6 +71,11 @@ export const PUBLIC_SETTING_KEYS = [
   'required_clock_latitude',
   'required_clock_longitude',
   'gps_margin_of_error',
+  // The rounding step, because a MEMBER'S OWN Clock History rounds its hours by it - the screen cannot honour a setting it
+  // cannot read - and the reconciliation report reads the same public document server-side. Written here as a literal
+  // rather than imported from utils/clockRounding, which would be a cycle: that module reads settings through this one.
+  // scripts/verify-firestore-writes pins the two names together so they cannot drift.
+  'clock_hours_rounding',
   'session_timeout',
   'is_dark_mode',
   'time_format',

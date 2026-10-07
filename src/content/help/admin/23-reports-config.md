@@ -42,8 +42,15 @@ This is the report you write to reconcile paid time. Each row is a member, and i
 
 Two things about it are deliberate and worth knowing before you read a number off it:
 
-1. **The tickboxes narrow only the *scheduled* side.** You tick the assignments — and, finer still, the **shift templates** — that count as paid time; every clocked hour still counts. That second list is the one that matters when an assignment has more than one pattern: *Officer* is one assignment, but **Officer – Day** and **Officer – Night** are two templates at two rates, so ticking the template is how you reconcile one rate at a time. A one-off shift has no template, so ticking any template leaves those out. A clock entry does not record which shift somebody was on — the app never asks at clock-in — so a reconciliation compares the two totals rather than pretending to match entries to shifts. That asymmetry is the useful part: it is how a volunteer's hours, or a paid member's extra hours, show up beside the paid schedule that was supposed to cover them.
-2. **Somebody with no shift at all still gets a row.** If they clocked in and nothing was scheduled, that shows as *Scheduled 0* — which is the row worth looking at, not one to hide.
+1. **Clocked hours are counted against the shifts the member was scheduled for.** Each clock entry is laid over the shifts it overlaps, and the minutes inside a shift count for that shift. So clocking in an hour before your night shift reads as *Night: 14 scheduled, 13.75 clocked, −0.25*, with the hour before it in the **No shift** row rather than dragging the whole night down with it. An entry that spans two shifts is divided between them, and one that runs past a shift's end counts the rest as **No shift**.
+
+2. **The tickboxes narrow only the *scheduled* side.** You tick the assignments — and, finer still, the **shift templates** — that count as paid time; every clocked hour still counts, and it is still measured against the shifts it actually fell in. That second list is the one that matters when an assignment has more than one pattern: *Officer* is one assignment, but **Officer – Day** and **Officer – Night** are two templates at two rates, so ticking the template is how you reconcile one rate at a time. A one-off shift has no template, so ticking any template leaves those out.
+
+3. **"No shift" is the hours that fell outside every shift the member was scheduled for** — arriving early, staying late, or coming in on a day nothing was booked. It is the row to read first, because it is the time nobody scheduled, and it is not where clocked hours land by default.
+
+4. **Somebody with no shift at all still gets a row.** If they clocked in and nothing was scheduled, all of their hours are **No shift** — which is the row worth looking at, not one to hide.
+
+5. **Clocked hours are rounded the way the station reports hours** — *System Settings → Clock Settings* — to the nearest 15 minutes, 30 minutes, or the hour. Each shift is rounded on its own, because a pay period rounds what it pays for. The same step is used in a member's own Clock History, so the two screens never disagree about an hour that was worked, and no recorded timestamp is ever changed.
 
 > [!NOTE]
 > **An entry that is still open** (nobody has clocked out yet) has no length to measure, so it is counted in a **Still open** column and left out of the hours — the same as the member's own Clock History, which also cannot total an entry that has no end. That column appears only when there is one.

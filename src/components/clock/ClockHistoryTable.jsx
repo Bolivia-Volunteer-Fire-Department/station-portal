@@ -7,7 +7,8 @@ export default function ClockHistoryTable({
   showUserColumn = false, 
   emptyMessage = "No clock entries found.",
   timeFormat = '12',
-  shifts = []
+  shifts = [],
+  roundingMinutes = 0
 }) {
   if (!logs || logs.length === 0) {
     return (
@@ -35,7 +36,7 @@ export default function ClockHistoryTable({
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700/50">
             {logs.map((log) => (
-              <ClockTableRow key={log.id} log={log} showUserColumn={showUserColumn} timeFormat={timeFormat} shifts={shifts} />
+              <ClockTableRow key={log.id} log={log} showUserColumn={showUserColumn} timeFormat={timeFormat} shifts={shifts} roundingMinutes={roundingMinutes} />
             ))}
           </tbody>
         </table>

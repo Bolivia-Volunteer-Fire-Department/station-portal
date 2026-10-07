@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import reporting from '../functions/reporting.js';
 // The member's own clock history rule, so the report's copy can be run against it rather than trusted.
 import { clockLogHours } from '../src/utils/clockLogs.js';
+import { computeShiftBreakdown } from '../src/utils/shiftHours.js';
+import { CLOCK_ROUNDING_KEY, roundClockHours } from '../src/utils/clockRounding.js';
 import { REPORT_RANGE_PRESETS, resolveReportRange } from '../src/utils/reportParameters.js';
 import { reportGroupLabel, reportResultCsv } from '../src/utils/reportExport.js';
 
@@ -121,6 +123,102 @@ check('grouping by month merges the members into one row', byMonth.map((r) => r.
 check('with both sides totalled across them', [byMonth[0].values.scheduled_hours, byMonth[0].values.clocked_hours], [15, 9]);
 check('and the variance of the totals, not the sum of the variances', byMonth[0].values.variance, -6);
 
+// A CLOCK ENTRY IS SPLIT ACROSS THE SHIFTS THE MEMBER WAS ACTUALLY SCHEDULED FOR, which is what a reconciliation grouped
+// by template is read for: "13.75 of the night shift was worked, and an hour of it was not during a shift at all". THE
+// CASE BELOW IS THE ONE THAT WAS REPORTED - in at 17:00, out at 07:45 - and the night shift that day runs 18:00 to 08:00.
+const EVERY_DAY = {
+  is_sunday: true,
+  is_monday: true,
+  is_tuesday: true,
+  is_wednesday: true,
+  is_thursday: true,
+  is_friday: true,
+  is_saturday: true,
+};
+const SHIFT_TEMPLATES = [
+  { id: 'day', nickname: 'Day', start_time: '07:00', end_time: '17:00' }, // 10h
+  { id: 'night', nickname: 'Night', start_time: '18:00', end_time: '08:00' }, // 14h, overnight
+];
+const SHIFT_TEMPLATE_TIMES = new Map(SHIFT_TEMPLATES.map((template) => [template.id, template]));
+const NIGHT_SHIFT = { user_id: 'u1', assignment_id: 'a1', schedule_template_id: 'night', date_from: '2026-10-06' };
+const NIGHT_ENTRY = { user_id: 'u1', time_in: '2026-10-06 17:00:00', time_out: '2026-10-07 07:45:00' };
+const split = reporting.splitClockEntry(NIGHT_ENTRY, [NIGHT_SHIFT], SHIFT_TEMPLATE_TIMES);
+check('the entry is divided by the shift it overlaps, in minutes', split.map((p) => [p.templateId, p.dateKey, p.minutes]), [['night', '2026-10-06', 825]]);
+check('so the night shift holds the 13.75 hours that were worked during it', split[0].minutes / 60, 13.75);
+const rowFor = (rows, text) => (rows.find((row) => String(row.label).includes(text)) || {}).values || {};
+const splitReport = reporting.aggregateReconciliation({
+  scheduleRows: [NIGHT_SHIFT],
+  clockRows: [NIGHT_ENTRY],
+  groupBy: ['member', 'template', 'day'],
+  users: USERS,
+  templates: SHIFT_TEMPLATES,
+});
+check('the night shift reads as worked rather than as a no-show', rowFor(splitReport, 'Night').clocked_hours, 13.75);
+check('against the 14 hours it was scheduled for', rowFor(splitReport, 'Night').scheduled_hours, 14);
+check('so the difference is the quarter hour nobody worked', rowFor(splitReport, 'Night').variance, -0.25);
+check('and the hour before the shift opened is the hour nobody scheduled', rowFor(splitReport, 'No shift').clocked_hours, 1);
+check(
+  'with nothing lost or invented between the two, so the parts add back up to the entry',
+  Math.round((rowFor(splitReport, 'Night').clocked_hours + rowFor(splitReport, 'No shift').clocked_hours) * 100) / 100,
+  14.75
+);
+// A ONE-OFF SHIFT IS ITS OWN WINDOW, because there is no template to ask - the times are on the row.
+const oneOff = reporting.splitClockEntry(
+  { time_in: '2026-10-06 09:30:00', time_out: '2026-10-06 10:30:00' },
+  [{ schedule_template_id: '', date_from: '2026-10-06', start_time: '09:00', end_time: '12:00' }],
+  SHIFT_TEMPLATE_TIMES
+);
+check('a one-off shift measures the entry against its own times', oneOff.map((p) => [p.dateKey, p.minutes]), [['2026-10-06', 60]]);
+// HOURS WORKED WITH NOTHING SCHEDULED ARE THE HOURS NOBODY SCHEDULED, which is the row the report exists for.
+const onOwn = reporting.aggregateReconciliation({
+  scheduleRows: [],
+  clockRows: [{ user_id: 'u1', time_in: '2026-10-06 09:00:00', time_out: '2026-10-06 10:00:00' }],
+  groupBy: ['member', 'template'],
+  users: USERS,
+  templates: [],
+});
+check('a member with no shift at all has every hour in the No-shift row', rowFor(onOwn, 'No shift').clocked_hours, 1);
+check('and no shift is invented for them', onOwn.some((row) => String(row.label).includes('Night')), false);
+// AND THE MEMBER'S CLOCK HISTORY SAYS SOMETHING ELSE ON PURPOSE, which is worth pinning so nobody reconciles the two. Its
+// Shift Time column splits against the station's shift PATTERNS (the `shifts` collection) and rounds each window to the
+// half hour for display, so it reads "1 hr (Day), 14 hrs (Night)" for this entry - the same hours, answering a different
+// question ("which pattern were these hours" rather than "were they during a shift you were booked for").
+const patterns = [
+  { id: 'day', description: 'Day', start_time: '07:00', end_time: '17:00', ...EVERY_DAY },
+  { id: 'night', description: 'Night', start_time: '18:00', end_time: '08:00', ...EVERY_DAY },
+];
+check(
+  'while the history\u2019s own column answers a different question and rounds to the half hour doing it',
+  computeShiftBreakdown(NIGHT_ENTRY, patterns).map((row) => [row.id, row.hours]),
+  [['day', 1], ['night', 14]]
+);
+// THE STATION'S ROUNDING STEP, which is one setting in System Settings -> Clock Settings and the same rule in both places.
+// The server's copy is summed here; the client's is printed in the member's own Clock History. A drift between them would
+// be a member reading one number and being paid another, so both are run over the same hours right here.
+console.log('\n--- the rounding step ---');
+check('both copies name the same setting', reporting.CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_KEY);
+check('and round by the three steps the settings card offers', [15, 30, 60].map((step) => reporting.roundToStep(13.75, step)), [13.75, 14, 14]);
+check(
+  'identically, over every step and a spread of hours',
+  [0, 0.2, 0.5, 7.25, 13.75, 14.75, 23.9].flatMap((hours) =>
+    [15, 30, 60].map((step) => reporting.roundToStep(hours, step) === roundClockHours(hours, step))
+  ),
+  Array(21).fill(true)
+);
+check('a value that is not one of the three falls back to the finest step', [reporting.clockRoundingStep('7'), reporting.clockRoundingStep(''), reporting.clockRoundingStep(undefined)], [15, 15, 15]);
+// AND THE REPORT ROUNDS BY IT, per shift, which is what a pay period pays for.
+const halfHourReport = reporting.aggregateReconciliation({
+  scheduleRows: [NIGHT_SHIFT],
+  clockRows: [NIGHT_ENTRY],
+  groupBy: ['member', 'template', 'day'],
+  users: USERS,
+  templates: SHIFT_TEMPLATES,
+  roundingMinutes: 30,
+});
+check('at half-hour steps the night reads as the half hour it rounded to', rowFor(halfHourReport, 'Night').clocked_hours, 14);
+check('so a night worked 15 minutes over the shift now reconciles exactly', rowFor(halfHourReport, 'Night').variance, 0);
+check('and the hour before it is still the hour nobody scheduled', rowFor(halfHourReport, 'No shift').clocked_hours, 1);
+
 console.log('\n--- the datasets a report may be written against ---');
 check('the reconciliation is one of them', Object.keys(reporting.REPORT_DATASET_GROUPINGS), ['schedule', 'training', 'reconciliation']);
 check('and it declares the measures a report can show', reporting.REPORT_DATASET_MEASURES.reconciliation, ['variance', 'scheduled_hours', 'clocked_hours', 'open_clock_entries']);
@@ -178,6 +276,25 @@ check(
 check(
   'and BOTH of its reads use that scope, because either one can leak the whole station',
   (reconcileBranch.match(/return ids \? base\.where\('user_id', 'in', ids\) : base;/g) || []).length === 2,
+  true
+);
+// AND ITS CLOCK READ MUST NAME THE ORDER THE INDEX DECLARES, which is the bug that shipped twice.
+//
+// THE EMULATOR ANSWERS ANY QUERY, so NOTHING HERE CAN CATCH THIS BY RUNNING IT: the failure is Firestore refusing to
+// serve a scan the declared index cannot cover, and it only happens against the real project - where it arrives as
+// "Firestore did not answer RUN_REPORT". The index is (user_id ASC, time_in DESC), so a range on `time_in` has to be
+// ordered DESC; the same trap is recorded in scripts/verify-read-budget.mjs, where Clock History fell into it.
+check(
+  'and its clock read names the order its index declares, or production refuses it',
+  /collection\('timeclock'\)[\s\S]{0,240}?orderBy\('time_in', 'DESC'\)/.test(reconcileBranch),
+  true
+);
+// The SCHEDULE read needs no orderBy: the index it uses is (user_id ASC, date_from ASC), which is exactly the implied
+// ascending scan, and that is why the schedule report has always worked.
+check(
+  'while the shift read is served by its index as written',
+  /where\('date_from', '>=', from\)\.where\('date_from', '<=', to\)/.test(reconcileBranch) &&
+    !/orderBy\('date_from'/.test(reconcileBranch),
   true
 );
 

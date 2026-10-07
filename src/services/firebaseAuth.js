@@ -19,6 +19,37 @@ export const syntheticEmail = (username) => `${String(username || '').trim().toL
 export const signInWithUsername = (username, password) =>
   signInWithEmailAndPassword(firebaseAuth(), syntheticEmail(username), password);
 
+// WHAT A REFUSED SIGN-IN TELLS THE PERSON WHO TYPED IT.
+//
+// The Auth SDK THROWS for every refusal, and its error codes say what actually happened. A `catch` cannot tell one refusal
+// from another, which is how a mistyped password came to be reported as "Unable to connect to authentication server" - the
+// one sentence that sends somebody to check their wifi over a typo, and the one that hides a real outage in the same
+// words. So the codes are read here, in one place, and the caller shows what this returns.
+//
+// A WRONG PASSWORD AND A USERNAME WITH NO ACCOUNT GET THE SAME SENTENCE, deliberately: this screen must not answer "does
+// this person have an account here" for whoever happens to be typing. That is also why the sentence names both.
+const CREDENTIAL_CODES = new Set([
+  'auth/invalid-credential', // what the modern SDK throws for a wrong password AND for no such account
+  'auth/invalid-login-credentials',
+  'auth/wrong-password',
+  'auth/user-not-found',
+  'auth/invalid-email', // the address is DERIVED from the username, so an invalid one means a bad username
+  'auth/missing-password',
+  'auth/missing-email',
+]);
+
+export const signInRefusalMessage = (error) => {
+  const code = String((error && error.code) || '').trim();
+  if (CREDENTIAL_CODES.has(code)) return "You didn't use the correct username/password.";
+  // Both of these are the credentials being right and the account being unable to sign in, so neither may be reported as
+  // a wrong password - there is nothing the person can retype to fix either one.
+  if (code === 'auth/user-disabled') return 'That account has been disabled. Ask an administrator to help.';
+  if (code === 'auth/too-many-requests') return 'Too many attempts. Wait a few minutes and try again.';
+  // EVERYTHING ELSE IS ABOUT REACHING THE SERVICE, including a refusal this does not recognize - and that is the honest
+  // reading once the credentials have been ruled out, which is what the codes above do.
+  return 'Unable to connect to authentication server.';
+};
+
 // Signing in to Firebase ALONGSIDE the app's own session, and never failing the login because of it.
 //
 // The move is phased: the app still signs in through Apps Script and still reads everything from the sheet, and
@@ -62,7 +93,15 @@ const readWithRetry = async (read, attempts = 2) => {
 // documents, and the private one carries `is_change_password_on_login`, which is what raises the change-your-password
 // screen after an officer reset: leaving it out would let a member past a forced change.
 export const signInAsMember = async (username, password) => {
-  await signInWithUsername(username, password);
+  try {
+    await signInWithUsername(username, password);
+  } catch (error) {
+    // A REFUSAL IS AN ANSWER, NOT A THROW. Returning the shape callers already read - success, message - is what puts the
+    // reason on the screen; letting it throw left every refusal to a catch-all that could only say "we could not reach
+    // the server", which is how a typo came to be reported as an outage. The credential itself is never logged.
+    console.info(`[firebase] sign-in refused (${(error && error.code) || error.message}).`);
+    return { success: false, message: signInRefusalMessage(error) };
+  }
 
   const account = await call('whoami', {});
 

@@ -23,6 +23,7 @@ import {
   formatClockHours,
   hasClockLogFilters,
 } from '../src/utils/clockLogs.js';
+import { CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes, roundClockHours } from '../src/utils/clockRounding.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -163,7 +164,7 @@ for (const path of ['src/components/MyClockHistory.jsx', 'src/components/admin/A
 }
 
 const memberSource = readFileSync('src/components/MyClockHistory.jsx', 'utf8');
-check('the member view totals the filtered rows', memberSource.includes('clockLogTotals(visibleLogs)'), true);
+check('the member view totals the filtered rows, rounded by the station\u2019s step', memberSource.includes('clockLogTotals(visibleLogs, { roundingMinutes })'), true);
 check('and labels the cards when filtered', memberSource.includes("Total Hours Logged{isFiltered ? ' (filtered)' : ''}"), true);
 
 // THE DURATION COLUMN, WHICH HAD A SECOND COPY OF THIS RULE AND LOST THE FALLBACK.
@@ -198,6 +199,47 @@ check(
 // The unit belongs to a number. An active entry is the COMMON case on this screen, not an edge, and `-- hrs` states a
 // unit for a figure that is not there.
 check('the unit is not printed beside a missing value', /hours === null \? '--' : `\$\{formattedHours\} hrs`/.test(rowSource), true);
+
+// ---------------------------------------------------------------------------
+// THE STATION'S ROUNDING STEP, which is one setting in System Settings -> Clock Settings.
+// ---------------------------------------------------------------------------
+// ONE SETTING, TWO SCREENS: this rule decides what hours are PRINTED here, in the member's own Clock History, and the same
+// value is handed to the server for the Clocked-vs-scheduled report - see verify-reporting, which runs the server's copy
+// of the rule over the same hours and fails if the two ever round differently. The MEASURED length of an entry is never
+// rounded by it, so a station that changes its pay structure changes only what is displayed.
+console.log('\n--- the rounding step ---');
+check('the three steps a station chooses between', CLOCK_ROUNDING_OPTIONS.map((option) => option.value), ['15', '30', '60']);
+check('nothing is rounded unless something says how', roundClockHours(1.4, 0), 1.4);
+check('and a step that is not a number rounds nothing either', roundClockHours(1.4, NaN), 1.4);
+check('a quarter of an hour is already a quarter of an hour', roundClockHours(13.75, 15), 13.75);
+check('the same hours at half-hour steps round to the nearest half hour', roundClockHours(13.75, 30), 14);
+check('and at whole-hour steps to the nearest hour', roundClockHours(13.75, 60), 14);
+check('a half rounds up, because the setting says nearest', roundClockHours(0.5, 60), 1);
+check('and 12 minutes past is not worth an hour', roundClockHours(0.2, 60), 0);
+check('an unset setting means the finest step', clockRoundingMinutes([]), 15);
+check('a chosen step is read back', clockRoundingMinutes([{ key: 'clock_hours_rounding', value: '30' }]), 30);
+check(
+  'and a stray value falls back to it rather than rounding by something nobody chose',
+  clockRoundingMinutes([{ key: 'clock_hours_rounding', value: '7' }]),
+  15
+);
+// THE TOTALS CARD SUMS WHAT THE COLUMN SHOWS, applying the step to each entry before adding them up, so the two can never
+// disagree - which is the same rule the duration column itself follows.
+const roundingRows = [
+  { calc_hours: '13.75', time_in: '2026-10-06 17:00:00', time_out: '2026-10-07 07:45:00' },
+  { calc_hours: '0.4', time_in: '2026-10-07 09:00:00', time_out: '2026-10-07 09:24:00' },
+];
+check('totals with no step are the measured hours', clockLogTotals(roundingRows).hours, 14.15);
+check(
+  'and with a step, each entry is rounded before it is added up',
+  clockLogTotals(roundingRows, { roundingMinutes: 30 }).hours,
+  14.5
+);
+check(
+  'which is the same figure the rows themselves show, added up',
+  clockLogTotals(roundingRows, { roundingMinutes: 30 }).hours,
+  Math.round((roundClockHours(13.75, 30) + roundClockHours(0.4, 30)) * 100) / 100
+);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
