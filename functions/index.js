@@ -20,6 +20,7 @@ const { logger } = require('firebase-functions/logger');
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { countPendingDocumentVerifications } = require('./documentVerification');
 const {
+  aggregateReconciliation,
   aggregateScheduleRows,
   aggregateTrainingRows,
   canUseReport,
@@ -346,6 +347,19 @@ const reportScopeIsAllowed = (report, role) => {
     if (report.scope === 'mine') return admin || isGranted(role?.can_sign_trainings);
     return admin || isGranted(role?.can_administer_trainings);
   }
+  if (report.dataset === 'reconciliation') {
+    // A reconciliation reads the member's SHIFT hours and their CLOCK entries, so the scope has to be allowed for BOTH
+    // halves. The clock half is the stricter of the two and the one that is about PRYING rather than rostering: reading
+    // somebody else's entries is `can_edit_timeclock`, which is exactly what Clock Management is gated on and what the
+    // rules honour on that collection. Without this branch a station-scope reconciliation would have been allowed to a
+    // role that may build the schedule but has no business reading anyone's clock history.
+    if (report.scope === 'mine') return admin || isGranted(role?.can_view_my_schedule);
+    return (
+      admin ||
+      ((isGranted(role?.can_view_full_schedule) || isGranted(role?.can_edit_schedule)) &&
+        isGranted(role?.can_edit_timeclock))
+    );
+  }
   if (report.scope === 'mine') return admin || isGranted(role?.can_view_my_schedule);
   return admin || isGranted(role?.can_view_full_schedule) || isGranted(role?.can_edit_schedule);
 };
@@ -506,6 +520,69 @@ exports.runReport = onCall(async (request) => {
       range: { from, to },
       rows: aggregateTrainingRows(signatures, { groupBy: options.groupBy, trainings, users: trainingMembers }),
       truncated: false,
+    };
+  }
+
+  // A RECONCILIATION: what was scheduled against what was actually worked. It reads TWO collections, which is the whole
+  // reason it is a dataset of its own rather than a grouping on the schedule report.
+  if (report.dataset === 'reconciliation') {
+    const mine = report.scope === 'mine' ? caller.uid : '';
+    const scheduleSource = mine
+      ? db.collection('schedule').where('user_id', 'in', [mine]).where('date_from', '>=', from).where('date_from', '<=', to)
+      : db.collection('schedule').where('date_from', '>=', from).where('date_from', '<=', to);
+    const scheduleSnapshot = await scheduleSource.limit(5001).get();
+    const scheduleRows = scheduleSnapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id }));
+
+    // CLOCK ENTRIES, and the bound is the fiddly part. `time_in` is a DATETIME ("yyyy-MM-dd HH:mm:ss") while `to` is a
+    // bare date key, so the upper bound is the day AFTER it, EXCLUSIVE - the same bound GET_TIMECLOCK_LOGS uses, and the
+    // bug recorded there is exactly this: comparing "2026-01-31 14:00:00" against "2026-01-31" drops the whole last day.
+    const dayAfter = new Date(Date.parse(`${to}T00:00:00.000Z`) + 86400000).toISOString().slice(0, 10);
+    const clockSource = mine
+      ? db.collection('timeclock').where('user_id', 'in', [mine]).where('time_in', '>=', from).where('time_in', '<', dayAfter)
+      : db.collection('timeclock').where('time_in', '>=', from).where('time_in', '<', dayAfter);
+    const clockSnapshot = await clockSource.limit(5001).get();
+    const clockRows = clockSnapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id }));
+
+    // Names for whoever appears, whether they were scheduled or merely turned up - a row for somebody who clocked in with
+    // no shift at all is the interesting one, so it must not be the one row that reads "Unnamed member".
+    const memberIds = [
+      ...new Set(
+        [...scheduleRows, ...clockRows].map((row) => String(row.user_id || '').trim()).filter(Boolean)
+      ),
+    ];
+    // The template each shift belongs to, because a shift's HOURS live on its template rather than on the row.
+    const templateIds = [
+      ...new Set(scheduleRows.map((row) => String(row.schedule_template_id || '').trim()).filter(Boolean)),
+    ];
+    const [memberSnapshots, templateSnapshots] = await Promise.all([
+      memberIds.length ? db.getAll(...memberIds.map((id) => db.doc(`users/${id}`))) : [],
+      templateIds.length ? db.getAll(...templateIds.map((id) => db.doc(`schedule_templates/${id}`))) : [],
+    ]);
+    const users = memberSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
+    const templates = templateSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
+
+    return {
+      report: {
+        id: report.id,
+        name: report.name,
+        visualization: options.visualization,
+        group_by: options.groupBy,
+        dataset: 'reconciliation',
+        unit: 'Hours',
+      },
+      range: { from, to },
+      rows: aggregateReconciliation({
+        scheduleRows,
+        clockRows,
+        groupBy: options.groupBy,
+        users,
+        templates,
+        assignmentIds: options.assignmentIds,
+      }),
+      // The axis that was actually compared, echoed back so the runner can say what these numbers are against rather
+      // than leaving an officer to remember which boxes they ticked.
+      assignment_ids: options.assignmentIds,
+      truncated: scheduleSnapshot.size > 5000 || clockSnapshot.size > 5000,
     };
   }
 

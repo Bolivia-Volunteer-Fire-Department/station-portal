@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, BarChart3, Download, Loader2, PieChart as PieIcon, Printer, Rocket, Table2, TrendingUp } from 'lucide-react';
-import { fetchAdminSections, fetchReports, runConfiguredReport } from '../services/api';
+import { fetchAdminSections, fetchReports, fetchScheduleSetup, runConfiguredReport } from '../services/api';
 import { toDateKey } from '../utils/scheduleDate';
 import { userLabel } from '../utils/displayLabel';
 import { downloadCsv, reportCsvFileName, reportResultCsv } from '../utils/reportExport';
@@ -21,6 +21,16 @@ const VISUALS = {
   line: { label: 'Line chart', icon: TrendingUp },
 };
 
+// The extra numbers a reconciliation carries, labelled the way an officer says them rather than the way the server names
+// them. The keys are functions/reporting's own measure names, so the table and the engine cannot disagree about what a
+// column is - and `datasetLabel` below is the same idea for the datasets themselves.
+const MEASURE_LABELS = {
+  scheduled_hours: 'Scheduled',
+  clocked_hours: 'Clocked in',
+  variance: 'Difference',
+  open_clock_entries: 'Still open',
+};
+
 const REPORT_LAUNCH_FORM_ID = 'report-launch-form';
 const INPUT_CLASS =
   'mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-white';
@@ -28,7 +38,12 @@ const ACTION_BUTTON_CLASS =
   'inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700';
 
 const rangeLabel = (preset) => REPORT_RANGE_PRESETS.find(([value]) => value === preset)?.[1] || 'This month';
-const datasetLabel = (report) => (report.dataset === 'training' ? 'Training hours' : 'Schedule');
+const datasetLabel = (report) =>
+  report.dataset === 'training'
+    ? 'Training hours'
+    : report.dataset === 'reconciliation'
+      ? 'Clocked vs scheduled'
+      : 'Schedule';
 
 function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
   const today = toDateKey(new Date());
@@ -46,6 +61,42 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
   // The crew list is read only for a report that asks for it, and not at all when the app already holds one.
   const needsFetch = wantsMembers && !knownMembers.length;
   const members = knownMembers.length ? knownMembers : fetchedMembers || [];
+
+  // WHICH ASSIGNMENTS COUNT AS PAID, for a reconciliation. There is deliberately no column on the assignment saying so:
+  // "is this paid?" is a question about THIS comparison, and a station whose one paid assignment changed would otherwise
+  // have to edit the assignment and live with the answer everywhere else. So the officer ticks them, and the report
+  // compares the schedule built from those against every hour anybody clocked.
+  //
+  // The list is the station's own assignments, read from the same schedule setup the calendars use - so a member running
+  // their own reconciliation needs no permission they do not already have to see the shift names on their own calendar.
+  const wantsAssignments = report.allow_assignments === true;
+  const [assignmentIds, setAssignmentIds] = useState([]);
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [fetchedAssignments, setFetchedAssignments] = useState(null);
+  const [assignmentsError, setAssignmentsError] = useState('');
+  const assignmentOptions = Array.isArray(fetchedAssignments) ? fetchedAssignments : [];
+  const visibleAssignments = assignmentOptions.filter((row) =>
+    String(row?.description || '').toLowerCase().includes(assignmentSearch.trim().toLowerCase())
+  );
+  const toggleAssignment = (id) =>
+    setAssignmentIds((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    );
+
+  useEffect(() => {
+    if (!wantsAssignments || fetchedAssignments !== null) return undefined;
+    let cancelled = false;
+    fetchScheduleSetup()
+      .then((data) => {
+        if (!cancelled) setFetchedAssignments(Array.isArray(data?.assignments) ? data.assignments : []);
+      })
+      .catch((failure) => {
+        if (!cancelled) setAssignmentsError(failure.message || 'Could not load the assignments.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [wantsAssignments, fetchedAssignments]);
 
   useEffect(() => {
     if (!needsFetch) return undefined;
@@ -74,7 +125,7 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
 
   const groupings = REPORT_GROUPINGS[report.dataset] || REPORT_GROUPINGS.schedule;
   const hasEditableParameters =
-    report.allow_range !== false || report.allow_group_by || report.allow_visualization || report.allow_category || wantsMembers;
+    report.allow_range !== false || report.allow_group_by || report.allow_visualization || report.allow_category || wantsMembers || wantsAssignments;
 
   const run = async (event) => {
     event.preventDefault();
@@ -89,6 +140,8 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
         visualization,
         category,
         member_ids: memberIds,
+        // Only sent when the definition opened it up; the server ignores it otherwise (resolveReportOptions).
+        assignment_ids: wantsAssignments ? assignmentIds : [],
       });
       // What was chosen is kept with the result, because the printed copy has to say what it is a copy of.
       const names = members.filter((member) => memberIds.includes(String(member.id))).map((member) => userLabel(member));
@@ -101,6 +154,19 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
           ['Shown as', VISUALS[answer.report.visualization]?.label || 'Table'],
           ...(report.allow_category ? [['Category', TRAINING_CATEGORY_FILTERS.find(([value]) => value === category)?.[1] || 'All categories']] : []),
           ...(wantsMembers ? [['Members', names.length ? names.join(', ') : 'Everyone']] : []),
+          ...(wantsAssignments
+            ? [
+                [
+                  'Paid assignments',
+                  assignmentIds.length
+                    ? assignmentOptions
+                        .filter((row) => assignmentIds.includes(String(row.id)))
+                        .map((row) => String(row.description || '').trim() || 'Unnamed assignment')
+                        .join(', ')
+                    : 'Every assignment',
+                ],
+              ]
+            : []),
         ],
       });
     } catch (failure) {
@@ -110,6 +176,19 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
       setRunning(false);
     }
   };
+
+  // A RECONCILIATION CARRIES MORE THAN ONE NUMBER PER ROW, so the table grows a column per measure rather than pretending
+  // the single `value` is the whole answer. `value` is the variance - the finding - and the two totals sit beside it.
+  // "Still open" appears only when there IS one, because a column of zeroes is furniture until it is not.
+  const hasMeasures = result ? result.rows.some((row) => row.values) : false;
+  const measureColumns = hasMeasures
+    ? [
+        'scheduled_hours',
+        'clocked_hours',
+        'variance',
+        ...(result.rows.some((row) => (row.values.open_clock_entries || 0) > 0) ? ['open_clock_entries'] : []),
+      ]
+    : [];
 
   const actions = result ? (
     <>
@@ -226,6 +305,46 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                 )}
               </div>
             )}
+            {wantsAssignments && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Assignments counted as paid{' '}
+                    {assignmentIds.length ? `(${assignmentIds.length} selected)` : '(every assignment)'}
+                  </p>
+                  {assignmentIds.length > 0 && (
+                    <button type="button" onClick={() => setAssignmentIds([])} className="text-xs font-medium text-red-600 hover:underline">Clear</button>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Only the ticked assignments count as <span className="font-medium">scheduled</span> time. Every clocked
+                  hour still counts &mdash; a clock entry does not say which shift somebody was on, and the hours nobody
+                  scheduled are the ones worth seeing. Tick nothing to count them all.
+                </p>
+                <input
+                  type="search"
+                  value={assignmentSearch}
+                  onChange={(event) => setAssignmentSearch(event.target.value)}
+                  placeholder="Search assignments"
+                  className={INPUT_CLASS}
+                />
+                {assignmentsError ? (
+                  <p className="mt-2 text-xs text-red-600">{assignmentsError}</p>
+                ) : fetchedAssignments === null ? (
+                  <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading assignments…</p>
+                ) : (
+                  <div className="mt-2 grid max-h-48 gap-x-4 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700 @lg:grid-cols-2">
+                    {visibleAssignments.map((row) => (
+                      <label key={row.id} className="flex items-center gap-2 py-1 text-sm text-slate-700 dark:text-slate-200">
+                        <input type="checkbox" checked={assignmentIds.includes(String(row.id))} onChange={() => toggleAssignment(String(row.id))} className="accent-red-600" />
+                        {String(row.description || '').trim() || 'Unnamed assignment'}
+                      </label>
+                    ))}
+                    {visibleAssignments.length === 0 && <p className="py-2 text-xs text-slate-500">No assignments match.</p>}
+                  </div>
+                )}
+              </div>
+            )}
             {!hasEditableParameters && <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">This report has no adjustable parameters.</p>}
           </section>
 
@@ -245,11 +364,25 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                      <tr><th className="px-3 py-2">{result.report.group_by}</th><th className="px-3 py-2 text-right">{result.report.unit || 'Shifts'}</th></tr>
+                      <tr>
+                        <th className="px-3 py-2">{result.report.group_by}</th>
+                        {measureColumns.map((measure) => <th key={measure} className="px-3 py-2 text-right">{MEASURE_LABELS[measure]}</th>)}
+                        {!hasMeasures && <th className="px-3 py-2 text-right">{result.report.unit || 'Shifts'}</th>}
+                      </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700/70">
-                      {result.rows.map((row) => <tr key={row.key}><td className="px-3 py-2 text-slate-800 dark:text-slate-200">{row.label}</td><td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">{row.value}</td></tr>)}
-                      {result.rows.length === 0 && <tr><td colSpan={2} className="px-3 py-10 text-center text-slate-500">No results for this date range.</td></tr>}
+                      {result.rows.map((row) => (
+                        <tr key={row.key}>
+                          <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{row.label}</td>
+                          {measureColumns.map((measure) => (
+                            <td key={measure} className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">
+                              {row.values?.[measure] ?? ''}
+                            </td>
+                          ))}
+                          {!hasMeasures && <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">{row.value}</td>}
+                        </tr>
+                      ))}
+                      {result.rows.length === 0 && <tr><td colSpan={measureColumns.length + (hasMeasures ? 1 : 2)} className="px-3 py-10 text-center text-slate-500">No results for this date range.</td></tr>}
                     </tbody>
                   </table>
                 </div>

@@ -56,7 +56,7 @@
     "verify:help": "vite build --ssr scripts/verify-help-guides.mjs --outDir tmp-test-out/help --logLevel error && node tmp-test-out/help/verify-help-guides.js",
     "verify:notification-prefs": "vite build --ssr scripts/verify-notification-prefs.mjs --outDir tmp-test-out/notification-prefs --logLevel error && node tmp-test-out/notification-prefs/verify-notification-prefs.js",
     "verify:permissions": "vite build --ssr scripts/verify-permissions.mjs --outDir tmp-test-out/permissions --logLevel error && node tmp-test-out/permissions/verify-permissions.js",
-    "verify:reporting": "node scripts/verify-reporting.mjs",
+    "verify:reporting": "vite build --ssr scripts/verify-reporting.mjs --outDir tmp-test-out/reporting --logLevel error && node tmp-test-out/reporting/verify-reporting.js",
     "verify:forms": "node scripts/verify-forms.mjs",
     "verify:admin-render": "vite build --ssr scripts/verify-admin-render.mjs --outDir tmp-test-out/admin-render --logLevel error && node tmp-test-out/admin-render/verify-admin-render.js",
     "verify:admin-schedule-runtime": "vite build --ssr scripts/verify-admin-schedule-runtime.mjs --outDir tmp-test-out/admin-schedule-runtime --logLevel error && node tmp-test-out/admin-schedule-runtime/verify-admin-schedule-runtime.js",

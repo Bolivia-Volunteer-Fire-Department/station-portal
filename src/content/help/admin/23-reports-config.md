@@ -13,9 +13,9 @@
 | Field | What it decides |
 |---|---|
 | **Name** | How the report is listed. 2–80 characters |
-| **Data source** | **Schedule** (shifts) or **Training (hours)** (hours signed for) |
+| **Data source** | **Schedule** (shifts), **Training (hours)** (hours signed for), or **Clocked vs scheduled (hours)** |
 | **Visualization** | How it is drawn: **Table**, **Bar graph**, **Pie graph** or **Line graph** |
-| **Group by** | What the rows and columns are. *Schedule*: assignment, member, day or month. *Training*: category, member, training, day or month |
+| **Group by** | What the rows and columns are. *Schedule*: assignment, member, day or month. *Training*: category, member, training, day or month. *Clocked vs scheduled*: member, day or month |
 | **Description** | An optional line, up to 300 characters, shown with the report |
 | **Scope** | The runner's **own** records, or the whole **station** |
 
@@ -27,6 +27,26 @@ A scope the runner's role cannot read is refused when the report is run, so the 
 |---|---|---|
 | Schedule | **View their schedule** | **See whole crew** or **Manage schedule** |
 | Training | **Sign trainings** | **Administer trainings** |
+| Clocked vs scheduled | **View their schedule** | **Manage the timeclock** *and* **See whole crew** or **Manage schedule** |
+
+> [!IMPORTANT]
+> A station-wide reconciliation shows how long every member was on station, so it asks for **Manage the timeclock** on top of a schedule permission. A role that may build the schedule but has no business reading clock history cannot run one — and a member can always run their own.
+
+## Clocked vs scheduled: what it compares
+
+This is the report you write to reconcile paid time. Each row is a member, and it shows **three numbers**:
+
+- **Scheduled** — the hours of shifts they were assigned to, added up (an overnight shift counts for the hours it actually spans, not the day it starts on).
+- **Clocked in** — the hours of their clock entries in the same range.
+- **Difference** — clocked minus scheduled. That is the number the report is for, and the rows are sorted so the biggest mismatches come first.
+
+Two things about it are deliberate and worth knowing before you read a number off it:
+
+1. **The tickboxes narrow only the *scheduled* side.** You tick the assignments that count as paid time; every clocked hour still counts. A clock entry does not record which shift somebody was on — the app never asks at clock-in — so a reconciliation compares the two totals rather than pretending to match entries to shifts. That asymmetry is the useful part: it is how a volunteer's hours, or a paid member's extra hours, show up beside the paid schedule that was supposed to cover them.
+2. **Somebody with no shift at all still gets a row.** If they clocked in and nothing was scheduled, that shows as *Scheduled 0* — which is the row worth looking at, not one to hide.
+
+> [!NOTE]
+> **An entry that is still open** (nobody has clocked out yet) has no length to measure, so it is counted in a **Still open** column and left out of the hours — the same as the member's own Clock History, which also cannot total an entry that has no end. That column appears only when there is one.
 
 ## What the runner may change
 

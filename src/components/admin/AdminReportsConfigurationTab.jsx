@@ -23,6 +23,7 @@ const EMPTY_REPORT = {
   allow_visualization: false,
   allow_category: false,
   allow_members: false,
+  allow_assignments: false,
   audience_all: false,
   audience_role_ids: [],
   audience_rank_ids: [],
@@ -45,6 +46,16 @@ const DATASETS = {
     mine: 'My training (requires Sign trainings)',
     station: 'Everyone\'s training (requires Administer trainings)',
     summary: 'Station training',
+  },
+  // WHAT WAS SCHEDULED AGAINST WHAT WAS ACTUALLY WORKED. The one dataset whose numbers an officer reconciles rather than
+  // reads: hours scheduled, hours clocked in, and the difference. It reads BOTH the schedule and the timeclock, which is
+  // why the station scope asks for the clock permission as well - see reportScopeIsAllowed in functions/index.js.
+  reconciliation: {
+    label: 'Clocked vs scheduled (hours)',
+    groupings: [['member', 'Member'], ['day', 'Day'], ['month', 'Month']],
+    mine: 'My hours (requires View their schedule)',
+    station: 'Everyone\'s hours (requires Manage the timeclock and a schedule permission)',
+    summary: 'Clocked vs scheduled',
   },
 };
 
@@ -251,6 +262,11 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
               ['allow_visualization', 'Viewer can change the visualization'],
               ...(form.dataset === 'training' ? [['allow_category', 'Viewer can filter by training category']] : []),
               ...(form.scope === 'station' ? [['allow_members', 'Viewer can choose which members to include']] : []),
+              // WHICH ASSIGNMENTS COUNT AS PAID, ticked by whoever runs it. No column on the assignment says paid, because
+              // "is this paid?" is a question about THIS comparison rather than a fact about the shift.
+              ...(form.dataset === 'reconciliation'
+                ? [['allow_assignments', 'Viewer can tick which assignments count as paid time']]
+                : []),
             ].map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
                 <input type="checkbox" checked={form[key] === true} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} className="accent-red-600" />
