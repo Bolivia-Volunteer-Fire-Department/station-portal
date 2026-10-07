@@ -13,6 +13,7 @@
  * emulator UI cannot drift apart.
  */
 import { initializeApp } from 'firebase/app';
+import { readFileSync } from 'node:fs';
 import {
   connectFirestoreEmulator,
   deleteDoc,
@@ -729,7 +730,7 @@ const main = async () => {
   // The private half is otherwise written by nobody, so this branch has to be proved narrow rather than trusted: the
   // member's own id, an officer's correction of anybody's, and NOTHING ELSE on that document. The status is the one that
   // matters - a write that carried a status alongside the id would be a browser unsuspending itself.
-  console.log('\n--- the FEMA student id ---');
+  console.log('\n--- a member’s own details ---');
   const writeMerged = async (label, allowed, path, data) => {
     try {
       await setDoc(doc(db, path), data, { merge: true });
@@ -740,18 +741,48 @@ const main = async () => {
   };
   await asUser('u2'); // the firefighter, editing their own record
   await writeMerged('a member sets their OWN FEMA student id', true, 'users_private/u2', { fema_student_id: '1234567' });
+  await writeMerged('and their own email', true, 'users_private/u2', { email: 'jane@example.com' });
+  await writeMerged('and their own phone', true, 'users_private/u2', { phone: '555-0100' });
   await writeMerged('but not another member’s', false, 'users_private/u1', { fema_student_id: '7654321' });
-  await writeMerged('and cannot smuggle a status change beside it', false, 'users_private/u2', {
+  await writeMerged('and cannot smuggle a status change beside them', false, 'users_private/u2', {
     fema_student_id: '1234567',
     status: 'suspended',
   });
+  // MEMBER ID IS THE ONE OF THE FOUR A MEMBER MAY NOT WRITE, which is what keeps an issued identifier out of their hands -
+  // and it is the branch that would be a hole if the two clauses were written as one list.
+  await writeMerged('nor set their own member id', false, 'users_private/u2', { member_id: '1042' });
+  // A value longer than the field is refused too, so nothing unbounded lands in the column.
+  await writeMerged('nor an email longer than the field allows', false, 'users_private/u2', {
+    email: `${'x'.repeat(120)}@example.com`,
+  });
   await asUser('u1'); // the administrator, correcting somebody else's
   await writeMerged('an officer corrects a member’s FEMA student id', true, 'users_private/u2', { fema_student_id: '2222222' });
+  await writeMerged('and sets their member id', true, 'users_private/u2', { member_id: '1042' });
   await asUser('u2');
   checkIs(
     'and the correction is what is on file',
     (await getDoc(doc(db, 'users_private', 'u2'))).data().fema_student_id,
     '2222222'
+  );
+
+  // THE RULES NAME THE SAME FIELDS THE APP DOES. utils/memberFields is the one list the writer and both screens use, and the
+  // rules have to spell the names out themselves - so this compares the two spellings rather than trusting them to match.
+  const memberFields = await import('../src/utils/memberFields.js');
+  const rulesSource = readFileSync('firestore.rules', 'utf8');
+  const listIn = (fields) => `['${fields.join("', '")}']`;
+  checkIs(
+    'the rules name exactly the fields a member may write',
+    rulesSource.includes(listIn(memberFields.MEMBER_PRIVATE_FIELDS)),
+    listIn(memberFields.MEMBER_PRIVATE_FIELDS)
+  );
+  checkIs(
+    'and exactly the fields an officer may',
+    rulesSource.includes(listIn(memberFields.MEMBER_PRIVATE_ADMIN_FIELDS)),
+    listIn(memberFields.MEMBER_PRIVATE_ADMIN_FIELDS)
+  );
+  checkIs(
+    'with the member id outside the member’s list, not merely unchecked',
+    !memberFields.MEMBER_PRIVATE_FIELDS.includes('member_id')
   );
 
   checkIs('every case ran', cases >= 27, `only ${cases} cases: a section has stopped running`);

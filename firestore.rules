@@ -187,21 +187,39 @@ service cloud.firestore {
     // account) and by officers. Written by NOBODY: creating a member and changing a username or a status goes
     // through a callable function, which is what stops a client inventing an account or un-suspending itself. The
     // Admin SDK bypasses this file - that is the point.
+    // A field a browser may write on a member's private row: a string, and no longer than that field is meant to be.
+    // A helper rather than repeating the clause, so the two branches below cannot drift apart in what they require.
+    function privateText(key, limit) {
+      return request.resource.data.get(key, '') is string
+        && request.resource.data.get(key, '').size() <= limit;
+    }
+
     match /users_private/{userId} {
       allow read: if signedIn() && (uid() == userId || permission('can_edit_users'));
       // THE PRIVATE HALF IS OTHERWISE WRITTEN BY NOBODY, and it stays that way for the username, the status and the
       // password-change flag - which is the whole point of this collection being write-denied: a browser must not be
       // able to unsuspend itself by rewriting its own row.
       //
-      // A FEMA STUDENT ID IS THE ONE EXCEPTION, and it is narrow rather than a hole. A member keeps their own up to date
-      // and an officer with the user permission may correct anybody's, but `affectedKeys().hasOnly(...)` means BOTH of
-      // them can change exactly that one key and nothing else: a crafted request cannot move a status or a username
-      // through this branch, so every other fact still requires the callable.
+      // TWO BRANCHES, because the two people who may write here do not own the same fields. A MEMBER keeps their own
+      // contact details up to date - email, phone, FEMA student id - and MEMBER ID IS DELIBERATELY NOT AMONG THEM: the
+      // station issues it and recycles it when somebody goes inactive, so it is not the member's to choose. AN OFFICER
+      // with the user permission may correct anybody's, the member id included.
+      //
+      // `affectedKeys().hasOnly(...)` is what makes both narrow rather than a hole: a crafted request cannot move a
+      // status or a username through either branch, so every other fact still requires the callable.
       allow update: if signedIn()
-        && (uid() == userId || permission('can_edit_users'))
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fema_student_id'])
-        && request.resource.data.get('fema_student_id', '') is string
-        && request.resource.data.get('fema_student_id', '').size() <= 40;
+        && uid() == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fema_student_id', 'email', 'phone'])
+        && privateText('fema_student_id', 40)
+        && privateText('email', 120)
+        && privateText('phone', 40);
+      allow update: if signedIn()
+        && permission('can_edit_users')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fema_student_id', 'email', 'phone', 'member_id'])
+        && privateText('fema_student_id', 40)
+        && privateText('email', 120)
+        && privateText('phone', 40)
+        && privateText('member_id', 20);
       allow create, delete: if false;
     }
 

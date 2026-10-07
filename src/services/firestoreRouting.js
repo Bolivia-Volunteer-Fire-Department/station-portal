@@ -266,7 +266,7 @@ export const ROUTED_FEATURES = {
     // A FEMA student id lives on the member's PRIVATE row rather than with the preferences, but it belongs to this
     // feature: the same screen edits it, the rules allow exactly that one key (the member's own, or an officer's), and
     // the read it depends on is the same member payload.
-    writes: ['UPDATE_USER_SETTINGS', 'SAVE_FEMA_STUDENT_ID'],
+    writes: ['UPDATE_USER_SETTINGS', 'SAVE_MEMBER_PRIVATE'],
     switchReads: [],
   },
 
@@ -630,12 +630,12 @@ const DISPATCH = {
     return ok(await saveMemberSettings({ userId: payload.id || uid, fields: payload }));
   },
 
-  // A FEMA student id, which lives on the member's PRIVATE row rather than with the preferences - so it is its own call.
-  // The session's own row unless the form named another, and a member naming somebody else is refused by the RULES,
-  // which allow exactly that one key and no other part of that document.
-  SAVE_FEMA_STUDENT_ID: async (body, uid) => {
-    const { saveFemaStudentId } = await writes();
-    return ok(await saveFemaStudentId({ userId: body?.userId || uid, value: body?.value }));
+  // A member's own details, which live on the member's PRIVATE row rather than with the preferences - so this is its own
+  // call. The session's own row unless the form named another, and a member naming somebody else is refused by the RULES,
+  // which allow only these keys on that document and none of the rest of it.
+  SAVE_MEMBER_PRIVATE: async (body, uid) => {
+    const { saveMemberPrivateFields } = await writes();
+    return ok(await saveMemberPrivateFields({ userId: body?.userId || uid, fields: body?.fields || {} }));
   },
 
   // Signing and verifying. EVERY IDENTITY COMES FROM THE SESSION, and the request only ever names the SUBJECT: `uid`

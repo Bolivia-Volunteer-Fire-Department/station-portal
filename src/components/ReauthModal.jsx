@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ShieldAlert, AlertCircle, Loader2, LogOut } from 'lucide-react';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
 import { renderInViewport } from '../utils/viewportLayer';
+import PasswordInput from './PasswordInput';
 
 /**
  * Full-screen reauthentication gate rendered on top of the app UI.
@@ -95,8 +96,7 @@ export default function ReauthModal({ username = '', reason = null, onReauth, on
 
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Password / PIN</label>
-            <input
-              type="password"
+            <PasswordInput
               placeholder="Enter password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

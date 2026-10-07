@@ -99,6 +99,14 @@ export const signInAsMember = async (username, password) => {
       // The FEMA student id, read with the rest of the private half rather than at sign-in for itself: this document is
       // ALREADY fetched here, so the field costs nothing, and My Settings is the one place that draws it.
       fema_student_id: String(secret.fema_student_id || ''),
+      // The member's own contact details, read with the rest of the private half rather than at sign-in for themselves:
+      // the document is ALREADY fetched here, so they cost nothing, and My Settings is the one place that draws them.
+      //
+      // `member_id` IS DELIBERATELY ABSENT, and that absence is the feature: the station issues it and recycles it when
+      // somebody goes inactive, so it is not carried into the session at all rather than carried and left undrawn - which
+      // is the difference between a rule and a habit.
+      email: String(secret.email || ''),
+      phone: String(secret.phone || ''),
       // EITHER COPY IS ENOUGH TO ASK, and that is the whole point of asking both. See `passwordChangeRequired` for why
       // the rule is an OR and why it fails closed: the column is fetched by a read that is allowed to fail, and `false`
       // is the answer that lets somebody past a forced password change.

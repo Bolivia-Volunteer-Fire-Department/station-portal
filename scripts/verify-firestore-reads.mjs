@@ -238,7 +238,11 @@ checkIs(
     // `fema_student_id` joined the list when the Users tab needed it: a personal number from FEMA's training system,
     // kept on the member's PRIVATE record so it is not on the roster every member reads. Named here like the rest, so
     // the friction described above still applies to whatever is added next.
-    ['fema_student_id', 'id', 'is_change_password_on_login', 'name', 'rank_id', 'role_id', 'status', 'user_name']
+    //
+    // `member_id`, `email` and `phone` joined it for the same reason, and `member_id` is worth a second look: it IS read
+    // here, because this is the ADMIN projection - the member's own session never carries it (see firebaseAuth), which is
+    // what makes "members cannot see their ID" true rather than merely undrawn.
+    ['email', 'fema_student_id', 'id', 'is_change_password_on_login', 'member_id', 'name', 'phone', 'rank_id', 'role_id', 'status', 'user_name']
   );
   // THE BOARD'S SECTIONS ARE NOT CARRIED EITHER - the assignments and templates with their private notes, the offers still waiting,
   // the shift definitions - because each of them belongs to a sub-tab that reads it when opened. They are read here the way those

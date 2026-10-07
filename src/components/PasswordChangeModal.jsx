@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { KeyRound, AlertCircle, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { passwordChangeCopy, passwordChangeProblem } from '../utils/passwordPolicy';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
+import PasswordInput from './PasswordInput';
 import { renderInViewport } from '../utils/viewportLayer';
 
 /**
@@ -81,8 +82,7 @@ export default function PasswordChangeModal({ username = '', onPasswordChange, o
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">
               New password
             </label>
-            <input
-              type="password"
+            <PasswordInput
               placeholder="Enter your new password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -98,8 +98,7 @@ export default function PasswordChangeModal({ username = '', onPasswordChange, o
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">
               Confirm new password
             </label>
-            <input
-              type="password"
+            <PasswordInput
               placeholder="Type it again"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}

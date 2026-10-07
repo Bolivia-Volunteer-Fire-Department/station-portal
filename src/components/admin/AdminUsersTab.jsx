@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Loader2, Pencil, Trash2, Plus, AlertCircle, Users as UsersIcon, Music, KeyRound, ListChecks, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
 import RankIcon from '../RankIcon';
-import { adminSaveUser, adminDeleteUser, saveFemaStudentId } from '../../services/api';
+import { adminSaveUser, adminDeleteUser, saveMemberPrivateFields } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import MemberName from '../MemberName';
+import PasswordInput from '../PasswordInput';
 import { recordHeading } from '../../utils/displayLabel';
+import { MEMBER_PRIVATE_ADMIN_FIELDS } from '../../utils/memberFields';
 
 // The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
 const USER_FORM_ID = 'user-editor-form';
@@ -24,13 +26,17 @@ const BULK_CHANGE_LABELS = {
   exclude_from_scheduling: 'scheduling',
 };
 
-const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE', fema_student_id: '' };
+const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE', fema_student_id: '', member_id: '', email: '', phone: '' };
+
+// The fields this form edits on the member's PRIVATE record - the half of an account a member may partly keep themselves.
+// utils/memberFields holds the one list, so this, the writer and the rules cannot disagree about which fields those are.
+const PRIVATE_FIELDS = [...MEMBER_PRIVATE_ADMIN_FIELDS];
 
 export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // What the member's FEMA student id WAS when the editor opened. It lives on the member's private record rather than on
   // the roster row, so it is saved as its own write - and only when this differs, so an ordinary save stays one request.
-  const [savedFemaId, setSavedFemaId] = useState('');
+  const [savedPrivate, setSavedPrivate] = useState({});
   // Whether the editor modal is open: "a new member" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -170,14 +176,15 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
   const resetForm = () => {
     setFormData(EMPTY_FORM);
-    setSavedFemaId('');
+    setSavedPrivate({});
     setEditorOpen(false);
   };
 
   const handleEdit = (user) => {
     setEditorOpen(true);
     setError(null);
-    setSavedFemaId(user.fema_student_id || '');
+    // What the record holds now, so the save below can send only what the officer actually changed.
+    setSavedPrivate(Object.fromEntries(PRIVATE_FIELDS.map((key) => [key, String(user[key] ?? '').trim()])));
     setFormData({
       id: user.id,
       // Carried through the form so the backend can refuse a save built on a stale copy.
@@ -192,6 +199,11 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
       runner_sound_profile: user.runner_sound_profile || '',
       fema_student_id: user.fema_student_id || '',
+      // The rest of the member's private details, edited here beside it. The member id is the officer's to set: the rules
+      // refuse it to the member on their own row, which is what keeps an issued identifier out of their hands.
+      member_id: user.member_id || '',
+      email: user.email || '',
+      phone: user.phone || '',
       // Normalized on the way in, so the checkbox is never in doubt about what the sheet holds.
       is_change_password_on_login:
         String(user.is_change_password_on_login ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
@@ -208,15 +220,19 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       const result = await adminSaveUser(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save user.');
 
-      // The FEMA student id is its OWN write: it lives on the member's private record, not the roster row this save
-      // writes, and the rules allow exactly that one key there. SKIPPED when the officer did not touch it, so an ordinary
-      // save is still the single request it has always been.
+      // THE MEMBER'S OWN DETAILS ARE THEIR OWN WRITE, and only what CHANGED is sent: they live on the member's private
+      // record rather than the roster row this save wrote, and the rules allow only these keys there - so an untouched
+      // field is left alone rather than round-tripped, and an ordinary save is still the single request it has always been.
       const savedId = result.id || formData.id;
-      const femaId = String(formData.fema_student_id || '').trim();
-      if (savedId && femaId !== String(savedFemaId || '').trim()) {
-        const femaResult = await saveFemaStudentId(femaId, savedId);
-        if (!femaResult?.success) {
-          throw new Error(femaResult?.message || 'The member saved, but the FEMA student ID did not.');
+      const changed = Object.fromEntries(
+        PRIVATE_FIELDS.map((key) => [key, String(formData[key] ?? '').trim()]).filter(
+          ([key, value]) => value !== String(savedPrivate[key] ?? '').trim()
+        )
+      );
+      if (savedId && Object.keys(changed).length) {
+        const privateResult = await saveMemberPrivateFields({ userId: savedId, fields: changed });
+        if (!privateResult?.success) {
+          throw new Error(privateResult?.message || 'The member saved, but their personal details did not.');
         }
       }
 
@@ -344,8 +360,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 Password {isEditing && <span className="text-slate-500">(leave blank to keep unchanged)</span>}
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -429,23 +444,75 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             </div>
           </div>
 
-          {/* The member's FEMA student id. It lives on the PRIVATE half of the account rather than the roster row (a
-              roster is readable by every member), and it is written as its own one-key field - see the note in
-              firestore.rules. Offered on the new-member form too, so an officer can record it while adding somebody. */}
-          <div>
-            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">FEMA Student ID</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={40}
-              value={formData.fema_student_id}
-              onChange={(e) => setFormData({ ...formData, fema_student_id: e.target.value })}
-              placeholder="e.g. 1234567 (optional)"
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              From FEMA’s training system. Kept on the member’s private record, not the station roster.
-            </p>
+          {/* THE MEMBER'S OWN DETAILS: four fields that live on the PRIVATE half of the account rather than the roster row
+              (a roster is readable by every member), written as their own call - see the note in firestore.rules. Offered
+              on the new-member form too, so an officer can record them while adding somebody.
+
+              MEMBER ID IS THE OFFICER'S ALONE. It is set here and nowhere else: no member sees it, which is why it is
+              absent from the sign-in shape (firebaseAuth) rather than merely left undrawn. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Member ID</label>
+              <input
+                type="text"
+                maxLength={20}
+                value={formData.member_id}
+                onChange={(e) => setFormData({ ...formData, member_id: e.target.value })}
+                placeholder="e.g. 1042 (optional)"
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                The station&rsquo;s own number for this member. Members cannot see or change it, and it may be reused once
+                somebody goes inactive.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">FEMA Student ID</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={40}
+                value={formData.fema_student_id}
+                onChange={(e) => setFormData({ ...formData, fema_student_id: e.target.value })}
+                placeholder="e.g. 1234567 (optional)"
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                From FEMA&rsquo;s training system. The member can keep this up to date themselves.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Email Address</label>
+              <input
+                type="email"
+                maxLength={120}
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="name@example.com (optional)"
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                For the station&rsquo;s records. Sign-in is unaffected &mdash; it still uses the username. The member can
+                change this themselves.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Phone Number</label>
+              <input
+                type="tel"
+                maxLength={40}
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                placeholder="e.g. 555-0100 (optional)"
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                The member can change this themselves in My Settings.
+              </p>
+            </div>
           </div>
 
           {/* The Firefighter Runner sound set. Shown to anyone who can manage users so the value
@@ -511,8 +578,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className={BULK_LABEL_CLASS}>New password <span className="text-slate-500">(blank = unchanged)</span></label>
-                <input
-                  type="password"
+                <PasswordInput
                   autoComplete="new-password"
                   value={bulkForm.password}
                   onChange={(e) => setBulkForm({ ...bulkForm, password: e.target.value })}

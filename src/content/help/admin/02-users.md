@@ -51,8 +51,15 @@ Setting **Status** to *Inactive* is usually better than deleting. An inactive me
 > [!CAUTION]
 > Only delete users that have no information related to them, or are duplicated.
 
-## FEMA Student ID
+## Personal details
 
-Each member has a **FEMA Student ID** field on their editor — the *Student Identification* number from FEMA's training system. It is offered when adding a member too, so it can be recorded as they join.
+Each member's editor carries four fields that are **not** on the station roster, because a roster is readable by every member and these are personal:
 
-It is kept on the member's **private record** rather than the roster: a roster is readable by every member, and this is a personal number, so only the member themselves and the officers who manage accounts can see it. Members can keep their own up to date from **My Settings → FEMA Student ID**.
+| Field | Who may change it | Notes |
+|---|---|---|
+| **Member ID** | Officers only | The station's own number for the member. **Members never see it** — it is not carried into their account at all — so it can be an internal reference without being something they can quote wrongly. It may be reused once somebody goes inactive. |
+| **FEMA Student ID** | The member, or an officer | The *Student Identification* number from FEMA's training system. |
+| **Email Address** | The member, or an officer | For the station's records. Sign-in still uses the username, so this never changes how somebody logs in. |
+| **Phone Number** | The member, or an officer | For the station's records. |
+
+All four sit on the member's **private record** rather than the roster, and they are offered when adding a member too, so they can be recorded as they join. Members keep their own three up to date from **My Settings → Personal Information**; only an officer can set the member ID.

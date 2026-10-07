@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle } from 'lucide-react';
 import { stationLogoUrl } from '../utils/assets';
+import PasswordInput from './PasswordInput';
 
 // THE LOGIN SCREEN CARRIES NO ANNOUNCEMENTS, and that is deliberate rather than an omission: it is read before anybody
 // has signed in, so it cannot be targeted at a role or a person, and it was the reason the app made a read without a
@@ -54,8 +55,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
 
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Password</label>
-            <input
-              type="password"
+            <PasswordInput
               placeholder="Enter password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -71,7 +71,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
           >
             Sign In
           </button>
-          <span className="text-xs text-slate-500 dark:text-slate-400">v1.43</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">v1.44</span>
         </form>
       </div>
     </div>

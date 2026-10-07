@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
+import PasswordInput from './PasswordInput';
 import { soundsActiveFrom } from '../utils/uiSounds';
 import { visibleNotificationTypes } from '../utils/notificationPrefs';
 import { rolePermissionAudit, roleColumnValue, ADMIN_PERMISSIONS } from '../utils/permissions';
@@ -14,7 +15,8 @@ import {
   currentDeviceToken,
   deviceLabelFromUserAgent,
 } from '../utils/pushNotifications';
-import { saveFemaStudentId } from '../services/api';
+import { saveMemberPrivateFields } from '../services/api';
+import { MEMBER_PRIVATE_FIELDS } from '../utils/memberFields';
 
 function isTruthySetting(value) {
   return value === true || String(value).trim().toUpperCase() === 'TRUE';
@@ -131,6 +133,10 @@ export default function UserSettings({
 
   return (
     <div className="space-y-6">
+
+      {/* THEIR OWN DETAILS COME FIRST. This is the card people open this screen for, and it is the only one here that is
+          about the member rather than about the app's behaviour. */}
+      <PersonalInformationCard currentUser={currentUser} />
 
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -336,8 +342,6 @@ export default function UserSettings({
 
       <PasswordChangeCard onPasswordChange={onPasswordChange} />
 
-      <FemaStudentIdCard currentUser={currentUser} />
-
       <AccessCard currentRole={currentRole} />
     </div>
   );
@@ -408,8 +412,7 @@ function PasswordChangeCard({ onPasswordChange }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">New Password</label>
-            <input
-              type="password"
+            <PasswordInput
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
@@ -420,8 +423,7 @@ function PasswordChangeCard({ onPasswordChange }) {
 
           <div>
             <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Confirm Password</label>
-            <input
-              type="password"
+            <PasswordInput
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               autoComplete="new-password"
@@ -1044,17 +1046,28 @@ function AccessCard({ currentRole }) {
   );
 }
 
-// The member's FEMA Student Identification number.
+// THE MEMBER'S OWN DETAILS - and this card is FIRST on the page because it is the one people come here to change.
 //
-// ITS OWN CARD AND ITS OWN SAVE, because it is stored differently from everything else on this screen: the preferences
-// go to the member's settings document, this goes to the PRIVATE half of their account (see firestore.rules - it is the
-// one key a browser may write there). Folding it into the settings form would save it through a call that cannot reach
-// it, which is exactly the "checkbox that quietly did nothing" this file has been bitten by before.
+// ITS OWN CARD AND ITS OWN SAVE, because these are stored differently from everything else on this screen: the preferences
+// go to the member's settings document, these go to the PRIVATE half of their account (see firestore.rules - they are the
+// keys a browser may write there, and the member id deliberately is not one of them). Folding them into the settings form
+// would save them through a call that cannot reach them, which is exactly the "control that quietly did nothing" this file
+// has been bitten by before.
 //
-// It is not shown to other members: the private half is readable by the member and by officers with the user permission,
-// and by nobody else.
-function FemaStudentIdCard({ currentUser }) {
-  const [value, setValue] = useState(currentUser?.fema_student_id || '');
+// THE NAME IS SHOWN BUT NOT EDITABLE. It is the station's record of who somebody is, and it is changed by an administrator
+// in Administration → Members; a member renaming themselves here would be editing the roster by the back door.
+//
+// MEMBER ID IS ABSENT ON PURPOSE, and the absence is the feature rather than a gap in the layout: the station issues it and
+// recycles it when somebody goes inactive, so it is not carried into the member's session at all (firebaseAuth).
+//
+// It is not shown to other members either: the private half is readable by the member and by officers with the user
+// permission, and by nobody else.
+function PersonalInformationCard({ currentUser }) {
+  const initialValues = () =>
+    Object.fromEntries(MEMBER_PRIVATE_FIELDS.map((key) => [key, currentUser?.[key] || '']));
+  const [form, setForm] = useState(initialValues);
+  // What the record holds now, so the save below can send only what actually changed.
+  const [saved, setSaved] = useState(initialValues);
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
@@ -1063,40 +1076,97 @@ function FemaStudentIdCard({ currentUser }) {
     setSaving(true);
     setStatusMessage(null);
     try {
-      // The row is the session's own unless a user id is passed, so a member saves theirs and nobody else's.
-      const result = await saveFemaStudentId(value);
-      if (!result?.success) throw new Error(result?.message || 'Could not save your FEMA Student ID.');
+      // ONLY WHAT CHANGED, so an untouched field is never round-tripped. The row is the session's own because no user id
+      // is passed - and the rules would refuse anybody else's anyway.
+      const changed = Object.fromEntries(
+        MEMBER_PRIVATE_FIELDS.map((key) => [key, String(form[key] ?? '').trim()]).filter(
+          ([key, value]) => value !== String(saved[key] ?? '').trim()
+        )
+      );
+      if (!Object.keys(changed).length) {
+        setStatusMessage({ type: 'success', text: 'Nothing to change.' });
+        return;
+      }
+      const result = await saveMemberPrivateFields({ fields: changed });
+      if (!result?.success) throw new Error(result?.message || 'Could not save your details.');
+      setSaved({ ...form });
       setStatusMessage({ type: 'success', text: 'Saved.' });
     } catch (failure) {
-      setStatusMessage({ type: 'error', text: failure.message || 'Could not save your FEMA Student ID.' });
+      setStatusMessage({ type: 'error', text: failure.message || 'Could not save your details.' });
     } finally {
       setSaving(false);
     }
   };
 
+  const field = (key) => String(form[key] ?? '');
+  const setField = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+  const FIELD_CLASS =
+    'w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
+  const LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300';
+
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
       <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-white">FEMA Student ID</h2>
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Personal Information</h2>
       </div>
       <form onSubmit={save} className="space-y-4 p-6">
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Your FEMA Student Identification number, from FEMA’s training system. It is kept on your record and is not shown
-          to other members.
+          Your own details. They are kept on your record, they are not shown to other members, and your email address is
+          for the station&rsquo;s records &mdash; signing in still uses your username.
         </p>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300">FEMA Student ID</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={40}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder="e.g. 1234567"
-            className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-          />
-        </label>
+
+        {/* The name, shown rather than offered: it is the station's record of who somebody is. */}
+        <div>
+          <span className={LABEL_CLASS}>Name</span>
+          <p className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
+            {currentUser?.name || 'Unnamed member'}
+          </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Changed by an administrator in Administration &rarr; Members.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <label className="block">
+            <span className={LABEL_CLASS}>Email Address</span>
+            <input
+              type="email"
+              autoComplete="email"
+              maxLength={120}
+              value={field('email')}
+              onChange={(event) => setField('email')(event.target.value)}
+              placeholder="name@example.com"
+              className={FIELD_CLASS}
+            />
+          </label>
+
+          <label className="block">
+            <span className={LABEL_CLASS}>Phone Number</span>
+            <input
+              type="tel"
+              autoComplete="tel"
+              maxLength={40}
+              value={field('phone')}
+              onChange={(event) => setField('phone')(event.target.value)}
+              placeholder="e.g. 555-0100"
+              className={FIELD_CLASS}
+            />
+          </label>
+
+          <label className="block">
+            <span className={LABEL_CLASS}>FEMA Student ID</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={40}
+              value={field('fema_student_id')}
+              onChange={(event) => setField('fema_student_id')(event.target.value)}
+              placeholder="e.g. 1234567"
+              className={FIELD_CLASS}
+            />
+          </label>
+        </div>
         {statusMessage && (
           <p
             className={`text-xs font-medium ${

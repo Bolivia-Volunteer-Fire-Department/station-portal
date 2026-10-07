@@ -129,7 +129,13 @@ check('the callable receives the password to change server-side', /call\('comple
 
 console.log('\n--- the popup nobody can get past ---');
 checkIs('it is rendered while the flag is set', /\{currentUser && mustChangePassword\(currentUser\) && \(/.test(appSource));
-checkIs('and it asks for the new password twice', /Confirm new password/.test(modalSource) && /type="password"/.test(modalSource));
+// The proxy had to change with the component: the literal `type="password"` now lives in ONE file (PasswordInput, which
+// carries the reveal eye), so looking for it here would have passed by accident on any password field at all. Counting the
+// component is what the claim actually is - the new password is asked for TWICE, and both are password fields.
+checkIs(
+  'and it asks for the new password twice',
+  /Confirm new password/.test(modalSource) && (modalSource.match(/<PasswordInput/g) || []).length === 2
+);
 // No way out but changing it or signing out: no close button, no backdrop dismissal. (checkIs takes the
 // condition directly - the negation has to be in the call.)
 checkIs('there is no close button', !/aria-label="Close"|<X /.test(modalSource));

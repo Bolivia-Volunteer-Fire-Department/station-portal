@@ -11,6 +11,13 @@
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
+// Which fields a browser may write on a member's PRIVATE record - see utils/memberFields, and the assertion in
+// scripts/verify-rules that the rules name the same set.
+//
+// THE WRITER CHECKS THE WIDER LIST ON PURPOSE. Which of these a given caller may write is the RULES' decision (a member
+// gets the narrower set, an officer the wider one), and this function cannot see who is calling - so it refuses anything
+// that is not a member detail at all and lets the rules answer the rest.
+import { MEMBER_PRIVATE_ADMIN_FIELDS } from '../utils/memberFields.js';
 import { rowsFor, rowsOf } from './firestorePayload.js';
 // The badge rule, shared with the repair script that rebuilds the index (scripts/normalize-certification-badges.mjs).
 import { badgeForRecord, badgeIndexFor, badgeToday } from '../utils/certificationBadges.js';
@@ -944,17 +951,22 @@ export const removeTrainingSignature = async ({ id }) => {
   return { removed: 1 };
 };
 
-// A member's FEMA student id: the ONE key on the private half a browser may write.
+// THE DETAILS ON A MEMBER'S PRIVATE HALF THAT A BROWSER MAY WRITE, merged rather than replaced so writing them cannot
+// disturb the username, the status or the password flag sitting beside them on the same document - none of which a browser
+// may write at all.
 //
-// The rules are what decide who - the member on their own row, or an officer with `can_edit_users` on anybody's - and
-// they allow exactly this field, so this does not repeat the permission where it could drift. MERGED rather than
-// replaced, so writing an id cannot disturb the username, the status or the password flag sitting beside it.
-export const saveFemaStudentId = async ({ userId, value } = {}) => {
+// AN UNKNOWN FIELD IS REFUSED OUT LOUD rather than dropped: silently ignoring a key is how a screen ends up saving four
+// fields and reporting success for five.
+export const saveMemberPrivateFields = async ({ userId, fields = {} } = {}) => {
   const target = String(userId || '').trim();
-  if (!target) throw new Error('Which member is this FEMA student id for?');
-  const clean = String(value ?? '').trim();
-  await setDoc(doc(firestore(), 'users_private', target), { fema_student_id: clean }, { merge: true });
-  return { userId: target, fema_student_id: clean };
+  if (!target) throw new Error('Which member are these details for?');
+  const entries = Object.entries(fields || {});
+  if (!entries.length) throw new Error('There is nothing to save.');
+  const unknown = entries.map(([key]) => key).filter((key) => !MEMBER_PRIVATE_ADMIN_FIELDS.includes(key));
+  if (unknown.length) throw new Error(`Not a member detail: ${unknown.join(', ')}.`);
+  const clean = Object.fromEntries(entries.map(([key, value]) => [key, String(value ?? '').trim()]));
+  await setDoc(doc(firestore(), 'users_private', target), clean, { merge: true });
+  return { userId: target, ...clean };
 };
 
 // A form definition: which blank, which source, and where each value goes.

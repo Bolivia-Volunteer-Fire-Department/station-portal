@@ -752,5 +752,23 @@ checkIs(
   'an exemption is left behind for a harness that is gone'
 );
 
+// --- every password field has an eye on it -----------------------------------------------------
+//
+// A password typed blind is a password typed wrong, and the reveal only helps if it is EVERYWHERE: a screen added later
+// with a bare `<input type="password">` would look deliberate and be the one place somebody cannot check their typing. The
+// component is the rule, so this asserts no file outside it declares a password input of its own.
+console.log('\n--- the password fields ---');
+const sourceFilesUnder = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return sourceFilesUnder(full);
+    return /\.jsx?$/.test(entry.name) ? [full] : [];
+  });
+const barePasswordFields = sourceFilesUnder('src').filter(
+  (file) => !file.endsWith('PasswordInput.jsx') && /type="password"/.test(readFileSync(file, 'utf8'))
+);
+check('every password field is the component with the eye on it', barePasswordFields, []);
+checkIs('and there is more than one to check', sourceFilesUnder('src').some((file) => file.endsWith('LoginScreen.jsx')));
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

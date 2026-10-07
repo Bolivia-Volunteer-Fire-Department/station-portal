@@ -399,8 +399,13 @@ export const adminDeleteCertification = async (id, token) =>
 //
 // Its OWN call rather than riding along with UPDATE_USER_SETTINGS, because it lives on the PRIVATE half of an account
 // rather than with the preferences: that is what lets the rules keep every other key of that document callable-only.
-export const saveFemaStudentId = (value, userId = '') =>
-  routeWrite('SAVE_FEMA_STUDENT_ID', { value: String(value ?? ''), userId: String(userId || '') });
+// The member's own details - their email, their phone, their FEMA student id - or, for a user administrator, anybody's,
+// the member id included. WHICH IS DECIDED BY THE RULES, which refuse the member id to the member on their own row.
+//
+// Its OWN call rather than riding along with UPDATE_USER_SETTINGS, because these live on the PRIVATE half of an account
+// rather than with the preferences: that is what lets the rules keep every other key of that document callable-only.
+export const saveMemberPrivateFields = ({ userId = '', fields = {} } = {}) =>
+  routeWrite('SAVE_MEMBER_PRIVATE', { userId: String(userId || ''), fields: fields || {} });
 
 export const saveUserSettings = async (updatedSettings, token) =>
   dispatchRequest({

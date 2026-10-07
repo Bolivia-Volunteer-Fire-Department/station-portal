@@ -72,9 +72,19 @@ Misbehaving? Work through the checks in order:
 - **A preference did not stick.** The change is saved to the server; a failure shows a message. If you see no message and the setting reverts, tell an administrator.
 - **Notifications never arrive, but the card says registered.** Check your operating system's notification settings for the browser — many platforms let a browser be silenced even when the site is allowed.
 
-## FEMA Student ID
+## Personal Information
 
-Your **FEMA Student ID** is the *Student Identification* number on your FEMA training transcript. It has its own card on this page, with its own **Save**, because it is kept separately from your preferences — type it and save; clearing the box and saving removes it.
+The **Personal Information** card sits at the top of this page, because it is the part of the screen that is about you rather than about how the app behaves. It has its own **Save**, separate from *Save Preferences*, because these details are kept differently from your preferences — type a change and save it; clearing a box and saving removes that detail.
+
+It shows:
+
+- **Name** — shown but not editable. It is the station's record of who you are, so an administrator changes it in *Administration → Members*.
+- **Email Address** — for the station's records. Your sign-in is unaffected: it still uses your username.
+- **Phone Number** — for the station's records.
+- **FEMA Student ID** — the *Student Identification* number on your FEMA training transcript.
 
 > [!NOTE]
-> It is **not shown to other members**. Only you and the administrators who manage accounts can see it.
+> None of it is shown to other members. Only you and the administrators who manage accounts can see these details.
+
+> [!TIP]
+> **Member ID is not here** and that is deliberate: the station issues it, and reuses it once somebody goes inactive. It is not carried into your account at all, so there is nothing to hide.

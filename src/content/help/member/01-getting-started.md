@@ -41,6 +41,9 @@ Modules are switched on by your **role**, not by you. If something you expect is
 This app was created by Matt Wills for the Bolivia Fire Department.
 
 ### Version 1.4x
+* Every password field now has an **eye** on it, so you can check what you are typing on the login screen and anywhere else a password is entered.
+* Added **Member ID**, **Email Address** and **Phone Number** to member records. Members keep their own email, phone and FEMA ID up to date in **My Settings → Personal Information**; the member ID is set by administrators and is not shown to members at all.
+* Renamed the FEMA card in **My Settings** to **Personal Information**, and moved it to the top. It now shows your name and your contact details as well.
 * Combined **Reports** and **Forms** into one module in the sidebar. They are configured together, so they are now one screen — it shows whichever of the two your role allows.
 * Added a **single-horn bugle** icon to the icon library, alongside the existing pair.
 * Added the **Forms** module, which allows specified users to export data onto pre-existing PDF forms. (i.e. state forms)

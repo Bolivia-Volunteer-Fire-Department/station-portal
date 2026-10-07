@@ -381,6 +381,15 @@ const ADMIN_SECTIONS = {
         // The FEMA student id rides with the other private fields - this document is already joined for the username and
         // the status, so the field costs no extra read and the Users tab can show and edit it.
         fema_student_id: (privateById[user.id] || {}).fema_student_id || '',
+        // The rest of the member's private details ride with it: the document is already joined for the username and the
+        // status, so all four cost no extra read and the Users tab shows and edits them.
+        //
+        // `member_id` BELONGS HERE AND ONLY HERE. This is the ADMIN section; the member's own copy is stripped at sign-in
+        // (firebaseAuth), which is what makes "members cannot see their ID" a property of what is read rather than of
+        // what is drawn.
+        member_id: (privateById[user.id] || {}).member_id || '',
+        email: (privateById[user.id] || {}).email || '',
+        phone: (privateById[user.id] || {}).phone || '',
         // The password-change flag: the edit form has a checkbox AND a "Password change due" badge for it, so it
         // is read here with the other two private fields rather than at sign-in. A member with no private row yet
         // is treated as not waiting for a change, the same default the username join uses for a missing row.
