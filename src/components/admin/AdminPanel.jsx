@@ -536,6 +536,13 @@ export default function AdminPanel({
           timeFormat={timeFormat}
           events={events}
           hideEventsByDefault={hideEventsByDefault}
+          // The schedule behind the All Members list's assign control: the templates and assignments the panel already
+          // holds, the month the app last read, and the read itself. The same three the board gets, because the control
+          // offers the same slots (utils/scheduleSlots) and writes through the same batch route.
+          scheduleTemplates={scheduleTemplates}
+          assignments={assignments}
+          schedule={schedule}
+          onNeedSchedule={onNeedSchedule}
           onDataChanged={onAvailabilityChanged}
         />
       )}

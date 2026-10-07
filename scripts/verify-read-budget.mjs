@@ -467,6 +467,22 @@ check(
   NAME_DRAWING_TABS.filter((tab) => !sectionListFor(tab).includes("'directory'")),
   []
 );
+// AND A TAB THAT OFFERS SHIFTS HAS TO READ THE SHIFT DEFINITIONS, which is the same class of bug one level down: the
+// availability tab's assign menu lists the day's shifts, and a slot cannot be drawn without a template to expand and the
+// assignment that names it. It had only the directory - so the menu opened EMPTY on a month that plainly had shifts, and
+// nothing about the screen looked broken. The month's ROWS are read when a name is clicked instead (the tab's own
+// windowed read), so only the definitions belong in this list.
+checkIs(
+  'the availability tab reads the shift definitions it offers',
+  sectionListFor('availability').includes("'scheduleTemplates'") &&
+    sectionListFor('availability').includes("'assignments'"),
+  sectionListFor('availability')
+);
+checkIs(
+  'and does not pull a whole schedule to show one month of it',
+  !sectionListFor('availability').includes("'schedule'"),
+  sectionListFor('availability')
+);
 checkIs(
   'and its section setter unwraps the rows from the window they came in',
   /schedule: \(payload\) => \{[\s\S]{0,400}?payload\?\.schedule/.test(appSource)

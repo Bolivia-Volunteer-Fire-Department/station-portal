@@ -9,6 +9,10 @@ import { adminBulkSaveSchedule, adminResolveShiftOffer } from '../../services/ap
 import { toDateKey, parseSheetDateKey } from '../../utils/scheduleDate';
 import { isShiftDay } from '../../utils/shiftPlacement';
 import { templateIsActiveOn } from '../../utils/scheduleTemplates';
+// What a slot is, and who is in it - shared with the Member Availability roster, which offers the same slots to assign
+// a member from. Imported under local names because this file already has a `slotsByDay` memo and a `slotOccupant`
+// helper that closes over the working copy an officer is editing.
+import { templateSlotsForMonth, slotsByDay as slotsByDayOf, slotOccupant as slotOccupantOf, rowFieldsOf as fieldsOf } from '../../utils/scheduleSlots';
 import { assignmentIsActiveOn, choosableAssignments } from '../../utils/assignmentDates';
 import { assignmentColor } from '../../utils/assignmentColor';
 import { toTimeInputValue } from '../../utils/timeInputValue';
@@ -27,9 +31,9 @@ import { mergeDayItems, separateShiftTimeBlocks } from '../../utils/dayOrder';
 // on the other. See utils/motion for the two phases and why the swap happens off the edge.
 import { useMonthSlide } from '../../utils/motion';
 
-// A day's SLOTS in the order that day reads: start time, then the assignment's required rank. The board tracks time
-// itself (mergeDayItems, which is stable), so this is what decides the order of two shifts that start together.
-import { sortSlotOrder } from '../../utils/crewOrder';
+// A day's SLOTS in the order that day reads: start time, then the assignment's required rank. The ORDERING moved to
+// utils/scheduleSlots with the rest of the slot rule, so this file no longer sorts slots itself - it reads a day that
+// has already been put in order.
 import { memberDayKeys } from '../../utils/availability';
 import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
 // The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
@@ -143,17 +147,9 @@ const pillShapeClass = (vacant, roomy) =>
       : FILLED_PILL_CLASS;
 const emptySlotShapeClass = (roomy) => (roomy ? EMPTY_SLOT_ROOMY_CLASS : EMPTY_SLOT_CLASS);
 
-const fieldsOf = (r) => ({
-  id: r.id || '',
-  schedule_template_id: r.schedule_template_id || '',
-  date_from: r.date_from || '',
-  date_to: r.date_to || '',
-  start_time: r.start_time || '',
-  end_time: r.end_time || '',
-  apparatus_id: r.apparatus_id || '',
-  assignment_id: r.assignment_id || '',
-  user_id: r.user_id || '',
-});
+// The field set a row is written with lives in utils/scheduleSlots (imported above as `fieldsOf`), beside the server's
+// reason for it: the writer REPLACES a row's fields rather than merging, so a partial entry blanks what it omits. Both
+// screens that write a row therefore send the same complete set.
 
 const timeRangeOf = (t) => {
   const s = toTimeInputValue(t.start_time);
@@ -623,8 +619,6 @@ export default function AdminScheduleManagementTab({
   const eligibilityFor = (assignment) => classifyEligibility({ users, ranks, assignment });
 
   const isOccurred = (entry) => Boolean(entry?._to && entry._to < todayKey);
-  const coversDate = (entry, dateKey) =>
-    Boolean(entry._from && entry._to && entry._from <= dateKey && dateKey <= entry._to);
 
   // An entry's template, and the time window shown for it: the template's, or (custom shifts) the start/end times stored
   // on the schedule row itself.
@@ -716,47 +710,15 @@ export default function AdminScheduleManagementTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimsMonthLoaded, monthKey, year, month]);
 
-  // Template slots for the visible month: every date crossed with every
-  // template whose day_of_week matches that date's weekday.
-  const visibleSlots = useMemo(() => {
-    const slots = [];
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateKey = toDateKey(new Date(year, month, d));
-      const dow = DAY_ORDER[new Date(year, month, d).getDay()];
-      for (const t of scheduleTemplates) {
-        if (String(t.day_of_week ?? '').trim().toLowerCase() !== dow) continue;
-        // A retired or not-yet-effective template draws no slot (utils/scheduleTemplates), and neither
-        // does one whose assignment is outside its own window (utils/assignmentDates).
-        if (!templateIsActiveOn(t, dateKey)) continue;
-        if (!assignmentIsActiveOn(assignmentById(t.assignment_id), dateKey)) continue;
-        slots.push({
-          slotKey: `slot-${dateKey}-${t.id}`,
-          dateKey,
-          template: t,
-          startMin: timeToMinutes(t.start_time) ?? 0,
-          endMin: timeToMinutes(t.end_time),
-          // The two keys the day's order is decided by, attached here so the slot carries its own ordering rather than
-          // depending on where it sat in the payload: the shift's required rank (from its ASSIGNMENT, not from whoever
-          // fills it) and a name to break a tie that the rank could not.
-          requiredRankOrder: parseRankOrder(assignmentById(t.assignment_id)?.rank_order_required),
-          name: `${assignmentById(t.assignment_id)?.description || unnamedLabel('assignment')} ${t.nickname || ''}`.trim(),
-        });
-      }
-    }
-    return slots;
-  }, [year, month, scheduleTemplates, assignmentById]);
+  // Template slots for the visible month, and the day each falls on. THE RULE LIVES IN utils/scheduleSlots - the
+  // Member Availability roster lists the same slots to assign a member to, and one definition of a slot is what keeps
+  // the two screens from disagreeing. What is left here is the memo and the dependency list.
+  const visibleSlots = useMemo(
+    () => templateSlotsForMonth({ year, month, scheduleTemplates, assignmentById }),
+    [year, month, scheduleTemplates, assignmentById]
+  );
 
-  const slotsByDay = useMemo(() => {
-    const map = {};
-    for (const s of visibleSlots) (map[s.dateKey] = map[s.dateKey] || []).push(s);
-    // Each day in the order the day reads: by start time, then by the assignment's required rank (utils/crewOrder's
-    // compareSlotOrder). The rows arrive in the payload's order, which applies the same rule to the TEMPLATES - but a
-    // slot's rank comes from its assignment, and pinning the order here keeps the board from depending on how the payload
-    // was assembled. mergeDayItems is stable, so this is also what decides two shifts that start at the same minute.
-    for (const dateKey of Object.keys(map)) map[dateKey] = sortSlotOrder(map[dateKey]);
-    return map;
-  }, [visibleSlots]);
+  const slotsByDay = useMemo(() => slotsByDayOf(visibleSlots), [visibleSlots]);
 
   // Scheduled pills per day of the visible month. A row is listed on the day it
   // STARTS only (utils/shiftPlacement): an overnight or multi-day row used to be
@@ -805,12 +767,8 @@ export default function AdminScheduleManagementTab({
     );
   }, [showEvents, events, ranks, year, month]);
 
-  const slotOccupant = (slot) =>
-    working.find(
-      (r) =>
-        String(r.schedule_template_id ?? '') === String(slot.template.id) &&
-        coversDate(r, slot.dateKey)
-    );
+  // The board's own rows are what fills a slot, so this stays a one-argument call and every use below is unchanged.
+  const slotOccupant = (slot) => slotOccupantOf(slot, working);
 
   // WHAT THIS MONTH ACTUALLY HOLDS, SAID OUT LOUD.
   //

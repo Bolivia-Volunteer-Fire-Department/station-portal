@@ -42,6 +42,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 
 ### Version 1.4x
 * Combined **Reports** and **Forms** into one module in the sidebar. They are configured together, so they are now one screen — it shows whichever of the two your role allows.
+* Added a **single-horn bugle** icon to the icon library, alongside the existing pair.
 * Added the **Forms** module, which allows specified users to export data onto pre-existing PDF forms. (i.e. state forms)
 * Added some ID fields to the users_private table.
 

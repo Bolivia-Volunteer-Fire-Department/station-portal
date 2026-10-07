@@ -13,17 +13,24 @@ import {
   Radiation, Sailboat, Ship, Megaphone, createLucideIcon,
 } from 'lucide-react';
 
-// Lucide has no bugle, so this is drawn with the same factory (24px grid, 2px round stroke): a pair of fire bugles, each a
-// flared mouthpiece, a band and a tapering body ending in a wide bell. It then behaves like any other icon in the map.
-const Bugle = createLucideIcon(
-  'bugle',
-  [6.5, 17.5].flatMap((cx) => [
-    ['path', { d: `M${cx - 2} 2h4l-1.2 4h-1.6z`, key: `mouth-${cx}` }],
-    ['path', { d: `M${cx - 1.5} 7h3`, key: `band-${cx}` }],
-    ['path', { d: `M${cx - 1.2} 8l-.8 9.5h4l-.8-9.5`, key: `body-${cx}` }],
-    ['path', { d: `M${cx - 2} 17.5L${cx - 4} 22h8l-2-4.5`, key: `bell-${cx}` }],
-  ])
-);
+// Lucide has no bugle, so this is drawn with the same factory (24px grid, 2px round stroke): a fire bugle - a flared
+// mouthpiece, a band, a tapering body and a wide bell.
+//
+// ONE HORN IS ONE FUNCTION. The pair and the single are the same drawing at different `cx`, so the two icons cannot
+// drift into two different bugles - which matters because they are a family: a single bugle is the insignia a
+// lieutenant carries and a pair is a captain's, and the pair only reads as "one more of these" if it IS one more of
+// these. The single is drawn at the same SCALE and centred rather than stretched to fill the grid: widening it would
+// buy a fuller box at the cost of exactly the likeness that makes the two worth having side by side.
+const buglePaths = (cx) => [
+  ['path', { d: `M${cx - 2} 2h4l-1.2 4h-1.6z`, key: `mouth-${cx}` }],
+  ['path', { d: `M${cx - 1.5} 7h3`, key: `band-${cx}` }],
+  ['path', { d: `M${cx - 1.2} 8l-.8 9.5h4l-.8-9.5`, key: `body-${cx}` }],
+  ['path', { d: `M${cx - 2} 17.5L${cx - 4} 22h8l-2-4.5`, key: `bell-${cx}` }],
+];
+
+const Bugle = createLucideIcon('bugle', [6.5, 17.5].flatMap(buglePaths));
+
+const BugleSingle = createLucideIcon('bugle-single', buglePaths(12));
 
 // Curated, tree-shakable subset of lucide icons commonly used for ranks/badges
 export const RANK_ICON_MAP = {
@@ -109,6 +116,7 @@ export const RANK_ICON_MAP = {
   sailboat: Sailboat,
   ship: Ship,
   bugle: Bugle,
+  'bugle-single': BugleSingle,
   megaphone: Megaphone,
 };
 

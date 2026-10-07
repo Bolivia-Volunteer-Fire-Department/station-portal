@@ -27,6 +27,24 @@ Three deliberate rules make it readable:
 2. **Shifts nobody has marked stay visible.** An uncovered shift is precisely the one worth spotting, so those rows are shown, marked *No one available*, and counted in a summary at the top.
 3. **It is a list, not a grid.** The question is "who can work this?", and names read far better in a line per shift than crammed into a calendar cell.
 
+## Building the schedule from this list
+
+**A name on this list is a button.** Click one and a menu appears beside it offering the shifts that fall on that day — the ones your schedule templates generate for that weekday, plus any one-off shifts that have been added for the date.
+
+**Only the shifts inside the window that name sits under are offered.** A member who claimed an *18:00–06:00* night is not offered the *06:00–18:00* day shift on the same day, because they have not said they can work it. A shift that runs past the end of the window is left out too — they said they were free until 06:00, and a shift ending at 08:00 would have them leave early. If nothing fits, the menu says so and how many shifts it set aside, so an empty list is never a mystery.
+
+- A shift **nobody is on** can be taken: pick it, and that member is assigned to it.
+- A shift **somebody already holds** is struck through and says who holds it, and cannot be picked. If it is already theirs it says so — which is how the same person is kept off the same shift twice.
+- The menu lists the day's shifts in time order, so you can see what else the window holds. To put somebody on a shift **outside** their claimed hours, use *Scheduling → Schedule Management*, where the whole day is on the board.
+
+Each chip you have given something to shows a tick and the shift's name, and the bar at the top counts what is pending.
+
+> [!IMPORTANT]
+> **Nothing is saved until you press Save.** Every choice is held as a draft, so a whole month can be built in one pass, and **Discard** throws the lot away. That is deliberate: half a month applied because a tab was closed is a schedule nobody asked for.
+
+> [!NOTE]
+> Assigning a shift changes the **schedule**, so it needs *Manage the schedule* in your role. A role with only *Manage member availability* can open this screen and use the menus, but the save will be refused — and the refusal says exactly which permission is missing, so it can be passed to whoever administers your roles.
+
 ## One member at a time
 
 Pick a member from the dropdown and you get **the same calendar they see**: a month grid of the windows that fall in it, with their marks.

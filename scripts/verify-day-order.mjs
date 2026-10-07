@@ -234,7 +234,14 @@ for (const { file, where } of CALENDARS) {
 const board = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
 checkIs('the board merges the slots AND the rows without a slot together', /mergeDayItems\(dayRows,/.test(board));
 checkIs('the board marks the merged shift time blocks', /separateShiftTimeBlocks\(\s*mergeDayItems\(dayRows,/.test(board));
-checkIs('slots and custom shifts carry end minutes for grouping', /endMin: timeToMinutes\(t\.end_time\)/.test(board) && /endMin: entryEndMinute\(entry\)/.test(board));
+// The slot's end minutes moved into the shared rule (utils/scheduleSlots) with the rest of the slot rule, so the check
+// follows it there rather than being dropped: a slot without an end minute could not be grouped into the day's time
+// blocks on EITHER screen. The custom row's end minute is still built here.
+checkIs(
+  'slots carry end minutes for grouping',
+  /endMin: timeToMinutes\(template\.end_time\)/.test(readFileSync('src/utils/scheduleSlots.js', 'utf8'))
+);
+checkIs('and so do custom shifts', /endMin: entryEndMinute\(entry\)/.test(board));
 checkIs('a new time block draws a horizontal separator', /separatorBefore && \([\s\S]{0,180}aria-hidden="true"[\s\S]{0,120}h-px/.test(board));
 // Each of those rows is given a start minute, taken from its own template-or-row times. Without it the
 // merge has nothing to order by and every custom shift ties at the end - the symptom, one layer down.

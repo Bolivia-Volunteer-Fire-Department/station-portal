@@ -152,9 +152,14 @@ check('neither wrapper parses dates itself', [
 console.log('\n--- every place the gate is needed ---');
 // Generation: a retired assignment must stop producing shifts through its templates. The counts are
 // CALL SITES, not imports (an import has no parenthesis after the name).
+//
+// THE BOARD'S COUNT DROPPED FROM TWO TO ONE when its slot loop moved into the SHARED rule (utils/scheduleSlots), which
+// the Member Availability roster now reads too. The rule is named here instead, so the coverage follows the gate rather
+// than being quietly reduced: a retired assignment missed there would produce shifts on BOTH screens.
 const generators = [
   ['src/components/ScheduleCalendar.jsx', 'the member calendar', 1],
-  ['src/components/admin/AdminScheduleManagementTab.jsx', "the administrator's board and picker", 2],
+  ['src/components/admin/AdminScheduleManagementTab.jsx', "the administrator's board and picker", 1],
+  ['src/utils/scheduleSlots.js', 'the slot rule the board and the availability roster both read', 1],
 ];
 for (const [path, what, minimum] of generators) {
   const source = readFileSync(path, 'utf8');

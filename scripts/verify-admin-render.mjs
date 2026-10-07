@@ -1645,24 +1645,40 @@ const rosterView = (props) => {
   }
 };
 
-// The chip markup for one member, from its opening tag through to the member's name. Used for
-// "this chip has the emerald styling / has no color of its own" - a window before the name would
-// also catch the PREVIOUS member's chip and its color.
+// The chip markup for one member, from the tag that OPENS the chip through to the member's name.
+//
+// TWO THINGS HERE HAD MADE THE CHECK BELOW MEANINGLESS rather than merely wrong, and they are worth naming because the
+// failure was silent:
+//   * the name is drawn EARLIER in the document, in the member picker's <option> list at the top of the tab. Matching
+//     the FIRST occurrence therefore returned a window that began before the roster and contained no chip at all.
+//   * the chip is a <button> now - clicking a name is how a shift gets assigned - and MemberName wraps the name in a
+//     <span> of its own, so the nearest span is INSIDE the chip. A helper looking for '<span' read that instead.
+// The last drawing of the name is the chip's own text, and the last <button> before it is the chip that holds it.
 const chipFor = (html, name) => {
-  const idx = String(html).indexOf(name);
-  if (idx === -1) return '';
-  return String(html).slice(String(html).lastIndexOf('<span', idx), idx);
+  const source = String(html);
+  const end = source.lastIndexOf(name);
+  if (end === -1) return '';
+  return source.slice(source.lastIndexOf('<button', end), end);
 };
 
 const roster = rosterView({});
 check('the roster renders', typeof roster === 'string', roster.error && roster.error.message);
+// A GUARD ON THE HELPER ITSELF, because its failure mode is silence: if neither tag is found it returns everything from
+// the start of the document, and the checks below still pass. This asserts it landed on a chip.
+check(
+  'and the chip helper finds the chip itself rather than a slice of it',
+  /^<button\b/.test(chipFor(roster, 'No Rank Member')),
+  true
+);
 check('listing the members', String(roster).includes('Member 1') && String(roster).includes('Member 2'));
 
 // The colors come from the ranks, applied to the name and to the icon.
 check('a rank color is applied', String(roster).includes('color:#227dc3'), true);
 check('and a second rank keeps its own', String(roster).includes('color:#c3223b'), true);
 check('the icon is drawn for a ranked member', String(roster).includes('lucide-truck') && String(roster).includes('lucide-shield-check'), true);
-check('the rank name is available as a tooltip', /title="Member 1 — Driver\/Operator"/.test(String(roster)), true);
+// The rank name is still the tooltip's OPENING, which is what this asks: the chip also says what clicking it does now
+// that a name click assigns a shift, and pinning the whole string would make adding that hint a test failure.
+check('the rank name is available as a tooltip', /title="Member 1 — Driver\/Operator[^"]*"/.test(String(roster)), true);
 // Two inline colors for one member: the icon and the name. The name is rendered through MemberName, which
 // wraps it (and any certification icons) in its own spans, so these look for the name INSIDE the colored span
 // rather than requiring the span to contain nothing else - the contract is where the color lands, not that the
@@ -1677,6 +1693,46 @@ check('a second member gets their own color', /style="[^"]*color:#c3223b[^"]*"[\
 
 // An unranked member must not break or silently borrow someone else's rank.
 check('an unranked member still appears', String(roster).includes('No Rank Member'));
+
+// TWO FAILURES EARNED THESE, and both would come back unnoticed:
+//
+//   * THE MENU LANDED TOO HIGH when it flipped above a button near the bottom of the screen. The shared positioning
+//     helper returns a `top` computed as if the panel were maxHeight tall, so a short menu floated a couple of hundred
+//     pixels above the name it belonged to. The flipped case is anchored by its BOTTOM instead - and folding that back
+//     into a spread of the helper's result is exactly the tidy-up that would reintroduce it.
+//   * THE MONTH'S SHIFTS WERE READ WHEN THE TAB OPENED, which is the largest read on this screen, for a menu most visits
+//     never open. They are read on the click now, so this asserts no effect still reaches for them.
+const availabilityPickerSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
+check(
+  'the shift menu is anchored by its bottom when it flips above the button',
+  /bottom: flipUp \? window\.innerHeight - rect\.top \+ PICKER_GAP : undefined/.test(availabilityPickerSource) &&
+    /top: flipUp \? undefined : rect\.bottom \+ PICKER_GAP/.test(availabilityPickerSource),
+  true
+);
+check(
+  'and the month’s shifts are read on the click rather than when the tab opens',
+  /void ensureShifts\(\)/.test(availabilityPickerSource) &&
+    !/useEffect\([\s\S]{0,300}?onNeedSchedule/.test(availabilityPickerSource),
+  true
+);
+// A MEMBER WHO HAS BEEN GIVEN A SHIFT IS FILLED IN, with that shift's ASSIGNMENT colour, so the same member reads the same
+// way here as on the board. The colour is the assignment's, not the rank's - a filled chip is about the SHIFT.
+check(
+  'a member given a shift is filled in with that shift’s assignment colour',
+  /const assignedColor = pending/.test(availabilityPickerSource) &&
+    /assignmentColor\(/.test(availabilityPickerSource) &&
+    /backgroundColor: assignedColor, borderColor: assignedColor, color: '#ffffff'/.test(availabilityPickerSource),
+  true
+);
+// AND THE SHIFT GOES UNDER THE NAME. Trailing it made one long chip that pushed the rest of the row about and read as part
+// of the member's name; the draft line is a second row inside the chip, which is what this pins - the name's row is CLOSED
+// before the shift is drawn.
+check(
+  'and the shift is stacked under the name rather than trailing it',
+  /inline-flex flex-col items-start/.test(availabilityPickerSource) &&
+    /<MemberName user=\{member\}[\s\S]{0,40}\/>\s*<\/span>\s*\{pending && \(/.test(availabilityPickerSource),
+  true
+);
 check('and keeps an uncoloured chip', !/style="border-color:/.test(chipFor(roster, 'No Rank Member')), true);
 check('with an unstyled name', !/style="color:#[^"]*"[^<]*No Rank Member/.test(String(roster)), true);
 check('and no rank icon', !/lucide-user[^>]*style="color:/.test(String(roster)), true);

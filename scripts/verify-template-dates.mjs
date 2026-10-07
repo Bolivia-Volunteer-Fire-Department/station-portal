@@ -153,9 +153,14 @@ console.log('\n--- every occurrence generator applies the gate ---');
 // parenthesis after the name, so the count below is call sites only. Two of these files build template
 // occurrences in more than one loop, and a gate applied to only the first would leave a retired template
 // drawing in the other - which is exactly what these counts pin.
+// WHERE THE GATE IS APPLIED NOW. The board used to have two call sites; one of them moved into the SHARED slot rule
+// (utils/scheduleSlots) when the Member Availability roster began drawing the same slots. So the rule's own loop is
+// named here rather than the board being allowed to drop to one - a gate missing there would now leave a retired
+// template drawing on BOTH screens rather than one.
 const callSites = [
   ['src/components/ScheduleCalendar.jsx', 'the member calendar', 1],
-  ['src/components/admin/AdminScheduleManagementTab.jsx', "the administrator's board and picker", 2],
+  ['src/components/admin/AdminScheduleManagementTab.jsx', "the administrator's board and picker", 1],
+  ['src/utils/scheduleSlots.js', 'the slot rule the board and the availability roster both read', 1],
 ];
 
 for (const [path, what, minimum] of callSites) {

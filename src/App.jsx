@@ -1013,7 +1013,12 @@ const getLoadingMessage = () => {
       certifications: ['certificationRecords', 'directory'],
       // AVAILABILITY HAD NO ENTRY AT ALL, which is the same lost-names bug the board's line once had: the tab
       // draws the crew by name and drew nothing until it read the directory.
-      availability: ['directory'],
+      // ...AND THE SHIFT DEFINITIONS, because the All Members list's assign menu offers the day's shifts, and a slot
+      // cannot be drawn without a template to expand and the assignment that names it. Without these two the menu was
+      // EMPTY on a month that plainly had shifts - there were simply no templates loaded to expand. They are small
+      // station reference data the panel already holds for other tabs; the month's ROWS are read when a name is first
+      // clicked rather than here, so opening this tab does not pay for a month of schedule.
+      availability: ['directory', 'scheduleTemplates', 'assignments'],
       // The tabs whose only use for the directory is the name beside a record (an audit row's actor, an audience
       // picker, a signature, a pending offer). Their own rows arrive by the route they always did - a live listener
       // for announcements, the events read, each tab's own section - so this is the one addition each of them needs.
