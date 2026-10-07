@@ -1435,7 +1435,7 @@ const TRAININGS = [
     start_time: '08:00',
     duration: '2',
     location: 'Station 1',
-    instructors: 'Capt. Alvarez',
+    instructors: 'Capt. Cooper',
     is_hazmat: 'TRUE',
     is_company_training: 'TRUE',
     narrative: 'Masks and bottles.',

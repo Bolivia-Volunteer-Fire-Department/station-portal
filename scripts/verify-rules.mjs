@@ -750,14 +750,14 @@ const main = async () => {
   });
   // MEMBER ID IS THE ONE OF THE FOUR A MEMBER MAY NOT WRITE, which is what keeps an issued identifier out of their hands -
   // and it is the branch that would be a hole if the two clauses were written as one list.
-  await writeMerged('nor set their own member id', false, 'users_private/u2', { member_id: '1042' });
+  await writeMerged('nor set their own member id', false, 'users_private/u2', { member_id: '706' });
   // A value longer than the field is refused too, so nothing unbounded lands in the column.
   await writeMerged('nor an email longer than the field allows', false, 'users_private/u2', {
     email: `${'x'.repeat(120)}@example.com`,
   });
   await asUser('u1'); // the administrator, correcting somebody else's
   await writeMerged('an officer corrects a member’s FEMA student id', true, 'users_private/u2', { fema_student_id: '2222222' });
-  await writeMerged('and sets their member id', true, 'users_private/u2', { member_id: '1042' });
+  await writeMerged('and sets their member id', true, 'users_private/u2', { member_id: '706' });
   await asUser('u2');
   checkIs(
     'and the correction is what is on file',

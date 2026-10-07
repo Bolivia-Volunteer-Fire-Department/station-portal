@@ -53,7 +53,7 @@ const ROW = {
   start_time: '08:00',
   duration: '2',
   location: 'Station 1',
-  instructors: 'Capt. Alvarez',
+  instructors: 'Capt. Cooper',
   is_hazmat: 'TRUE',
   is_company_training: 'TRUE',
   is_multipanycompany: 'FALSE',

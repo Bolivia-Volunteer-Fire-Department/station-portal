@@ -79,7 +79,7 @@ const mixed = eligibilityFor({
   users: [
     ...USERS,
     { id: '60', name: 'Bo Jones', rank_id: 'k1', exclude_from_scheduling: true },
-    { id: '61', name: 'Alvarez Kim', rank_id: 'k1', status: 'inactive' },
+    { id: '61', name: 'Cooper Kim', rank_id: 'k1', status: 'inactive' },
     { id: '62', name: 'No Rank Here', rank_id: 'k9' },
     { id: '63', name: 'Mia Novak', rank_id: 'k1' },
   ],
@@ -92,7 +92,7 @@ check('rank too low', names(mixed.rankBlocked), ['amy brooks', 'Mia Novak', 'Zoe
 // and it is listed rather than hidden: an officer deciding by eye needs to see the member is there at all.
 check('rank cannot be verified', names(mixed.unverifiable), ['No Rank Here']);
 check('excluded from scheduling', names(mixed.excluded), ['Bo Jones']);
-check('inactive', names(mixed.inactive), ['Alvarez Kim']);
+check('inactive', names(mixed.inactive), ['Cooper Kim']);
 // This is the property the ordering exists for: listing the buckets in their declared order puts every
 // member who cannot take the shift BELOW every member who can, with no caller-side work to do.
 check(
@@ -107,7 +107,7 @@ check(
   [
     'Cameron Rave', 'Ralph Fike Jr', 'Roo Lowrey',
     'amy brooks', 'Mia Novak', 'Zoe Anders',
-    'No Rank Here', 'Bo Jones', 'Alvarez Kim',
+    'No Rank Here', 'Bo Jones', 'Cooper Kim',
   ]
 );
 
@@ -159,7 +159,7 @@ console.log('\n--- the single-member rule the member screens share ---');
 const officer = { name: 'Ralph Fike Jr', rank_id: 'k3' };
 const driver = { name: 'Cameron Rave', rank_id: 'k2' };
 const chief = { name: 'Bo Jones', rank_id: 'k1', exclude_from_scheduling: true };
-const absent = { name: 'Alvarez Kim', rank_id: 'k1', status: 'inactive' };
+const absent = { name: 'Cooper Kim', rank_id: 'k1', status: 'inactive' };
 const officerShift = { rank_order_required: 3 };
 const firefighterShift = { rank_order_required: 1 };
 checkIs('an officer may fill an officer shift', memberCanFillAssignment({ member: officer, assignment: officerShift, ranks: RANKS }));

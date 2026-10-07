@@ -458,7 +458,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 maxLength={20}
                 value={formData.member_id}
                 onChange={(e) => setFormData({ ...formData, member_id: e.target.value })}
-                placeholder="e.g. 1042 (optional)"
+                placeholder="e.g. 706 (optional)"
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">

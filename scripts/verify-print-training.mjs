@@ -63,7 +63,7 @@ const TRAININGS = [
     start_time: '08:00',
     duration: '2',
     location: 'Station 1',
-    instructors: 'Capt. Alvarez',
+    instructors: 'Capt. Cooper',
     narrative: 'Masks and bottles.\nSecond line.',
     is_hazmat: 'TRUE',
     is_ems: 'TRUE',
@@ -115,7 +115,7 @@ check('the field values', detail.fields.map((field) => field.value), [
   '8:00 AM',
   '2 hrs',
   'Station 1',
-  'Capt. Alvarez',
+  'Capt. Cooper',
 ]);
 // The full labels, not the badges' abbreviations: this sheet has room to be unambiguous.
 check('the categories in full', detail.categories, ['Hazmat', 'EMS']);
@@ -187,7 +187,7 @@ check('the title', list[0].title, 'SCBA Refresher');
 check('the time label under it, as on screen', list[0].when, '8:00 AM · 2 hrs');
 check('and the category badges, in the sheet order', list[0].badges, ['Hazmat', 'EMS']);
 check('a location', list[0].location, 'Station 1');
-check('instructors', list[0].instructors, 'Capt. Alvarez');
+check('instructors', list[0].instructors, 'Capt. Cooper');
 check('and blanks stay blank rather than printing undefined', [list[1].instructors, list[1].location], ['', 'Academy']);
 check('the external marker is on the row that has it', [list[0].external, list[2].external], [false, true]);
 
