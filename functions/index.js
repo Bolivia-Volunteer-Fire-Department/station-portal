@@ -518,7 +518,7 @@ exports.runReport = onCall(async (request) => {
     return {
       report: { id: report.id, name: report.name, visualization: options.visualization, group_by: options.groupBy, dataset: 'training', unit: 'Hours' },
       range: { from, to },
-      rows: aggregateTrainingRows(signatures, { groupBy: options.groupBy, trainings, users: trainingMembers }),
+      rows: aggregateTrainingRows(signatures, { groupBy: options.groupBy, trainings, users: trainingMembers, orderBy: options.orderBy }),
       truncated: false,
     };
   }
@@ -526,22 +526,44 @@ exports.runReport = onCall(async (request) => {
   // A RECONCILIATION: what was scheduled against what was actually worked. It reads TWO collections, which is the whole
   // reason it is a dataset of its own rather than a grouping on the schedule report.
   if (report.dataset === 'reconciliation') {
-    const mine = report.scope === 'mine' ? caller.uid : '';
-    const scheduleSource = mine
-      ? db.collection('schedule').where('user_id', 'in', [mine]).where('date_from', '>=', from).where('date_from', '<=', to)
-      : db.collection('schedule').where('date_from', '>=', from).where('date_from', '<=', to);
-    const scheduleSnapshot = await scheduleSource.limit(5001).get();
-    const scheduleRows = scheduleSnapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id }));
+    // WHO IS BEING RECONCILED. The runner's member picker was being ignored here, which is why a report narrowed to one
+    // member still listed everybody - the SCHEDULE branch applies `options.memberIds` and this one did not, so the whole
+    // station came back. `mine` is the same idea for a member's own report, and the two cannot both apply.
+    const wantedMembers = report.scope === 'mine' ? [caller.uid] : options.memberIds;
+
+    // One collection's rows for the members asked for. A NAMED LIST IS CHUNKED BY 30, which is Firestore's own limit on
+    // an `in` filter - the schedule branch does the same, and a report asking about more than thirty members would
+    // otherwise fail rather than cap.
+    const readInRange = async (build) => {
+      if (!wantedMembers.length) {
+        const snapshot = await build(null).limit(5001).get();
+        return { rows: snapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id })), overLimit: snapshot.size > 5000 };
+      }
+      const rows = [];
+      let overLimit = false;
+      for (let start = 0; start < wantedMembers.length && !overLimit; start += 30) {
+        const chunk = await build(wantedMembers.slice(start, start + 30)).limit(5001 - rows.length).get();
+        rows.push(...chunk.docs.map((row) => ({ ...row.data(), id: row.id })));
+        overLimit = rows.length > 5000;
+      }
+      return { rows: rows.slice(0, 5000), overLimit };
+    };
+
+    const scheduleRead = await readInRange((ids) => {
+      const base = db.collection('schedule').where('date_from', '>=', from).where('date_from', '<=', to);
+      return ids ? base.where('user_id', 'in', ids) : base;
+    });
+    const scheduleRows = scheduleRead.rows;
 
     // CLOCK ENTRIES, and the bound is the fiddly part. `time_in` is a DATETIME ("yyyy-MM-dd HH:mm:ss") while `to` is a
     // bare date key, so the upper bound is the day AFTER it, EXCLUSIVE - the same bound GET_TIMECLOCK_LOGS uses, and the
     // bug recorded there is exactly this: comparing "2026-01-31 14:00:00" against "2026-01-31" drops the whole last day.
     const dayAfter = new Date(Date.parse(`${to}T00:00:00.000Z`) + 86400000).toISOString().slice(0, 10);
-    const clockSource = mine
-      ? db.collection('timeclock').where('user_id', 'in', [mine]).where('time_in', '>=', from).where('time_in', '<', dayAfter)
-      : db.collection('timeclock').where('time_in', '>=', from).where('time_in', '<', dayAfter);
-    const clockSnapshot = await clockSource.limit(5001).get();
-    const clockRows = clockSnapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id }));
+    const clockRead = await readInRange((ids) => {
+      const base = db.collection('timeclock').where('time_in', '>=', from).where('time_in', '<', dayAfter);
+      return ids ? base.where('user_id', 'in', ids) : base;
+    });
+    const clockRows = clockRead.rows;
 
     // Names for whoever appears, whether they were scheduled or merely turned up - a row for somebody who clocked in with
     // no shift at all is the interesting one, so it must not be the one row that reads "Unnamed member".
@@ -578,11 +600,14 @@ exports.runReport = onCall(async (request) => {
         users,
         templates,
         assignmentIds: options.assignmentIds,
+        templateIds: options.templateIds,
+        orderBy: options.orderBy,
       }),
       // The axis that was actually compared, echoed back so the runner can say what these numbers are against rather
       // than leaving an officer to remember which boxes they ticked.
       assignment_ids: options.assignmentIds,
-      truncated: scheduleSnapshot.size > 5000 || clockSnapshot.size > 5000,
+      template_ids: options.templateIds,
+      truncated: scheduleRead.overLimit || clockRead.overLimit,
     };
   }
 
@@ -606,20 +631,29 @@ exports.runReport = onCall(async (request) => {
     overLimit = snapshot.size > 5000;
     scheduleRows = snapshot.docs.slice(0, 5000).map((row) => ({ ...row.data(), id: row.id }));
   }
-  // Names are only read for the grouping that draws them.
-  const assignmentIds = options.groupBy === 'assignment'
+  // Names are only read for the groupings that draw them - and `options.groupBy` is a LIST now, so each check is an
+  // `includes` rather than an equality. Reading every assignment's name for a report grouped by month was already
+  // wasteful; with two levels it would have happened more often.
+  const draws = (level) => (Array.isArray(options.groupBy) ? options.groupBy : [options.groupBy]).includes(level);
+  const assignmentIds = draws('assignment')
     ? [...new Set(scheduleRows.map((row) => String(row.assignment_id || '').trim()).filter(Boolean))]
     : [];
-  const memberIds = options.groupBy === 'member'
+  const memberIds = draws('member')
     ? [...new Set(scheduleRows.map((row) => String(row.user_id || '').trim()).filter(Boolean))]
     : [];
-  const [assignmentSnapshots, memberSnapshots] = await Promise.all([
+  // The SHIFT PATTERN's nickname, which is what tells "Officer - Day" from "Officer - Night".
+  const templateIds = draws('template')
+    ? [...new Set(scheduleRows.map((row) => String(row.schedule_template_id || '').trim()).filter(Boolean))]
+    : [];
+  const [assignmentSnapshots, memberSnapshots, templateSnapshots] = await Promise.all([
     assignmentIds.length ? db.getAll(...assignmentIds.map((id) => db.doc(`assignments/${id}`))) : [],
     memberIds.length ? db.getAll(...memberIds.map((id) => db.doc(`users/${id}`))) : [],
+    templateIds.length ? db.getAll(...templateIds.map((id) => db.doc(`schedule_templates/${id}`))) : [],
   ]);
   const assignments = assignmentSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
   const users = memberSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
-  const rows = aggregateScheduleRows(scheduleRows, { groupBy: options.groupBy, assignments, users });
+  const templates = templateSnapshots.map((row) => ({ id: row.id, ...(row.exists ? row.data() : {}) }));
+  const rows = aggregateScheduleRows(scheduleRows, { groupBy: options.groupBy, assignments, users, templates, orderBy: options.orderBy });
 
   return {
     report: { id: report.id, name: report.name, visualization: options.visualization, group_by: options.groupBy, dataset: 'schedule', unit: 'Shifts' },

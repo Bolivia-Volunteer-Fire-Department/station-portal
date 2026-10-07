@@ -3,7 +3,7 @@ import { AlertCircle, BarChart3, Download, Loader2, PieChart as PieIcon, Printer
 import { fetchAdminSections, fetchReports, fetchScheduleSetup, runConfiguredReport } from '../services/api';
 import { toDateKey } from '../utils/scheduleDate';
 import { userLabel } from '../utils/displayLabel';
-import { downloadCsv, reportCsvFileName, reportResultCsv } from '../utils/reportExport';
+import { downloadCsv, reportCsvFileName, reportResultCsv, reportMeasureColumns } from '../utils/reportExport';
 import {
   REPORT_GROUPINGS,
   REPORT_RANGE_PRESETS,
@@ -11,6 +11,7 @@ import {
   resolveReportRange,
 } from '../utils/reportParameters';
 import ViewportModal from './ViewportModal';
+import ReportGroupingPicker from './ReportGroupingPicker';
 import PrintableReport from './PrintableReport';
 import ReportChart from './ReportChart';
 
@@ -50,7 +51,14 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
   const initialRange = resolveReportRange(report.default_range, today);
   const [from, setFrom] = useState(initialRange.from);
   const [to, setTo] = useState(initialRange.to);
-  const [groupBy, setGroupBy] = useState(report.group_by);
+  // THE LEVELS THIS RUN GROUPS BY, in order. A definition saved before groupings were a list holds a bare string, so
+  // both shapes read the same here.
+  const [groupBy, setGroupBy] = useState(() => {
+    const own = [].concat(report.group_by || [])
+      .map((level) => String(level || '').trim())
+      .filter(Boolean);
+    return own.length ? own : [(REPORT_GROUPINGS[report.dataset] || [])[0]?.[0] || 'month'];
+  });
   const [visualization, setVisualization] = useState(report.visualization);
   const [category, setCategory] = useState('');
   const [memberIds, setMemberIds] = useState([]);
@@ -73,6 +81,7 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
   const [assignmentIds, setAssignmentIds] = useState([]);
   const [assignmentSearch, setAssignmentSearch] = useState('');
   const [fetchedAssignments, setFetchedAssignments] = useState(null);
+  const [fetchedTemplates, setFetchedTemplates] = useState(null);
   const [assignmentsError, setAssignmentsError] = useState('');
   const assignmentOptions = Array.isArray(fetchedAssignments) ? fetchedAssignments : [];
   const visibleAssignments = assignmentOptions.filter((row) =>
@@ -83,12 +92,37 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
       current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
     );
 
+  // THE FINER AXIS: which SHIFT TEMPLATES count. An assignment can carry several patterns at different pay rates -
+  // `Officer` is one assignment, but "Officer - Day" and "Officer - Night" are two templates - so reconciling pay means
+  // ticking the pattern rather than the whole assignment. Both lists come from the one schedule-setup read above.
+  const [templateIds, setTemplateIds] = useState([]);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const templateOptions = Array.isArray(fetchedTemplates) ? fetchedTemplates : [];
+  const assignmentName = (id) =>
+    String(assignmentOptions.find((row) => String(row.id) === String(id))?.description || '').trim();
+  // Labelled the way the board draws a shift: the assignment, then the pattern that tells two of them apart.
+  const templateLabel = (row) => {
+    const nickname = String(row?.nickname || '').trim();
+    const assignment = assignmentName(row?.assignment_id);
+    if (assignment && nickname) return `${assignment} — ${nickname}`;
+    return assignment || nickname || 'Unnamed shift';
+  };
+  const visibleTemplates = templateOptions.filter((row) =>
+    templateLabel(row).toLowerCase().includes(templateSearch.trim().toLowerCase())
+  );
+  const toggleTemplate = (id) =>
+    setTemplateIds((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));
+
   useEffect(() => {
     if (!wantsAssignments || fetchedAssignments !== null) return undefined;
     let cancelled = false;
     fetchScheduleSetup()
       .then((data) => {
-        if (!cancelled) setFetchedAssignments(Array.isArray(data?.assignments) ? data.assignments : []);
+        if (cancelled) return;
+        setFetchedAssignments(Array.isArray(data?.assignments) ? data.assignments : []);
+        // The templates come from the SAME read - they are the station's schedule setup, which is what the calendars
+        // already load - so the second list costs no extra request.
+        setFetchedTemplates(Array.isArray(data?.scheduleTemplates) ? data.scheduleTemplates : []);
       })
       .catch((failure) => {
         if (!cancelled) setAssignmentsError(failure.message || 'Could not load the assignments.');
@@ -142,6 +176,7 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
         member_ids: memberIds,
         // Only sent when the definition opened it up; the server ignores it otherwise (resolveReportOptions).
         assignment_ids: wantsAssignments ? assignmentIds : [],
+        template_ids: wantsAssignments ? templateIds : [],
       });
       // What was chosen is kept with the result, because the printed copy has to say what it is a copy of.
       const names = members.filter((member) => memberIds.includes(String(member.id))).map((member) => userLabel(member));
@@ -165,6 +200,15 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                         .join(', ')
                     : 'Every assignment',
                 ],
+                [
+                  'Paid shift templates',
+                  templateIds.length
+                    ? templateOptions
+                        .filter((row) => templateIds.includes(String(row.id)))
+                        .map((row) => templateLabel(row))
+                        .join(', ')
+                    : 'Every template',
+                ],
               ]
             : []),
         ],
@@ -180,15 +224,22 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
   // A RECONCILIATION CARRIES MORE THAN ONE NUMBER PER ROW, so the table grows a column per measure rather than pretending
   // the single `value` is the whole answer. `value` is the variance - the finding - and the two totals sit beside it.
   // "Still open" appears only when there IS one, because a column of zeroes is furniture until it is not.
-  const hasMeasures = result ? result.rows.some((row) => row.values) : false;
-  const measureColumns = hasMeasures
-    ? [
-        'scheduled_hours',
-        'clocked_hours',
-        'variance',
-        ...(result.rows.some((row) => (row.values.open_clock_entries || 0) > 0) ? ['open_clock_entries'] : []),
-      ]
+  // The extra numbers a reconciliation carries, in the one place all three renderers (screen, print, CSV) read them from.
+  const measureColumns = reportMeasureColumns(result);
+  const hasMeasures = measureColumns.length > 0;
+
+  // ONE COLUMN PER GROUPING LEVEL, which is what makes "month, then member" readable as a table: a month's members sit
+  // together under a repeated month, and no nested rows are needed. A single-level report draws the same single column it
+  // always did.
+  const groupingLevels = result
+    ? [].concat(result.report.group_by || []).filter(Boolean)
     : [];
+  const availableGroupings = result ? REPORT_GROUPINGS[result.report.dataset] || [] : [];
+  const groupColumns = groupingLevels.length
+    ? groupingLevels.map((level) => availableGroupings.find(([value]) => value === level)?.[1] || level)
+    : ['Group'];
+  // What a heading row spans: every column, so a month's name reads across the whole width rather than under one heading.
+  const totalColumns = groupColumns.length + Math.max(measureColumns.length, 1);
 
   const actions = result ? (
     <>
@@ -247,18 +298,33 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                 </p>
               )}
               {report.allow_group_by && (
-                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 @lg:col-span-2">
                   Group by
-                  <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)} className={INPUT_CLASS}>
-                    {groupings.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
+                  <div className="mt-1">
+                    <ReportGroupingPicker
+                      value={groupBy}
+                      options={groupings}
+                      onChange={(levels) => {
+                        setGroupBy(levels);
+                        // A CHART HAS ONE AXIS, so adding a second grouping switches this run to a table rather than
+                        // leaving a bar graph that cannot be drawn. The choice is disabled below as well; this is what
+                        // makes it true the moment the level is added.
+                        if (levels.length > 1) setVisualization('table');
+                      }}
+                      fieldClass={INPUT_CLASS}
+                    />
+                  </div>
+                </div>
               )}
               {report.allow_visualization && (
                 <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                   Show as
                   <select value={visualization} onChange={(event) => setVisualization(event.target.value)} className={INPUT_CLASS}>
-                    {Object.entries(VISUALS).map(([value, option]) => <option key={value} value={value}>{option.label}</option>)}
+                    {Object.entries(VISUALS).map(([value, option]) => (
+                      <option key={value} value={value} disabled={groupBy.length > 1 && value !== 'table'}>
+                        {option.label}{groupBy.length > 1 && value !== 'table' ? ' (one grouping only)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </label>
               )}
@@ -333,15 +399,49 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                 ) : fetchedAssignments === null ? (
                   <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading assignments…</p>
                 ) : (
-                  <div className="mt-2 grid max-h-48 gap-x-4 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700 @lg:grid-cols-2">
-                    {visibleAssignments.map((row) => (
-                      <label key={row.id} className="flex items-center gap-2 py-1 text-sm text-slate-700 dark:text-slate-200">
-                        <input type="checkbox" checked={assignmentIds.includes(String(row.id))} onChange={() => toggleAssignment(String(row.id))} className="accent-red-600" />
-                        {String(row.description || '').trim() || 'Unnamed assignment'}
-                      </label>
-                    ))}
-                    {visibleAssignments.length === 0 && <p className="py-2 text-xs text-slate-500">No assignments match.</p>}
-                  </div>
+                  <>
+                    <div className="mt-2 grid max-h-40 gap-x-4 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700 @lg:grid-cols-2">
+                      {visibleAssignments.map((row) => (
+                        <label key={row.id} className="flex items-center gap-2 py-1 text-sm text-slate-700 dark:text-slate-200">
+                          <input type="checkbox" checked={assignmentIds.includes(String(row.id))} onChange={() => toggleAssignment(String(row.id))} className="accent-red-600" />
+                          {String(row.description || '').trim() || 'Unnamed assignment'}
+                        </label>
+                      ))}
+                      {visibleAssignments.length === 0 && <p className="py-2 text-xs text-slate-500">No assignments match.</p>}
+                    </div>
+
+                    {/* THE PATTERNS UNDER THOSE ASSIGNMENTS. An assignment's shifts can be several templates at different
+                        pay rates, so this is the list that separates them - see templateLabel. */}
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        Shift templates{' '}
+                        {templateIds.length ? `(${templateIds.length} selected)` : '(every template)'}
+                      </p>
+                      {templateIds.length > 0 && (
+                        <button type="button" onClick={() => setTemplateIds([])} className="text-xs font-medium text-red-600 hover:underline">Clear</button>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Narrow it further to a pattern &mdash; an assignment with a day shift and a night shift at different
+                      rates is two templates. A one-off shift has no template, so ticking any template leaves those out.
+                    </p>
+                    <input
+                      type="search"
+                      value={templateSearch}
+                      onChange={(event) => setTemplateSearch(event.target.value)}
+                      placeholder="Search shift templates"
+                      className={INPUT_CLASS}
+                    />
+                    <div className="mt-2 grid max-h-40 gap-x-4 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700 @lg:grid-cols-2">
+                      {visibleTemplates.map((row) => (
+                        <label key={row.id} className="flex items-center gap-2 py-1 text-sm text-slate-700 dark:text-slate-200">
+                          <input type="checkbox" checked={templateIds.includes(String(row.id))} onChange={() => toggleTemplate(String(row.id))} className="accent-red-600" />
+                          {templateLabel(row)}
+                        </label>
+                      ))}
+                      {visibleTemplates.length === 0 && <p className="py-2 text-xs text-slate-500">No shift templates match.</p>}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -365,23 +465,58 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
                   <table className="w-full text-left text-sm">
                     <thead className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700 dark:text-slate-400">
                       <tr>
-                        <th className="px-3 py-2">{result.report.group_by}</th>
+                        {groupColumns.map((label, index) => (
+                          <th key={`${label}-${index}`} className="px-3 py-2">{label}</th>
+                        ))}
                         {measureColumns.map((measure) => <th key={measure} className="px-3 py-2 text-right">{MEASURE_LABELS[measure]}</th>)}
                         {!hasMeasures && <th className="px-3 py-2 text-right">{result.report.unit || 'Shifts'}</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700/70">
-                      {result.rows.map((row) => (
-                        <tr key={row.key}>
-                          <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{row.label}</td>
-                          {measureColumns.map((measure) => (
-                            <td key={measure} className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">
-                              {row.values?.[measure] ?? ''}
-                            </td>
-                          ))}
-                          {!hasMeasures && <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">{row.value}</td>}
-                        </tr>
-                      ))}
+                      {result.rows.map((row, rowIndex) => {
+                        const parts = row.levels && row.levels.length ? row.levels : [row.label];
+                        const above = rowIndex > 0 ? result.rows[rowIndex - 1] : null;
+                        const previous = above
+                          ? (above.levels && above.levels.length ? above.levels : [above.label])
+                          : [];
+                        // A HEADING IS DRAWN WHEN THE VALUE AT THAT LEVEL CHANGES, so a month is named once and its
+                        // members read underneath it - which is the whole point of grouping by two things. The deepest
+                        // level is not a heading: it is the row that carries the numbers.
+                        const headings = parts
+                          .slice(0, -1)
+                          .map((value, depth) => (previous[depth] === value ? null : { value, depth }))
+                          .filter(Boolean);
+                        return (
+                          <React.Fragment key={row.key}>
+                            {headings.map((heading) => (
+                              <tr key={`${row.key}-heading-${heading.depth}`} className="bg-slate-50 dark:bg-slate-900/60">
+                                <td
+                                  colSpan={totalColumns}
+                                  className="px-3 py-1.5 font-semibold text-slate-700 dark:text-slate-200"
+                                  style={{ paddingLeft: `${heading.depth * 1.25 + 0.75}rem` }}
+                                >
+                                  {heading.value}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr>
+                              <td
+                                colSpan={groupColumns.length}
+                                className="px-3 py-2 text-slate-800 dark:text-slate-200"
+                                style={{ paddingLeft: `${(parts.length - 1) * 1.25 + 0.75}rem` }}
+                              >
+                                {parts[parts.length - 1]}
+                              </td>
+                              {measureColumns.map((measure) => (
+                                <td key={measure} className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">
+                                  {row.values?.[measure] ?? ''}
+                                </td>
+                              ))}
+                              {!hasMeasures && <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-300">{row.value}</td>}
+                            </tr>
+                          </React.Fragment>
+                        );
+                      })}
                       {result.rows.length === 0 && <tr><td colSpan={measureColumns.length + (hasMeasures ? 1 : 2)} className="px-3 py-10 text-center text-slate-500">No results for this date range.</td></tr>}
                     </tbody>
                   </table>

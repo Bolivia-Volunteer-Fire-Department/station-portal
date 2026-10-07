@@ -15,7 +15,7 @@
 | **Name** | How the report is listed. 2–80 characters |
 | **Data source** | **Schedule** (shifts), **Training (hours)** (hours signed for), or **Clocked vs scheduled (hours)** |
 | **Visualization** | How it is drawn: **Table**, **Bar graph**, **Pie graph** or **Line graph** |
-| **Group by** | What the rows and columns are. *Schedule*: assignment, member, day or month. *Training*: category, member, training, day or month. *Clocked vs scheduled*: member, day or month |
+| **Group by** | What the rows are, **in order**. More than one can be chosen — *Month*, then *Member* — and the first is the outer heading. *Schedule*: assignment, shift template, member, day or month. *Training*: category, member, training, day or month. *Clocked vs scheduled*: member, shift template, day or month |
 | **Description** | An optional line, up to 300 characters, shown with the report |
 | **Scope** | The runner's **own** records, or the whole **station** |
 
@@ -42,11 +42,48 @@ This is the report you write to reconcile paid time. Each row is a member, and i
 
 Two things about it are deliberate and worth knowing before you read a number off it:
 
-1. **The tickboxes narrow only the *scheduled* side.** You tick the assignments that count as paid time; every clocked hour still counts. A clock entry does not record which shift somebody was on — the app never asks at clock-in — so a reconciliation compares the two totals rather than pretending to match entries to shifts. That asymmetry is the useful part: it is how a volunteer's hours, or a paid member's extra hours, show up beside the paid schedule that was supposed to cover them.
+1. **The tickboxes narrow only the *scheduled* side.** You tick the assignments — and, finer still, the **shift templates** — that count as paid time; every clocked hour still counts. That second list is the one that matters when an assignment has more than one pattern: *Officer* is one assignment, but **Officer – Day** and **Officer – Night** are two templates at two rates, so ticking the template is how you reconcile one rate at a time. A one-off shift has no template, so ticking any template leaves those out. A clock entry does not record which shift somebody was on — the app never asks at clock-in — so a reconciliation compares the two totals rather than pretending to match entries to shifts. That asymmetry is the useful part: it is how a volunteer's hours, or a paid member's extra hours, show up beside the paid schedule that was supposed to cover them.
 2. **Somebody with no shift at all still gets a row.** If they clocked in and nothing was scheduled, that shows as *Scheduled 0* — which is the row worth looking at, not one to hide.
 
 > [!NOTE]
 > **An entry that is still open** (nobody has clocked out yet) has no length to measure, so it is counted in a **Still open** column and left out of the hours — the same as the member's own Clock History, which also cannot total an entry that has no end. That column appears only when there is one.
+
+## Grouping by more than one thing
+
+**Group by** is a list, and you can add up to **three** levels to it, moving them with the arrows. The order is what the reader sees, so *Month* then *Member* reads as each month, with its members underneath:
+
+```
+2026-01
+  Ana
+  Bo
+2026-02
+  Ana
+```
+
+The **first** level is the outer heading and each one after it nests a step further in. Two things follow from that, and both are deliberate:
+
+- **More than one level is a table.** A graph has one axis, so the bar, pie and line options are switched off while a second grouping is selected, and a report grouped that way is drawn as a table whatever was asked for. That last part is enforced by the server as well as the screen — a request built by hand cannot produce a two-level graph.
+- **The order comes from the grouping, not the size.** A report grouped by one thing still puts the biggest row first; a report grouped by two or more reads in the order you chose, because sorting those rows by size would scatter each month's members through the table.
+
+## Ordering the rows
+
+**Order by** is a list too, built the same way, and it can be left **empty**. It offers the levels the report is *grouped by* plus the report's own number, because a row only carries what it was grouped by — ordering a report grouped by month alone by *Member* would have nothing to sort on.
+
+Putting the **number first** is the part worth having: *Difference, high to low*, then *Member* gives the biggest mismatches at the top with names breaking the ties, which the default cannot express. Each key has its own direction — **Low → high** or **High → low** — so *Month* can run forwards while the number runs backwards.
+
+Left empty, a report behaves as it always has: grouped by one thing, the biggest row first; grouped by several, in the order of its groupings.
+
+## Printing and exporting
+
+**Print** and **Save CSV** both follow the grouping:
+
+- **The printed sheet nests the headings** the way the screen does, so *Month* then *Member* prints as each month with its members indented under it.
+- **The CSV gives each grouping level its own column** instead of one combined label. A spreadsheet has no headings to nest, so *2026-01, Ana* becomes two cells — which is what makes the file pivotable and filterable.
+- A reconciliation exports **a column per measure** (*Scheduled*, *Clocked in*, *Difference*) rather than a single number.
+
+## Date ranges
+
+**Last week** is the calendar week that just ended — **Sunday to Saturday**, the same seven days the schedule draws as one week — while **Last 7 days** is the seven days ending today, today included. They answer different questions, and both are on the list.
 
 ## What the runner may change
 

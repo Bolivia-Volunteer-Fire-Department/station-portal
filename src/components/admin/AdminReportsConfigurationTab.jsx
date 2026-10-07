@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import ReportGroupingPicker from '../ReportGroupingPicker';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
-import { REPORT_RANGE_PRESETS } from '../../utils/reportParameters';
+import { REPORT_RANGE_PRESETS, REPORT_DATASET_MEASURE_LABELS } from '../../utils/reportParameters';
 import {
   deleteReportConfiguration,
   fetchReportConfigurations,
@@ -16,6 +17,7 @@ const EMPTY_REPORT = {
   dataset: 'schedule',
   visualization: 'table',
   group_by: 'assignment',
+  order_by: [],
   scope: 'station',
   default_range: 'this_month',
   allow_range: true,
@@ -35,7 +37,7 @@ const REPORT_FORM_ID = 'report-editor-form';
 const DATASETS = {
   schedule: {
     label: 'Schedule',
-    groupings: [['assignment', 'Assignment'], ['member', 'Member'], ['day', 'Day'], ['month', 'Month']],
+    groupings: [['assignment', 'Assignment'], ['template', 'Shift Template'], ['member', 'Member'], ['day', 'Day'], ['month', 'Month']],
     mine: 'My schedule (requires View their schedule)',
     station: 'Station schedule (requires See whole crew or Manage schedule)',
     summary: 'Station schedule',
@@ -52,7 +54,7 @@ const DATASETS = {
   // why the station scope asks for the clock permission as well - see reportScopeIsAllowed in functions/index.js.
   reconciliation: {
     label: 'Clocked vs scheduled (hours)',
-    groupings: [['member', 'Member'], ['day', 'Day'], ['month', 'Month']],
+    groupings: [['member', 'Member'], ['template', 'Shift Template'], ['day', 'Day'], ['month', 'Month']],
     mine: 'My hours (requires View their schedule)',
     station: 'Everyone\'s hours (requires Manage the timeclock and a schedule permission)',
     summary: 'Clocked vs scheduled',
@@ -68,6 +70,8 @@ const toggleId = (values, id) =>
 export default function AdminReportsConfigurationTab({ roles = [], ranks = [] }) {
   const [reports, setReports] = useState([]);
   const [form, setForm] = useState(EMPTY_REPORT);
+  // How many levels the form's grouping has, which decides whether a chart is even offerable - a chart has one axis.
+  const levelCount = (Array.isArray(form.group_by) ? form.group_by : [form.group_by]).filter(Boolean).length;
   const [editorOpen, setEditorOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -176,7 +180,7 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
                     <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{report.name}</span>
                     {!report.enabled && <span className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">Disabled</span>}
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{report.scope === 'station' ? (DATASETS[report.dataset] || DATASETS.schedule).summary : 'My ' + (report.dataset === 'training' ? 'training' : 'schedule')} · {report.visualization} · by {report.group_by}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{report.scope === 'station' ? (DATASETS[report.dataset] || DATASETS.schedule).summary : 'My ' + (report.dataset === 'training' ? 'training' : 'schedule')} · {report.visualization} · by {[].concat(report.group_by || []).join(', ')}</p>
                 </div>
                 <button type="button" onClick={() => beginEdit(report)} title={`Edit ${report.name}`} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700">
                   <Pencil className="h-3.5 w-3.5" /> Edit
@@ -218,19 +222,64 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
             </label>
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
               Visualization
-              <select value={form.visualization} onChange={(event) => setForm({ ...form, visualization: event.target.value })} className={FIELD_CLASS}>
+              <select
+                value={form.visualization}
+                onChange={(event) => setForm({ ...form, visualization: event.target.value })}
+                className={FIELD_CLASS}
+              >
                 <option value="table">Table</option>
-                <option value="bar">Bar graph</option>
-                <option value="pie">Pie graph</option>
-                <option value="line">Line graph</option>
+                {/* A CHART HAS ONE AXIS, so the graphing choices are offered only while the report groups by one thing.
+                    The server refuses a multi-level chart too (resolveReportOptions), because a rule enforced only in a
+                    dropdown is not a rule - but saying so HERE is what stops an author picking one and wondering why the
+                    report came back as a table. */}
+                <option value="bar" disabled={levelCount > 1}>Bar graph{levelCount > 1 ? ' (one grouping only)' : ''}</option>
+                <option value="pie" disabled={levelCount > 1}>Pie graph{levelCount > 1 ? ' (one grouping only)' : ''}</option>
+                <option value="line" disabled={levelCount > 1}>Line graph{levelCount > 1 ? ' (one grouping only)' : ''}</option>
               </select>
             </label>
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 sm:col-span-2">
               Group by
-              <select value={form.group_by} onChange={(event) => setForm({ ...form, group_by: event.target.value })} className={FIELD_CLASS}>
-                {(DATASETS[form.dataset] || DATASETS.schedule).groupings.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
+              <div className="mt-1">
+                <ReportGroupingPicker
+                  value={Array.isArray(form.group_by) ? form.group_by : [form.group_by].filter(Boolean)}
+                  options={(DATASETS[form.dataset] || DATASETS.schedule).groupings}
+                  onChange={(levels) => setForm({
+                    ...form,
+                    group_by: levels,
+                    // Adding a second level turns a chart into a table, in the form as well as in the engine, so what is
+                    // saved is what will be drawn.
+                    visualization: levels.length > 1 ? 'table' : form.visualization,
+                  })}
+                  fieldClass={FIELD_CLASS}
+                />
+              </div>
             </label>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 sm:col-span-2">
+              Order by (optional)
+              <div className="mt-1">
+                <ReportGroupingPicker
+                  withDirection
+                  min={0}
+                  max={4}
+                  value={Array.isArray(form.order_by) ? form.order_by : []}
+                  // THE SAME KEYS THE GROUPING OFFERS, PLUS THE MEASURE. A row carries only what it was grouped by, so
+                  // ordering by anything else would have nothing to sort on - and putting the MEASURE first is the
+                  // useful part: "biggest difference first, then by member".
+                  options={[
+                    ...(DATASETS[form.dataset] || DATASETS.schedule).groupings.filter(([value]) =>
+                      (Array.isArray(form.group_by) ? form.group_by : [form.group_by]).includes(value)
+                    ),
+                    ['value', REPORT_DATASET_MEASURE_LABELS[form.dataset] || 'Value'],
+                  ]}
+                  onChange={(entries) => setForm({ ...form, order_by: entries })}
+                  fieldClass={FIELD_CLASS}
+                />
+              </div>
+              <p className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                Left empty, a report grouped by one thing puts the biggest row first, and one grouped by several reads in
+                the order of its groupings.
+              </p>
+            </div>
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 sm:col-span-2">
               Description (optional)
               <textarea maxLength={300} rows={2} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-white" />
@@ -265,7 +314,7 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
               // WHICH ASSIGNMENTS COUNT AS PAID, ticked by whoever runs it. No column on the assignment says paid, because
               // "is this paid?" is a question about THIS comparison rather than a fact about the shift.
               ...(form.dataset === 'reconciliation'
-                ? [['allow_assignments', 'Viewer can tick which assignments count as paid time']]
+                ? [['allow_assignments', 'Viewer can tick which assignments and shift templates count as paid time']]
                 : []),
             ].map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
