@@ -405,6 +405,41 @@ export const adminSaveCertification = async (certification, token) =>
 export const adminDeleteCertification = async (id, token) =>
   dispatchRequest({ action: 'ADMIN_DELETE_CERTIFICATION', token, id: String(id || '') });
 
+// The certification report's batch save. Three kinds of work, in one request:
+//
+//   * RECORDS - the same certification and dates recorded for several members at once, which is how a course that a
+//     group sat together gets onto the books. One row per member, exactly as the single save writes it.
+//   * UPDATES - a change applied to several EXISTING rows at once, given by id. Only the fields the officer actually
+//     ticked are sent, and the writer merges them, so a bulk edit cannot blank a column nobody looked at.
+//   * DELETES - ids, for the same reason.
+//
+// The reply carries the rebuilt badge index, as a single save's does: a batch can change every member's icons.
+export const adminBulkSaveCertification = async ({ records = [], updates = [], deleteIds = [] }, token) =>
+  dispatchRequest({
+    action: 'ADMIN_BULK_SAVE_CERTIFICATION',
+    token,
+    payload: {
+      records: records.map((row) => ({
+        id: String(row.id || ''),
+        user_id: String(row.user_id || ''),
+        certification_id: String(row.certification_id || ''),
+        effective_date: String(row.effective_date || ''),
+        end_date: String(row.end_date || ''),
+        notes: String(row.notes || ''),
+      })),
+      updates: updates.map((change) => {
+        const out = { id: String(change.id || '') };
+        // `undefined` is the officer NOT touching this field on any selected row, and it is left out of the request
+        // rather than sent as an empty string: the writer merges, so absent means untouched and "" means cleared.
+        if (change.effective_date !== undefined) out.effective_date = String(change.effective_date);
+        if (change.end_date !== undefined) out.end_date = String(change.end_date);
+        if (change.notes !== undefined) out.notes = String(change.notes);
+        return out;
+      }),
+      deleteIds: deleteIds.map((id) => String(id)),
+    },
+  });
+
 // The member's own settings row: time format, theme, and which notifications they want.
 //
 // NO `fcm_token`. That field existed because the sheet kept the device token in this row as well as in `push_devices`,

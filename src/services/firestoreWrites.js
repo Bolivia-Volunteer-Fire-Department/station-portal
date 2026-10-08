@@ -1144,6 +1144,48 @@ export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
   return { saved: rows.length, deleted: deleteIds.length };
 };
 
+// The certification report's batch: records for SEVERAL members at once, changes to SEVERAL rows at once, and
+// removals - in one commit.
+//
+// WHY A BATCH rather than a call per row: an officer recording that eight members sat the same course is ONE act, and
+// eight round trips are eight chances to half-finish it. Firestore commits a batch atomically, so the screen either
+// has the whole thing or none of it - which is also why the request is capped by the batch limit (500 writes) rather
+// than by anything this file decides.
+//
+// ONE SHAPE FOR BOTH KINDS OF ROW. A new record is written exactly as the single save writes it, so a bulk add and a
+// one-off add produce rows nothing downstream can tell apart. A change is MERGED over the row it names, so a bulk
+// edit that fixes one date cannot blank a note nobody touched - the fields the officer did not tick are simply absent
+// from the request.
+//
+// The id is written as a FIELD as well as being the document key, because the migration put it there and the app reads
+// it off every row it lists (see rowsOf: the key wins, but the field has to agree with it).
+export const saveCertificationRows = async ({ records = [], updates = [], deleteIds = [] }) => {
+  const db = firestore();
+  const batch = writeBatch(db);
+
+  records.forEach((row) => {
+    const { action, token, id, ...fields } = row;
+    void action;
+    void token;
+    const target = String(id || '').trim() || doc(collection(db, 'certifications')).id;
+    batch.set(doc(db, 'certifications', target), { ...fields, id: target }, { merge: true });
+  });
+
+  updates.forEach((change) => {
+    const { id, ...fields } = change || {};
+    const target = String(id || '').trim();
+    // A change with nothing to name cannot be applied to anything. Skipped rather than guessed at: the alternative is
+    // creating a row out of a half-built change, which is how a bulk edit would quietly ADD records.
+    if (!target || Object.keys(fields).length === 0) return;
+    batch.set(doc(db, 'certifications', target), fields, { merge: true });
+  });
+
+  deleteIds.forEach((id) => batch.delete(doc(db, 'certifications', String(id))));
+
+  await batch.commit();
+  return { saved: records.length, updated: updates.length, deleted: deleteIds.length };
+};
+
 // The badge index: member id -> the [{ id, name, icon }] of the types that asked to be shown beside a name, and only
 // for records that are CURRENT. This mirrors the sheet's certificationBadgeIndex, including the part that matters
 // most: a paramedic badge on somebody whose licence lapsed is worse than no badge, because it is the app making a

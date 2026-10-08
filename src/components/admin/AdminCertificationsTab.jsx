@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download } from 'lucide-react';
-import { adminSaveCertification, adminDeleteCertification, fetchAdminCertificationRecords } from '../../services/api';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, X, Users } from 'lucide-react';
+import { adminSaveCertification, adminDeleteCertification, adminBulkSaveCertification, fetchAdminCertificationRecords } from '../../services/api';
 import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
 import ConfirmModal from '../ConfirmModal';
@@ -9,6 +9,8 @@ import PrintableCertifications from '../PrintableCertifications';
 import { userLabel } from '../../utils/displayLabel';
 import { certificationRowsCsv, sortCertificationRows } from '../../utils/certificationReport';
 import {
+  certificationFiltersActive,
+  certificationRowMatches,
   certificationStateLabel,
   certificationStateBadge,
   certificationCountdown,
@@ -34,6 +36,16 @@ const FILTERS = [
   { id: 'current', label: 'Current' },
 ];
 
+// The fields a bulk edit may change, and ONLY these. A record's member and its certification are what the row IS, so
+// changing them across a selection would be re-labelling history rather than correcting it - the honest way to fix a
+// record given to the wrong person, or of the wrong type, is to delete it and add the right one, which is what the
+// table's own Delete does one row at a time.
+const EDITABLE_FIELDS = [
+  { key: 'effective_date', label: 'Effective date', type: 'date' },
+  { key: 'end_date', label: 'End date', type: 'date' },
+  { key: 'notes', label: 'Notes', type: 'text' },
+];
+
 const TOOLBAR_BUTTON_CLASS =
   'inline-flex h-9 min-w-32 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500';
 
@@ -52,6 +64,11 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
+  // THE TWO SEARCHES, kept apart from the chips above because they answer a different question: the chips are "what
+  // needs my attention", these are "the member and the paperwork in front of me". Both are ANDed with the chips, so
+  // the table is narrowed by everything the officer has asked for rather than by the last thing they pressed.
+  const [memberQuery, setMemberQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState([]);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [inactiveResult, setInactiveResult] = useState(null);
   const [inactiveFailure, setInactiveFailure] = useState(null);
@@ -187,14 +204,177 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
 
   // Non-current certifications first, then member and certification names for a stable, scannable roster.
   const visible = useMemo(() => {
+    const nameOf = (row) => userLabel(usersById[row.user_id]);
     const rows = recordsForView.filter((row) => {
       if (filter === 'attention') return row.state === 'expiring' || row.state === 'expired';
       if (filter === 'current') return row.state === 'active' || row.state === 'upcoming';
       return true;
     });
 
-    return sortCertificationRows(rows, (row) => userLabel(usersById[row.user_id]));
-  }, [recordsForView, filter, usersById]);
+    // Then the two searches, so everything downstream - the table, the print sheet and the CSV - is the same list the
+    // officer is looking at. A filtered table that exports the whole database is the bug this avoids.
+    return sortCertificationRows(
+      rows.filter((row) =>
+        certificationRowMatches(row, { memberName: memberQuery, certificationIds: typeFilter }, nameOf)
+      ),
+      nameOf
+    );
+  }, [recordsForView, filter, usersById, memberQuery, typeFilter]);
+
+  // Whether either search is on, for the Clear control and the empty state.
+  const searchesActive = certificationFiltersActive({ memberName: memberQuery, certificationIds: typeFilter });
+
+  const toggleType = (id) =>
+    setTypeFilter((current) =>
+      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]
+    );
+
+  // ---- Bulk -------------------------------------------------------------------------------------------------------
+  //
+  // TWO gestures, because a station does two things in batches:
+  //
+  //   * RECORD FOR SEVERAL - one certification and one set of dates, for every member ticked. That is how a course a
+  //     group sat together gets onto the books, and the shared dates are the whole point of the gesture.
+  //   * EDIT SELECTED - a change applied to the rows ticked in the table. Each field has its own "change this" box,
+  //     so a blank box means UNTOUCHED rather than "clear it": without that, an officer fixing one date would wipe
+  //     every note on the rows they had selected.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState({ certification_id: '', effective_date: '', end_date: '', notes: '' });
+  const [bulkMembers, setBulkMembers] = useState([]);
+  const [bulkMemberQuery, setBulkMemberQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editFields, setEditFields] = useState({ effective_date: '', end_date: '', notes: '' });
+  const [editApply, setEditApply] = useState({ effective_date: false, end_date: false, notes: false });
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  const bulkType = useMemo(
+    () => setup.find((type) => type.id === bulkForm.certification_id) || null,
+    [setup, bulkForm.certification_id]
+  );
+  const bulkEndDateOff = !bulkType || !bulkType.is_renewable;
+
+  // The roster the bulk add ticks through: everyone, since a record can be given to somebody whose status is
+  // inactive as easily as to one on duty, with the search an officer needs at a station of any size.
+  const bulkMemberList = useMemo(() => {
+    const wanted = bulkMemberQuery.trim().toLowerCase();
+    const rows = users.filter((user) => !wanted || userLabel(user).toLowerCase().includes(wanted));
+    return [...rows].sort((a, b) => userLabel(a).localeCompare(userLabel(b)));
+  }, [users, bulkMemberQuery]);
+
+  // ONLY the ticked rows that are ON SCREEN. A row hidden by a search cannot be seen to be selected, and changing
+  // something the officer cannot see is how a bulk edit becomes a surprise.
+  const selectedRows = useMemo(
+    () => visible.filter((row) => selectedIds.includes(row.id)),
+    [visible, selectedIds]
+  );
+  const allVisibleSelected = visible.length > 0 && visible.every((row) => selectedIds.includes(row.id));
+
+  const toggleAllVisible = () =>
+    setSelectedIds((current) =>
+      allVisibleSelected
+        ? current.filter((id) => !visible.some((row) => row.id === id))
+        : [...new Set([...current, ...visible.map((row) => row.id)])]
+    );
+
+  const toggleSelected = (id) =>
+    setSelectedIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
+
+  // The same two gestures over the roster inside the bulk-add editor: tick one member, tick everybody the search is
+  // showing, or clear. "Select all" adds and removes only what is ON SCREEN, so a search left running cannot become
+  // a way to tick people the officer never saw.
+  const toggleBulkMember = (id) =>
+    setBulkMembers((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
+
+  const allShownSelected =
+    bulkMemberList.length > 0 && bulkMemberList.every((user) => bulkMembers.includes(String(user.id)));
+
+  const toggleAllShownMembers = () =>
+    setBulkMembers((current) =>
+      allShownSelected
+        ? current.filter((id) => !bulkMemberList.some((user) => String(user.id) === id))
+        : [...new Set([...current, ...bulkMemberList.map((user) => String(user.id))])]
+    );
+
+  const openBulkAdd = () => {
+    setError(null);
+    setBulkForm({ certification_id: '', effective_date: '', end_date: '', notes: '' });
+    setBulkMembers([]);
+    setBulkMemberQuery('');
+    setBulkOpen(true);
+  };
+
+  const openBulkEdit = () => {
+    setError(null);
+    setEditFields({ effective_date: '', end_date: '', notes: '' });
+    setEditApply({ effective_date: false, end_date: false, notes: false });
+    setEditOpen(true);
+  };
+
+  // Both bulk saves end the way the single one does: close, hand up the rebuilt badge index, and ask for the refresh
+  // in the background. The rows are built here because what is SHARED between them - the dates, or the one field being
+  // changed - is the gesture rather than something the writer could work out.
+  const handleBulkAdd = async () => {
+    if (!bulkForm.certification_id || !bulkForm.effective_date || bulkMembers.length === 0) return;
+    setBulkSaving(true);
+    setError(null);
+    try {
+      const response = await adminBulkSaveCertification(
+        {
+          records: bulkMembers.map((userId) => ({
+            user_id: userId,
+            certification_id: bulkForm.certification_id,
+            effective_date: bulkForm.effective_date,
+            end_date: bulkEndDateOff ? '' : bulkForm.end_date,
+            notes: bulkForm.notes,
+          })),
+        },
+        token
+      );
+      if (!response?.success) {
+        setError(response?.message || 'Could not save these certifications.');
+        return;
+      }
+      setBulkOpen(false);
+      onBadgesChanged?.(response.badges);
+      void onDataChanged?.('certificationRecords');
+    } catch (err) {
+      setError(err.message || 'Could not save these certifications.');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
+  const handleBulkEdit = async () => {
+    // Only the ticked fields travel. A ticked box with an empty value is a deliberate CLEAR, which is why the tick
+    // decides and the value does not.
+    const changes = {};
+    if (editApply.effective_date) changes.effective_date = editFields.effective_date;
+    if (editApply.end_date) changes.end_date = editFields.end_date;
+    if (editApply.notes) changes.notes = editFields.notes;
+    if (selectedRows.length === 0 || Object.keys(changes).length === 0) return;
+
+    setBulkSaving(true);
+    setError(null);
+    try {
+      const response = await adminBulkSaveCertification(
+        { updates: selectedRows.map((row) => ({ id: row.id, ...changes })) },
+        token
+      );
+      if (!response?.success) {
+        setError(response?.message || 'Could not change these records.');
+        return;
+      }
+      setEditOpen(false);
+      setSelectedIds([]);
+      onBadgesChanged?.(response.badges);
+      void onDataChanged?.('certificationRecords');
+    } catch (err) {
+      setError(err.message || 'Could not change these records.');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
 
   const attentionCount = recordsForView.filter((row) => row.state === 'expiring' || row.state === 'expired').length;
   const printableRows = visible.map((row) => ({
@@ -368,6 +548,30 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             {inactiveLoading && <Loader2 aria-label="Loading inactive records" className="h-3.5 w-3.5 animate-spin" />}
           </label>
           <div className="ml-auto flex flex-wrap gap-2">
+            {/* Contextual, and only when there is a selection to act on: a button that changes several records at
+                once should never be reachable by accident. */}
+            {selectedRows.length > 0 && (
+              <button
+                type="button"
+                onClick={openBulkEdit}
+                className={`${TOOLBAR_BUTTON_CLASS} border border-slate-800 bg-slate-800 text-white hover:bg-slate-700 dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300`}
+              >
+                <Pencil className="h-4 w-4" /> Edit selected ({selectedRows.length})
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={openBulkAdd}
+              disabled={setup.length === 0}
+              title={
+                setup.length
+                  ? 'Record one certification for several members at once'
+                  : 'Add the certifications the station tracks first'
+              }
+              className={`${TOOLBAR_BUTTON_CLASS} border border-red-600 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400 dark:text-red-400 dark:hover:bg-red-950/40`}
+            >
+              <Users className="h-4 w-4" /> Record for several
+            </button>
             <button
               type="button"
               onClick={startNew}
@@ -396,6 +600,60 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           </div>
         </div>
 
+        {/* THE TWO SEARCHES, on their own row under the chips because they answer a different question: the chips are
+            "what needs my attention", these are "the member and the paperwork in front of me". They are visible at all
+            times - a table that looks empty because something is filtered is the failure this prevents, and a Clear
+            control that only appears when there is something to clear is what makes it obvious. */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700/70">
+          <label className="inline-flex h-9 items-center gap-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+            Member
+            <input
+              type="search"
+              value={memberQuery}
+              onChange={(event) => setMemberQuery(event.target.value)}
+              placeholder="Name"
+              aria-label="Filter by member name"
+              className="h-9 w-40 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal normal-case text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+            />
+          </label>
+
+          <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Certifications</span>
+          {setup.length === 0 ? (
+            <span className="text-xs text-slate-500 dark:text-slate-400">None set up yet</span>
+          ) : (
+            setup.map((type) => (
+              <button
+                key={type.id}
+                type="button"
+                onClick={() => toggleType(type.id)}
+                aria-pressed={typeFilter.includes(type.id)}
+                title={`Show only ${type.name}`}
+                className={`${TOOLBAR_BUTTON_CLASS} border ${
+                  typeFilter.includes(type.id)
+                    ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
+                    : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700'
+                }`}
+              >
+                <RankIcon name={type.icon} className="h-3.5 w-3.5 shrink-0" />
+                {type.name}
+              </button>
+            ))
+          )}
+
+          {searchesActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setMemberQuery('');
+                setTypeFilter([]);
+              }}
+              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 underline decoration-dotted underline-offset-2 transition hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
+            >
+              <X className="h-3.5 w-3.5" /> Clear searches
+            </button>
+          )}
+        </div>
+
         {inactiveError && (
           <div role="alert" className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
             {inactiveError}
@@ -406,6 +664,15 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
               <tr>
+                <th className="w-10 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                    aria-label="Select every record shown"
+                    className="h-4 w-4 accent-red-600"
+                  />
+                </th>
                 <th className="px-4 py-3">Member</th>
                 <th className="px-4 py-3">Certification</th>
                 <th className="px-4 py-3">Effective</th>
@@ -418,13 +685,24 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
-                    Nothing to show for this filter.
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
+                    {searchesActive
+                      ? 'No records match these searches — clear them to see the rest.'
+                      : 'Nothing to show for this filter.'}
                   </td>
                 </tr>
               ) : (
                 visible.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(row.id)}
+                        onChange={() => toggleSelected(row.id)}
+                        aria-label={`Select the ${row.name} record for ${userLabel(usersById[row.user_id])}`}
+                        className="h-4 w-4 accent-red-600"
+                      />
+                    </td>
                     <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
                       <span className="flex items-center gap-1.5">
                         {userLabel(usersById[row.user_id])}
@@ -508,6 +786,180 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           </table>
         </div>
       </div>
+
+      {/* RECORD FOR SEVERAL: one certification and one set of dates, for the members who earned it. The dates are asked
+          for ONCE, above the list, because their being shared is the whole gesture. */}
+      {bulkOpen && (
+        <ViewportModal
+          title="Record for several members"
+          subtitle={bulkMembers.length ? `${bulkMembers.length} chosen` : 'Nobody chosen yet'}
+          icon={<Users className="h-4 w-4" />}
+          onSave={handleBulkAdd}
+          saveLabel={bulkMembers.length ? `Record for ${bulkMembers.length}` : 'Record'}
+          saving={bulkSaving}
+          onClose={() => setBulkOpen(false)}
+        >
+          <div className="space-y-4">
+            {error && (
+              <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-600 dark:border-red-800/80 dark:bg-red-950/80 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  Certification
+                </span>
+                <select
+                  value={bulkForm.certification_id}
+                  onChange={(event) =>
+                    setBulkForm({ ...bulkForm, certification_id: event.target.value, end_date: '' })
+                  }
+                  className={FIELD_CLASS}
+                >
+                  <option value="">-- Choose a certification --</option>
+                  {setup.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  Effective date
+                </span>
+                <input
+                  type="date"
+                  value={bulkForm.effective_date}
+                  onChange={(event) => setBulkForm({ ...bulkForm, effective_date: event.target.value })}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  End date{bulkEndDateOff ? ' — not used' : ''}
+                </span>
+                <input
+                  type="date"
+                  value={bulkForm.end_date}
+                  disabled={bulkEndDateOff}
+                  onChange={(event) => setBulkForm({ ...bulkForm, end_date: event.target.value })}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Notes</span>
+                <input
+                  type="text"
+                  value={bulkForm.notes}
+                  onChange={(event) => setBulkForm({ ...bulkForm, notes: event.target.value })}
+                  placeholder="Recorded on every one"
+                  className={FIELD_CLASS}
+                />
+              </label>
+            </div>
+
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  Members ({bulkMembers.length} chosen)
+                </span>
+                <input
+                  type="search"
+                  value={bulkMemberQuery}
+                  onChange={(event) => setBulkMemberQuery(event.target.value)}
+                  placeholder="Find a member"
+                  aria-label="Find a member to include"
+                  className="h-8 w-40 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={toggleAllShownMembers}
+                  className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 underline decoration-dotted underline-offset-2 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
+                >
+                  {allShownSelected ? 'Clear all shown' : 'Select all shown'}
+                </button>
+              </div>
+
+              <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                {bulkMemberList.length === 0 ? (
+                  <p className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">No member matches that name.</p>
+                ) : (
+                  bulkMemberList.map((user) => (
+                    <label
+                      key={user.id}
+                      className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={bulkMembers.includes(String(user.id))}
+                        onChange={() => toggleBulkMember(String(user.id))}
+                        className="h-4 w-4 accent-red-600"
+                      />
+                      {userLabel(user)}
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </ViewportModal>
+      )}
+
+      {/* EDIT SELECTED: only what is ticked changes. A field with its box unticked is absent from the request
+          altogether, which is what keeps a date fix from wiping a note on every row in the selection. */}
+      {editOpen && (
+        <ViewportModal
+          title="Change selected records"
+          subtitle={selectedRows.length ? `${selectedRows.length} selected` : 'Nothing selected'}
+          icon={<Pencil className="h-4 w-4" />}
+          onSave={handleBulkEdit}
+          saveLabel={selectedRows.length ? `Change ${selectedRows.length}` : 'Change'}
+          saving={bulkSaving}
+          onClose={() => setEditOpen(false)}
+        >
+          <div className="space-y-4">
+            {error && (
+              <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-600 dark:border-red-800/80 dark:bg-red-950/80 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Tick only what you want to set. Anything left unticked stays exactly as it is — and a ticked field with
+              nothing in it clears that field on every selected record.
+            </p>
+
+            {EDITABLE_FIELDS.map((field) => (
+              <div key={field.key} className="flex items-center gap-3">
+                <label className="inline-flex w-40 shrink-0 items-center gap-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={editApply[field.key]}
+                    onChange={(event) => setEditApply({ ...editApply, [field.key]: event.target.checked })}
+                    className="h-4 w-4 accent-red-600"
+                  />
+                  {field.label}
+                </label>
+                <input
+                  type={field.type}
+                  value={editFields[field.key]}
+                  disabled={!editApply[field.key]}
+                  onChange={(event) => setEditFields({ ...editFields, [field.key]: event.target.value })}
+                  className={`${FIELD_CLASS} mt-0 flex-1`}
+                />
+              </div>
+            ))}
+          </div>
+        </ViewportModal>
+      )}
 
       {pendingDelete && (
         <ConfirmModal

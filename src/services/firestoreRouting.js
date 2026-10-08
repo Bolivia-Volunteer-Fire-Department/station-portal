@@ -127,6 +127,7 @@ export const ROUTED_FEATURES = {
       'ADMIN_DELETE_SCHEDULE_TEMPLATE',
       'ADMIN_DELETE_CERTIFICATION',
       'ADMIN_BULK_SAVE_TRAINING',
+      'ADMIN_BULK_SAVE_CERTIFICATION',
       'ADMIN_SAVE_SYSTEM_SETTING',
       'ADMIN_SAVE_SYSTEM_SETTINGS',
       'ADMIN_DELETE_SYSTEM_SETTING',
@@ -839,6 +840,23 @@ const DISPATCH = {
     const { saveTrainingRows } = await writes();
     const request = body.payload || body;
     return ok(await saveTrainingRows({ rows: request.trainings || [], deleteIds: request.deleteIds || [] }));
+  },
+
+  // The certification report's batch, and its own dispatcher for the same reason: new records for several members,
+  // changes to several rows, and removals, in one commit.
+  //
+  // THE BADGE INDEX IS REBUILT AND TRAVELS BACK, as it does for a single save: the icons beside a name are derived
+  // from these rows, so a batch can change every member's badges, and the screen has to be able to redraw them without
+  // asking for the index again. Computing it here is what makes the reply self-sufficient.
+  ADMIN_BULK_SAVE_CERTIFICATION: async (body) => {
+    const { saveCertificationRows, refreshCertificationBadges } = await writes();
+    const request = body.payload || body;
+    const result = await saveCertificationRows({
+      records: request.records || [],
+      updates: request.updates || [],
+      deleteIds: request.deleteIds || [],
+    });
+    return ok({ ...result, badges: await refreshCertificationBadges() });
   },
 
   // The member module's save: rows only. It is NOT a document save - the request carries the rows under `payload`, and

@@ -28,9 +28,44 @@ export const CERTIFICATION_STATES = {
 
 export const certificationStateLabel = (state) =>
   (CERTIFICATION_STATES[state] || {}).label || 'Unknown';
-
 export const certificationStateBadge = (state) =>
   (CERTIFICATION_STATES[state] || {}).badge || CERTIFICATION_STATES.upcoming.badge;
+
+// ---------------------------------------------------------------------------
+// THE TWO SEARCHES an officer does on the certification table: WHO, and WHAT.
+//
+// Kept out of the component because they are decisions rather than markup: which rows survive a name typed in and a
+// set of certifications chosen. `nameOf` is passed in rather than looked up here, because a member's name comes from
+// the screen's own roster index - this module knows about records, not about the crew.
+// ---------------------------------------------------------------------------
+
+// Whether one row survives both searches. An empty box is NOT a constraint, which is what keeps the default view the
+// whole table.
+//
+// The name match is a CONTAINS, case-insensitive: "bo" finds Bo Jones and "jones" finds him too. That is the search
+// somebody does from memory, and an exact match would make the box useless for the common case of half a name.
+//
+// SEVERAL CERTIFICATIONS CHOSEN IS AN OR - an officer narrowing to "Air Brake or First Aid" wants either one. The two
+// boxes themselves are ANDed, so a member and a certification together mean that member's rows of that certification,
+// which is the question the pair is actually asking.
+export const certificationRowMatches = (row, { memberName = '', certificationIds = [] } = {}, nameOf = () => '') => {
+  const wanted = String(memberName || '').trim().toLowerCase();
+  // The label is asked for only of a row that is there: the screen's lookup indexes the roster by the row's member,
+  // and a row without one would throw where a search is meant to answer "no".
+  if (wanted && !String((row ? nameOf(row) : '') || '').toLowerCase().includes(wanted)) return false;
+
+  // Blank entries are dropped rather than compared: a chip list can hold an empty id for a moment, and `['']` would
+  // otherwise hide every row instead of none.
+  const chosen = (Array.isArray(certificationIds) ? certificationIds : []).filter(Boolean).map(String);
+  if (chosen.length && !chosen.includes(String((row || {}).certification_id || ''))) return false;
+
+  return true;
+};
+
+// Whether either search is doing anything - what the Clear control hangs off, and what the empty state says.
+export const certificationFiltersActive = ({ memberName = '', certificationIds = [] } = {}) =>
+  String(memberName || '').trim() !== '' || (Array.isArray(certificationIds) ? certificationIds.length : 0) > 0;
+
 
 // ---------------------------------------------------------------------------
 // WHERE A RECORD STANDS - derived at read time, never stored.

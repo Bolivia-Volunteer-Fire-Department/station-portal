@@ -19,6 +19,8 @@ import { readFileSync } from 'node:fs';
 // that script's plan, so the decision that deletes badge documents is tested without a database.
 import { badgeForRecord, badgeIndexFor } from '../src/utils/certificationBadges.js';
 import { certificationRowsCsv, sortCertificationRows } from '../src/utils/certificationReport.js';
+// The two searches on the certification table: who, and what.
+import { certificationFiltersActive, certificationRowMatches } from '../src/utils/certifications.js';
 import { badgeRebuildPlan, refuseOnInvisibleRecords } from './normalize-certification-badges.mjs';
 
 let failures = 0;
@@ -341,7 +343,13 @@ checkIs(
   /\{row\.notes \? \(/.test(adminTab) && /title="This record has notes/.test(adminTab)
 );
 checkIs('with an em dash where there are none', /text-slate-300 dark:text-slate-600">—<\/span>/.test(adminTab));
-checkIs('and the empty table still spans every column', /colSpan=\{7\}/.test(adminTab));
+// The empty state has to span the whole table - and "the whole table" is however many columns there are, so the
+// count is taken from the header cells rather than written down here. It has drifted twice while this screen grew
+// (the selection column is the latest), and a colSpan that disagrees with the header leaves a ragged row rather than
+// anything that looks broken.
+const recordColumns = (adminTab.match(/<th[\s>]/g) || []).length;
+checkIs('the records table has a column per header cell', recordColumns >= 8, `only ${recordColumns} header cells`);
+checkIs('and the empty table still spans every column', new RegExp(`colSpan=\\{${recordColumns}\\}`).test(adminTab));
 // The column is only as good as the payload: `notes` has to be on every record the client is handed. The
 // decoration spreads the stored row, so notes survive it by construction - asserted against the helper.
 checkIs(
@@ -731,6 +739,105 @@ console.log('\n--- what a repair would do, before it deletes anything ---');
   checkIs('a station with records and no readable types is refused', refuseOnInvisibleRecords(records, []).length > 0);
   checkIs('a station with neither is simply empty, not refused', refuseOnInvisibleRecords([], []) === '');
   checkIs('and one that can judge them proceeds', refuseOnInvisibleRecords(records, [emt]) === '');
+}
+
+console.log('');
+console.log('--- the two searches: who, and what ---');
+{
+  // The searches an officer does on the certification table: a member's name typed in, and one or more certifications
+  // chosen. Both narrow what is shown; neither is required, which is what keeps the whole table the default view.
+  const rows = [
+    { id: 'c1', user_id: 'u1', certification_id: 't1' },
+    { id: 'c2', user_id: 'u2', certification_id: 't1' },
+    { id: 'c3', user_id: 'u2', certification_id: 't2' },
+  ];
+  const names = { u1: 'Bo Jones', u2: 'Cara Reyes' };
+  const nameOf = (row) => names[row.user_id];
+  const match = (options) =>
+    rows.filter((row) => certificationRowMatches(row, options, nameOf)).map((row) => row.id);
+
+  check('with nothing typed, every row is shown', match({}), ['c1', 'c2', 'c3']);
+  // Half a name, or a surname, is how somebody is looked up from memory.
+  check('a member name narrows to that member', match({ memberName: 'bo' }), ['c1']);
+  check('a surname finds them too', match({ memberName: 'reyes' }), ['c2', 'c3']);
+  check('and the case typed does not matter', match({ memberName: 'JONES' }), ['c1']);
+  check('spaces around it are not a name', match({ memberName: '   ' }), ['c1', 'c2', 'c3']);
+  check('a name nobody has shows nothing', match({ memberName: 'nobody' }), []);
+  // One or more certifications: several chosen means EITHER, which is what "Air Brake or First Aid" asks for.
+  check('one certification narrows to it', match({ certificationIds: ['t2'] }), ['c3']);
+  check('two certifications are either, not both', match({ certificationIds: ['t1', 't2'] }), ['c1', 'c2', 'c3']);
+  // ...and the two boxes together are ANDed, which is what makes them searches rather than two lists.
+  check('a member and a certification are ANDed', match({ memberName: 'cara', certificationIds: ['t1'] }), ['c2']);
+  check('and a pair that matches nothing shows nothing', match({ memberName: 'bo', certificationIds: ['t2'] }), []);
+  // Shapes a caller can get wrong without the screen falling over.
+  check('a blank id in the list is not a filter', match({ certificationIds: ['', null, 't1'] }), ['c1', 'c2']);
+  checkIs('a row that is not there is not a crash', certificationRowMatches(undefined, { memberName: 'bo' }, nameOf) === false);
+  checkIs('nor is a missing name lookup', certificationRowMatches(rows[0], { memberName: 'bo' }) === false);
+  // What the Clear control hangs off, and what the empty state says.
+  check('no searches means nothing to clear', certificationFiltersActive({}), false);
+  check('a typed name is something to clear', certificationFiltersActive({ memberName: 'bo' }), true);
+  check('and so is a chosen certification', certificationFiltersActive({ certificationIds: ['t1'] }), true);
+  check('while spaces alone are not', certificationFiltersActive({ memberName: '  ' }), false);
+}
+
+console.log('');
+console.log('--- the bulk gestures ---');
+{
+  // ONE CERTIFICATION, MANY MEMBERS (bulk add) and ONE CHANGE, MANY ROWS (bulk edit) - the two things a station does
+  // in batches. Both go through ONE action, because both are one commit rather than a call per row.
+  const tab = readFileSync('src/components/admin/AdminCertificationsTab.jsx', 'utf8');
+  const api = readFileSync('src/services/api.js', 'utf8');
+  const routing = readFileSync('src/services/firestoreRouting.js', 'utf8');
+  const writes = readFileSync('src/services/firestoreWrites.js', 'utf8');
+
+  checkIs('the bulk add records one row per member chosen', /records: bulkMembers\.map\(\(userId\) => \(\{/.test(tab));
+  checkIs('with the dates shared between them', /effective_date: bulkForm\.effective_date/.test(tab));
+  // A non-renewable type has no end date in bulk either - the same rule the single editor keeps, kept in the same
+  // place (the value sent), so a bulk add cannot smuggle in a date the one-off form refuses.
+  checkIs(
+    'and no end date for a type that cannot be renewed',
+    /end_date: bulkEndDateOff \? '' : bulkForm\.end_date/.test(tab)
+  );
+  // BULK EDIT: only the ticked fields travel, which is what stops a date fix wiping a note.
+  checkIs(
+    'the bulk edit sends only the fields that were ticked',
+    /if \(editApply\.effective_date\) changes\.effective_date/.test(tab) &&
+      /if \(editApply\.notes\) changes\.notes/.test(tab)
+  );
+  checkIs(
+    'and names the rows it changes by id',
+    /updates: selectedRows\.map\(\(row\) => \(\{ id: row\.id, \.\.\.changes \}\)\)/.test(tab)
+  );
+  // The icons beside a name are derived from these rows, so a batch reply has to carry the rebuilt index - the same
+  // reason a single save's does.
+  checkIs(
+    'a batch reply carries the rebuilt badge index',
+    /onBadgesChanged\?\.\(response\.badges\)/.test(tab) && /refreshCertificationBadges\(\)/.test(routing)
+  );
+  // Every saving screen asks for its refresh in the background; a batch is four saves' worth of rows, so it matters
+  // more here than anywhere.
+  checkIs(
+    'and a bulk save still asks for the refresh',
+    (tab.match(/onDataChanged\?\.\('certificationRecords'\)/g) || []).length >= 4
+  );
+  // The action, its route, and its writer - the three places a batch can go missing.
+  checkIs(
+    'the batch is one action, routed and implemented',
+    api.includes("action: 'ADMIN_BULK_SAVE_CERTIFICATION'") &&
+      routing.includes('ADMIN_BULK_SAVE_CERTIFICATION') &&
+      writes.includes('saveCertificationRows')
+  );
+  // A change is MERGED over the row it names: an unticked field is absent from the request, so it is left alone
+  // rather than written back blank.
+  checkIs(
+    'a change is merged over the row it names',
+    /batch\.set\(doc\(db, 'certifications', target\), fields, \{ merge: true \}\)/.test(writes)
+  );
+  // ...and a change with nothing to change is skipped rather than invented into a new record.
+  checkIs(
+    'while a change with nothing in it is skipped',
+    /if \(!target \|\| Object\.keys\(fields\)\.length === 0\) return;/.test(writes)
+  );
 }
 
 const SUMMARY = `\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`;
