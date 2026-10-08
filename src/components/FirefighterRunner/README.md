@@ -19,15 +19,30 @@ export default function App() {
 - Arrow Down: duck
 - Click: jump / start / restart
 - Holding Arrow Down while jumping increases downward acceleration
+- Getting hit: the four death frames play out, the firefighter falls to the ground if it was caught in
+  the air, and the last frame stays on screen behind the game-over panel
+
+## The obstacles
+
+Two kinds come at the player. At ground level, jumped over: a fire hydrant, or — just as often — a
+firetruck parked in the road, flipped to face the way it is parked and drawn a fifth bigger than its
+own SVG. In the air, ducked under: a **helicopter**, hovering at one of three heights with its rotor
+always turning. The helicopter is drawn from `heli.png` — a four-cell strip like the boss sheets — at
+80% of a cell, and it collides on its measured body, scaled with the sprite, never on the transparent
+margin around it.
 
 ## The boss level
 
-Every 1:16 of play the **chief** rises in on the right and the hydrants and trucks stop — the boss
-takes over. It holds the right edge, hovering, and lobs fireballs the player has to **duck** under
-(they fly at chest height). Both boss sheets are four-frame strips: the fireball loops, while the
-chief is frozen on its last frame until it fires, when its four-frame sequence plays once per
-fireball (with `fireball.mp3`). After 30 seconds the chief floats up out of the frame and the normal
-run resumes. Each completed cycle makes everything that flies at the player 5% faster.
+Every 1:16 of play the **chief** rises in on the right and the hydrants, trucks and helicopters stop —
+the boss takes over. It holds the right edge, floating up and down between two firing heights, and lobs
+fireballs the player has to read: a **high** one passes over a ducking player, so duck it, and a
+**low** one skims the ground under both hitboxes, so jump it. It never fires the same height twice in
+a row — no held key survives the fight — and each ball leaves from the chief's own mouth, at whatever
+height it is floating. Both boss sheets are four-frame strips: the fireball loops, while the chief is
+frozen on its last frame until it fires, when its four-frame sequence plays once per fireball (with
+`fireball.mp3`). The gap between shots opens at 1–2 seconds and closes to under a second as the fight
+goes on. After 30 seconds the chief floats up out of the frame and the normal run resumes. Each
+completed cycle makes everything that flies at the player 5% faster.
 
 The schedule and the chief's behaviour are pure decisions in `src/utils/runnerLevel.js`, so they are
 tested without a browser by `npm run verify:runner-boss`; this component is only the sprites,

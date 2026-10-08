@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import firefighterSheet from "./firefighter.png";
 import chiefSheet from "./chief.png";
 import fireballSheet from "./fireball.png";
+import heliSheet from "./heli.png";
 // The boss's own effect. An mp3, and deliberately NOT part of the member sound profile below: that
 // profile is a filename PREFIX for the .wav effects (jump / die / point), and it resolves .wav only.
 // The music that will sit beside this file will follow the same "fixed, not personalised" rule.
@@ -70,15 +71,36 @@ const SPRITES = {
   dead: [[0, 4], [1, 4], [2, 4], [3, 4]],
 };
 
+// --- the obstacles ------------------------------------------------------------------------------
+//
+// The hydrant and the parked firetruck are inline SVGs, drawn to fill the box they spawn with. The
+// helicopter is a sprite sheet like the boss sheets - one row of four 128px cells - and its rotor is
+// always turning, because that is what makes it read as flying.
+//
+// The helicopter's art does not fill its cell. Measured from the sheet, the union of the four frames
+// sits in this rectangle, with the rotor sweeping the top of it. The sprite is drawn at 80% of a cell,
+// so it comes out a fifth smaller than the sheet drew it, and the hitbox scales with the sprite: the
+// helicopter collides on the helicopter, never on the transparent margin around it - the rule the
+// fireball already follows with its flame.
+const HELI_CELL_SIZE = 128;
+const HELI_SCALE = 0.8;
+const HELI_DISPLAY_SIZE = HELI_CELL_SIZE * HELI_SCALE; // 102.4
+const HELI_BODY = { x: 8, y: 25, width: 114, height: 75 }; // in sheet pixels, so it scales with it
+const HELI_FRAME_SECONDS = 0.08; // about three turns of the rotor a second
+// Where a helicopter hovers, as the height of its BODY above the ground. The lowest is the one that
+// has to be ducked - it catches a standing player and passes over a ducking one - and the other two
+// fly overhead, which is what the truck's three heights did before it.
+const HELI_BODY_BOTTOMS = [44, 78, 110];
+
 // --- the boss level's rendering ----------------------------------------------------------------
 //
 // The chief's arrival, hover, firing and departure are decisions, and they live in
 // utils/runnerLevel so they can be tested without a browser (the same split utils/soundRules uses).
 // What stays here is how the two boss sheets are drawn.
 //
-// Both are one row of four 128px cells (a 512x128 png), drawn at half source scale exactly as the
-// firefighter sheet is.
-const BOSS_STRIP_FRAMES = 4;
+// The chief, the fireball and the helicopter are each one row of four 128px cells (a 512x128 png), so
+// one frame count does for all three. Each is drawn at its own display size: the cell scales with it.
+const STRIP_FRAMES = 4;
 // The flame art is small and centred inside its 128px cell, so the sprite box is mostly transparent
 // margin and must be drawn much larger than the fireball looks. These are the flame's real bounds
 // within the cell (measured from the sheet); it is the FLAME - not the box - that collides and that
@@ -186,9 +208,9 @@ function SpriteFrame({ animation, frame }) {
   );
 }
 
-// One row of equal-width cells. The chief and the fireball are both a 4-cell strip, so unlike
-// SpriteFrame this needs no frame table - the cell is just `frame` along the row.
-function StripSprite({ sheet, frame, frames = BOSS_STRIP_FRAMES, displaySize }) {
+// One row of equal-width cells. The chief, the fireball and the helicopter are all a 4-cell strip, so
+// unlike SpriteFrame this needs no frame table - the cell is just `frame` along the row.
+function StripSprite({ sheet, frame, frames = STRIP_FRAMES, displaySize }) {
   return (
     <div
       className="ffr__sprite"
@@ -270,6 +292,9 @@ export default function FirefighterRunner({
   const dieAudioRef = useRef(null);
   const pointAudioRef = useRef(null);
   const diePlayedRef = useRef(false);
+  // True from the fatal collision until the game-over screen: the loop keeps running for the death
+  // animation, which is the one part of a run that outlives the run.
+  const dyingRef = useRef(false);
   const fireballAudioRef = useRef(null);
   const fireballsRef = useRef([]);
   // The level clock and the chief - the whole boss cycle, owned by utils/runnerLevel. The loop hands
@@ -422,6 +447,7 @@ export default function FirefighterRunner({
     scoreRef.current = 0;
     animationStateRef.current = { name: "idle", frame: 0, timer: 0 };
     diePlayedRef.current = false;
+    dyingRef.current = false;
     fireballsRef.current = [];
     // A new run starts in normal play, at the base speed, with no boss cycle behind it.
     levelRef.current = createLevel();
@@ -596,17 +622,30 @@ export default function FirefighterRunner({
     };
   }, [setDuck, startOrJump]);
 
-  const endGame = useCallback(() => {
-    if (gameState !== "playing") return;
+  // The fatal collision. The run ends here, but the loop does not: the firefighter still has to fall
+  // to the ground and play its four death frames, so this only turns the player dead and lets the
+  // loop's dying path take it from there.
+  const startDying = useCallback(() => {
+    if (gameState !== "playing" || dyingRef.current) return;
 
     const player = playerRef.current;
     player.dead = true;
     player.ducking = false;
+    dyingRef.current = true;
+    // Straight to the first death frame. A duck in progress otherwise stands the player back up first,
+    // because its frames play out before the animation state is asked what to do next.
+    animationStateRef.current = { name: "dead", frame: 0, timer: 0 };
 
     if (!diePlayedRef.current) {
       playSound(dieAudioRef);
       diePlayedRef.current = true;
     }
+  }, [gameState, playSound]);
+
+  // The end of the run itself: the score, the high score and the game-over screen. The loop calls it
+  // once the death animation has played out, so the last frame is what stays on screen behind it.
+  const endGame = useCallback(() => {
+    if (gameState !== "playing") return;
 
     const finalScore = scoreRef.current;
 
@@ -617,7 +656,7 @@ export default function FirefighterRunner({
     // Fire-and-forget: submitScore reports its own failures in the leaderboard panel, so the
     // game never waits on the network to show the game-over screen.
     submitScore(finalScore);
-  }, [gameState, onGameOver, playSound, rememberBest, submitScore]);
+  }, [gameState, onGameOver, rememberBest, submitScore]);
 
   useEffect(() => {
     if (gameState !== "playing") return undefined;
@@ -632,19 +671,33 @@ export default function FirefighterRunner({
         Math.random() < Math.min(0.22 + scoreRef.current / 1800, 0.55);
 
       if (flying) {
-        const heights = [
-          groundY - 82,
-          groundY - 116,
-          groundY - 148,
-        ];
+        // A helicopter, at one of its three hover heights, rotor already turning.
+        const bottoms = HELI_BODY_BOTTOMS;
+        const bottom = bottoms[Math.floor(Math.random() * bottoms.length)];
 
+        obstacles.push({
+          id: crypto.randomUUID(),
+          type: "heli",
+          x: width + 24,
+          // Placed by where its body ends up, so the height the player has to clear is the height the
+          // helicopter is drawn at - the sprite's own transparent margin does not come into it.
+          y: groundY - bottom - (HELI_BODY.y + HELI_BODY.height) * HELI_SCALE,
+          frame: 0,
+          frameTimer: 0,
+          width: HELI_DISPLAY_SIZE,
+          height: HELI_DISPLAY_SIZE,
+        });
+      } else if (Math.random() < 0.5) {
+        // Ground level, and as often as a hydrant: a firetruck parked in the road. Its own 64x40 SVG
+        // drawn a fifth bigger again, which makes it the widest thing on the ground - the same jump,
+        // just a longer one.
         obstacles.push({
           id: crypto.randomUUID(),
           type: "truck",
           x: width + 24,
-          y: heights[Math.floor(Math.random() * heights.length)],
-          width: 72,
-          height: 38,
+          y: groundY - 48,
+          width: 76.8,
+          height: 48,
         });
       } else {
         obstacles.push({
@@ -790,6 +843,49 @@ export default function FirefighterRunner({
       lastTimeRef.current = timestamp;
 
       const player = playerRef.current;
+
+      // The run is over, but the loop is not: the firefighter has four death frames to play and, if it
+      // died in the air, a fall to finish. Nothing else in the run moves - no level clock, no
+      // obstacles, no fireballs, no score.
+      if (dyingRef.current) {
+        if (!player.grounded) {
+          player.velocityY += GRAVITY * dt;
+          player.y += player.velocityY * dt;
+
+          const floorY = groundY - PLAYER_SPRITE_SIZE;
+
+          if (player.y >= floorY) {
+            player.y = floorY;
+            player.velocityY = 0;
+            player.grounded = true;
+          }
+        }
+
+        updateAnimation(dt);
+
+        const dyingAnimation = animationStateRef.current;
+        setView((current) => ({
+          ...current,
+          player: { ...player },
+          animation: dyingAnimation.name,
+          frame: dyingAnimation.frame,
+        }));
+
+        // The last death frame, on the ground: that is the picture the game-over screen steps over.
+        // Ending the run tears this effect down, and the loop with it.
+        if (
+          dyingAnimation.name === "dead" &&
+          dyingAnimation.frame >= SPRITES.dead.length - 1 &&
+          player.grounded
+        ) {
+          endGame();
+          return;
+        }
+
+        animationRef.current = requestAnimationFrame(frame);
+        return;
+      }
+
       // The run's own speed, and the same speed stepped by the boss-cycle multiplier. Distance (and
       // so the score) follows the base, so a cycle raises what flies at you but not the score.
       const level = levelRef.current;
@@ -810,7 +906,7 @@ export default function FirefighterRunner({
           });
           playSound(fireballAudioRef);
         } else if (event.type === "boss-ended") {
-          spawnTimerRef.current = 1; // a beat before the hydrants and trucks come back
+          spawnTimerRef.current = 1; // a beat before the obstacles come back
         }
       }
 
@@ -853,6 +949,16 @@ export default function FirefighterRunner({
 
       for (const obstacle of obstaclesRef.current) {
         obstacle.x -= speed * dt;
+
+        // The helicopter's rotor never stops. It is drawn from its own four-cell strip the way the
+        // fireball is, so it carries a frame and its own timer.
+        if (obstacle.type === "heli") {
+          obstacle.frameTimer += dt;
+          while (obstacle.frameTimer >= HELI_FRAME_SECONDS) {
+            obstacle.frameTimer -= HELI_FRAME_SECONDS;
+            obstacle.frame = (obstacle.frame + 1) % STRIP_FRAMES;
+          }
+        }
       }
 
       obstaclesRef.current = obstaclesRef.current.filter(
@@ -865,7 +971,7 @@ export default function FirefighterRunner({
         fireball.frameTimer += dt;
         while (fireball.frameTimer >= FIREBALL_FRAME_SECONDS) {
           fireball.frameTimer -= FIREBALL_FRAME_SECONDS;
-          fireball.frame = (fireball.frame + 1) % BOSS_STRIP_FRAMES;
+          fireball.frame = (fireball.frame + 1) % STRIP_FRAMES;
         }
       }
 
@@ -913,14 +1019,26 @@ export default function FirefighterRunner({
         height: hitbox.height,
       };
 
-      const hitObstacle = obstaclesRef.current.some((obstacle) =>
-        intersects(playerHitbox, {
-          x: obstacle.x + 4,
-          y: obstacle.y + 4,
-          width: obstacle.width - 8,
-          height: obstacle.height - 8,
-        })
-      );
+      const hitObstacle = obstaclesRef.current.some((obstacle) => {
+        // A sprite sheet's box is mostly transparent margin, so the helicopter is hit on the
+        // helicopter, at the size it is drawn - the rule the fireball already follows with its flame.
+        const box =
+          obstacle.type === "heli"
+            ? {
+                x: obstacle.x + HELI_BODY.x * HELI_SCALE,
+                y: obstacle.y + HELI_BODY.y * HELI_SCALE,
+                width: HELI_BODY.width * HELI_SCALE,
+                height: HELI_BODY.height * HELI_SCALE,
+              }
+            : {
+                x: obstacle.x + 4,
+                y: obstacle.y + 4,
+                width: obstacle.width - 8,
+                height: obstacle.height - 8,
+              };
+
+        return intersects(playerHitbox, box);
+      });
 
       const hitFireball = fireballsRef.current.some((fireball) =>
         intersects(playerHitbox, {
@@ -934,7 +1052,7 @@ export default function FirefighterRunner({
       const collision = hitObstacle || hitFireball;
 
       if (collision) {
-        endGame();
+        startDying();
       }
 
       updateAnimation(dt);
@@ -954,9 +1072,9 @@ export default function FirefighterRunner({
         frame: animation.frame,
       });
 
-      if (!collision) {
-        animationRef.current = requestAnimationFrame(frame);
-      }
+      // Always: a collision no longer stops the loop, it starts the death animation. What stops the
+      // loop is the game-over screen replacing it, which the dying path above does.
+      animationRef.current = requestAnimationFrame(frame);
     }
 
     lastTimeRef.current = 0;
@@ -980,6 +1098,7 @@ export default function FirefighterRunner({
     width,
     playSound,
     playMusic,
+    startDying,
   ]);
 
   useEffect(() => {
@@ -1101,10 +1220,14 @@ export default function FirefighterRunner({
               transform: `translate3d(${obstacle.x}px, ${obstacle.y}px, 0)`,
             }}
           >
-            {obstacle.type === "hydrant" ? (
-              <HydrantSprite />
-            ) : (
-              <FireTruckSprite />
+            {obstacle.type === "hydrant" && <HydrantSprite />}
+            {obstacle.type === "truck" && <FireTruckSprite />}
+            {obstacle.type === "heli" && (
+              <StripSprite
+                sheet={heliSheet}
+                frame={obstacle.frame}
+                displaySize={HELI_DISPLAY_SIZE}
+              />
             )}
           </div>
         ))}
@@ -1189,7 +1312,7 @@ export default function FirefighterRunner({
       <div className="ffr__footer">
         <span>SPACE / ↑ = JUMP</span>
         <span>↓ = DUCK</span>
-        <span>AVOID HYDRANTS &amp; FLYING TRUCKS</span>
+        <span>AVOID HYDRANTS, TRUCKS &amp; HELICOPTERS</span>
       </div>
 
       {/* Station leaderboard. The whole page is a start button, so a click in here must not

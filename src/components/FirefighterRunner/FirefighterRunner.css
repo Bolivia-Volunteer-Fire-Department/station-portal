@@ -143,11 +143,23 @@
   color: var(--ffr-red);
 }
 
+/* The truck's art is drawn facing the other way for a run that goes left, so it is flipped to face
+   the way it is parked, and scaled to 120% of its own 64x40 SVG. */
 .ffr__obstacle--truck {
-  width: 72px;
-  height: 38px;
+  width: 76.8px;
+  height: 48px;
   color: var(--ffr-red);
   animation: ffr-siren .35s steps(2, end) infinite;
+}
+
+.ffr__obstacle--truck .ffr__obstacle-sprite {
+  transform: scaleX(-1);
+}
+
+/* The helicopter is an 80% scale of its 128px sheet cell, and the frame it is drawn on is the rotor. */
+.ffr__obstacle--heli {
+  width: 102.4px;
+  height: 102.4px;
 }
 
 .ffr__obstacle-sprite {

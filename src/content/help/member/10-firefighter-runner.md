@@ -6,6 +6,6 @@ Click on **something** a few times. Once the game is open, clicking the logo ret
 
 ## Playing
 
-Jump the hydrants (**Space** or **↑**) and duck the flying trucks (**↓**). Every so often a **boss** takes over: the chief floats in on the right and throws fireballs you duck under, until it drifts up out of the frame and the ordinary run resumes — a little faster each time.
+Jump the hydrants and the parked firetrucks (**Space** or **↑**) and duck the helicopters (**↓**). Every so often a **boss** takes over: the chief floats in on the right and throws fireballs. High ones you duck under, low ones you jump over, never the same height twice in a row, and quicker the longer it stays. When it drifts up out of the frame the ordinary run resumes, a little faster each time.
 
 The game has music and sound effects, with **MUSIC** and **SOUNDS** buttons at the top to switch each off.
