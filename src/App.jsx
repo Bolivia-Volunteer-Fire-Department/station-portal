@@ -1036,7 +1036,6 @@ const getLoadingMessage = () => {
       // "I can't select any members" was the report rather than a screen full of "Unnamed member" - and nothing about
       // the tab looks broken otherwise. `verify-read-budget` now holds Documents in NAME_DRAWING_TABS with the rest.
       documents: ['directory'],
-      'system-log': ['directory'],
       announcements: ['directory'],
       events: ['directory'],
       training: ['directory'],

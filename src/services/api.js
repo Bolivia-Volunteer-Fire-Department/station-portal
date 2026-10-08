@@ -2,7 +2,6 @@ import { NOTIFICATION_TYPES } from '../utils/notificationPrefs';
 import { EVENT_WEEKDAYS } from '../utils/events';
 import { roleFieldsFromForm } from '../utils/permissions';
 import { storedRequiresVerification } from '../utils/documents.js';
-import { systemLogRequest } from '../utils/systemLog';
 import { rankFieldsFromForm } from '../utils/ranks';
 import { isReadAction } from '../utils/readCoalescing';
 import { SESSION_ENDED_MESSAGE } from '../utils/sessionTimeout';
@@ -1085,13 +1084,6 @@ export const submitShiftOffer = async ({ schedule_template_id, date_from, date_t
 // waiting on approval.
 export const adminFetchScheduleOffers = async (token) =>
   dispatchRequest({ action: 'ADMIN_GET_SCHEDULE_OFFERS', token });
-
-// One page of the audit log, which is read ON DEMAND from Cloud Logging - see readSystemLog in functions/index.js. The
-// filter, the sort and the page token travel with the request, and the body is composed by systemLogRequest, which is
-// where the RPC envelope meets the query: the one place the action FILTER (`action_filter`) can be kept from shadowing
-// the action NAME.
-export const adminFetchSystemLog = async (params = {}, token) =>
-  dispatchRequest(systemLogRequest(params, token));
 
 // Admin: approve (fills the shift) or decline a single offer, both through the same route - and both of them through a
 // callable, because writing a schedule row or a status is an officer's decision rather than a client write.

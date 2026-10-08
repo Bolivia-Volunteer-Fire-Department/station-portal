@@ -51,10 +51,6 @@ export const ADMIN_BAR_LABELS = {
   'reports-config': 'Reports',
   'forms-config': 'Forms',
   notifications: 'Notifications',
-  // The audit log's tab id is `system-log`, unchanged from when its rows lived in a collection: an id-based lookup has
-  // to match the navigation exactly, and a test asserts every id in ADMIN_NAV_CATEGORIES has an entry here. The LABEL is
-  // what changed, because where the rows come from did.
-  'system-log': 'Audit Log',
   debug: 'Debug',
   help: 'Help',
 };

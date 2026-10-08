@@ -975,23 +975,6 @@ export const READERS = {
     return answer.data || {};
   },
 
-  // The audit log, read ON DEMAND from Cloud Logging. Nothing in the app reads it otherwise, and that is the point: the
-  // lines are written for nothing by the functions, and this asks the Logging API for one page when an officer opens the
-  // tab. The response is FORWARD-PAGED (a token, and no total) because that is what the API offers - the sheet's
-  // "page 3 of 12" needed the whole log in hand, which is the cost this design exists to avoid.
-  ADMIN_GET_SYSTEM_LOG: async (uid, body) => {
-    const answer = await httpsCallable(firebaseFunctions(), 'readSystemLog')({
-      page_size: (body && body.page_size) || '',
-      sort: (body && body.sort) || '',
-      from: (body && body.from) || '',
-      to: (body && body.to) || '',
-      action_filter: (body && body.action_filter) || '',
-      member: (body && body.member) || '',
-      page_token: (body && body.page_token) || '',
-    });
-    return answer.data || {};
-  },
-
   // THE FORM DEFINITIONS this caller may generate, from the audience they carry. One question, asked the way
   // announcements are asked: the rules prove the SAME array-contains-any over the viewer's own keys, so the read works
   // exactly because the rule does. `enabled` is filtered HERE rather than in the rule, because a rule condition the

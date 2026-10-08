@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, ScrollText, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -12,7 +12,7 @@ import AdminSystemSettingsTab from './AdminSystemSettingsTab';
 import AdminClockManagementTab from './AdminClockManagementTab';
 import AdminPendingApprovalsTab from './AdminPendingApprovalsTab';
 import AdminNotificationsTab from './AdminNotificationsTab';
-import AdminSystemLogTab from './AdminSystemLogTab';
+// The Audit Log tab was removed: the station's audit trail is Cloud Logging now (see `audit` in functions/index.js).
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
 import AdminTrainingTab from './AdminTrainingTab';
@@ -106,10 +106,6 @@ export const ADMIN_NAV_CATEGORIES = [
     items: [
       { id: 'system', label: 'System Settings', icon: Settings2 },
       { id: 'notifications', label: 'Notifications', icon: Bell },
-      // The audit log is DELIBERATELY not part of refreshAdminData: the log is the largest table in the app, so it is
-      // fetched only when this tab is opened - and it is fetched from Cloud Logging, which is why opening it costs
-      // nothing to keep and nothing to read.
-      { id: 'system-log', label: 'Audit Log', icon: ScrollText },
       // Debug fires the app's own toasts, dialogs and sounds from buttons. Like the audit log it is not part of the
       // refresh wave, and unlike the log it fetches nothing at all - see AdminDebugTab.
       { id: 'debug', label: 'Debug', icon: Bug },
@@ -586,12 +582,6 @@ export default function AdminPanel({
           isAdmin={isAdmin}
           onDataChanged={onDataChanged}
         />
-      )}
-
-      {/* The audit log fetches its own page when it mounts, so a tab nobody visits costs no requests - and the request
-          goes to Cloud Logging on demand, not to a collection. */}
-      {activeSubTab === 'system-log' && (
-        <AdminSystemLogTab token={token} users={nameRows} timeFormat={timeFormat} />
       )}
 
       {/* Debug: fires the app's own feedback on demand. Gated on can_access_debug by the nav. It takes no token

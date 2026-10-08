@@ -23,7 +23,7 @@ import AdminRolesTab from '../src/components/admin/AdminRolesTab.jsx';
 import AdminScheduleTemplatesTab from '../src/components/admin/AdminScheduleTemplatesTab.jsx';
 import AdminAssignmentsTab from '../src/components/admin/AdminAssignmentsTab.jsx';
 import AdminCertificationsTab from '../src/components/admin/AdminCertificationsTab.jsx';
-import AdminSystemLogTab from '../src/components/admin/AdminSystemLogTab.jsx';
+// (The Audit Log tab is gone; the trail is Cloud Logging now.)
 import MyAvailability from '../src/components/MyAvailability.jsx';
 import AvailabilityCalendar from '../src/components/AvailabilityCalendar.jsx';
 import AdminAvailabilityTab from '../src/components/admin/AdminAvailabilityTab.jsx';
@@ -2480,24 +2480,9 @@ check(
 // Two things to pin: the tab is wired to its own permission and reaches the panel, and it is NOT part of the shared
 // refresh wave - the log is the largest table in the app, so loading it on sign-in for everyone would undo the point.
 // It is read ON DEMAND FROM CLOUD LOGGING, which is what replaced the collection: the filter, sorts and row mapping
-// are tested for real in verify-audit-log, and what is left for source checks is the wiring.
-const auditTabSource = readFileSync('src/components/admin/AdminSystemLogTab.jsx', 'utf8');
-check('the Audit Log tab exists', auditTabSource.length > 2000, true);
-check('it fetches its own page when it mounts', /adminFetchSystemLog\(query, token\)/.test(auditTabSource), true);
-check('building the query from the shared helper', /logQueryParams\(\{ sort, filters, pageToken \}\)/.test(auditTabSource), true);
-check(
-  'and it pages FORWARD, because the Logging API has no total to page by',
-  /next_page_token/.test(auditTabSource) && /has_more/.test(auditTabSource) && !/total_pages/.test(auditTabSource),
-  true
-);
-check('with a way back to the newest page', /setPageToken\(''\)/.test(auditTabSource), true);
-check('and it offers only the sorts the API can do server-side', /AUDIT_SORT_OPTIONS\.map/.test(auditTabSource), true);
-
-const auditPanelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
-check('the panel has the tab', /<AdminSystemLogTab/.test(auditPanelSource), true);
-check('under the System heading, labeled as the audit log', /id: 'system-log', label: 'Audit Log'/.test(auditPanelSource), true);
-// Lazy loading depends on this: the component is mounted only while its tab is open.
-check('rendered only while its tab is active', /activeSubTab === 'system-log' &&/.test(auditPanelSource), true);
+// are tested for real where they can be (the Functions' own read callable), and what is left for source checks is the wiring.
+// (The Audit Log tab's own source checks went with the tab. What remains below is the guard that keeps the log OFF the
+// shared refresh wave, and the assertion that the read callable is gated on the permission - both still true.)
 
 // The guard that keeps it lazy: nothing in App's admin refresh may ask for the log.
 const appAuditSource = readFileSync('src/App.jsx', 'utf8');
@@ -2511,40 +2496,7 @@ check('the refresh wave was found', refreshBody.length > 300, true);
 check('and it does NOT fetch the log', !/SystemLog|system_log|systemLog/.test(refreshBody));
 check('nor does any other App-level fetch', !/adminFetchSystemLog/.test(appAuditSource));
 
-// The permission drives the tab, and the callable is gated on it - server-side, where the rules cannot be talked around.
-const auditPermission = ADMIN_PERMISSIONS.find((permission) => permission.key === 'can_view_system_log');
-check('the permission is declared', Boolean(auditPermission), true);
-check('pointing at the tab', auditPermission && auditPermission.tab, 'system-log');
-const auditCallable = readFileSync('functions/index.js', 'utf8');
-check(
-  'and the callable refuses anybody without it',
-  /exports\.readSystemLog[\s\S]{0,400}?can_view_system_log/.test(auditCallable),
-  true
-);
-check(
-  'and folds a refused filter into an error rather than a query',
-  /if \(problem\) throw new HttpsError\('invalid-argument'/.test(auditCallable),
-  true
-);
 
-// A real render, because source assertions cannot catch a typo in the JSX. Effects do not run under renderToString, so
-// what this proves is the FIRST paint: the controls exist, and the loading state is what a visitor sees before the
-// request resolves.
-const auditTabView = (() => {
-  try {
-    return renderToString(React.createElement(AdminSystemLogTab, { token: 't', users: [{ id: 'u1', name: 'Member 1' }], timeFormat: '12' }));
-  } catch (error) {
-    return { error };
-  }
-})();
-check('the tab renders', typeof auditTabView === 'string', auditTabView.error && auditTabView.error.message);
-check('showing the loader first', String(auditTabView).includes('Loading the system log'), true);
-check(
-  'with the filter dropdowns',
-  String(auditTabView).includes('All actions') && String(auditTabView).includes('All members'),
-  true
-);
-check('and not the row id', !/aria-label="ID"|>ID</.test(String(auditTabView)), true);
 
 //
 // Two halves again: the client timer signs the user out, and the server expires the session. The

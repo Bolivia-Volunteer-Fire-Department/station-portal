@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, X, Users } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, X, Users, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { adminSaveCertification, adminDeleteCertification, adminBulkSaveCertification, fetchAdminCertificationRecords } from '../../services/api';
 import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
@@ -9,12 +9,17 @@ import PrintableCertifications from '../PrintableCertifications';
 import { userLabel } from '../../utils/displayLabel';
 import { certificationRowsCsv, sortCertificationRows } from '../../utils/certificationReport';
 import {
+  CERTIFICATIONS_PAGE_SIZE,
+  certificationFilterLabel,
   certificationFiltersActive,
   certificationRowMatches,
   certificationStateLabel,
   certificationStateBadge,
   certificationCountdown,
 } from '../../utils/certifications';
+// The page arithmetic shared with the events list and the system log, so three tables cannot disagree about what
+// "page 3 of 7" means or about what happens when a list shrinks under the page you are on.
+import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
 
 const EMPTY_FORM = {
   id: '',
@@ -69,6 +74,13 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   // the table is narrowed by everything the officer has asked for rather than by the last thing they pressed.
   const [memberQuery, setMemberQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState([]);
+  // The certification filter is a DROPDOWN rather than a row of chips: a station can track a dozen types, and a dozen
+  // chips turns a filter into the loudest thing on the screen. Open state and the wrapper the outside-click test uses.
+  const [typeOpen, setTypeOpen] = useState(false);
+  const typeMenuRef = useRef(null);
+  // WHICH PAGE OF THE TABLE. Paging is a reading aid rather than a filter: Print and Export CSV still take everything
+  // the searches yield, however many pages that is.
+  const [page, setPage] = useState(1);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [inactiveResult, setInactiveResult] = useState(null);
   const [inactiveFailure, setInactiveFailure] = useState(null);
@@ -229,6 +241,41 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
       current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]
     );
 
+  // What the closed button says: see certificationFilterLabel. Its awkward case is a filter naming a type that has
+  // since been deleted from the catalogue, which must not read as "All certifications" over a table that is filtered.
+  const typeFilterLabel = certificationFilterLabel(setup, typeFilter);
+
+  // Dismiss the dropdown on an outside pointer press or Escape - the idiom the clock tab's address popover uses, and
+  // `pointerdown` rather than `click` so the dismissal lands before whatever was pressed does its work.
+  useEffect(() => {
+    if (!typeOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (typeMenuRef.current && !typeMenuRef.current.contains(event.target)) setTypeOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setTypeOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [typeOpen]);
+
+  // A NEW SEARCH STARTS AT THE FIRST PAGE: staying on page 4 of what is now a one-page list is how a paginated table
+  // looks broken for no reason, and the sequence that gets there is ordinary - search, page forward, then clear it.
+  //
+  // DONE DURING RENDER, NOT IN AN EFFECT. This is React's own pattern for "reset state when the inputs change"; an
+  // effect would set the page after a commit and draw the table twice, which is the flicker the set-state-in-effect
+  // rule exists to catch. `pageSlice` clamps as well, for what this cannot see - a delete, or a save that removes rows.
+  const searchKey = JSON.stringify([filter, memberQuery, typeFilter]);
+  const [pagedFor, setPagedFor] = useState(searchKey);
+  if (pagedFor !== searchKey) {
+    setPagedFor(searchKey);
+    setPage(1);
+  }
+
   // ---- Bulk -------------------------------------------------------------------------------------------------------
   //
   // TWO gestures, because a station does two things in batches:
@@ -262,19 +309,30 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     return [...rows].sort((a, b) => userLabel(a).localeCompare(userLabel(b)));
   }, [users, bulkMemberQuery]);
 
-  // ONLY the ticked rows that are ON SCREEN. A row hidden by a search cannot be seen to be selected, and changing
-  // something the officer cannot see is how a bulk edit becomes a surprise.
+  // ONLY the ticked rows that survive the searches. A row hidden by a search cannot be seen to be selected, and
+  // changing something the officer cannot see is how a bulk edit becomes a surprise. A row on ANOTHER PAGE is a
+  // different matter: it was ticked deliberately, the toolbar says how many are selected, and the pager's Clear
+  // selection is how that is undone.
   const selectedRows = useMemo(
     () => visible.filter((row) => selectedIds.includes(row.id)),
     [visible, selectedIds]
   );
-  const allVisibleSelected = visible.length > 0 && visible.every((row) => selectedIds.includes(row.id));
 
-  const toggleAllVisible = () =>
+  // THE PAGE, from the arithmetic shared with the events list and the system log. `currentPage` is clamped rather than
+  // trusted, so a save or a delete that shortens the list lands on the last page instead of on nothing.
+  const pageCount = totalPages(visible.length, CERTIFICATIONS_PAGE_SIZE);
+  const currentPage = clampPage(page, visible.length, CERTIFICATIONS_PAGE_SIZE);
+  const pageRows = pageSlice(visible, currentPage, CERTIFICATIONS_PAGE_SIZE);
+
+  // The header checkbox is THE PAGE - a checkbox in a table header has always meant the rows under it, and with paging
+  // those are the page's. Ticking it does not disturb a selection made on another page.
+  const allPageSelected = pageRows.length > 0 && pageRows.every((row) => selectedIds.includes(row.id));
+
+  const toggleAllOnPage = () =>
     setSelectedIds((current) =>
-      allVisibleSelected
-        ? current.filter((id) => !visible.some((row) => row.id === id))
-        : [...new Set([...current, ...visible.map((row) => row.id)])]
+      allPageSelected
+        ? current.filter((id) => !pageRows.some((row) => row.id === id))
+        : [...new Set([...current, ...pageRows.map((row) => row.id)])]
     );
 
   const toggleSelected = (id) =>
@@ -617,27 +675,67 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             />
           </label>
 
-          <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Certifications</span>
           {setup.length === 0 ? (
-            <span className="text-xs text-slate-500 dark:text-slate-400">None set up yet</span>
+            <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+              No certifications set up yet
+            </span>
           ) : (
-            setup.map((type) => (
+            <div className="relative" ref={typeMenuRef}>
               <button
-                key={type.id}
                 type="button"
-                onClick={() => toggleType(type.id)}
-                aria-pressed={typeFilter.includes(type.id)}
-                title={`Show only ${type.name}`}
+                aria-haspopup="true"
+                aria-expanded={typeOpen}
+                onClick={() => setTypeOpen((open) => !open)}
+                title="Show only the certifications you choose"
                 className={`${TOOLBAR_BUTTON_CLASS} border ${
-                  typeFilter.includes(type.id)
+                  typeFilter.length > 0
                     ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
                     : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700'
                 }`}
               >
-                <RankIcon name={type.icon} className="h-3.5 w-3.5 shrink-0" />
-                {type.name}
+                <Award className="h-3.5 w-3.5 shrink-0" />
+                {typeFilterLabel}
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
               </button>
-            ))
+
+              {typeOpen && (
+                <div className="absolute left-0 top-full z-20 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      Certifications
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTypeFilter([])}
+                      disabled={typeFilter.length === 0}
+                      className="text-xs font-semibold text-slate-500 underline decoration-dotted underline-offset-2 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-400 dark:hover:text-slate-100"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  {/* Checkboxes rather than a native <select multiple>: a ctrl-click list is a gesture nobody has been
+                      taught, and every choice is visible at once here. */}
+                  <div className="max-h-64 overflow-y-auto p-1">
+                    {setup.map((type) => (
+                      <label
+                        key={type.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700/60"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={typeFilter.includes(type.id)}
+                          onChange={() => toggleType(type.id)}
+                          className="h-4 w-4 accent-red-600"
+                        />
+                        <RankIcon name={type.icon} className="h-3.5 w-3.5 shrink-0" />
+                        {type.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {searchesActive && (
@@ -667,9 +765,9 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                 <th className="w-10 px-4 py-3">
                   <input
                     type="checkbox"
-                    checked={allVisibleSelected}
-                    onChange={toggleAllVisible}
-                    aria-label="Select every record shown"
+                    checked={allPageSelected}
+                    onChange={toggleAllOnPage}
+                    aria-label="Select every record on this page"
                     className="h-4 w-4 accent-red-600"
                   />
                 </th>
@@ -692,7 +790,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                   </td>
                 </tr>
               ) : (
-                visible.map((row) => (
+                pageRows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                     <td className="px-4 py-3">
                       <input
@@ -785,6 +883,49 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             </tbody>
           </table>
         </div>
+
+        {/* THE PAGER, hidden on a single page - a "Page 1 of 1" bar is chrome around nothing, the same judgment the
+            events list makes. What it counts is the ROWS ON SCREEN, which is why it is the range and not a total: Print
+            and Export CSV are deliberately not paged, and saying "57" in a bar above a 20-row table would invite the
+            reader to think the other 37 were missing. */}
+        {pageCount > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500 dark:border-slate-700/70 dark:text-slate-400">
+            <span>{pageRangeLabel(visible.length, currentPage, CERTIFICATIONS_PAGE_SIZE)}</span>
+            <div className="flex items-center gap-2">
+              {/* A selection can outlive the page it was made on, so it needs a way out that is not "save it". */}
+              {selectedRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds([])}
+                  className="rounded-lg px-2 py-1 font-semibold underline decoration-dotted underline-offset-2 transition hover:text-slate-800 dark:hover:text-slate-100"
+                >
+                  Clear selection ({selectedRows.length})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPage(clampPage(currentPage - 1, visible.length, CERTIFICATIONS_PAGE_SIZE))}
+                disabled={currentPage <= 1}
+                className="rounded-lg p-2 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span>
+                Page {currentPage} of {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(clampPage(currentPage + 1, visible.length, CERTIFICATIONS_PAGE_SIZE))}
+                disabled={currentPage >= pageCount}
+                className="rounded-lg p-2 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* RECORD FOR SEVERAL: one certification and one set of dates, for the members who earned it. The dates are asked

@@ -1,5 +1,6 @@
 // The words and tones for a certification's state, in one place.
 //
+
 // Both the member's own module and the administration table show the same four states, and the sign-in notice
 // talks about two of them - so the phrasing lives here rather than being written three times and drifting.
 //
@@ -7,6 +8,15 @@
 // function of the record's two dates, the type's warning window, and today, and it would go stale with nobody
 // writing anything if it were stored. "Today" is the STATION's today (America/New_York), computed by
 // `stationTodayKey` in utils/scheduleDate.js, so every member's screen agrees regardless of where they are.
+import { DEFAULT_PAGE_SIZE } from './pagination.js';
+
+// HOW MANY ROWS THE CERTIFICATION REPORT SHOWS AT ONCE.
+//
+// It IS the shared default, and it is named here anyway so that "20 at a time" is a fact about THIS table - one a test
+// can assert - rather than a number it happens to inherit. The arithmetic that turns it into pages is utils/pagination,
+// the same module the events list and the system log use, so three tables cannot disagree about what "page 3 of 7" is.
+export const CERTIFICATIONS_PAGE_SIZE = DEFAULT_PAGE_SIZE;
+
 export const CERTIFICATION_STATES = {
   expiring: {
     label: 'Expires soon',
@@ -65,6 +75,24 @@ export const certificationRowMatches = (row, { memberName = '', certificationIds
 // Whether either search is doing anything - what the Clear control hangs off, and what the empty state says.
 export const certificationFiltersActive = ({ memberName = '', certificationIds = [] } = {}) =>
   String(memberName || '').trim() !== '' || (Array.isArray(certificationIds) ? certificationIds.length : 0) > 0;
+
+// THE WORDS ON THE CERTIFICATION FILTER'S OWN BUTTON - "All certifications", the one chosen, or the first with a
+// count. Written here rather than in the markup because it has an edge the button cannot see: a selected id that is no
+// longer in the catalogue (a type deleted while a filter still names it) has no name to show, and a label that
+// claimed "All" while rows were quietly hidden would be the worst possible answer.
+export const certificationFilterLabel = (setup = [], ids = []) => {
+  const chosen = (Array.isArray(ids) ? ids : []).filter(Boolean).map(String);
+  if (chosen.length === 0) return 'All certifications';
+
+  const names = (Array.isArray(setup) ? setup : [])
+    .filter((type) => chosen.includes(String(type.id)))
+    .map((type) => String(type.name || ''))
+    .filter(Boolean);
+
+  if (names.length === 0) return `${chosen.length} chosen`;
+  if (names.length === 1) return names[0];
+  return `${names[0]} +${names.length - 1}`;
+};
 
 
 // ---------------------------------------------------------------------------

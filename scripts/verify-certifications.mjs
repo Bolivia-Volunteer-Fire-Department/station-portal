@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { badgeForRecord, badgeIndexFor } from '../src/utils/certificationBadges.js';
 import { certificationRowsCsv, sortCertificationRows } from '../src/utils/certificationReport.js';
 // The two searches on the certification table: who, and what.
-import { certificationFiltersActive, certificationRowMatches } from '../src/utils/certifications.js';
+import { CERTIFICATIONS_PAGE_SIZE, certificationFilterLabel, certificationFiltersActive, certificationRowMatches } from '../src/utils/certifications.js';
 import { badgeRebuildPlan, refuseOnInvisibleRecords } from './normalize-certification-badges.mjs';
 
 let failures = 0;
@@ -778,6 +778,27 @@ console.log('--- the two searches: who, and what ---');
   check('a typed name is something to clear', certificationFiltersActive({ memberName: 'bo' }), true);
   check('and so is a chosen certification', certificationFiltersActive({ certificationIds: ['t1'] }), true);
   check('while spaces alone are not', certificationFiltersActive({ memberName: '  ' }), false);
+
+  // The DROPDOWN's own words. Its awkward case is the last two: a filter can name a type that has since been deleted
+  // from the catalogue, and a button reading "All certifications" over a filtered table would be a lie.
+  const catalog = [
+    { id: 't1', name: 'Air Brake' },
+    { id: 't2', name: 'First Aid' },
+    { id: 't3', name: 'Hazmat' },
+  ];
+  check('nothing chosen reads as all of them', certificationFilterLabel(catalog, []), 'All certifications');
+  check('one chosen is named', certificationFilterLabel(catalog, ['t1']), 'Air Brake');
+  check('two name the first and count the rest', certificationFilterLabel(catalog, ['t1', 't2']), 'Air Brake +1');
+  check('three count two more', certificationFilterLabel(catalog, ['t1', 't2', 't3']), 'Air Brake +2');
+  check('a type that no longer exists is counted, not named', certificationFilterLabel(catalog, ['gone']), '1 chosen');
+  check('and a filter over an empty catalogue is not "all"', certificationFilterLabel([], ['gone']), '1 chosen');
+  check(
+    'a chosen type with no name is not a blank button',
+    certificationFilterLabel([{ id: 't1', name: '' }], ['t1']),
+    '1 chosen'
+  );
+  check('junk in the list is ignored', certificationFilterLabel(catalog, ['', null, 't2']), 'First Aid');
+  check('and no catalogue at all is tolerated', certificationFilterLabel(undefined, []), 'All certifications');
 }
 
 console.log('');
@@ -838,6 +859,67 @@ console.log('--- the bulk gestures ---');
     'while a change with nothing in it is skipped',
     /if \(!target \|\| Object\.keys\(fields\)\.length === 0\) return;/.test(writes)
   );
+}
+
+console.log('');
+console.log('--- the certification filter, as a control ---');
+{
+  // A DROPDOWN rather than a row of chips, and one that can be dismissed without a mouse: an outside press and Escape,
+  // which is the idiom the clock tab's address popover established for this app. The decision it drives is tested with
+  // the searches above; this is only that the control is the one it claims to be.
+  const tab = readFileSync('src/components/admin/AdminCertificationsTab.jsx', 'utf8');
+  checkIs('the filter is a dropdown, not a wall of chips', /aria-expanded=\{typeOpen\}/.test(tab) && /ref=\{typeMenuRef\}/.test(tab));
+  checkIs(
+    'that closes on an outside press and on Escape',
+    /contains\(event\.target\)/.test(tab) && /event\.key === 'Escape'/.test(tab)
+  );
+  checkIs('with a checkbox per certification in it', /typeFilter\.includes\(type\.id\)/.test(tab));
+  checkIs('and a Clear of its own', /onClick=\{\(\) => setTypeFilter\(\[\]\)\}/.test(tab));
+  // The trigger's words come from the model, so the "a type has been deleted" case is covered by tests rather than by
+  // the markup.
+  checkIs('labelled by the tested helper', /certificationFilterLabel\(setup, typeFilter\)/.test(tab));
+}
+
+console.log('');
+console.log('--- twenty at a time ---');
+{
+  const tab = readFileSync('src/components/admin/AdminCertificationsTab.jsx', 'utf8');
+
+  // THE NUMBER THE OFFICER SEES, asserted rather than described. A report of every record a station has ever issued
+  // is a wall of rows nobody reads; twenty is a screenful with the filters and the pager still in view.
+  check('the report shows twenty rows at a time', CERTIFICATIONS_PAGE_SIZE, 20);
+  // ...through the SHARED arithmetic, the same module the events list and the system log use, so three tables cannot
+  // disagree about what "page 3 of 7" means or about what happens when a list shrinks under the page you are on.
+  checkIs(
+    'through the shared page arithmetic',
+    /totalPages\(visible\.length, CERTIFICATIONS_PAGE_SIZE\)/.test(tab) &&
+      /clampPage\(page, visible\.length, CERTIFICATIONS_PAGE_SIZE\)/.test(tab) &&
+      /pageSlice\(visible, currentPage, CERTIFICATIONS_PAGE_SIZE\)/.test(tab) &&
+      /pageRangeLabel\(visible\.length, currentPage, CERTIFICATIONS_PAGE_SIZE\)/.test(tab)
+  );
+  // THE TABLE DRAWS THE PAGE. This is the feature - and the reason Print and CSV deliberately still read `visible`:
+  // paging is how the table is READ, not a filter on what the station can print or export.
+  checkIs('and the table draws the page rather than the whole list', /pageRows\.map\(\(row\) => \(/.test(tab));
+  checkIs('with the pager hidden on a single page', /\{pageCount > 1 && \(/.test(tab));
+  // The header checkbox means the page, which is what a checkbox in a table header has always meant: ticking it does
+  // not disturb a selection made on another page.
+  checkIs(
+    'the header checkbox selects the page and says so',
+    /checked=\{allPageSelected\}/.test(tab) &&
+      /onChange=\{toggleAllOnPage\}/.test(tab) &&
+      tab.includes('aria-label="Select every record on this page"')
+  );
+  // Page 4 of a list that is now one page long looks broken, and that is an ordinary sequence: search, page forward,
+  // clear the search.
+  // Back to the first page when the searches change - done DURING RENDER rather than in an effect, because an effect
+  // would draw the table twice and the set-state-in-effect rule exists for exactly that.
+  checkIs(
+    'and a new search returns to the first page',
+    /const searchKey = JSON\.stringify\(\[filter, memberQuery, typeFilter\]\)/.test(tab) &&
+      /if \(pagedFor !== searchKey\) \{\s*\n\s*setPagedFor\(searchKey\);\s*\n\s*setPage\(1\);/.test(tab)
+  );
+  // A selection can outlive the page it was made on, so the pager offers a way out of it that is not "save it".
+  checkIs('with a way out of a selection that spans pages', /Clear selection \(\{selectedRows\.length\}\)/.test(tab));
 }
 
 const SUMMARY = `\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`;
