@@ -210,9 +210,28 @@ const assessmentScoreRow = async (documentId, userId) => {
   const wantedMember = String(userId || '').trim();
   if (!wantedDocument || !wantedMember) return null;
 
-  const snapshot = await getDoc(
-    doc(firestore(), 'document_assessment_scores', assessmentScoreId(wantedDocument, wantedMember))
-  );
+  // NO SCORE IS A REFUSAL, NOT A MISS - and that is why this read is caught rather than merely checked.
+  //
+  // The read rule is `resource.data.user_id == uid() || permission('can_add_assessment_scores')` - see
+  // document_assessment_scores in firestore.rules. A member who has never been assessed owns NO row, so there is
+  // nothing for that condition to be true of: `resource` is null, `.data` off null is an EVALUATION ERROR, and
+  // Firestore answers permission-denied. A member who HOLDS the scorer permission gets an ordinary "not there"
+  // instead, which is why the same read behaves differently for the officer who records the score.
+  //
+  // UNCAUGHT, that refusal failed the WHOLE document. A member opening an assessment their role was perfectly entitled
+  // to read got "GET_DOCUMENT failed: permission-denied: Missing or insufficient permissions", because the answer to
+  // "what is my score" had nowhere to come from - the body, the signature and the date window were all fine.
+  //
+  // `visibleDocumentFor` catches for the same reason, and says so: a permission-denied and a missing document are ONE
+  // answer to a caller who is only asking whether they have a score. The null returned here is that answer.
+  let snapshot = null;
+  try {
+    snapshot = await getDoc(
+      doc(firestore(), 'document_assessment_scores', assessmentScoreId(wantedDocument, wantedMember))
+    );
+  } catch {
+    return null;
+  }
   // `.exists()` is a METHOD in the client SDK - the Admin SDK is where it is a property, and the two are easy to
   // confuse. Read as a property it yields a function, which is truthy, so a missing score would report as present.
   if (!snapshot.exists()) return null;

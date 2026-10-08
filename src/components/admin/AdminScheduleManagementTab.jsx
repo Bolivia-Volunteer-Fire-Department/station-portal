@@ -35,7 +35,7 @@ import { useMonthSlide } from '../../utils/motion';
 // utils/scheduleSlots with the rest of the slot rule, so this file no longer sorts slots itself - it reads a day that
 // has already been put in order.
 import { memberDayKeys } from '../../utils/availability';
-import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
+import { planShiftDrop, planShiftSwap, planSwapHover, stillOnSlot, swapSlotFields, SWAP_DWELL_MS, SWAP_POP_MS, DROP_NOTICES } from '../../utils/scheduleDrop';
 // The app-wide toast wrapper, so a refused drop is explained and sounds like the other errors (utils/toast).
 import { toast } from '../../utils/toast';
 import {
@@ -1233,9 +1233,19 @@ export default function AdminScheduleManagementTab({
     // makes the swap stay on screen once it appears.
   };
 
-  const handleSlotDragLeave = (slot) => {
+  const handleSlotDragLeave = (e, slot) => {
+    // A LEAVE THAT NEVER LEFT IS THE ORDINARY CASE, not an edge case - and it is the whole of the reported "it sits
+    // there flashing and won't swap". A pill is a div full of children (a name, a rank dot, a badge, the time), and the
+    // pointer crossing from the pill onto one of them fires dragleave on the pill; so does a hand resting a pixel off
+    // the rounded edge. Believing each of those cancels the hold and restarts the countdown, so the blink never
+    // resolves and no offer is armed when the pointer is released. See stillOnSlot for what counts as leaving.
+    //
+    // The box is measured here because a rect is the element's business - whether that box counts is the verdict's.
+    const box = e?.currentTarget?.getBoundingClientRect?.() || null;
+    if (stillOnSlot({ x: e?.clientX, y: e?.clientY, box })) return;
+
+    // It really did leave: that is the cancellation - stop counting, and stop showing the exchange.
     setHoverSlot((cur) => (cur === slot.slotKey ? null : cur));
-    // Moving out of the slot is the cancellation: stop counting, and stop showing the exchange.
     cancelSwapDwell();
     cancelSwapPreview();
   };
@@ -2694,7 +2704,7 @@ export default function AdminScheduleManagementTab({
                         // in handleSlotDrop, and the occupant it needs is looked up from the rows, not passed in
                         // from what this render happens to be drawing.
                         onDragOver={(e) => handleSlotDragOver(e, slot)}
-                        onDragLeave={() => handleSlotDragLeave(slot)}
+                        onDragLeave={(e) => handleSlotDragLeave(e, slot)}
                         onDrop={(e) => handleSlotDrop(e, slot)}
                         title={`${occupantLabel(occupant, slot.template)} · ${timeRangeOf(slot.template)}${
                           occurred
@@ -2747,7 +2757,7 @@ export default function AdminScheduleManagementTab({
                               : `Assign a member to ${slotLabelText(slot)}`
                       }
                       onDragOver={(e) => handleSlotDragOver(e, slot)}
-                      onDragLeave={() => handleSlotDragLeave(slot)}
+                      onDragLeave={(e) => handleSlotDragLeave(e, slot)}
                       onDrop={(e) => handleSlotDrop(e, slot)}
                       className={`${emptySlotShapeClass(roomy)} ${
                         hoverSlot === slot.slotKey

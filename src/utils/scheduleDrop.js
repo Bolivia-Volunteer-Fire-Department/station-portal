@@ -26,6 +26,33 @@ export const planSwapHover = ({
   return { action: 'hold' };
 };
 
+// HOW FAR OUTSIDE A SLOT THE POINTER MAY STRAY AND STILL BE COUNTED AS ON IT, in CSS pixels.
+//
+// A drag fires `dragleave` on an element the moment the pointer crosses onto one of its CHILDREN - and a pill is a div
+// full of them: a name, a rank dot, a certification badge, the time - then `dragover` again as the pointer comes back.
+// So a pointer resting near the edge of a pill, or drifting across the name inside it, produces a burst of leave/enter
+// pairs. Believing each one cancels the hold and restarts the countdown, so the pill blinks and blinks while the count
+// never arrives: the gesture looks recognised and then never happens, and letting go drops onto a slot with no offer
+// armed. That is the whole of "it sits there flashing and won't swap".
+//
+// WHY EIGHT. The board stacks its pills 4px apart (gap-1) and the smallest of them is about 14px tall, so 8 is more
+// than the gap between two shifts and more than a hand wobbles at an edge, while still being under half a pill - it
+// absorbs a boundary without becoming a second target, which a larger number would: the row above or below would
+// answer to it too.
+export const SWAP_LEAVE_SLACK_PX = 8;
+
+// Whether a `dragleave` position is still within the slot's own box. The coordinates come from the event and the box
+// from the element, which keeps the decision pure - the harness drives it with numbers rather than a DOM.
+//
+// A box or a pointer that cannot be read counts as STILL ON the slot. The two mistakes are not symmetrical: a hold
+// kept too long is corrected by the next real move, or by the end of the drag, which always clears it - whereas a hold
+// cancelled on missing evidence is the flicker this exists to stop, and it happens on a real gesture.
+export const stillOnSlot = ({ x, y, box, slack = SWAP_LEAVE_SLACK_PX } = {}) => {
+  if (!box) return true;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
+  return x >= box.left - slack && x <= box.right + slack && y >= box.top - slack && y <= box.bottom + slack;
+};
+
 //
 // Two members whose shifts are both filled can change places: hold the dragged pill over the other one, and after
 // SWAP_DWELL_MS the board shows them exchanged. Letting go there confirms it; moving out before that, or dropping

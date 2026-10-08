@@ -48,6 +48,10 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added a **single-horn bugle** icon to the icon library, alongside the existing pair.
 * Added the **Forms** module, which allows specified users to export data onto pre-existing PDF forms. (i.e. state forms)
 * Added some ID fields to the users_private table.
+* Added a boss level to the mini game.
+* Fixed a bug in document permissions.
+* Added a "members without availability" card to the Administration module.
+* Added some reports.
 
 ### Version 1.3x
 * Added the **Reports** module

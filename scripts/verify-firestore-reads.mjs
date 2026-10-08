@@ -1025,6 +1025,38 @@ checkIs(
   check('and one that is not live yet answers the same way', (await routeRead('GET_DOCUMENT', { id: 'doc3' })).success, false);
   check('as does an unpublished one', (await routeRead('GET_DOCUMENT', { id: 'doc4' })).success, false);
 
+  // AN ASSESSMENT THE READER HAS NEVER BEEN SCORED ON - the state every member is in until somebody runs the test with
+  // them, and the state that broke opening one. GET_DOCUMENT asks for the caller's OWN score row on every assessment,
+  // and for a member who has no score there is no row to ask for. The read rule is `resource.data.user_id == uid()`,
+  // which a row that does not exist can never satisfy - so that read is REFUSED where a plain get would have answered
+  // "not there". The refusal used to travel out of GET_DOCUMENT and fail the WHOLE document: a member whose role was
+  // perfectly entitled to open the assessment got "GET_DOCUMENT failed: permission-denied: Missing or insufficient
+  // permissions". This is the end-to-end guard - the document must open, and the score must read as absent.
+  //
+  // WRITTEN AND REMOVED HERE, like the rank probe above, so nothing that enumerates documents has to know about it.
+  await signIn('jane');
+  await setDoc(doc(firestore(), 'documents', 'doc-unscored'), {
+    title: 'Air Brake Endorsement',
+    content: 'Read the standard, then sit the practical.',
+    audience_keys: ['*'],
+    content_revision: 1,
+    is_published: true,
+    doc_type: 'assessment',
+  });
+  await signIn('bo');
+  // The router logs the refusal and answers null rather than throwing - which is also the shape the SCREEN sees, so a
+  // null here is asserted as itself rather than caught.
+  const unscored = await routeRead('GET_DOCUMENT', { id: 'doc-unscored' });
+  checkIs(
+    'an assessment nobody has scored this reader on still opens',
+    unscored !== null,
+    'the read came back null: the score sub-read refused the whole document'
+  );
+  check('with the document it was opened for', unscored && unscored.success, true);
+  check('and the score reading as absent rather than as a refusal', unscored ? unscored.assessment_score : 'the read came back null', null);
+  await signIn('jane');
+  await deleteDoc(doc(firestore(), 'documents', 'doc-unscored'));
+
   // An officer is not filtered: managing documents is the job, and the editor needs the WHOLE row.
   await signIn('jane');
   const officerView = await routeRead('ADMIN_GET_DOCUMENT', { id: 'doc2' });

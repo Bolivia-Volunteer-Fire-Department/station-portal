@@ -19,6 +19,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   collection,
   query,
@@ -480,6 +481,30 @@ const main = async () => {
     (error) => String(error.code || '')
   );
   checkIs('a member reads their own score', ownScore, 'read');
+
+  // AND ONE THEY HAVE NEVER BEEN GIVEN, which is the read the APP makes every time a member opens an assessment:
+  // GET_DOCUMENT asks for the CALLER'S own row whether or not one exists. For a member who has never been assessed
+  // there is no row, and this read is REFUSED rather than answered - `resource` is null, so `.data` off it is an
+  // EVALUATION ERROR (the emulator names it: "Null value error"), which a client cannot tell apart from a denial.
+  //
+  // THAT REFUSAL IS THE EXPECTED ANSWER HERE, and not the bug. No row can satisfy `resource.data.user_id == uid()`, so
+  // a member with no score has nothing to own. What it explains is why the READER has to CATCH it: uncaught, it failed
+  // the whole document, and reached a real member as "GET_DOCUMENT failed: permission-denied: Missing or insufficient
+  // permissions" for an assessment their role was entitled to open. See assessmentScoreRow in firestore-reads.js, and
+  // the end-to-end guard in verify-firestore-reads.mjs.
+  //
+  // READ FROM THE SERVER, because this is the one assertion here that a CACHE can fake: the SDK answers a get for a
+  // document it already knows (from an earlier query in this run) to be absent without asking the rules at all, and
+  // that is exactly how this read looked allowed the first time it was written.
+  const unscored = await getDocFromServer(doc(db, 'document_assessment_scores', 'doc-b_u2')).then(
+    () => 'read',
+    (error) => String(error.code || '')
+  );
+  checkIs(
+    'while a score row that does not exist is refused, which is why the reader catches it',
+    unscored.includes('permission-denied'),
+    unscored
+  );
 
   // THE REQUIREMENT'S HARD PART, first half: a member writing ANY score. Their own first, because that is the one the
   // requirement names - and it is also the one a "user_id must be mine" check would happily allow.

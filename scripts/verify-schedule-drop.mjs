@@ -13,7 +13,7 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { planShiftDrop, planShiftSwap, planSwapHover, swapSlotFields, dropMessage, DROP_MESSAGES, DROP_NOTICES, SWAP_DWELL_MS, SWAP_POP_MS, SWAP_SLOT_FIELDS } from '../src/utils/scheduleDrop.js';
+import { planShiftDrop, planShiftSwap, planSwapHover, stillOnSlot, swapSlotFields, dropMessage, DROP_MESSAGES, DROP_NOTICES, SWAP_DWELL_MS, SWAP_POP_MS, SWAP_SLOT_FIELDS, SWAP_LEAVE_SLACK_PX } from '../src/utils/scheduleDrop.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -29,6 +29,16 @@ const checkIs = (label, condition, detail) => {
 };
 
 const board = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
+
+// Where handleSlotDragLeave lives, and how far into it the checks below look. There is a window rather than a plain
+// substring because the handler says WHY a leave is often not a leave before it does anything, so this covers the
+// comment as well as the code: it bounds the SEARCH, not how much the handler is allowed to explain.
+//
+// THE SAME NUMBER IS IN THREE REGEX LITERALS BELOW - the two cancel checks, and the teeth that mutate them - because
+// a literal cannot interpolate this. Widening the handler's explanation means widening all four together.
+const LEAVE_WINDOW = 1400;
+const leaveStart = board.indexOf('const handleSlotDragLeave');
+const leaveHandler = board.slice(leaveStart, leaveStart + LEAVE_WINDOW);
 
 // A row on the board. `_from`/`_to` are the client's own date keys for the entry's window, and the sheet-facing
 // `date_from`/`date_to` mirror them - as normalizeRows sets them, and as a real row always has them. Deriving
@@ -309,6 +319,71 @@ checkIs('the mutation restored the old wiring', withDrawnOccupant !== board);
 checkIs('and the check would catch it', withDrawnOccupant.includes('handleSlotDragOver(e, slot, occupant)'));
 
 // ---------------------------------------------------------------------------
+// 6d. Leaving a slot, which is mostly not leaving it
+// ---------------------------------------------------------------------------
+// The reported bug: holding a dragged pill on the EDGE of the pill being dropped on - or anywhere over that pill's
+// own children - fired dragleave on the pill and cancelled the countdown, and the next dragover re-armed it. So the
+// pill blinked for as long as the pointer sat there, at a countdown that kept starting over, and nothing was armed
+// when the pointer was finally released. See stillOnSlot in utils/scheduleDrop for the rule itself.
+console.log('');
+console.log('--- what counts as leaving a slot ---');
+const BOX = { left: 100, top: 200, right: 260, bottom: 224 };
+// Inside the pill: over the name, a rank dot or a badge, which is where a pointer spends most of a hold.
+checkIs('a pointer over a child of the pill has not left it', stillOnSlot({ x: 180, y: 212, box: BOX }), true);
+// ...and the reported case: a hand resting a few pixels past the edge.
+checkIs('nor has one just past the edge', stillOnSlot({ x: BOX.right + SWAP_LEAVE_SLACK_PX - 1, y: 212, box: BOX }), true);
+check(
+  'and still on it from the other three sides',
+  [
+    stillOnSlot({ x: BOX.left - SWAP_LEAVE_SLACK_PX + 1, y: 212, box: BOX }),
+    stillOnSlot({ x: 180, y: BOX.top - SWAP_LEAVE_SLACK_PX + 1, box: BOX }),
+    stillOnSlot({ x: 180, y: BOX.bottom + SWAP_LEAVE_SLACK_PX - 1, box: BOX }),
+  ],
+  [true, true, true]
+);
+// Past the slack it really has gone, and THEN the hold should be cancelled - this is the half that keeps dragging
+// away from a slot working, so it is asserted as carefully as the tolerance itself.
+check('past the slack it has left', stillOnSlot({ x: BOX.right + SWAP_LEAVE_SLACK_PX + 1, y: 212, box: BOX }), false);
+check(
+  'and gone from the other three sides too',
+  [
+    stillOnSlot({ x: BOX.left - SWAP_LEAVE_SLACK_PX - 1, y: 212, box: BOX }),
+    stillOnSlot({ x: 180, y: BOX.top - SWAP_LEAVE_SLACK_PX - 1, box: BOX }),
+    stillOnSlot({ x: 180, y: BOX.bottom + SWAP_LEAVE_SLACK_PX + 1, box: BOX }),
+  ],
+  [false, false, false]
+);
+// A box or a pointer that cannot be read counts as STILL ON the slot. The two mistakes are not symmetrical:
+// cancelling a hold on missing evidence is the flicker this exists to stop, and a hold kept too long is cleared by
+// the next real move - or by the end of the drag, which always clears it.
+checkIs('an unreadable box is not evidence of leaving', stillOnSlot({ x: 180, y: 212 }), true);
+checkIs('nor is an unreadable pointer', stillOnSlot({ x: undefined, y: Number.NaN, box: BOX }), true);
+checkIs(
+  'and the slack is a tolerance rather than a second drop target',
+  SWAP_LEAVE_SLACK_PX > 0 && SWAP_LEAVE_SLACK_PX <= 20,
+  SWAP_LEAVE_SLACK_PX + 'px'
+);
+
+console.log('');
+console.log('--- and the leave handler asks it before it cancels ---');
+checkIs('the handler takes the event, so it has the pointer', board.includes('const handleSlotDragLeave = (e, slot) =>'));
+checkIs('it measures the slot it is leaving', leaveHandler.includes('getBoundingClientRect'));
+checkIs(
+  'and returns before cancelling while the pointer is still on it',
+  leaveHandler.includes('if (stillOnSlot({ x: e?.clientX, y: e?.clientY, box })) return;')
+);
+checkIs(
+  'on both kinds of target, which is what makes both tolerant',
+  board.split('onDragLeave={(e) => handleSlotDragLeave(e, slot)}').length - 1 === 2
+);
+// Teeth: drop the guard and confirm the check above notices. The guard IS the fix, and a helper that was imported but
+// never consulted would look identical to it from the outside - the import would still be there, and the pill would
+// still blink.
+const withoutLeaveGuard = board.replace('if (stillOnSlot({ x: e?.clientX, y: e?.clientY, box })) return;', '// guard removed');
+checkIs('the mutation removed the leave guard', withoutLeaveGuard !== board);
+checkIs('and the guard check fails without it', !withoutLeaveGuard.includes('stillOnSlot({'));
+
+// ---------------------------------------------------------------------------
 // 7. The wiring, which is where the bug actually lived
 // ---------------------------------------------------------------------------
 // The decision above is only reached if a drop on an occupied slot is DELIVERED. That was the fix: the pill had no
@@ -316,7 +391,7 @@ checkIs('and the check would catch it', withDrawnOccupant.includes('handleSlotDr
 console.log('\n--- the board asks for a verdict ---');
 checkIs('the occupant pill arms the drop', /onDragOver=\{\(e\) => handleSlotDragOver\(e, slot\)\}/.test(board));
 checkIs('and accepts it', /onDrop=\{\(e\) => handleSlotDrop\(e, slot\)\}/.test(board));
-checkIs('and forgets the highlight when the pointer leaves', /onDragLeave=\{\(\) => handleSlotDragLeave\(slot\)\}/.test(board));
+checkIs('and forgets the highlight when the pointer leaves', board.includes('onDragLeave={(e) => handleSlotDragLeave(e, slot)}'));
 checkIs('the free slot arms and accepts it too', /onDrop=\{\(e\) => handleSlotDrop\(e, slot\)\}/.test(board));
 // The old shape: both handlers were conditional, so a past day was not a drop target at all and said nothing.
 checkIs(
@@ -375,8 +450,8 @@ checkIs('the drag-over takes no occupant from the render, so the drawing cannot 
 // would never arrive. This guard is the difference between working and never firing.
 checkIs('and the countdown is not restarted while the pointer stays put', /if \(swapDwell\?\.slotKey === slot\.slotKey\) return;/.test(board));
 checkIs('the countdown uses the documented dwell', /SWAP_DWELL_MS/.test(board) && !/setTimeout\([^,]+, \d{3,4}\)/.test(board));
-checkIs('leaving the slot cancels the countdown', /const handleSlotDragLeave[\s\S]{0,300}?cancelSwapDwell\(\)/.test(board));
-checkIs('and takes the offered swap back with it', /const handleSlotDragLeave[\s\S]{0,300}?cancelSwapPreview\(\)/.test(board));
+checkIs('leaving the slot cancels the countdown', /const handleSlotDragLeave[\s\S]{0,1400}?cancelSwapDwell\(\)/.test(board));
+checkIs('and takes the offered swap back with it', /const handleSlotDragLeave[\s\S]{0,1400}?cancelSwapPreview\(\)/.test(board));
 checkIs('letting go anywhere ends both', /const handleDragEndPill[\s\S]{0,400}?cancelSwapDwell\(\)[\s\S]{0,200}?cancelSwapPreview\(\)/.test(board));
 checkIs('releasing on the slot commits the swap', /if \(armed\) \{\s*\n\s*commitSwap\(armed\);\s*\n\s*return;\s*\n\s*\}/.test(board));
 checkIs('the commit exchanges the two rows through the shared rule', /const \[nextA, nextB\] = swapSlotFields\(a, b\)/.test(board));
@@ -475,7 +550,7 @@ const withoutCancel = board.replace(/\s+cancelSwapPreview\(\);\n  \};/, '\n  };'
 checkIs('the mutation removed the cancel-on-leave', withoutCancel !== board);
 checkIs(
   'and the cancel-on-leave check fails without it',
-  !/const handleSlotDragLeave[\s\S]{0,300}?cancelSwapPreview\(\)/.test(withoutCancel)
+  !/const handleSlotDragLeave[\s\S]{0,1400}?cancelSwapPreview\(\)/.test(withoutCancel)
 );
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
