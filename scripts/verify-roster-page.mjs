@@ -17,16 +17,25 @@
  *   2. THE SEARCH IS A PREFIX, expressed as the two ends of a name range, and an empty term is NOT a range (a range that
  *      matches everything is the same answer as no filter, at the cost of one).
  *   3. THE COLUMNS ARE THE PAGE'S, and a member who has left does not appear on it.
+ *
+ * AND THE ONE THAT CAME BACK AS A BUG REPORT: a page has to be able to FILL ITSELF before it calls itself the end of the
+ * roster. The read used to look at one chunk - a page plus one candidate - and take "no more" from it, so a candidate who
+ * had left ate the spare and the screen drew a short page with the "load more" button gone. The second half of this file
+ * is that scan, and the walk at the end of it reads a whole roster page by page to prove everyone is reachable.
  */
 import {
   ROSTER_MAX_PAGE_SIZE,
   ROSTER_PAGE_SIZE,
+  ROSTER_SCAN_LIMIT,
   certificationIdsForMembers,
   isActiveMember,
   namePrefixRange,
   pageFromCandidates,
   rosterCertificationTypes,
+  rosterChunkSize,
   rosterPageSize,
+  rosterScanStep,
+  scanRosterPage,
 } from '../functions/rosterPage.js';
 
 let failures = 0;
@@ -112,6 +121,223 @@ check(
   pageFromCandidates({ candidates: roster, privateById: { u1: { status: 'inactive' }, u2: {}, u3: { status: 'retired' } } }).members,
   []
 );
+
+// ---------------------------------------------------------------------------------------------------------------------
+// THE SCAN: HOW MANY CANDIDATES A PAGE LOOKS AT BEFORE IT CALLS ITSELF THE END.
+//
+// THIS SECTION IS A BUG REPORT. The read used to take ONE chunk - a page plus one candidate - and decide `hasMore` from
+// it. A candidate who has LEFT eats that spare, so the page came out short AND the button to reach the rest of the roster
+// went away with it: "Load more members" loaded a few and then vanished. One chunk cannot tell "that is everyone" from
+// "there is more behind this", which is what ROSTER_SCAN_LIMIT was for in the first place.
+console.log('\n--- a chunk is one more candidate than the page, and the scan may need several ---');
+check('a chunk is one past the page it has to fill', rosterChunkSize(ROSTER_PAGE_SIZE), ROSTER_PAGE_SIZE + 1);
+check('the cap holds for a hand-made request', rosterChunkSize(10000), ROSTER_MAX_PAGE_SIZE + 1);
+check('and a nonsense size falls back to the default page', rosterChunkSize('lots'), ROSTER_PAGE_SIZE + 1);
+
+const ten = Array.from({ length: 10 }, (_, index) => ({ id: `u${index}`, name: `Member ${String(index).padStart(2, '0')}` }));
+const eleven = [...ten, { id: 'u10', name: 'Member 10' }];
+const allActive = Object.fromEntries(eleven.map((member) => [member.id, { status: 'active' }]));
+const spareHasLeft = { ...allActive, u10: { status: 'inactive' } };
+
+// THE BUG, one line each. A full page whose SPARE candidate is still a member may stop; a full page whose spare has left
+// may not, because the roster can carry on behind them.
+check(
+  'a full page with an active spare says there is more',
+  rosterScanStep({ candidates: eleven, privateById: allActive, pageSize: 10, lastChunkFull: true }).hasMore,
+  true
+);
+check(
+  'and it is finished reading',
+  rosterScanStep({ candidates: eleven, privateById: allActive, pageSize: 10, lastChunkFull: true }).done,
+  true
+);
+check(
+  'a full page whose spare has left reads on rather than ending the roster',
+  rosterScanStep({ candidates: eleven, privateById: spareHasLeft, pageSize: 10, lastChunkFull: true }).done,
+  false
+);
+check(
+  'and until it reads on it claims no more - which is what the old read announced as the end',
+  rosterScanStep({ candidates: eleven, privateById: spareHasLeft, pageSize: 10, lastChunkFull: true }).hasMore,
+  false
+);
+check(
+  'a short page that ran out of candidates is the end',
+  rosterScanStep({ candidates: ten.slice(0, 4), privateById: allActive, pageSize: 10, lastChunkFull: false }).hasMore,
+  false
+);
+check(
+  'and the cursor is the last name ON THE PAGE, whoever was seen past it',
+  rosterScanStep({ candidates: eleven, privateById: spareHasLeft, pageSize: 10, lastChunkFull: true }).nextCursor,
+  'Member 09'
+);
+// THE SCAN LIMIT IS NOT THE END OF THE ROSTER. A page that stops short because two hundred candidates were mostly people
+// who have left keeps its way onward: `has_more` stays true (and `exhausted` says why), so the officer is not left with a
+// short page and no button.
+const twoHundredGone = Array.from({ length: 200 }, (_, index) => ({ id: `x${index}`, name: `Gone ${String(index).padStart(3, '0')}` }));
+const gonePrivate = Object.fromEntries(twoHundredGone.map((row) => [row.id, { status: 'inactive' }]));
+const stoppedAtLimit = rosterScanStep({
+  candidates: twoHundredGone,
+  privateById: gonePrivate,
+  pageSize: 10,
+  scanLimit: 200,
+  lastChunkFull: true,
+});
+check('a page that hit the scan limit offers the way on', stoppedAtLimit.hasMore, true);
+check('and says it stopped at the limit rather than at the end', stoppedAtLimit.exhausted, true);
+check(
+  'a page with nobody on it still hands the next attempt a cursor, or it would never move',
+  stoppedAtLimit.nextCursor,
+  'Gone 199'
+);
+check(
+  'while a page that ends the roster points its cursor at the last name shown',
+  rosterScanStep({
+    candidates: [{ id: 'u1', name: 'Alice' }],
+    privateById: { u1: { status: 'active' } },
+    pageSize: 10,
+    scanLimit: 200,
+    lastChunkFull: false,
+  }).nextCursor,
+  'Alice'
+);
+
+// ---------------------------------------------------------------------------------------------------------------------
+// THE WHOLE WALK: a roster of its own, read page by page exactly as the screen reads it, with the reading faked out.
+//
+// This is the assertion that matters, because it is the one that failed in the field: EVERY member still with the station
+// must appear, on exactly one page, and the button must be offered until the last one. The fake reader answers the two
+// things the callable's queries answer - a chunk of candidates in name order, and the private rows for them - so the pages
+// and the cursors here are the pages and cursors an officer would get.
+const fakeReader = (rows, privateById) => async ({ cursor, limit }) => {
+  const after = String(cursor || '');
+  const start = after ? rows.findIndex((row) => row.name === after) + 1 : 0;
+  const chunk = rows.slice(start, start + limit);
+  return {
+    candidates: chunk,
+    privateById: Object.fromEntries(chunk.map((row) => [row.id, privateById[row.id] || {}])),
+  };
+};
+const walkRoster = async (rows, privateById, pageSize) => {
+  const read = fakeReader(rows, privateById);
+  const pages = [];
+  const seen = [];
+  let cursor = '';
+  let hasMore = true;
+  // A CEILING ON THE WALK, so a scan that failed to advance cannot hang the harness - and a page that offers more while
+  // handing back nobody to move past is exactly the trap this is watching for.
+  for (let pass = 0; pass < 12 && hasMore; pass += 1) {
+    const walked = await scanRosterPage({ read, pageSize, cursor });
+    pages.push({ names: walked.members.map((member) => member.name), hasMore: walked.hasMore, scanned: walked.scanned });
+    seen.push(...walked.members.map((member) => member.id));
+    hasMore = walked.hasMore;
+    cursor = walked.nextCursor;
+  }
+  return { pages, seen };
+};
+
+// Twenty-five members in name order, four of whom have left - scattered, INCLUDING one immediately past a page's end,
+// which is the position that used to silence the button.
+const everyone = Array.from({ length: 25 }, (_, index) => ({
+  id: `m${String(index + 1).padStart(2, '0')}`,
+  name: `Member ${String(index + 1).padStart(2, '0')}`,
+  rank_id: 'r1',
+}));
+const goneIds = ['m03', 'm07', 'm11', 'm20'];
+const everyStatus = Object.fromEntries(
+  everyone.map((row) => [row.id, { status: goneIds.includes(row.id) ? 'inactive' : 'active' }])
+);
+
+const walked = await walkRoster(everyone, everyStatus, 10);
+check('every member still with the station is reached', walked.seen.length, everyone.length - goneIds.length);
+check('nobody appears twice across the pages', walked.seen.length, new Set(walked.seen).size);
+check('and the four who have left appear nowhere', walked.seen.filter((id) => goneIds.includes(id)), []);
+check(
+  'nobody is skipped',
+  [...walked.seen].sort(),
+  everyone
+    .filter((row) => !goneIds.includes(row.id))
+    .map((row) => row.id)
+    .sort()
+);
+check('the pages are drawn full while there is more', walked.pages.map((page) => page.names.length), [10, 10, 1]);
+check('the button is offered until the last page is in hand', walked.pages.map((page) => page.hasMore), [true, true, false]);
+check(
+  'and each page ends where the next one starts',
+  walked.pages.map((page) => page.names[page.names.length - 1]),
+  ['Member 13', 'Member 24', 'Member 25']
+);
+check(
+  'no page reads past the limit the module allows',
+  walked.pages.every((page) => page.scanned <= ROSTER_SCAN_LIMIT),
+  true
+);
+// THE READ COST, as numbers, so a change to the chunking has to face them.
+//
+// PAGE ONE COSTS TWO CHUNKS AND THIS IS THE BUG IN NUMBERS: its first chunk is Member 01..11, which holds only eight members
+// still with the station (three of the four who have left fall in it), and the candidate past the eight - Member 11 - has
+// left. The OLD read stopped exactly there: eight names, no button, and the rest of the roster unreachable. This one reads
+// on, fills the page, and the names it ends on are the assertion above.
+check('a page whose spare candidate has left costs a second chunk', walked.pages[0].scanned, 22);
+check('the page after it reads the tail of the roster', walked.pages[1].scanned, 12);
+check('and the last one is just what is left', walked.pages[2].scanned, 1);
+
+// THE SAME WALK WITH NOBODY HAVING LEFT is the cheap case, and it must stay cheap: one chunk per page.
+const allHere = Object.fromEntries(everyone.map((row) => [row.id, { status: 'active' }]));
+const walkedAll = await walkRoster(everyone, allHere, 10);
+check('a full roster of active members costs one chunk a page', walkedAll.pages.map((page) => page.scanned), [11, 11, 5]);
+check('and it still reaches the end', walkedAll.pages.map((page) => page.hasMore), [true, true, false]);
+check('drawing every one of them once', walkedAll.seen.length, everyone.length);
+
+// A ROSTER WHERE EVERYBODY HAS LEFT: the page is empty, but it is not the end while the limit is still finding candidates -
+// and each attempt hands back a cursor, so a station that has emptied out still ends instead of offering a button that does
+// nothing. This is why an empty page's cursor is the last name READ rather than nothing.
+const longGone = Array.from({ length: 250 }, (_, index) => ({ id: `g${index}`, name: `Gone ${String(index).padStart(3, '0')}` }));
+const goneRead = fakeReader(longGone, Object.fromEntries(longGone.map((row) => [row.id, { status: 'inactive' }])));
+const goneFirst = await scanRosterPage({ read: goneRead, pageSize: 10, cursor: '' });
+const goneSecond = await scanRosterPage({ read: goneRead, pageSize: 10, cursor: goneFirst.nextCursor });
+check('a roster of former members yields an empty page', goneFirst.members, []);
+check('but does not pretend that is the end', goneFirst.hasMore, true);
+check('and says it was the limit that stopped it', goneFirst.exhausted, true);
+check('the next attempt resumes where the last one stopped reading', goneFirst.nextCursor, 'Gone 199');
+check('reads the rest of the roster rather than the same 200 again', goneSecond.scanned, 50);
+check('and finally ends, so the button goes away', goneSecond.hasMore, false);
+
+// A FULL PAGE AT THE SCAN LIMIT. A roster whose eleventh candidate, and twenty-second, and so on have all left keeps a
+// full page while the scan walks to its ceiling - and if that page reported "no more", the button would go away with the
+// rest of the roster still behind it. The same bug as above, one disguise down; `exhausted` is what says which end this is.
+const everyEleventhGone = Array.from({ length: 220 }, (_, index) => ({
+  id: `e${index}`,
+  name: `Member ${String(index + 1).padStart(3, '0')}`,
+}));
+// The tenth candidate and every one after it has left: the page is full (Member 001..010) and stays full however far the
+// scan reads, which is what makes this the limit's case rather than the roster's.
+const everyEleventhStatus = Object.fromEntries(
+  everyEleventhGone.map((row, index) => [row.id, { status: index >= 10 ? 'inactive' : 'active' }])
+);
+const fullAtLimit = rosterScanStep({
+  candidates: everyEleventhGone.slice(0, 200),
+  privateById: everyEleventhStatus,
+  pageSize: 10,
+  scanLimit: 200,
+  lastChunkFull: true,
+});
+check('a full page that ran out of allowance still offers the way on', fullAtLimit.hasMore, true);
+check('and names the limit as the reason', fullAtLimit.exhausted, true);
+check('drawing the ten it found', fullAtLimit.members.length, 10);
+check('and reading on past them next time', fullAtLimit.nextCursor, 'Member 010');
+
+// A FULL PAGE THAT ENDED THE ROSTER is the other side of that coin, and it must NOT claim there is more: the last chunk
+// came back short, so there is nothing behind the page.
+const endedRoster = rosterScanStep({
+  candidates: everyEleventhGone.slice(0, 12),
+  privateById: everyEleventhStatus,
+  pageSize: 10,
+  scanLimit: 200,
+  lastChunkFull: false,
+});
+check('a full page that ran out of candidates claims no more', endedRoster.hasMore, false);
+check('and does not say it was cut off', endedRoster.exhausted, false);
 
 console.log('\n--- the columns are the ones the station marked for the roster ---');
 const setup = [

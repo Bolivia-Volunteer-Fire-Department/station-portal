@@ -1,17 +1,30 @@
-.ffr {
+/* THE CABINET'S PALETTE AND FACE, declared for TWO elements rather than one, and the second one is the reason.
+ *
+ * The board dialog is PORTALLED to document.body (see FirefighterRunner.jsx, and the note on the backdrop below), so it
+ * is NOT inside `.ffr` in the DOM: anything declared only there - the five colours, the monospace face - is simply absent
+ * inside the dialog, and `var(--ffr-yellow)` on a border resolves to nothing rather than to the cabinet's yellow. One
+ * selector list, one set of values, two places that need them.
+ *
+ * `user-select: none` travels with them for the same reason: a screen of a sprite game is not a document to select text
+ * in, and a leaderboard with a draggable selection reads like a web page rather than part of the cabinet. */
+.ffr,
+.ffr__modal-backdrop {
   --ffr-ink: #24282d;
   --ffr-red: #d92d20;
   --ffr-yellow: #ffd23f;
   --ffr-paper: #f8f7f2;
   --ffr-sky: #eaf6ff;
 
-  box-sizing: border-box;
-  width: min(100%, var(--ffr-width));
-  margin: 0 auto;
   color: var(--ffr-ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", monospace;
   user-select: none;
+}
+
+.ffr {
+  box-sizing: border-box;
+  width: min(100%, var(--ffr-width));
+  margin: 0 auto;
   outline: none;
 }
 
@@ -30,10 +43,12 @@
   letter-spacing: .08em;
 }
 
-/* The HUD controls (the admin skip and the music mute), pinned to the left so the scores keep their
-   place on the right. `margin-right: auto` on the group does that. */
+/* The HUD controls (the admin skip, the two sound switches and the board), pinned to the left so the scores keep their
+   place on the right. `margin-right: auto` on the group does that, and the wrap is for the narrowest phones: four
+   controls plus two scores is more than a 360px row holds, and a row that overflows takes the SCORE with it. */
 .ffr__hud-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-right: auto;
 }
@@ -323,26 +338,139 @@
   letter-spacing: .04em;
 }
 
-/* Station leaderboard, below the game. Same paper/ink treatment as the play area so it
-   reads as part of the game rather than a panel bolted on. */
-.ffr__board {
-  margin-top: 16px;
-  padding: 10px 12px 12px;
-  background: var(--ffr-paper);
-  border: 2px solid var(--ffr-ink);
-  border-radius: 8px;
-  box-shadow: 6px 6px 0 rgba(36, 40, 45, .12);
+/* -------------------------------------------------------------------------------------------------------------
+ * The station board, as a dialog.
+ * -------------------------------------------------------------------------------------------------------------
+ * The look is the cabinet's own - the yellow/ink palette, the hard borders, the offset shadow the game already uses -
+ * pushed into a CRT: a dark screen in a yellow frame, scanlines over its own background so they travel with a long
+ * board instead of sitting over the first screenful, and a phosphor glow on the title. Deliberately NOT the app's own
+ * dialog styling (slate panels, rounded-2xl): this is part of the game, and it should look like it.
+ *
+ * THE CLOSED STATE IS `visibility`, AND IT CANNOT BE `hidden`. A stylesheet rule that sets `display` beats the `[hidden]`
+ * attribute - the attribute's rule is the browser's own and the weakest there is - so a backdrop that has to be
+ * `display: grid` to centre its panel would stay on screen and cover the whole app. `visibility: hidden` keeps the
+ * element out of the tab order and out of the accessibility tree exactly as `display: none` does, transitions in both
+ * directions (so the dialog fades rather than snapping, like every other dialog in this app), and - unlike opacity
+ * alone - takes no pointer events, so the game behind it cannot be clicked through an invisible sheet.
+ */
+.ffr__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .045) 0 1px, transparent 1px 3px),
+    rgba(8, 11, 15, .82);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 140ms linear, visibility 140ms linear;
 }
 
-.ffr__board-head {
+.ffr__modal-backdrop--open {
+  visibility: visible;
+  opacity: 1;
+}
+
+.ffr__modal {
+  width: min(440px, 100%);
+  max-height: min(78vh, 520px);
+  overflow: auto;
+  /* A scroll inside the panel must not walk the page behind it, which on a phone is the whole game. */
+  overscroll-behavior: contain;
+  padding: 12px 14px;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .035) 0 1px, transparent 1px 3px),
+    #111a23;
+  color: var(--ffr-paper);
+  border: 3px solid var(--ffr-yellow);
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px #05070a, 8px 8px 0 rgba(0, 0, 0, .45),
+    0 0 30px rgba(255, 210, 63, .18);
+}
+
+.ffr__modal-head {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 7px;
-  border-bottom: 2px dashed rgba(36, 40, 45, .25);
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px dashed rgba(248, 247, 242, .28);
+}
+
+.ffr__modal-title {
+  color: var(--ffr-yellow);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  /* The glow is most of what makes a dark panel read as a screen rather than a dark box. */
+  text-shadow: 0 0 9px rgba(255, 210, 63, .45);
+}
+
+/* Thumb-sized rather than mouse-sized, like the touch pads: the ✕ is the one control a phone reaches for. */
+.ffr__modal-close {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--ffr-yellow);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ffr-yellow);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ffr__modal-close:hover,
+.ffr__modal-done:hover {
+  filter: brightness(1.08);
+}
+
+.ffr__modal-close:focus-visible,
+.ffr__modal-done:focus-visible {
+  outline: 3px solid var(--ffr-paper);
+  outline-offset: 3px;
+}
+
+.ffr__modal-sub {
+  margin: 7px 0 0;
+  color: rgba(248, 247, 242, .72);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.ffr__modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 2px dashed rgba(248, 247, 242, .28);
+}
+
+.ffr__modal-esc {
+  color: rgba(248, 247, 242, .55);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+.ffr__modal-done {
+  padding: 7px 14px;
+  border: 2px solid var(--ffr-ink);
+  border-radius: 6px;
+  background: var(--ffr-yellow);
+  color: var(--ffr-ink);
+  font: inherit;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .08em;
+  cursor: pointer;
 }
 
 .ffr__board-list {
@@ -363,13 +491,21 @@
   font-weight: 700;
 }
 
+/* YOUR OWN LINE, on the yellow - and it takes the ink back with it, or the name would be paper-on-yellow. The rank
+   and the score go back to inheriting too: they are yellow everywhere else. */
 .ffr__board-row--me {
   background: var(--ffr-yellow);
+  color: var(--ffr-ink);
   border-radius: 5px;
 }
 
+.ffr__board-row--me .ffr__board-rank,
+.ffr__board-row--me .ffr__board-score {
+  color: inherit;
+}
+
 .ffr__board-rank {
-  opacity: .55;
+  color: rgba(255, 210, 63, .8);
 }
 
 .ffr__board-name {
@@ -379,10 +515,14 @@
 }
 
 .ffr__board-score {
+  color: var(--ffr-yellow);
   font-variant-numeric: tabular-nums;
 }
 
-.ffr__board-note {
+/* One line about the board or about the score that was just sent - "checking the board", "board unavailable", and the
+   three outcomes of a save. Used BOTH on the pale game-over screen and inside the dark dialog, which is why the
+   contrast it needs on the dark screen is a scoped override below rather than the colour here. */
+.ffr__notice {
   margin: 9px 0 0;
   font-size: 10px;
   font-weight: 800;
@@ -390,14 +530,29 @@
   opacity: .7;
 }
 
-.ffr__board-note--ok {
+.ffr__notice--ok {
   color: #1d7a3c;
   opacity: 1;
 }
 
-.ffr__board-note--warn {
+.ffr__notice--warn {
   color: var(--ffr-red);
   opacity: 1;
+}
+
+/* ON THE DARK SCREEN the same three lines need their own colours: the green that reads on the pale overlay is nearly
+   black on #111a23. */
+.ffr__modal .ffr__notice {
+  color: rgba(248, 247, 242, .75);
+  opacity: 1;
+}
+
+.ffr__modal .ffr__notice--ok {
+  color: #7ce6a4;
+}
+
+.ffr__modal .ffr__notice--warn {
+  color: #ff9b8c;
 }
 
 @keyframes ffr-ground {
@@ -414,6 +569,12 @@
   .ffr__ground-lines,
   .ffr__obstacle--truck {
     animation: none;
+  }
+
+  /* The board's fade, dropped with it: `transition: none` lands the open and the close in one frame - the visibility
+     flip included, since there is no longer a transition for it to ride on. */
+  .ffr__modal-backdrop {
+    transition: none;
   }
 }
 
@@ -491,5 +652,11 @@
     gap: 12px;
     margin-top: 10px;
     padding: 0 4px;
+  }
+
+  /* There is no Escape key on the device this is for, so the hint is a line about a key that is not there. The ✕ and
+     CLOSE are the ways out, and both are on screen. */
+  .ffr__modal-esc {
+    display: none;
   }
 }

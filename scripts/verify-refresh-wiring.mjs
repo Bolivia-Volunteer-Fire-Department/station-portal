@@ -192,12 +192,25 @@ const WAVE_PROPS = ['onDataChanged', 'onAdminDataChanged'];
 
 // Which tabs receive a SINGLE-request callback as their onDataChanged. DERIVED from AdminPanel rather than
 // listed here, so rewiring a tab to the fan-out automatically puts it back under the rule.
+//
+// THE SCAN FOLLOWS THE TAGS THEMSELVES, not a character budget. This used to read 1200 characters past the opening
+// tag, and AdminAvailabilityTab's prop list grew past that, so its wiring - `onDataChanged={onAvailabilityChanged}`,
+// which starts ONE request - became invisible. The tab was then treated as a fan-out screen and its own await
+// reported as waiting on the wave: a false alarm that reads exactly like the bug this check exists to catch, and one
+// that would have pushed somebody to "fix" a screen that was right. The scan is now: which tab was opened last, and
+// what its onDataChanged is wired to.
 const panelSourceForRules = read('src/components/admin/AdminPanel.jsx');
 const singleRequestTabs = [];
-for (const match of panelSourceForRules.matchAll(/<Admin(\w+)Tab\b[\s\S]{0,1200}?\/>/g)) {
-  const wiring = /onDataChanged=\{on(\w+)\}/.exec(match[0]);
-  // The capture drops the `on` prefix, so it is added back before comparing against the fan-out names.
-  if (wiring && !WAVE_PROPS.includes(`on${wiring[1]}`)) singleRequestTabs.push(`Admin${match[1]}Tab.jsx`);
+let openTab = '';
+for (const match of panelSourceForRules.matchAll(/<Admin(\w+)Tab\b|onDataChanged=\{on(\w+)\}/g)) {
+  if (match[1]) {
+    openTab = `Admin${match[1]}Tab.jsx`;
+    continue;
+  }
+  if (!openTab) continue;
+  if (!WAVE_PROPS.includes(`on${match[2]}`) && !singleRequestTabs.includes(openTab)) {
+    singleRequestTabs.push(openTab);
+  }
 }
 check(
   'the single-request screens are identified',

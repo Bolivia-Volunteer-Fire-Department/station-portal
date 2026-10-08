@@ -1132,9 +1132,9 @@ check(
 );
 
 console.log('\n--- the Firefighter Runner easter egg ---');
-// The game carries a leaderboard panel now. Effects do not run during a server render, so
-// this proves the panel's markup renders (and that the game still renders with no props at
-// all) - the data path is covered by verify:runner.
+// The game carries a station leaderboard now, in a dialog behind a BOARD button. Effects do not run during a server
+// render, so this proves the markup renders (and that the game still renders with no props at all) - the data path is
+// covered by verify:runner, the sound of a press inside the dialog by verify:sounds.
 const runnerHtml = (() => {
   try {
     return renderToString(React.createElement(FirefighterRunner, { width: 800, height: 280 }));
@@ -1152,6 +1152,14 @@ check(
   'and its loading state before the fetch resolves',
   String(runnerHtml).includes('CHECKING THE BOARD')
 );
+// THE BUTTON IS THE WAY IN. The URL is a game, so the one control that is not the game is in the HUD with the sound
+// switches, and this is what proves it is on screen without a click.
+check('and the button that opens it', String(runnerHtml).includes('🏆 BOARD'));
+// THE DIALOG IS IN THE MARKUP EVEN WHILE IT IS SHUT - hidden with `visibility` rather than unmounted, which is exactly
+// what keeps the two checks above possible (a panel mounted on a click is a panel no server render can see) - and the
+// closed state is the one that must not be covered: an open class here would draw the backdrop over the game at launch.
+check('with the dialog rendered, and closed', String(runnerHtml).includes('aria-modal="true"'));
+check('so nothing is covered before a press', !String(runnerHtml).includes('ffr__modal-backdrop--open'));
 // The minigame is opted out of the app-wide UI click sound (utils/uiSounds): its own audio is untouched, and a UI
 // click must not layer over it. Asserted on the RENDERED markup, because that is what the delegated listener
 // actually queries - a React attribute that never reaches the DOM would pass a source check and fail in practice.

@@ -443,16 +443,19 @@ console.log('\n--- dying ---');
 console.log('\n--- the touch pads, for a phone ---');
 const stylesheet = readFileSync('src/components/FirefighterRunner/FirefighterRunner.css', 'utf8');
 {
-  // WHERE THEY SIT is the ask, and the order in the source is the only thing that decides it: below the play area,
-  // above the leaderboard. Asserted by index rather than by eye.
+  // WHERE THEY SIT is the ask, and the order in the source is the only thing that decides it: below the play area.
+  // The station board used to be the next thing down, and this assertion used to pin the pads between the two - the
+  // board is a dialog over the game now (see verify:runner), so what is left to hold here is that the pads are BELOW
+  // the play area and that the board is not a panel in the page flow any more.
   checkIs(
     'a pad for each control',
     /ffr__touch-button--duck/.test(component) && /ffr__touch-button--jump/.test(component)
   );
   checkIs(
-    'placed below the play area and above the leaderboard',
+    'placed below the play area, with the board moved out of the page flow',
     component.indexOf('ffr__touch"') > component.indexOf('ffr__sky"') &&
-      component.indexOf('ffr__touch"') < component.indexOf('ffr__board"')
+      component.indexOf('ffr__modal-backdrop') < component.indexOf('ffr__board-list') &&
+      !/className="ffr__board"/.test(component)
   );
   // A DEVICE TEST, not a width one: a narrow window on a desktop gets a mouse and a keyboard, and two dead buttons in
   // the tab order would be worse than nothing. `display: none` by default is what keeps them out of it.

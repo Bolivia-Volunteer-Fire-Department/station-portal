@@ -36,16 +36,17 @@ const {
   announcementRecipients,
   audienceTargetsFrom,
 } = require('./pushAudience');
-// THE ROSTER'S PAGE: what one screenful is, which candidates are still members, and which certification columns it draws.
+// THE ROSTER'S PAGE: what one screenful is, which candidates are still members, how far the read has to look to fill one,
+// and which certification columns it draws.
 // Pure, so scripts/verify-roster-page.mjs can ask it directly - and THIS REPO RUNS NO FUNCTIONS EMULATOR, so a callable is
 // not exercised by the suite at all: anything this function could get wrong has to live where a harness can reach it.
 const {
   ROSTER_SCAN_LIMIT,
   certificationIdsForMembers,
   namePrefixRange,
-  pageFromCandidates,
   rosterCertificationTypes,
   rosterPageSize,
+  scanRosterPage,
 } = require('./rosterPage');
 
 // The attached scans, for the same reason and by the same rule: what may be attached, where it goes and what is
@@ -203,7 +204,7 @@ const setRoleClaims = async (userId, roleId, extra = {}) => {
 //
 // Clearing only the claim is what went wrong: the member changed their password, the modal closed because the app
 // cleared its own local copy, and the NEXT sign-in read the private column - still TRUE - so the forced change came
-// back, every single time, until an officer unticked the box by hand. `completePasswordChange` did exactly half the job
+// back, every single time, until an officer unchecked the box by hand. `completePasswordChange` did exactly half the job
 // and `verify-firebase-auth.mjs` agreed with it, because that harness asserted `whoami` and never read the document the
 // app actually gates on.
 //
@@ -266,9 +267,10 @@ exports.whoami = onCall(async (request) => {
 // the officer is looking at, which is the point: a roster only ever gets bigger, and so does every collection behind it.
 //
 // THE DECISIONS LIVE IN ./rosterPage - the page size and its cap, the prefix a search box becomes, which candidates are
-// members, and which columns the page holds. That split is not tidiness: this repo runs no Functions emulator, so nothing
-// here is exercised by the suite, and every rule that could be got wrong is in a module scripts/verify-roster-page.mjs
-// asks directly (the arrangement ./pushAudience established). What is left below is the reading.
+// members, HOW MANY CHUNKS THE READ LOOKS AT BEFORE IT CALLS A PAGE THE END, and which columns the page holds. That split
+// is not tidiness: this repo runs no Functions emulator, so nothing here is exercised by the suite, and every rule that
+// could be got wrong is in a module scripts/verify-roster-page.mjs asks directly (the arrangement ./pushAudience
+// established). What is left below is the reading.
 exports.readRosterModule = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   await requirePermission(request.auth.uid, 'can_view_roster', 'view the roster');
@@ -284,31 +286,42 @@ exports.readRosterModule = onCall(async (request) => {
   // THE TWO BRANCHES ARE WRITTEN AS FULL CHAINS, and that is not style: scripts/verify-read-budget walks each
   // `collection(...)` call and the filters that follow it textually, so a query assembled onto a variable afterwards is a
   // query whose index requirement nothing checks. Both shapes need NO composite index - a range and the ordering on the
-  // SAME field are served by that field's own index - and the harness is what says so.
+  // SAME field are served by that field's own index - and the harness is what says so. They are read in CHUNKS, because
+  // the loop that fills the page lives in functions/rosterPage.js where a harness can drive it; all that is left here is
+  // the reading, which is what a function is allowed to be in this repo.
   //
-  // ONE MORE THAN THE PAGE NEEDS, because the status is private: some candidates will turn out to have left, and the page
-  // has to be able to tell "that is everyone" from "there is more behind this". The over-read stops at the scan limit, so a
-  // roster full of former members cannot turn one page into a whole-collection read.
-  const range = namePrefixRange(search);
-  const candidateLimit = Math.min(pageSize + 1, ROSTER_SCAN_LIMIT);
-  const candidateQuery = range.from
-    ? db.collection('users').where('name', '>=', range.from).where('name', '<=', range.to).orderBy('name').limit(candidateLimit)
-    : db.collection('users').orderBy('name').limit(candidateLimit);
-  const candidateRows = (await (cursor ? candidateQuery.startAfter(cursor) : candidateQuery).get()).docs.map((row) => ({
-    id: row.id,
-    name: row.get('name'),
-    rank_id: row.get('rank_id'),
-  }));
+  // A CHUNK IS ONE MORE THAN THE PAGE, because the status is private: some candidates will turn out to have left, and the
+  // page has to be able to fill itself anyway. One chunk on its own could not tell "that is everyone" from "there is more
+  // behind this" - which is the bug this read was rewritten for (see rosterScanStep).
+  const read = async ({ cursor: after, limit }) => {
+    const range = namePrefixRange(search);
+    const candidateQuery = range.from
+      ? db.collection('users').where('name', '>=', range.from).where('name', '<=', range.to).orderBy('name').limit(limit)
+      : db.collection('users').orderBy('name').limit(limit);
+    const chunkRows = (await (after ? candidateQuery.startAfter(after) : candidateQuery).get()).docs.map((row) => ({
+      id: row.id,
+      name: row.get('name'),
+      rank_id: row.get('rank_id'),
+    }));
 
-  // THEIR PRIVATE HALVES, BY DOCUMENT - only the candidates, never the collection. One `getAll` is a single round trip for
-  // every ref, which is the cheapest shape this read can take; the rules are not in the way because this is the admin SDK,
-  // which is exactly why the screen cannot do this for itself.
-  const privateRows = candidateRows.length
-    ? await db.getAll(...candidateRows.map((candidate) => db.collection('users_private').doc(candidate.id)))
-    : [];
-  const privateById = Object.fromEntries(privateRows.map((row) => [row.id, row.exists ? row.data() : {}]));
+    // THEIR PRIVATE HALVES, BY DOCUMENT - only the chunk's candidates, never the collection. One `getAll` is a single round
+    // trip for every ref, which is the cheapest shape this read can take; the rules are not in the way because this is the
+    // admin SDK, which is exactly why the screen cannot do this for itself.
+    const privateRows = chunkRows.length
+      ? await db.getAll(...chunkRows.map((candidate) => db.collection('users_private').doc(candidate.id)))
+      : [];
+    return {
+      candidates: chunkRows,
+      privateById: Object.fromEntries(privateRows.map((row) => [row.id, row.exists ? row.data() : {}])),
+    };
+  };
 
-  const page = pageFromCandidates({ candidates: candidateRows, privateById, pageSize });
+  const page = await scanRosterPage({
+    read,
+    pageSize,
+    cursor,
+    scanLimit: ROSTER_SCAN_LIMIT,
+  });
   const certificationTypes = rosterCertificationTypes((await db.collection('certification_setup').get()).docs);
   const typeIds = certificationTypes.map((type) => type.id);
 
@@ -338,12 +351,17 @@ exports.readRosterModule = onCall(async (request) => {
     // WHAT THE CALLER ACTUALLY HAS, rather than what it hoped for: the cursor to continue from, whether there is anything
     // to continue to, and the search these names answer - so a screen whose search changed mid-read cannot draw one page's
     // members under another page's heading.
+    //
+    // `scanned` is the candidates the WHOLE scan looked at, which is the read this page cost. `exhausted` says the scan
+    // stopped at ROSTER_SCAN_LIMIT rather than at the end of the roster: the page is real and `has_more` is true, but it
+    // ended short because so many candidates have left - worth being able to see when a roster gets slow.
     roster_page: {
       size: pageSize,
       search,
       has_more: page.hasMore,
       next_cursor: page.nextCursor,
-      scanned: candidateRows.length,
+      scanned: page.scanned,
+      exhausted: page.exhausted === true,
     },
   };
 });
@@ -817,7 +835,7 @@ exports.runReport = onCall(async (request) => {
         roundingMinutes,
       }),
       // The axis that was actually compared, echoed back so the runner can say what these numbers are against rather
-      // than leaving an officer to remember which boxes they ticked.
+      // than leaving an officer to remember which boxes they checked.
       assignment_ids: options.assignmentIds,
       template_ids: options.templateIds,
       truncated: scheduleRead.overLimit || clockRead.overLimit,
@@ -1404,7 +1422,7 @@ exports.updateMemberAccount = onCall(async (request) => {
   }
 
   if (data.isChangePasswordOnLogin !== undefined) {
-    // THROUGH THE ONE WRITER, so the officer's checkbox clears the claim as well as their own column. Unticking it is
+    // THROUGH THE ONE WRITER, so the officer's checkbox clears the claim as well as their own column. Unchecking it is
     // how an officer says "stop asking", and with only the column written the member would be held at the modal by a
     // claim nobody had told about it - the same drift as the reported bug, from the other direction.
     const required = await setPasswordChangeRequired(userId, data.isChangePasswordOnLogin === true);

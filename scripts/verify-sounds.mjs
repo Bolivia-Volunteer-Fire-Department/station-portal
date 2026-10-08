@@ -790,6 +790,18 @@ checkIs(
   'its jump/die/point audio is still its own',
   /jumpAudioRef/.test(runnerSource) && /dieAudioRef/.test(runnerSource) && /pointAudioRef/.test(runnerSource)
 );
+// THE BOARD DIALOG CARRIES THE MARKER AGAIN, and it is the one place in this app where that is not a duplicate. The
+// dialog is portalled to document.body (`renderInViewport`, because the cabinet carries the world's scale transform), so
+// it is NOT inside the marked subtree any more: without its own `data-sound="none"`, every press in the dialog - the ✕,
+// CLOSE, the backdrop - would play the app's UI click over the game's own voice, which is the single thing the cabinet's
+// marker exists to prevent.
+//
+// Asserted as the marker standing ALONE ON A LINE inside the portalled node, not as the words appearing somewhere in the
+// file: this dialog's own comment names the attribute twice, so a looser pattern would be satisfied by the explanation
+// and would keep passing with the marker deleted.
+const portalledBoard = runnerSource.slice(runnerSource.indexOf('renderInViewport('));
+checkIs('the portalled board dialog was found', portalledBoard.length > 0);
+checkIs('and it carries the marker on its own node', /^\s+data-sound="none"$/m.test(portalledBoard));
 
 // ---------------------------------------------------------------------------
 // 8. What is deliberately silent

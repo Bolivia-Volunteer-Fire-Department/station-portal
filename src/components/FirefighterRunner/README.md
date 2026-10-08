@@ -19,10 +19,10 @@ export default function App() {
 - Arrow Down: duck
 - Click: jump / start / restart
 - Holding Arrow Down while jumping increases downward acceleration
-- On a phone: two pads **below the play area and above the leaderboard** — DUCK on the left, JUMP on the right, the way
-  a controller puts them. They appear only on a device that cannot hover (`hover: none` and `pointer: coarse`), so a
-  desktop never sees them and they are never in its tab order. Duck holds while it is pressed; jump is one press, and
-  doubles as start and restart, because it goes through the same call the keyboard does.
+- On a phone: two pads **below the play area** — DUCK on the left, JUMP on the right, the way a controller puts them.
+  They appear only on a device that cannot hover (`hover: none` and `pointer: coarse`), so a desktop never sees them and
+  they are never in its tab order. Duck holds while it is pressed; jump is one press, and doubles as start and restart,
+  because it goes through the same call the keyboard does.
 - Getting hit: the four death frames play out, the firefighter falls to the ground if it was caught in
   the air, and the last frame stays on screen behind the game-over panel
 
@@ -104,8 +104,24 @@ No additional npm dependencies are required.
 
 ## Leaderboard
 
-Passing `token` (and optionally `currentUser`) adds the **STATION LEADERBOARD** panel below
-the game. Both are optional: without them the game plays exactly as before, just with no board.
+Passing `token` (and optionally `currentUser`) adds the **STATION LEADERBOARD**, which lives in a retro dialog over the
+game and opens from a **BOARD** button in the HUD beside the two sound switches. Both props are optional: without them the
+game plays exactly as before, just with no board.
+
+The dialog is **rendered whether or not it is open** and hidden with `visibility` (which keeps it out of the tab order and
+the accessibility tree, and - unlike `display: none` or the `hidden` attribute - survives the backdrop needing
+`display: grid` to centre its panel). It is portalled to `document.body` with `renderInViewport`, because the cabinet
+carries the world's scale transform and a `fixed` child of a transformed ancestor is positioned against that ancestor.
+While it is open it owns the keyboard (the game's keys are on `window`), so Escape closes it and space cannot restart a
+run behind it; focus goes in on open and back to the cabinet on close, so the next space is a jump rather than another
+press of the button that opened it. **It also pauses a run in progress** rather than covering a game that keeps playing:
+the loop returns early while the dialog is up, reading a ref rather than a dependency so the run is never torn down, and
+it keeps advancing its own clock so resuming is not a jump.
+
+**It opens itself after a run, and only when that run set a new high score** — the rule, and the argument behind it, are
+in `src/utils/runnerBoard.js`. That rule lives in a module of its own rather than as a boolean in this component for the
+same reason the level's schedule does: this repo's suite cannot run a browser, so a decision worth testing has to be
+somewhere a harness can ask it (`npm run verify:runner`).
 
 - **Scores live on the `users` sheet's `runner_score` column** as personal bests, so the board
   is the station roster rather than a separate table. `GET_RUNNER_LEADERBOARD` projects
@@ -115,11 +131,14 @@ the game. Both are optional: without them the game plays exactly as before, just
 - **The backend keeps the higher score.** `SAVE_RUNNER_SCORE` clamps the client-supplied value
   (a browser can send anything) and stores it only when it beats the existing best, so a bad
   run cannot cost a member their position and a repeat call is harmless. The response reports
-  `improved`, and the panel says either "new personal best saved" or what the best still is.
+  `improved`, which is one of the two facts the board's own opening rule reads.
+- **What happened to the score is on the game-over screen, not in the dialog**: "new personal best saved", what the best
+  still is, or a failure. It used to be a note under the always-visible panel, and a dialog that is usually shut would
+  have made those lines readable only by opening it.
 - **The HUD keeps working offline.** The local `localStorage` best is still written, and the
   board's number for your own row raises it when it is higher — so a member's best follows them
   between devices once the request succeeds.
-- **A failure never blocks play.** An unreachable backend only makes the panel say "board
+- **A failure never blocks play.** An unreachable backend only makes the dialog say "board
   unavailable right now"; the game itself has no dependency on the network.
 
 `npm run verify:runner` covers the two backend rules (which rows reach the client, and what may

@@ -28,10 +28,10 @@ const fontScaleValue = (value) => {
   return FONT_SCALES.includes(scale) ? scale : 1;
 };
 
-export default function UserSettings({ 
-  currentUser, 
-  userSettings = [], 
-  systemSettings = {}, 
+export default function UserSettings({
+  currentUser,
+  userSettings = [],
+  systemSettings = {},
   // The signed-in member's own role row, for the read-only access summary below.
   currentRole,
   canApproveShifts = false,
@@ -141,15 +141,14 @@ export default function UserSettings({
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <form id="user-settings-form" onSubmit={handleSubmit} className="p-6 space-y-6">
-          
+
           {/* Status Feedback Banner */}
           {statusMessage && (
             <div
-              className={`p-4 rounded-xl flex items-center gap-3 text-sm font-medium border ${
-                statusMessage.type === 'success'
+              className={`p-4 rounded-xl flex items-center gap-3 text-sm font-medium border ${statusMessage.type === 'success'
                   ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-400 dark:border-emerald-800/80'
                   : 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
-              }`}
+                }`}
             >
               {statusMessage.type === 'success' ? (
                 <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 dark:text-emerald-400" />
@@ -172,11 +171,10 @@ export default function UserSettings({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* 12-Hour Option */}
               <label
-                className={`flex items-start p-4 rounded-xl border cursor-pointer transition ${
-                  String(formData.time_format) === '12'
+                className={`flex items-start p-4 rounded-xl border cursor-pointer transition ${String(formData.time_format) === '12'
                     ? 'bg-red-500/10 border-red-500 text-slate-900 dark:text-white'
                     : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 dark:bg-slate-900/60 dark:border-slate-700/80 dark:text-slate-300 dark:hover:bg-slate-900'
-                }`}
+                  }`}
               >
                 <input
                   type="radio"
@@ -196,11 +194,10 @@ export default function UserSettings({
 
               {/* 24-Hour Option */}
               <label
-                className={`flex items-start p-4 rounded-xl border cursor-pointer transition ${
-                  String(formData.time_format) === '24'
+                className={`flex items-start p-4 rounded-xl border cursor-pointer transition ${String(formData.time_format) === '24'
                     ? 'bg-red-500/10 border-red-500 text-slate-900 dark:text-white'
                     : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 dark:bg-slate-900/60 dark:border-slate-700/80 dark:text-slate-300 dark:hover:bg-slate-900'
-                }`}
+                  }`}
               >
                 <input
                   type="radio"
@@ -394,11 +391,10 @@ function PasswordChangeCard({ onPasswordChange }) {
 
         {statusMessage && (
           <div
-            className={`p-3 rounded-xl flex items-center gap-2 text-sm font-medium border ${
-              statusMessage.type === 'success'
+            className={`p-3 rounded-xl flex items-center gap-2 text-sm font-medium border ${statusMessage.type === 'success'
                 ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-400 dark:border-emerald-800/80'
                 : 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
-            }`}
+              }`}
           >
             {statusMessage.type === 'success' ? (
               <CheckCircle className="w-4 h-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
@@ -756,11 +752,10 @@ function NotificationsCard({
 
         {statusMessage && (
           <div
-            className={`p-3 rounded-xl flex items-center gap-2 text-sm font-medium border ${
-              statusMessage.type === 'success'
+            className={`p-3 rounded-xl flex items-center gap-2 text-sm font-medium border ${statusMessage.type === 'success'
                 ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-400 dark:border-emerald-800/80'
                 : 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
-            }`}
+              }`}
           >
             {statusMessage.type === 'success' ? (
               <CheckCircle className="w-4 h-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
@@ -790,9 +785,8 @@ function NotificationsCard({
                         // The sentence that was missing. A subscription existing here is not the same as
                         // it being the signed-in member's, and a card that cannot tell the two apart
                         // either lies about delivery or offers to break somebody else's device.
-                        ? `This computer is set up for ${thisDevice.ownerName}, so ${
-                            thisDevice.ownerName === 'another member' ? 'their' : `${thisDevice.ownerName}'s`
-                          } alerts appear here.`
+                        ? `This computer is set up for ${thisDevice.ownerName}, so ${thisDevice.ownerName === 'another member' ? 'their' : `${thisDevice.ownerName}'s`
+                        } alerts appear here.`
                         : 'Notifications are on for this device.'}
               </p>
               {pushBlocked && (
@@ -981,11 +975,10 @@ function AccessCard({ currentRole }) {
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span
-            className={`px-2 py-1 rounded-lg font-medium border ${
-              isAdministrator
+            className={`px-2 py-1 rounded-lg font-medium border ${isAdministrator
                 ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
                 : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700'
-            }`}
+              }`}
           >
             Administrator access: {masterLabel}
           </span>
@@ -996,35 +989,38 @@ function AccessCard({ currentRole }) {
 
         {isAdministrator && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Administrator access grants every permission, so no other roles-sheet column needs setting.
+            Administrator access grants every permission, so no other roles column needs setting.
           </p>
         )}
-
-        {adminGrants.length > 0 && (
+        {!isAdministrator && (
           <div>
-            <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">Administration</p>
-            <div className="flex flex-wrap gap-1.5">{adminGrants.map(chip)}</div>
-          </div>
-        )}
+            {adminGrants.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">Administration</p>
+                <div className="flex flex-wrap gap-1.5">{adminGrants.map(chip)}</div>
+              </div>
+            )}
 
-        {memberGrants.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">Station modules</p>
-            <div className="flex flex-wrap gap-1.5">{memberGrants.map(chip)}</div>
-          </div>
-        )}
+            {memberGrants.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">Station modules</p>
+                <div className="flex flex-wrap gap-1.5">{memberGrants.map(chip)}</div>
+              </div>
+            )}
 
-        {audit.granted.length === 0 && (
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            No permissions are granted, so only the dashboard and My Settings are available.
-          </p>
+            {audit.granted.length === 0 && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                No permissions are granted, so only the dashboard and My Settings are available.
+              </p>
+            )}
+          </div>
         )}
 
         {showSheetCheck && (
           <div className="p-3 rounded-xl border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/80 space-y-1.5">
             <p className="flex items-center gap-2 text-sm font-medium">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>Roles sheet check</span>
+              <span>Roles check</span>
             </p>
             {audit.unknownColumns.length > 0 && (
               <p className="text-xs">
@@ -1169,11 +1165,10 @@ function PersonalInformationCard({ currentUser }) {
         </div>
         {statusMessage && (
           <p
-            className={`text-xs font-medium ${
-              statusMessage.type === 'success'
+            className={`text-xs font-medium ${statusMessage.type === 'success'
                 ? 'text-emerald-600 dark:text-emerald-400'
                 : 'text-red-600 dark:text-red-400'
-            }`}
+              }`}
           >
             {statusMessage.text}
           </p>

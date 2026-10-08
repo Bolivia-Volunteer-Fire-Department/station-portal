@@ -36,6 +36,11 @@ import {
 const SOUND_FILES = import.meta.glob("./*.wav", { eager: true, query: "?url", import: "default" });
 import { fetchRunnerLeaderboard, saveRunnerScore } from "../../services/api";
 import { unnamedLabel } from "../../utils/displayLabel";
+// WHETHER A RUN SET A NEW HIGH SCORE, which is what opens the board by itself - the argument behind it is in that file.
+import { isNewRunnerBest } from "../../utils/runnerBoard";
+// The station board is a DIALOG, and this hands it to document.body: `.ffr__sky` carries the world's scale transform, so
+// a `position: fixed` child of the cabinet is positioned and clipped against its ancestors rather than the viewport.
+import { renderInViewport } from "../../utils/viewportLayer";
 import "./FirefighterRunner.css";
 
 const DEFAULT_WIDTH = 800;
@@ -399,14 +404,24 @@ export default function FirefighterRunner({
   const [gameState, setGameState] = useState("ready");
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
-  // Leaderboard: the rows, plus a status so the panel can say "loading" or "unavailable"
+  // The station board: whether it is up, the rows, and a status so the dialog can say "loading" or "unavailable"
   // instead of rendering an empty list that looks like nobody has ever played.
+  const [boardOpen, setBoardOpen] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
   const [leaderboardTotal, setLeaderboardTotal] = useState(0);
   const [boardStatus, setBoardStatus] = useState("loading");
   // What happened to the run that just ended: a new personal best, a score that did not beat
-  // the existing one, or a failed save.
+  // the existing one, or a failed save. Shown in the game-over message rather than inside the board, because it is
+  // about the RUN - and it has to be visible whether or not the board came up over it.
   const [savedNotice, setSavedNotice] = useState(null);
+  // The cabinet, and the two controls inside the dialog: the cabinet takes the focus back when the dialog closes, and
+  // the dialog's own controls are the two stops it cycles between (see the Tab handler on the backdrop).
+  const rootRef = useRef(null);
+  const boardCloseRef = useRef(null);
+  const boardDoneRef = useRef(null);
+  // Whether the dialog was up a moment ago, so the focus effect can tell a close from a first render - a component that
+  // grabs the focus when it mounts is a component that steals it from the tab the member just switched to.
+  const boardWasOpenRef = useRef(false);
   const [view, setView] = useState({
     player: null,
     obstacles: [],
@@ -528,15 +543,74 @@ export default function FirefighterRunner({
     loadLeaderboard();
   }, [loadLeaderboard]);
 
-  // Records a finished run, then refreshes the board so the player sees where they landed.
-  // The backend keeps the higher score, so calling this after every game is safe.
+  // The board's open state, as the LOOP can read it. A pause cannot be a dependency of the loop's effect - that would
+  // tear the run down and start it again - so it is a ref, the same arrangement the two sound switches use (`musicMutedRef`
+  // and `sfxMutedRef`), and for the same reason: the loop reads it every frame without re-subscribing.
+  const boardOpenRef = useRef(false);
+
+  // Opening it from the HUD button. The board is re-read first, because standings fetched minutes ago are not what a
+  // member pressed the button to see. The AUTOMATIC open after a run does NOT read again: submitScore has just refreshed
+  // the board, and the row the dialog is celebrating is the one that refresh fetched.
+  const openBoard = useCallback(() => {
+    setBoardOpen(true);
+    loadLeaderboard();
+  }, [loadLeaderboard]);
+
+  const dismissBoard = useCallback(() => setBoardOpen(false), []);
+
+  // THE FOCUS FOLLOWS THE DIALOG: in on open, so Escape and the two buttons are where a keyboard is pointed. OUT to the
+  // CABINET, not back to the BOARD button that opened it - and that is the point worth stating. The next thing a member
+  // does after a run is press space, and space on a focused button presses it, which would open the board straight back
+  // up over the game they are trying to replay. The cabinet is the game's own focus stop (the `tabIndex` on `.ffr`), so
+  // space there is a jump - exactly what the game-over message promises.
+  useEffect(() => {
+    if (boardOpen) boardCloseRef.current?.focus();
+    else if (boardWasOpenRef.current) rootRef.current?.focus();
+    boardWasOpenRef.current = boardOpen;
+  }, [boardOpen]);
+
+  // A SMALL FOCUS TRAP, and the reason is this cabinet rather than dialogs in general: the game's own controls - the
+  // three HUD buttons and the touch pads - are BEHIND the dialog and still in the tab order, so Tab would walk out of a
+  // dialog that is covering the screen and land on something nobody can see. Two stops, wrapped, so the dialog is the
+  // only thing a keyboard can reach while it is up.
+  const trapBoardFocus = useCallback((event) => {
+    if (event.key !== "Tab") return;
+
+    const stops = [boardCloseRef.current, boardDoneRef.current].filter(Boolean);
+    if (stops.length < 2) return;
+
+    const index = stops.indexOf(document.activeElement);
+    const next = event.shiftKey
+      ? (index <= 0 ? stops.length - 1 : index - 1)
+      : (index >= stops.length - 1 ? 0 : index + 1);
+
+    event.preventDefault();
+    stops[next]?.focus();
+  }, []);
+
+  // The ref follows the state, from an effect rather than during render: a render is allowed to be thrown away and re-run,
+  // and this one is what a frame reads.
+  useEffect(() => {
+    boardOpenRef.current = boardOpen;
+  }, [boardOpen]);
+
+  // Records a finished run, then refreshes the board so the player sees where they landed. The backend keeps the
+  // higher score, so calling this after every game is safe.
+  //
+  // `beatShownBest` is the caller's answer to a question only the caller can answer at the right moment: did this run
+  // beat the number the HUD was showing? It is one half of whether the board opens itself - see utils/runnerBoard for
+  // the other half and for why both count.
   const submitScore = useCallback(
-    async (finalScore) => {
+    async (finalScore, beatShownBest = false) => {
+      // No session, no board and no record: there is nothing to celebrate and nothing to draw, so nothing opens.
       if (!token || !(finalScore > 0)) return;
       try {
         const result = await saveRunnerScore(finalScore, token);
         if (!result || !result.success) {
           setSavedNotice({ kind: "failed" });
+          // The save never landed, so the server has no answer to give and the screen's own comparison is the only
+          // evidence there is. Falling through to it is the same call, with `improved` left false.
+          if (isNewRunnerBest({ beatShownBest })) setBoardOpen(true);
           return;
         }
         rememberBest(result.best);
@@ -545,10 +619,14 @@ export default function FirefighterRunner({
             ? { kind: "improved", best: result.best }
             : { kind: "kept", best: result.best }
         );
+        // The board is refreshed BEFORE it is opened, so the row it is celebrating is the one this run just earned
+        // rather than the standings from before it.
         await loadLeaderboard();
+        if (isNewRunnerBest({ improved: result.improved === true, beatShownBest })) setBoardOpen(true);
       } catch (err) {
         console.error("Could not save the runner score", err);
         setSavedNotice({ kind: "failed" });
+        if (isNewRunnerBest({ beatShownBest })) setBoardOpen(true);
       }
     },
     [token, rememberBest, loadLeaderboard]
@@ -557,8 +635,12 @@ export default function FirefighterRunner({
   const startOrJump = useCallback(() => {
     if (gameState === "ready" || gameState === "gameover") {
       resetGame();
-      // A new run starts clean, so last run's save notice is cleared with it.
+      // A new run starts clean, so last run's save notice is cleared with it - and the board goes with it. This is
+      // belt-and-braces (the dialog takes the keyboard while it is up, so space cannot reach here with it open, and its
+      // backdrop covers the touch pads), and it is what keeps "a run begins, a screen is put away" true for every path
+      // into a run rather than only the ones that exist today.
       setSavedNotice(null);
+      setBoardOpen(false);
       setGameState("playing");
       return;
     }
@@ -580,6 +662,8 @@ export default function FirefighterRunner({
     if (gameState !== "playing") {
       resetGame();
       setSavedNotice(null);
+      // The admin debug path starts a run too, so it puts the board away like any other - see startOrJump.
+      setBoardOpen(false);
       setGameState("playing");
     }
     startBoss(levelRef.current, levelBounds);
@@ -605,6 +689,18 @@ export default function FirefighterRunner({
 
   useEffect(() => {
     function handleKeyDown(event) {
+      // THE DIALOG TAKES THE KEYBOARD WHILE IT IS UP. Escape closes it, and nothing else reaches the game at all: space
+      // is the dialog's own key (it presses whatever has focus in there), and a run must not start - or a duck be held -
+      // behind a dialog the member is reading. The game keys come back the moment it closes, which is also what makes
+      // "CLICK OR PRESS SPACE TO RUN AGAIN" true again the instant the board is out of the way.
+      if (boardOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          dismissBoard();
+        }
+        return;
+      }
+
       if (event.code === "ArrowDown") {
         event.preventDefault();
         setDuck(true);
@@ -631,7 +727,9 @@ export default function FirefighterRunner({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [setDuck, startOrJump]);
+    // `dismissBoard` is in here with the two game callbacks: the dialog's own key is read in this listener, and a stale
+    // one would leave Escape doing nothing.
+  }, [boardOpen, dismissBoard, setDuck, startOrJump]);
 
   // The fatal collision. The run ends here, but the loop does not: the firefighter still has to fall
   // to the ground and play its four death frames, so this only turns the player dead and lets the
@@ -660,13 +758,17 @@ export default function FirefighterRunner({
 
     const finalScore = scoreRef.current;
 
+    // ASKED BEFORE `rememberBest`, which is what makes it a question worth asking: the ref holds the best this screen
+    // knew while the run was being played, and the line below overwrites it with the run that just ended.
+    const beatShownBest = finalScore > highScoreRef.current;
+
     rememberBest(finalScore);
 
     setGameState("gameover");
     onGameOver?.(finalScore);
-    // Fire-and-forget: submitScore reports its own failures in the leaderboard panel, so the
-    // game never waits on the network to show the game-over screen.
-    submitScore(finalScore);
+    // Fire-and-forget: submitScore reports its own failures in the game-over message and opens the board itself if the
+    // run was a record, so the game never waits on the network to show the game-over screen.
+    submitScore(finalScore, beatShownBest);
   }, [gameState, onGameOver, rememberBest, submitScore]);
 
   useEffect(() => {
@@ -852,6 +954,16 @@ export default function FirefighterRunner({
       const previous = lastTimeRef.current || timestamp;
       const dt = Math.min((timestamp - previous) / 1000, 0.05);
       lastTimeRef.current = timestamp;
+
+      // THE BOARD PAUSES THE RUN. It covers the game, and it takes the keyboard while it is up, so a run left playing
+      // behind it is a run the member can neither see nor control - it would die at whatever it ran into next. Freezing
+      // here keeps the run exactly as it was: the clock still advances (`lastTimeRef` is set above), so there is no jump
+      // when play resumes, and nothing is torn down - the player, the obstacles and the level are all refs that simply
+      // stop being stepped.
+      if (boardOpenRef.current) {
+        animationRef.current = requestAnimationFrame(frame);
+        return;
+      }
 
       const player = playerRef.current;
 
@@ -1181,6 +1293,7 @@ export default function FirefighterRunner({
   return (
     <div
       className="ffr"
+      ref={rootRef}
       // Opts the whole minigame out of the app-wide UI click sound (see utils/uiSounds). Its own jump/die/point
       // audio is deliberately untouched and stays exactly as it was; this only stops a UI click being layered
       // over it, since the whole cabinet is one big pointer surface with its own voice.
@@ -1213,7 +1326,7 @@ export default function FirefighterRunner({
               onPointerDown={(event) => event.stopPropagation()}
               onClick={skipToBoss}
             >
-              SKIP TO BOSS
+              DEBUG BOSS
             </button>
           )}
           <button
@@ -1235,6 +1348,20 @@ export default function FirefighterRunner({
             onClick={() => setSfxMuted((muted) => !muted)}
           >
             {sfxMuted ? "🔇 SOUNDS OFF" : "🔊 SOUNDS ON"}
+          </button>
+          {/* THE STATION BOARD, beside the sound switches: it is a thing to look at rather than to switch, and the row
+              of controls at the top is where the game keeps everything that is not the game. `aria-haspopup` and
+              `aria-expanded` both say what pressing it did - a dialog, and whether one is up. */}
+          <button
+            type="button"
+            className="ffr__hud-button"
+            aria-haspopup="dialog"
+            aria-expanded={boardOpen}
+            aria-label="Station leaderboard"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={openBoard}
+          >
+            🏆 LEADERBOARD
           </button>
         </div>
         <span>HI {formattedHighScore}</span>
@@ -1373,6 +1500,24 @@ export default function FirefighterRunner({
                 <div className="ffr__message">
                   SCORE {formattedScore} · HI {formattedHighScore}
                 </div>
+                {/* WHAT HAPPENED TO THE SCORE, on the run's own screen rather than inside the board. It used to be a note
+                    under the board panel, which worked while the board was always on screen - now that it is a dialog,
+                    a "SCORE SENT · YOUR BEST IS STILL …" or a failure would only be readable by opening the board,
+                    which is the opposite of what those lines are for. Whether the board came up over this or not, the
+                    answer to "did my score count?" is here. */}
+                {savedNotice?.kind === "improved" && (
+                  <p className="ffr__notice ffr__notice--ok">
+                    🏆 NEW PERSONAL BEST SAVED — {String(savedNotice.best).padStart(5, "0")}
+                  </p>
+                )}
+                {savedNotice?.kind === "kept" && (
+                  <p className="ffr__notice">
+                    SCORE SENT · YOUR BEST IS STILL {String(savedNotice.best).padStart(5, "0")}
+                  </p>
+                )}
+                {savedNotice?.kind === "failed" && (
+                  <p className="ffr__notice ffr__notice--warn">COULD NOT SAVE YOUR SCORE</p>
+                )}
                 <div className="ffr__hint">
                   CLICK OR PRESS SPACE TO RUN AGAIN
                 </div>
@@ -1384,8 +1529,9 @@ export default function FirefighterRunner({
 
       {/* TOUCH CONTROLS, for the device this is most likely played on. The keyboard the game was built around is not
           there, and tapping the screen is a poor substitute for a jump button: the same tap starts the run, and the
-          thumb ends up over the thing it is trying to jump. The two pads sit BELOW the play area and above the
-          leaderboard - out of the way of the game, and where the thumbs already rest.
+          thumb ends up over the thing it is trying to jump. The two pads sit BELOW the play area - out of the way of the
+          game, and where the thumbs already rest. (The station board used to be the next thing down; it is a dialog over
+          the game now, so nothing is below the pads but the key hints.)
 
           Shown only on a device that cannot hover (see the media query in the stylesheet), so on a desktop they are
           `display: none` and never in the tab order. And each one stops propagation, which is not optional: the whole
@@ -1432,76 +1578,118 @@ export default function FirefighterRunner({
         <span>AVOID HYDRANTS, TRUCKS &amp; HELICOPTERS</span>
       </div>
 
-      {/* Station leaderboard. The whole page is a start button, so a click in here must not
-          kick off a run - hence the stopPropagation. */}
-      <section
-        className="ffr__board"
-        aria-label="Station leaderboard"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div className="ffr__board-head">
-          <span>🏆 STATION LEADERBOARD</span>
-          <span>
-            {boardStatus === "ready" && leaderboardTotal > 0
-              ? `TOP ${leaderboard.length} OF ${leaderboardTotal}`
-              : "PERSONAL BESTS"}
-          </span>
+      {/* THE STATION BOARD, in a dialog rather than a panel under the game.
+          ----------------------------------------------------------------------------------------------------------
+          It opens from the BOARD button in the HUD, and it opens ITSELF after a run - but only when that run set a new
+          high score, which is the decision in utils/runnerBoard rather than a boolean here.
+
+          ALWAYS RENDERED, and hidden with `visibility` rather than unmounted or `hidden`, and the reason is worth
+          stating because both alternatives look tidier:
+            * `hidden` (or `display: none`) is NOT safe here: a stylesheet rule that sets `display` beats the `[hidden]`
+              attribute, because the attribute's own rule is the browser's weakest - so the backdrop, which has to be
+              `display: grid` to centre the panel, would stay on screen and cover the whole app.
+            * Unmounting it would take the board's markup out of the DOM, and that markup is what verify:admin-render
+              renders and checks (a panel that exists only after a click is a panel nothing checks), and it would cost a
+              remount every time the dialog opens in the middle of a game.
+
+          `visibility: hidden` is the right answer for the closed state: it keeps the element out of the tab order and out
+          of the accessibility tree exactly as `display: none` does, it can be transitioned in both directions (so the
+          dialog fades rather than snapping, which is what every other dialog in this app does), and it does not take
+          layout space in a way that matters - this is a fixed overlay either way.
+
+          THE PORTAL IS renderInViewport's: `.ffr__sky` carries the world's scale transform, and `position: fixed` is
+          positioned against the nearest ancestor with a transform (and clipped by any `overflow: hidden` on the way),
+          so a dialog left inside the cabinet would be centred on the game area instead of the window.
+
+          `data-sound="none"` ON THIS NODE is not a duplicate of the one on the cabinet, and it is the kind of thing that
+          is only noticed by its absence: the portal puts this subtree in document.body, OUTSIDE the marked cabinet, so
+          without its own marker every press in here would play the app's UI click over the game's own voice - the one
+          thing that marker exists to prevent. */}
+      {renderInViewport(
+        <div
+          className={`ffr__modal-backdrop${boardOpen ? " ffr__modal-backdrop--open" : ""}`}
+          data-sound="none"
+          // A closed dialog is not read out. `visibility: hidden` already does this, but the attribute is what makes it
+          // true for the at-launch screen readers that only look at aria-hidden.
+          aria-hidden={!boardOpen}
+          onPointerDown={(event) => {
+            // The cabinet is one big pointer surface that jumps, so a press in here must never reach it - true even
+            // through the portal, and cheap to keep true if this node is ever rendered in place.
+            event.stopPropagation();
+            // ONLY THE BACKDROP ITSELF DISMISSES: a press that lands on the panel is the member reading the board.
+            if (event.target === event.currentTarget) dismissBoard();
+          }}
+          onKeyDown={trapBoardFocus}
+        >
+          <div className="ffr__modal" role="dialog" aria-modal="true" aria-label="Station leaderboard">
+            <div className="ffr__modal-head">
+              <span className="ffr__modal-title">🏆 STATION LEADERBOARD</span>
+              <button
+                type="button"
+                ref={boardCloseRef}
+                className="ffr__modal-close"
+                aria-label="Close the leaderboard"
+                onClick={dismissBoard}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="ffr__modal-sub">
+              {boardStatus === "ready" && leaderboardTotal > 0
+                ? `TOP ${leaderboard.length} OF ${leaderboardTotal} · PERSONAL BESTS`
+                : "PERSONAL BESTS"}
+            </p>
+
+            {boardStatus === "loading" && <p className="ffr__notice">CHECKING THE BOARD…</p>}
+
+            {boardStatus === "unavailable" && (
+              <p className="ffr__notice">BOARD UNAVAILABLE RIGHT NOW</p>
+            )}
+
+            {boardStatus === "ready" && leaderboard.length === 0 && (
+              <p className="ffr__notice">NO SCORES YET — BE THE FIRST ON THE BOARD.</p>
+            )}
+
+            {leaderboard.length > 0 && (
+              <ol className="ffr__board-list">
+                {leaderboard.map((row, index) => {
+                  const isMe = currentUser && String(row.id) === String(currentUser.id);
+                  return (
+                    <li
+                      key={row.id}
+                      className={`ffr__board-row${isMe ? " ffr__board-row--me" : ""}`}
+                    >
+                      <span className="ffr__board-rank">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="ffr__board-name">
+                        {row.name || unnamedLabel("member")}
+                        {isMe ? " (you)" : ""}
+                      </span>
+                      <span className="ffr__board-score">
+                        {String(row.score).padStart(5, "0")}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+
+            <div className="ffr__modal-foot">
+              <span className="ffr__modal-esc">PRESS ESC TO CLOSE</span>
+              <button
+                type="button"
+                ref={boardDoneRef}
+                className="ffr__modal-done"
+                onClick={dismissBoard}
+              >
+                CLOSE
+              </button>
+            </div>
+          </div>
         </div>
-
-        {boardStatus === "loading" && (
-          <p className="ffr__board-note">CHECKING THE BOARD…</p>
-        )}
-
-        {boardStatus === "unavailable" && (
-          <p className="ffr__board-note">BOARD UNAVAILABLE RIGHT NOW</p>
-        )}
-
-        {boardStatus === "ready" && leaderboard.length === 0 && (
-          <p className="ffr__board-note">NO SCORES YET — BE THE FIRST ON THE BOARD.</p>
-        )}
-
-        {leaderboard.length > 0 && (
-          <ol className="ffr__board-list">
-            {leaderboard.map((row, index) => {
-              const isMe =
-                currentUser && String(row.id) === String(currentUser.id);
-              return (
-                <li
-                  key={row.id}
-                  className={`ffr__board-row${isMe ? " ffr__board-row--me" : ""}`}
-                >
-                  <span className="ffr__board-rank">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="ffr__board-name">
-                    {row.name || unnamedLabel('member')}
-                    {isMe ? " (you)" : ""}
-                  </span>
-                  <span className="ffr__board-score">
-                    {String(row.score).padStart(5, "0")}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-
-        {savedNotice?.kind === "improved" && (
-          <p className="ffr__board-note ffr__board-note--ok">
-            🏆 NEW PERSONAL BEST SAVED — {String(savedNotice.best).padStart(5, "0")}
-          </p>
-        )}
-        {savedNotice?.kind === "kept" && (
-          <p className="ffr__board-note">
-            SCORE SENT · YOUR BEST IS STILL {String(savedNotice.best).padStart(5, "0")}
-          </p>
-        )}
-        {savedNotice?.kind === "failed" && (
-          <p className="ffr__board-note ffr__board-note--warn">
-            COULD NOT SAVE YOUR SCORE
-          </p>
-        )}
-      </section>
+      )}
     </div>
   );
 }

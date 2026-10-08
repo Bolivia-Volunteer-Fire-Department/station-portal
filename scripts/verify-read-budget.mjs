@@ -597,11 +597,21 @@ checkIs('never the whole collection', !/db\.collection\('certifications'\)\.get\
 // `users_private` are one document per member, so both halves grew with the station. The page's candidates are read by
 // query, their private halves BY DOCUMENT (getAll over the candidates' own refs), and the certification columns by the
 // page's ids.
+//
+// THE QUERIES LIVE IN A `read` THE CALLABLE HANDS TO functions/rosterPage.js, because the read has to look at MORE THAN
+// ONE CHUNK to fill a page - a candidate who has left eats the spare - and that loop is a decision, so it belongs where a
+// harness can drive it. The two chains are still written out in full below and still bounded by the limit the module
+// asks for, which is what these assertions are here to keep true.
 checkIs(
   'and it reads a page rather than the roster',
   /namePrefixRange\(search\)/.test(rosterBody) &&
-    /pageFromCandidates\(\{ candidates: candidateRows/.test(rosterBody) &&
+    /scanRosterPage\(\{/.test(rosterBody) &&
+    /scanLimit: ROSTER_SCAN_LIMIT/.test(rosterBody) &&
     /roster_page: \{/.test(rosterBody)
+);
+checkIs(
+  'a chunk of candidates is a query bounded by the limit the module asked for',
+  /orderBy\('name'\)\.limit\(limit\)/.test(rosterBody) && !/db\.collection\('users'\)\.orderBy\('name'\)\.get\(\)/.test(rosterBody)
 );
 checkIs(
   'never the whole users or users_private collections',
@@ -609,7 +619,7 @@ checkIs(
 );
 checkIs(
   'the private halves by document, for the candidates only',
-  /db\.getAll\(\.\.\.candidateRows\.map\(\(candidate\) => db\.collection\('users_private'\)\.doc\(candidate\.id\)\)\)/.test(rosterBody)
+  /db\.getAll\(\.\.\.chunkRows\.map\(\(candidate\) => db\.collection\('users_private'\)\.doc\(candidate\.id\)\)\)/.test(rosterBody)
 );
 
 // 2. The training count is a stored counter, kept by a trigger on both directions.

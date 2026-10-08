@@ -217,13 +217,15 @@ const main = async () => {
   console.log('\n--- an administrator reads the full payload ---');
   await signIn('jane');
   const asAdmin = await fetchAdminPayload(accountFor('u1'));
-  // THREE roles now, not two: `r3` is the Assessor, seeded for the assessment-score rules - "an officer who may add scores
-// still may not score themselves" needs an identity that HOLDS the permission and is not the subject, which the
-// administrator cannot be (`is_admin` passes everything and would answer "allowed" for the wrong reason). The count is
-// asserted rather than assumed, so adding a role again would fail here rather than silently pass.
-checkIs(
+  // FOUR roles now, not two. `r3` is the Assessor, seeded for the assessment-score rules - "an officer who may add scores
+  // still may not score themselves" needs an identity that HOLDS the permission and is not the subject, which the
+  // administrator cannot be (`is_admin` passes everything and would answer "allowed" for the wrong reason). `r4` is the
+  // certification officer, seeded for the same reason one step further out: the storage rules let an officer who may
+  // MANAGE certifications attach a scan, and that has to be provable without an administrator's blanket permission. The
+  // count is asserted rather than assumed, so adding a role again fails here rather than silently passing.
+  checkIs(
     'the member half is still all there',
-    Array.isArray(asAdmin.onDuty) && asAdmin.roles.length === 3,
+    Array.isArray(asAdmin.onDuty) && asAdmin.roles.length === 4,
     JSON.stringify({ onDuty: (asAdmin.onDuty || []).length, roles: (asAdmin.roles || []).length })
   );
   // THE SCHEDULE IS ASKED FOR RATHER THAN CARRIED, on both payloads - driven for real in the window section below, which is
@@ -248,6 +250,9 @@ checkIs(
     // Rae Nolan is the Assessor: the third seeded member, with `can_add_assessment_scores` and nothing else
     // administrative. Present so the rules harness has somebody who may score but must not score themselves.
     ['Rae Nolan', 'rae', 'active'],
+    // Sam Ortiz is the certification officer, present so the STORAGE rules have somebody who may attach a scan to a
+    // certification without being an administrator.
+    ['Sam Ortiz', 'sam', 'active'],
   ]);
   // THE SHAPE OF A DIRECTORY ROW, asserted exactly rather than by hunting for a substring.
   //
