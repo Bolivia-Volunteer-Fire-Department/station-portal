@@ -100,9 +100,16 @@ const claims = [
   { id: 'c5', user_id: 'u9', availability_window_id: 'aw1', date_from: '2026-09-01' },
 ];
 const directory = [
-  { id: 'u1', name: 'Zoe', rank_id: 'k1' },
-  { id: 'u2', name: 'Abe', rank_id: 'k2' },
-  { id: 'u3', name: 'Nobody' },
+  { id: 'u1', name: 'Zoe', rank_id: 'k1', role_id: 'r-fire' },
+  { id: 'u2', name: 'Abe', rank_id: 'k2', role_id: 'r-fire' },
+  { id: 'u3', name: 'Nobody', role_id: 'r-fire' },
+];
+// The roles, for the one question the "said nothing" list asks about a member: may they set their own availability at
+// all? Everyone in the directory holds the role that may, which is what keeps the cases below unchanged - a member who
+// cannot answer is a case of its own, further down.
+const roles = [
+  { id: 'r-fire', can_edit_own_availability: true },
+  { id: 'r-desk', can_edit_own_availability: false },
 ];
 check('the claims for one window and day, in name order', availableMembersForWindow(claims, 'aw1', '2026-09-01', directory).map((m) => m.name), ['Abe', 'Unnamed member', 'Zoe']);
 check('a member missing from the directory is labeled rather than dropped', availableMembersForWindow(claims, 'aw1', '2026-09-01', directory).map((m) => m.id), ['u2', 'u9', 'u1']);
@@ -190,29 +197,82 @@ console.log('\n--- who said nothing this month, and whether the month was read a
 // unclaimed, and a claim in another month must not count as a claim in this one - the roster holds a RANGE of months.
 check(
   'September 2026: the one member who claimed nothing',
-  membersWithNoAvailability({ users: directory, availability: claims, year: 2026, month: 8 }),
+  membersWithNoAvailability({ users: directory, availability: claims, roles, year: 2026, month: 8 }),
   [{ id: 'u3', name: 'Nobody', rank_id: '' }]
 );
 // c4 is a JUNE 2024 claim by Abe, so asking about June 2024 must not credit his September claims.
 check(
   'a claim in another month is not a claim in this one',
-  membersWithNoAvailability({ users: directory, availability: claims, year: 2024, month: 5 }).map((m) => m.name),
+  membersWithNoAvailability({ users: directory, availability: claims, roles, year: 2024, month: 5 }).map((m) => m.name),
   ['Nobody', 'Zoe']
 );
 check(
   'a month nobody claimed lists everyone, in name order',
-  membersWithNoAvailability({ users: directory, availability: claims, year: 2027, month: 0 }).map((m) => m.name),
+  membersWithNoAvailability({ users: directory, availability: claims, roles, year: 2027, month: 0 }).map((m) => m.name),
   ['Abe', 'Nobody', 'Zoe']
 );
 check(
   'a claim by somebody not in the directory adds nobody',
-  membersWithNoAvailability({ users: directory, availability: [{ user_id: 'u9', date_from: '2026-09-01' }], year: 2026, month: 8 }).length,
+  membersWithNoAvailability({ users: directory, availability: [{ user_id: 'u9', date_from: '2026-09-01' }], roles, year: 2026, month: 8 }).length,
   3
 );
 check(
   'a member with no name falls back to the unnamed label',
-  membersWithNoAvailability({ users: [{ id: 'u7' }], availability: [], year: 2026, month: 8 }),
+  membersWithNoAvailability({ users: [{ id: 'u7', role_id: 'r-fire' }], availability: [], roles, year: 2026, month: 8 }),
   [{ id: 'u7', name: 'Unnamed member', rank_id: '' }]
+);
+
+// A MEMBER WHO CANNOT ANSWER IS NOT SOMEBODY TO CHASE. A role without the permission cannot open the Availability
+// module at all, so "said nothing this month" is not a lapse - it is the shape of their job, and the same name would
+// sit on that card every month for ever. The check is the permission ITSELF, the same one the module is gated on, so
+// this list and that screen cannot disagree about who is able to answer.
+check(
+  'a member whose role cannot set availability is left off the list',
+  membersWithNoAvailability({
+    users: [
+      { id: 'u1', name: 'Zoe', rank_id: 'k1', role_id: 'r-fire' },
+      { id: 'u4', name: 'Desk', rank_id: 'k2', role_id: 'r-desk' },
+    ],
+    availability: [],
+    roles,
+    year: 2026,
+    month: 8,
+  }).map((m) => m.id),
+  ['u1']
+);
+// A role that cannot be found, and no role at all, are the same answer as the member's own screen would give: the
+// module is not there for them, so there is nothing for them to have filled in.
+check(
+  'and one whose role cannot be found is left off too',
+  membersWithNoAvailability({ users: [{ id: 'u8', name: 'Ghost', role_id: 'r-gone' }], availability: [], roles, year: 2026, month: 8 }),
+  []
+);
+check(
+  "nor does a member with no role on their row appear",
+  membersWithNoAvailability({ users: [{ id: 'u9', name: 'Fresh' }], availability: [], roles, year: 2026, month: 8 }),
+  []
+);
+// The roles sheet writes TRUE as text, and the client has always accepted both spellings - permissionGranted is
+// isTruthyFlag, so a role maintained by hand grants exactly what a role edited in the app grants.
+check(
+  'a role written the sheet way still counts as granted',
+  membersWithNoAvailability({
+    users: [{ id: 'u10', name: 'Sheet', role_id: 'r-sheet' }],
+    availability: [],
+    roles: [{ id: 'r-sheet', can_edit_own_availability: 'TRUE' }],
+    year: 2026,
+    month: 8,
+  }).map((m) => m.id),
+  ['u10']
+);
+// FAIL CLOSED, deliberately, and the same way the permission helpers do everywhere else: with no roles to check
+// against, nobody can be shown to be able to answer, so nobody is listed rather than everybody. The tab always hands
+// them in (see AdminAvailabilityTab), so this only bites a caller that forgot - which is worth seeing rather than
+// quietly getting the old behaviour back.
+check(
+  'and with no roles handed in at all, the list is empty rather than everybody',
+  membersWithNoAvailability({ users: directory, availability: [], year: 2026, month: 8 }),
+  []
 );
 check('a month nobody gave is nobody missing', membersWithNoAvailability({ users: directory, availability: claims }), []);
 check('and a member with no id is never listed', membersWithNoAvailability({ users: [{ name: 'Ghost' }], availability: [], year: 2026, month: 8 }), []);

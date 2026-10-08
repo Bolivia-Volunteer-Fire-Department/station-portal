@@ -35,6 +35,9 @@ import { toDateKey, parseSheetDateKey } from './scheduleDate.js';
 import { DAY_ORDER } from './calendarConstants.js';
 import { unnamedLabel } from './displayLabel.js';
 import { timeToMinutes } from './shiftTime.js';
+// The one definition of "may set their own availability", shared with the module's own gate in App (and with the
+// rules, which read the same role flag). Nothing here may invent a second reading of that permission.
+import { permissionGranted } from './permissions.js';
 
 // The key one claim is identified by: the window AND the day. Two members can claim the same window on the same day, and
 // one member can claim the same window on two days.
@@ -232,13 +235,30 @@ export const monthAvailabilityLoaded = (loadedFrom, loadedTo, year, month) => {
   return (!loadedFrom || monthStart >= loadedFrom) && (!loadedTo || monthEnd <= loadedTo);
 };
 
+// Whether a member's own Availability module is open to them: their role, found by id, granting the permission the
+// module is gated on. A role that cannot be found comes back false - which is what permissionGranted(undefined, ...)
+// says, and what the member's own screen says too, because the module would not be there for them either.
+const memberCanSetAvailability = (user, roles) => {
+  const roleId = String(user?.role_id ?? '').trim();
+  const role = (Array.isArray(roles) ? roles : []).find(
+    (candidate) => String(candidate?.id ?? '').trim() === roleId
+  );
+  return permissionGranted(role, 'can_edit_own_availability');
+};
+
 // The members who claimed NOTHING in a month - the list an officer works from when they are chasing people before
 // the month closes. The rows are scoped to the month HERE rather than by the caller, because the roster holds
 // whatever range has been read and a claim in another month must not count as a claim in this one.
 //
 // An unread month makes every member look unclaimed, which is why the caller pairs this with monthAvailabilityLoaded
 // and says so rather than printing the whole crew.
-export const membersWithNoAvailability = ({ users = [], availability = [], year, month } = {}) => {
+//
+// ONLY THE MEMBERS WHO COULD FILL IT IN. A role without "Set their own availability" cannot open the module, so that
+// member has no way to claim anything - and listing them is not a chase, it is a permanent entry on a list of people to
+// chase, sitting there every month. So the list is the members whose role GRANTS the permission, and the check is the
+// SAME one the module itself is gated on (App's canEditOwnAvailability, from permissionGranted) rather than a second
+// reading of the role: whoever is missing here is somebody whose own screen offers them nothing to do.
+export const membersWithNoAvailability = ({ users = [], availability = [], roles = [], year, month } = {}) => {
   if (!Number.isInteger(year) || !Number.isInteger(month)) return [];
   const monthStart = toDateKey(new Date(year, month, 1));
   const monthEnd = toDateKey(new Date(year, month + 1, 0));
@@ -254,7 +274,7 @@ export const membersWithNoAvailability = ({ users = [], availability = [], year,
   return (Array.isArray(users) ? users : [])
     .filter((user) => {
       const id = String(user?.id ?? '').trim();
-      return id && !claimed.has(id);
+      return id && !claimed.has(id) && memberCanSetAvailability(user, roles);
     })
     .map((user) => ({
       id: String(user.id).trim(),

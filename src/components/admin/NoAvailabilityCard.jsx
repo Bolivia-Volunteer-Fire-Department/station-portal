@@ -30,7 +30,7 @@ export default function NoAvailabilityCard({ members = [], year, month, loaded =
           </p>
         ) : members.length === 0 ? (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Everyone has marked some availability in {MONTHS[month]} {year}.
+            Everyone who can set their own availability has marked some in {MONTHS[month]} {year}.
           </p>
         ) : (
           <ul className="space-y-1.5">

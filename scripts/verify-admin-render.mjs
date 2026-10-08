@@ -667,10 +667,17 @@ const adminAvailabilityHtml = (() => {
     return renderToString(
       React.createElement(AdminAvailabilityTab, {
         token: 'test-token',
-        users: [availMember, { id: 'u2', name: 'Member 3', rank_id: 'k1', status: 'active' }],
+        users: [
+          { ...availMember, role_id: 'r-fire' },
+          { id: 'u2', name: 'Member 3', rank_id: 'k1', status: 'active', role_id: 'r-fire' },
+        ],
         windows: [availWindow],
         // Member 1's one claim, so the day list has a chip and the no-availability card has exactly one name.
         rosterAvailability: availRows,
+        // The roles, because the card lists only the members whose role can set their own availability at all - see
+        // utils/availability#membersWithNoAvailability. Both of these hold one that can, which is what the assertions
+        // below depend on; the member whose role cannot is the case after them.
+        roles: [{ id: 'r-fire', can_edit_own_availability: true }],
         ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
         onDataChanged: async () => {},
       })
@@ -703,6 +710,50 @@ check(
 );
 check('naming the member who claimed nothing', noAvailCard.includes('Member 3'));
 check('and not the member who did claim', !noAvailCard.includes('Member 1'));
+
+console.log('\n--- and nothing at all for somebody who cannot answer ---');
+// A MEMBER WHOSE ROLE CANNOT SET AVAILABILITY is not somebody to chase: the module is not there for them, so they have
+// no way to fill the month in and their name would sit on that card for ever. The same month, the same claims, one more
+// member - whose role does not carry the permission.
+const lockedOutHtml = String(
+  (() => {
+    try {
+      return renderToString(
+        React.createElement(AdminAvailabilityTab, {
+          token: 'test-token',
+          users: [
+            { ...availMember, role_id: 'r-fire' },
+            { id: 'u2', name: 'Member 3', rank_id: 'k1', status: 'active', role_id: 'r-fire' },
+            { id: 'u4', name: 'Member 4', rank_id: 'k1', status: 'active', role_id: 'r-desk' },
+          ],
+          windows: [availWindow],
+          // Nobody has claimed anything, so every member who CAN answer belongs on the card - and Member 4, who cannot,
+          // is the one name that must not be there.
+          rosterAvailability: [],
+          roles: [
+            { id: 'r-fire', can_edit_own_availability: true },
+            { id: 'r-desk', can_edit_own_availability: false },
+          ],
+          ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
+          onDataChanged: async () => {},
+        })
+      );
+    } catch (error) {
+      return { error };
+    }
+  })()
+);
+// Scoped to the CARD, by the same slice the assertions above use: the member picker legitimately lists everybody (an
+// officer with "Manage member availability" may edit any member's month), so the question is only who the card names.
+const lockedCard = lockedOutHtml.slice(
+  lockedOutHtml.indexOf('No availability'),
+  lockedOutHtml.indexOf('Day shift cover')
+);
+check(
+  'the card still names the members who can answer',
+  lockedCard.includes('Member 1') && lockedCard.includes('Member 3')
+);
+check('and leaves off the one whose role forbids it', !lockedCard.includes('Member 4'));
 
 console.log('\n--- the availability windows tab, with nothing in it ---');
 // THE STATE A STATION STARTS IN, and the one this tab shipped broken in. The list and the empty message were two panels

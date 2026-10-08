@@ -31,6 +31,8 @@ Three deliberate rules make it readable:
 2. **Shifts nobody has marked stay visible.** An uncovered shift is precisely the one worth spotting, so those rows are shown, marked *No one available*, and counted in a summary at the top.
 3. **It is a list, not a grid.** The question is "who can work this?", and names read far better in a line per shift than crammed into a calendar cell.
 
+Beside the days sits **No availability**: the members who have marked nothing at all that month, which is the list to work from when you are chasing people before the month closes. It counts **only the members whose role can set their own availability** — the role permission *Set their own availability* — because everyone else has no way to answer: their own Availability module is not there, so "said nothing" is not a lapse and their name would sit on that card every month for ever. Somebody whose role cannot be found, or who has no role at all, is left off for the same reason: their screen would not offer them the module either. The list appears once the month has actually been read, and says so rather than showing you the whole crew.
+
 ## Building the schedule from this list
 
 **A name on this list is a button.** Click one and a menu appears beside it offering the shifts that fall on that day — the ones your schedule templates generate for that weekday, plus any one-off shifts that have been added for the date.

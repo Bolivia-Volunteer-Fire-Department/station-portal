@@ -533,6 +533,9 @@ export default function AdminPanel({
           loadedTo={rosterScope?.to || ''}
           onLoadMonth={onRosterMonth}
           ranks={ranks}
+          // The roles, for the "hasn't filled it in" card alone: a member whose role cannot open the Availability
+          // module has no way to answer, so listing them every month is noise rather than a chase.
+          roles={roles}
           timeFormat={timeFormat}
           events={events}
           hideEventsByDefault={hideEventsByDefault}

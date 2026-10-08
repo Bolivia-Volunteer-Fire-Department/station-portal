@@ -53,6 +53,9 @@ export default function AdminAvailabilityTab({
   loadedTo = '',
   onLoadMonth,
   ranks = [],
+  // The roles, for ONE question: which members can set their own availability at all, so the "hasn't filled it in"
+  // card lists the people worth chasing rather than everybody whose role offers them no way to answer.
+  roles = [],
   timeFormat = '12',
   hideEventsByDefault = false,
   // Non-shift entries, drawn on BOTH views: on the single-member grid so an administrator sees the same month the member
@@ -97,6 +100,9 @@ export default function AdminAvailabilityTab({
   const noAvailability = membersWithNoAvailability({
     users,
     availability: rosterAvailability,
+    // The roles, because "who said nothing" is only worth listing for the members who can say anything: see the note on
+    // the filter in utils/availability. The tab is handed them for this one question.
+    roles,
     year: rosterYear,
     month: rosterMonth,
   });
