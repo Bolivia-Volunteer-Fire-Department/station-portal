@@ -102,7 +102,7 @@ import { mergeSavedUser } from './utils/userRow';
 import { mergeSavedRow, mergeRowsById, replaceRowsInRange } from './utils/savedRow';
 // Date keys, for the windows this screen asks for (the clock history, and the schedule before it). The history's
 // window is measured on the STATION's clock, because that is the clock its entries are stamped on.
-import { dateKeyMonthsBack, stationTodayKey, toDateKey } from './utils/scheduleDate';
+import { dateKeyDaysBack, stationTodayKey, toDateKey } from './utils/scheduleDate';
 // The trustworthy-clock rule, for the clock card: it must not offer a button it cannot honour, and it must say why.
 import { OFFLINE_CLOCK_MESSAGE, isOffline } from './utils/connectivity';
 import { createWaveReporter, nextWaveId } from './utils/activity';
@@ -448,26 +448,62 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
     ]
   );
 
-  useEffect(() => {
-    if (!authToken || activeTab !== 'roster' || !canViewRoster) return;
-    if (rosterModuleCache?.token === authToken) return;
-    let cancelled = false;
-    setRosterModuleLoading(true);
+  // THE ROSTER MODULE, A PAGE AT A TIME, WITH A NAME SEARCH (what a page IS lives in functions/rosterPage.js, and the
+  // callable is the reader).
+  //
+  // ONE READ PER PAGE, AND ONE PER SEARCH - NEVER ONE PER KEYSTROKE. The search box is a controlled input whose value is
+  // COMMITTED on submit, so typing is not a query. That is a read decision as much as a UX one: a read per keystroke is the
+  // same class of waste this paging exists to remove.
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [rosterLoadingMore, setRosterLoadingMore] = useState(false);
+  // WHICH READ THE PAGE IN HAND ANSWERS, so coming back to this tab does not buy the same page twice. The key is the
+  // account AND the search, and an admin change to the roster clears it below - the same invalidation the old cache had.
+  const [rosterLoadedFor, setRosterLoadedFor] = useState('');
+
+  const loadRosterPage = async ({ token = authToken, search = '', cursor = '', append = false } = {}) => {
+    if (append) setRosterLoadingMore(true);
+    else setRosterModuleLoading(true);
     setRosterModuleError('');
-    fetchRosterModule(authToken)
-      .then((data) => {
-        if (!cancelled) setRosterModuleCache({ token: authToken, data });
-      })
-      .catch((error) => {
-        if (!cancelled) setRosterModuleError(error.message || 'Could not load the roster.');
-      })
-      .finally(() => {
-        if (!cancelled) setRosterModuleLoading(false);
+    try {
+      const data = await fetchRosterModule(token, { search, cursor });
+      if (!data || data.code === 'UNAUTHORIZED') {
+        sessionExpired(token);
+        return;
+      }
+      setRosterModuleCache((prev) => {
+        // A SECOND PAGE ADDS to the first rather than replacing it, and the columns merge with it: the callable answers
+        // with the page's own members and those members' columns, which is exactly what is appended here.
+        const base = append && prev && prev.token === token && prev.search === search ? prev.data : null;
+        return {
+          token,
+          search,
+          data: {
+            ...data,
+            members: base ? [...(base.members || []), ...(data.members || [])] : data.members || [],
+            memberCertificationIds: {
+              ...((base && base.memberCertificationIds) || {}),
+              ...(data.memberCertificationIds || {}),
+            },
+          },
+        };
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [authToken, activeTab, canViewRoster, rosterModuleCache]);
+    } catch (error) {
+      setRosterModuleError(error.message || 'Could not load the roster.');
+    } finally {
+      if (append) setRosterLoadingMore(false);
+      else setRosterModuleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!authToken || activeTab !== 'roster' || !canViewRoster) return undefined;
+    const key = `${authToken}|${rosterSearch}`;
+    if (rosterLoadedFor === key) return undefined;
+    setRosterLoadedFor(key);
+    void loadRosterPage({ token: authToken, search: rosterSearch });
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, canViewRoster, rosterSearch, rosterLoadedFor]);
 
   useEffect(() => {
     // Nothing to warm until a member is signed in: that is when a role exists, and so a set of reachable tabs.
@@ -818,7 +854,11 @@ const getLoadingMessage = () => {
     if (!wanted.length) return refreshAdminData(token);
     const rosterSections = ['users', 'certificationSetup', 'certificationRecords'];
     const invalidateRoster = () => {
-      if (wanted.some((name) => rosterSections.includes(name))) setRosterModuleCache(null);
+      if (wanted.some((name) => rosterSections.includes(name))) {
+        setRosterModuleCache(null);
+        // ...AND THE MARKER WITH IT, or the page in hand would still read as current for a roster that just changed.
+        setRosterLoadedFor('');
+      }
     };
 
     try {
@@ -1187,13 +1227,28 @@ const getLoadingMessage = () => {
     return rows;
   };
 
-  // The window the screen opens with, and the one its "older entries" button asks for: twelve months at a time.
+  // THE WINDOW IS THE STATION'S PAY PERIOD, AND THAT IS A READ DECISION AS MUCH AS A DISPLAY ONE.
+  //
+  // `timeclock` is the one collection that grows on its own: every clock-in and clock-out, by every member, forever. Forty
+  // members clocking in twice a day is roughly 2,400 entries a month, so the twelve months this screen used to open on was
+  // ~29,000 reads for ONE officer's first look - paid again on every visit by every officer, because the scope is per
+  // session rather than per save, and paid by the member's own Clock History too (which reads the same list, narrowed by
+  // the reader to their own rows).
+  //
+  // SEVEN DAYS INCLUDING TODAY, which is the period the station pays by, so the default is the range somebody actually
+  // reconciles - not a compromise between what they want and what a read costs. `dateKeyDaysBack(6)` is the first of those
+  // seven days; the count is deliberately the offset rather than the span, and the harness pins the pair.
+  //
+  // NOTHING IS HIDDEN, which is what makes a small default safe rather than a cut: the table says what it holds and offers
+  // "load older entries", which walks back ONE PAY PERIOD at a time. The button is the older look; the default is the one
+  // paid for on every visit - and the CSV export exports what is LOADED, so the button is also how an officer asks for more
+  // before exporting.
   //
   // MEASURED ON THE STATION'S CLOCK, not the device's. Entries are stamped with `stationTimestamp` (Eastern), so a
   // phone whose own date has already rolled over - or has not yet - would put the window's edge on the wrong day and
   // hide exactly the entry just written. The end of a window is the one bound that must not be approximate, which is
   // what makes this the same `stationTodayKey` the rest of the app asks "is this in force today?" with.
-  const monthsBack = (months) => dateKeyMonthsBack(months);
+  const daysBack = (days, fromKey) => dateKeyDaysBack(days, fromKey || stationTodayKey());
 
   // ONCE PER SESSION PER WINDOW, which is what makes this different from re-fetching a module on every visit: the guard is
   // the scope itself, so moving between tabs costs nothing after the first look.
@@ -1215,7 +1270,7 @@ const getLoadingMessage = () => {
   useEffect(() => {
     const wantsTheHistory = activeTab === 'clock-history' || (activeTab === 'admin' && adminSubTab === 'clock');
     if (!wantsTheHistory || !authToken || logsScope) return;
-    void loadLogs(monthsBack(12), stationTodayKey()).catch((error) => {
+    void loadLogs(daysBack(6), stationTodayKey()).catch((error) => {
       console.error('[logs] could not load the clock history', error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2421,7 +2476,7 @@ const getLoadingMessage = () => {
                 loadedFrom={logsScope ? logsScope.from : ''}
                 onLoadOlder={() => {
                   if (!logsScope || !logsScope.from) return undefined;
-                  return loadLogs(monthsBack(24), logsScope.from);
+                  return loadLogs(daysBack(6, logsScope.from), logsScope.from);
                 }}
               />
             )}
@@ -2430,6 +2485,22 @@ const getLoadingMessage = () => {
               <RosterModule
                 loading={rosterModuleLoading}
                 error={rosterModuleError}
+                // ONE PAGE IN HAND, AND THE SEARCH IT ANSWERS: the box is controlled from here, so the committed term and
+                // the rows on screen cannot disagree about which question was asked.
+                search={rosterSearch}
+                onSearch={setRosterSearch}
+                loadingMore={rosterLoadingMore}
+                page={rosterModuleCache && rosterModuleCache.token === authToken ? rosterModuleCache.data.roster_page || {} : {}}
+                onLoadMore={() =>
+                  loadRosterPage({
+                    token: authToken,
+                    search: rosterSearch,
+                    cursor: (rosterModuleCache && rosterModuleCache.data && rosterModuleCache.data.roster_page
+                      ? rosterModuleCache.data.roster_page.next_cursor
+                      : '') || '',
+                    append: true,
+                  })
+                }
                 members={rosterModuleCache?.token === authToken ? rosterModuleCache.data.members || [] : []}
                 ranks={ranks}
                 certificationTypes={rosterModuleCache?.token === authToken ? rosterModuleCache.data.certificationTypes || [] : []}
@@ -2516,6 +2587,10 @@ const getLoadingMessage = () => {
                 currentUser={currentUser}
                 trainings={trainings}
                 signatures={trainingSignatures}
+                // The public settings, for the SIGNING WINDOW: a training can be signed for a configured number of days
+                // after its date, and the module closes the button rather than letting the writer refuse a click the
+                // member has already made (see utils/training#trainingSignBlockedReason).
+                systemSettings={systemSettings}
                 canEdit={canEditTrainings}
                 onChanged={refreshTraining}
               />
@@ -2619,6 +2694,13 @@ const getLoadingMessage = () => {
                 onDataChanged={refreshAdminCollections}
                 onAvailabilityChanged={refreshAvailability}
                 onLogsChanged={refreshLogs}
+                // What the clock history HOLDS and how to go further back: the same pair the member's Clock History gets,
+                // so an officer sees that the table is a quarter and can ask for older entries - rather than reading a
+                // truncated list as the station's whole history (see the window note in `loadLogs`).
+                clockLogsFrom={logsScope ? logsScope.from : ''}
+                onLoadOlderClockLogs={() =>
+                  loadLogs(daysBack(6, logsScope ? logsScope.from : stationTodayKey()), logsScope ? logsScope.from : stationTodayKey())
+                }
                 onAdminDataChanged={refreshAdminCollections}
                 // A certification or setup save returns the rebuilt badge index. `setCertificationBadges` REPLACES rather
                 // than merges, which is right here: this is the whole index, freshly computed, so it supersedes anything

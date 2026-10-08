@@ -5,16 +5,18 @@ import TrainingBadges from './training/TrainingBadges';
 import TrainingFilters from './training/TrainingFilters';
 import TrainingForm from './training/TrainingForm';
 import TrainingTotals from './training/TrainingTotals';
-import { displayDate } from '../utils/scheduleDate';
+import { displayDate, stationTodayKey } from '../utils/scheduleDate';
 import {
   DEFAULT_TRAINING_SORT,
   emptyTrainingFilters,
   filterTrainings,
   normalizeTrainingList,
+  signatureWindowDays,
   signedTrainingIds,
   sortTrainingRows,
   trainingEditable,
   trainingEditBlockedReason,
+  trainingSignBlockedReason,
   trainingTotals,
 } from '../utils/training';
 
@@ -36,6 +38,10 @@ export default function TrainingModule({
   currentUser,
   trainings = [],
   signatures = [],
+  // The public system settings, for the SIGNING WINDOW: a training can be signed for a configured number of days after
+  // its date (see utils/training), and the module closes the button rather than letting the writer refuse a click the
+  // member has already made.
+  systemSettings = [],
   canEdit = false,
   onChanged,
 }) {
@@ -81,6 +87,12 @@ export default function TrainingModule({
   const totals = useMemo(() => trainingTotals(rows, signedIds), [rows, signedIds]);
   const pendingCount = pendingSignIds.size;
 
+  // THE SIGNING WINDOW, read from the public settings the app already holds. `todayKey` is the STATION's today rather
+  // than the device's, because a deadline is a station fact - the same comparison every other "is this still live?"
+  // question in the app makes (utils/scheduleDate#stationTodayKey).
+  const windowDays = signatureWindowDays(systemSettings);
+  const todayKey = stationTodayKey();
+
   const toggleSign = (training) => {
     const id = String(training.id);
     if (signedIds.has(id)) {
@@ -90,6 +102,13 @@ export default function TrainingModule({
         type: 'info',
         text: 'Signatures cannot be removed. If this is wrong, ask an administrator to correct it in the Training report.',
       });
+      return;
+    }
+    // CLOSED FOR SIGNATURE - the window has passed, or the record has been marked as finished. Say which rather than
+    // doing nothing, in the words the writer would refuse with, so a click and a save cannot read differently.
+    const blocked = trainingSignBlockedReason(training, { todayKey, windowDays });
+    if (blocked) {
+      setMessage({ type: 'info', text: blocked });
       return;
     }
     setPendingSignIds((prev) => {
@@ -240,6 +259,16 @@ export default function TrainingModule({
           </div>
         )}
 
+        {/* THE RULE, SAID ONCE, rather than only as a tooltip on a button the member cannot use: a Closed button explains
+            itself on hover, but a member who never hovers would read it as a broken screen. Shown only when a window is
+            configured - with none, there is nothing to say. */}
+        {windowDays !== null && (
+          <p className="px-4 pt-3 text-xs text-slate-500 dark:text-slate-400">
+            Trainings can be signed for {windowDays} day{windowDays === 1 ? '' : 's'} after the date. For anything older,
+            ask an administrator.
+          </p>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
@@ -276,6 +305,9 @@ export default function TrainingModule({
                 // because it is locked - offers Open (read-only) in place of Edit.
                 const editable = trainingEditable(training);
                 const editBlockedReason = trainingEditBlockedReason(training);
+                // Why the signature button is closed, if it is. Worked out per row rather than stored on the training,
+                // because the window is a setting and the clock keeps moving.
+                const signBlockedReason = trainingSignBlockedReason(training, { todayKey, windowDays });
                 return (
                   <tr key={id} className="align-top">
                     <td className="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300">
@@ -322,27 +354,33 @@ export default function TrainingModule({
                       </td>
                     )}
                     <td className="px-4 py-3 text-right">
+                      {/* THREE STATES AND A CLOSED ONE: signed, ready to sign, unsigned - and a training nobody may sign
+                          any more (the window has passed, or the record is marked as finished), which reads Closed and
+                          explains itself on hover rather than looking like a button that broke. */}
                       <button
                         type="button"
                         onClick={() => toggleSign(training)}
-                        disabled={isSigned}
+                        disabled={isSigned || Boolean(signBlockedReason)}
                         title={
                           isSigned
                             ? 'You signed this training. Signatures cannot be removed.'
-                            : isPending
-                              ? 'Click to take this back out of the batch'
-                              : 'Click to add your signature, then save'
+                            : signBlockedReason ||
+                              (isPending
+                                ? 'Click to take this back out of the batch'
+                                : 'Click to add your signature, then save')
                         }
                         className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
                           isSigned
                             ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 cursor-default'
-                            : isPending
-                              ? 'border-2 border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
-                              : 'border-2 border-dashed border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 dark:border-slate-600 dark:text-slate-400 dark:hover:text-white'
+                            : signBlockedReason
+                              ? 'cursor-not-allowed border-2 border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-500'
+                              : isPending
+                                ? 'border-2 border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                                : 'border-2 border-dashed border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 dark:border-slate-600 dark:text-slate-400 dark:hover:text-white'
                         }`}
                       >
                         {isSigned && <Check className="w-3.5 h-3.5" />}
-                        {isSigned ? 'Signed' : isPending ? 'Ready to sign' : 'Sign'}
+                        {isSigned ? 'Signed' : signBlockedReason ? 'Closed' : isPending ? 'Ready to sign' : 'Sign'}
                       </button>
                     </td>
                   </tr>

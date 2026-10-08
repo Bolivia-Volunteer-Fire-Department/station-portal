@@ -105,8 +105,11 @@ export default function MyClockHistory({ currentUser, logs = [], timeFormat, shi
           <span>
             Showing {totals.count} of {mineCount} {mineCount === 1 ? 'entry' : 'entries'}
             {isFiltered ? ' (filtered)' : ''}
-            {/* THE PAGE DOES NOT HOLD YOUR WHOLE HISTORY, and it says so: it opens on the last twelve months and can be asked
-                for older ones. Without this line, "Showing 8 of 8" reads as a lifetime total, which it is not. */}
+            {/* THE PAGE DOES NOT HOLD YOUR WHOLE HISTORY, and it says so: it opens on the station's PAY PERIOD - the last
+                seven days, including today - and can be asked for older ones a week at a time. Without this line, "Showing
+                8 of 8" reads as a lifetime total, which it is not. The size of the default is a READ decision: the same
+                list serves an officer's whole-station table, where a year is tens of thousands of entries (see the window
+                note in App#loadLogs). */}
             {loadedFrom ? ` · entries back to ${loadedFrom}` : ''}
           </span>
           <span className="flex items-center gap-3">

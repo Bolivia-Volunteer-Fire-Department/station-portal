@@ -77,6 +77,11 @@ export const PUBLIC_SETTING_KEYS = [
   // scripts/verify-firestore-writes pins the two names together so they cannot drift.
   'clock_hours_rounding',
   'session_timeout',
+  // The training SIGNING WINDOW, because the MEMBER'S OWN Training module reads it to close the Sign button on a training
+  // whose date is too far back - and a screen cannot honour a setting it may not read. Written as a literal rather than
+  // imported from utils/training, which reads settings through this module (the same cycle the rounding key above avoids);
+  // scripts/verify-training pins the two names together so they cannot drift.
+  'training_signature_window_days',
   'is_dark_mode',
   'time_format',
 ];

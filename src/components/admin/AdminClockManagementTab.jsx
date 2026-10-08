@@ -1,5 +1,5 @@
 import React, { useMemo, useEffect, useRef, useState, useId } from 'react';
-import { Loader2, Pencil, Trash2, Plus, AlertCircle, Clock, ArrowUpDown, Download, MapPin } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, Clock, ArrowUpDown, Download, History, MapPin } from 'lucide-react';
 import { adminSaveTimeclockEntry, adminDeleteTimeclockEntry } from '../../services/api';
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
@@ -125,8 +125,10 @@ function durationHoursFor(log, roundingMinutes) {
   return Number.isFinite(hours) ? roundClockHours(hours, roundingMinutes) : null;
 }
 
-export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [], systemSettings = [] }) {
+export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [], systemSettings = [], loadedFrom = '', onLoadOlder }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
+  // A "load older entries" press is a read of a year of the station's clock entries, so it says it is working.
+  const [loadingOlder, setLoadingOlder] = useState(false);
   // Whether the editor modal is open: "a new entry" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -397,6 +399,15 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             Timeclock Entries {filteredSortedLogs.length > 0 && `(${filteredSortedLogs.length})`}
+            {/* WHAT THIS TABLE HOLDS, said out loud: the count is what is LOADED, not the station's lifetime total, and
+                this line is what stops the two being read as the same thing (the member's Clock History says it the same
+                way). It opens on the PAY PERIOD - seven days including today - because `timeclock` grows on its own: see
+                App#loadLogs. */}
+            {loadedFrom ? (
+              <span className="ml-2 font-normal text-xs text-slate-500 dark:text-slate-400">
+                · entries back to {loadedFrom}
+              </span>
+            ) : null}
           </h3>
           <button
             type="button"
@@ -418,6 +429,27 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
             <Download className="w-4 h-4" />
             Export CSV
           </button>
+          {/* THE OTHER HALF OF A SMALLER DEFAULT: the table opens on a quarter, so an officer who wants further back asks
+              for it here rather than paying for a year on every visit. The export above exports what is LOADED, which is
+              why this sits beside it. */}
+          {onLoadOlder && (
+            <button
+              type="button"
+              disabled={loadingOlder}
+              onClick={async () => {
+                setLoadingOlder(true);
+                try {
+                  await onLoadOlder();
+                } finally {
+                  setLoadingOlder(false);
+                }
+              }}
+              className="ml-2 flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium text-sm px-4 py-2 rounded-xl transition disabled:opacity-50"
+            >
+              <History className="w-4 h-4" />
+              {loadingOlder ? 'Loading…' : 'Load older entries'}
+            </button>
+          )}
         </div>
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">

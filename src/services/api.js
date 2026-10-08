@@ -294,7 +294,11 @@ export const fetchScheduleWindow = async (from, to, token) =>
 // when such a screen opens rather than at sign-in: see firestorePayload#readStationRows and App#loadRoster.
 export const fetchRoster = async (token) => dispatchRequest({ action: 'GET_ROSTER', token });
 
-export const fetchRosterModule = async (token) => dispatchRequest({ action: 'GET_ROSTER_MODULE', token });
+// ONE PAGE of the roster. The search and the cursor belong to the SCREEN and travel as top-level keys on the request the
+// reader receives (the shape the clock history's range uses); the page SIZE is deliberately not sent, so the default lives
+// in exactly one place - functions/rosterPage.js, where the harness can ask it.
+export const fetchRosterModule = async (token, { search = '', cursor = '' } = {}) =>
+  dispatchRequest({ action: 'GET_ROSTER_MODULE', token, search, cursor });
 
 // --- Certification badges ---------------------------------------------------------------------------------------
 

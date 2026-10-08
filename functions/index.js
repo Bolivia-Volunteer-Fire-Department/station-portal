@@ -6,14 +6,6 @@ const { getAuth } = require('firebase-admin/auth');
 const { FieldValue, getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
-// The audit trail's filter, sorts and row mapping: pure, no dependencies, and tested without an emulator.
-const {
-  buildAuditFilter,
-  orderByFor,
-  pageSizeFor,
-  logReplyFrom,
-  FACET_SAMPLE_SIZE,
-} = require('./auditLog');
 // The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
 // searchable in the Firebase console. See the note on `audit` below.
 const { logger } = require('firebase-functions/logger');
@@ -43,6 +35,17 @@ const {
   announcementRecipients,
   audienceTargetsFrom,
 } = require('./pushAudience');
+// THE ROSTER'S PAGE: what one screenful is, which candidates are still members, and which certification columns it draws.
+// Pure, so scripts/verify-roster-page.mjs can ask it directly - and THIS REPO RUNS NO FUNCTIONS EMULATOR, so a callable is
+// not exercised by the suite at all: anything this function could get wrong has to live where a harness can reach it.
+const {
+  ROSTER_SCAN_LIMIT,
+  certificationIdsForMembers,
+  namePrefixRange,
+  pageFromCandidates,
+  rosterCertificationTypes,
+  rosterPageSize,
+} = require('./rosterPage');
 
 // WHAT BELONGS IN A FUNCTION, and why:
 //
@@ -231,73 +234,93 @@ exports.whoami = onCall(async (request) => {
 });
 
 
+// THE ROSTER MODULE, A PAGE AT A TIME, WITH A NAME SEARCH.
+//
+// IT USED TO READ EVERYTHING TO DRAW TEN NAMES. `users` and `users_private` are one document per member, so that half grew
+// with the roster; `certifications` is append-only, so its half grew with the station's age. Both are now bounded by what
+// the officer is looking at, which is the point: a roster only ever gets bigger, and so does every collection behind it.
+//
+// THE DECISIONS LIVE IN ./rosterPage - the page size and its cap, the prefix a search box becomes, which candidates are
+// members, and which columns the page holds. That split is not tidiness: this repo runs no Functions emulator, so nothing
+// here is exercised by the suite, and every rule that could be got wrong is in a module scripts/verify-roster-page.mjs
+// asks directly (the arrangement ./pushAudience established). What is left below is the reading.
 exports.readRosterModule = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   await requirePermission(request.auth.uid, 'can_view_roster', 'view the roster');
 
-  const [usersSnapshot, privateSnapshot, setupSnapshot] = await Promise.all([
-    db.collection('users').get(),
-    db.collection('users_private').get(),
-    db.collection('certification_setup').get(),
-  ]);
-  const privateById = new Map(privateSnapshot.docs.map((row) => [row.id, row.data()]));
-  const members = usersSnapshot.docs
-    .filter((row) => String(privateById.get(row.id)?.status || '').trim().toLowerCase() === 'active')
-    .map((row) => ({
-      id: row.id,
-      name: String(row.get('name') || ''),
-      rank_id: String(row.get('rank_id') || ''),
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name));
-  const memberIds = new Set(members.map((member) => member.id));
-  const certificationTypes = setupSnapshot.docs
-    .filter((row) => row.get('show_on_roster') === true)
-    .map((row) => ({
-      id: row.id,
-      name: String(row.get('name') || ''),
-      icon: String(row.get('icon') || ''),
-      sort_order: Number(row.get('sort_order') || 999),
-    }))
-    .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
-  const visibleTypeIds = new Set(certificationTypes.map((type) => type.id));
-  const memberCertificationIds = Object.fromEntries(members.map((member) => [member.id, []]));
+  const data = request.data || {};
+  const pageSize = rosterPageSize(data.page_size);
+  const search = String(data.search || '').trim();
+  const cursor = String(data.cursor || '').trim();
   const today = stationTimestamp().slice(0, 10);
 
-  // ONLY THE ACTIVE MEMBERS' RECORDS, in batches of thirty - never the whole collection.
+  // THE CANDIDATES: by name, narrowed to a prefix when the officer typed one, and resumed after the last name they hold.
+  //
+  // THE TWO BRANCHES ARE WRITTEN AS FULL CHAINS, and that is not style: scripts/verify-read-budget walks each
+  // `collection(...)` call and the filters that follow it textually, so a query assembled onto a variable afterwards is a
+  // query whose index requirement nothing checks. Both shapes need NO composite index - a range and the ordering on the
+  // SAME field are served by that field's own index - and the harness is what says so.
+  //
+  // ONE MORE THAN THE PAGE NEEDS, because the status is private: some candidates will turn out to have left, and the page
+  // has to be able to tell "that is everyone" from "there is more behind this". The over-read stops at the scan limit, so a
+  // roster full of former members cannot turn one page into a whole-collection read.
+  const range = namePrefixRange(search);
+  const candidateLimit = Math.min(pageSize + 1, ROSTER_SCAN_LIMIT);
+  const candidateQuery = range.from
+    ? db.collection('users').where('name', '>=', range.from).where('name', '<=', range.to).orderBy('name').limit(candidateLimit)
+    : db.collection('users').orderBy('name').limit(candidateLimit);
+  const candidateRows = (await (cursor ? candidateQuery.startAfter(cursor) : candidateQuery).get()).docs.map((row) => ({
+    id: row.id,
+    name: row.get('name'),
+    rank_id: row.get('rank_id'),
+  }));
+
+  // THEIR PRIVATE HALVES, BY DOCUMENT - only the candidates, never the collection. One `getAll` is a single round trip for
+  // every ref, which is the cheapest shape this read can take; the rules are not in the way because this is the admin SDK,
+  // which is exactly why the screen cannot do this for itself.
+  const privateRows = candidateRows.length
+    ? await db.getAll(...candidateRows.map((candidate) => db.collection('users_private').doc(candidate.id)))
+    : [];
+  const privateById = Object.fromEntries(privateRows.map((row) => [row.id, row.exists ? row.data() : {}]));
+
+  const page = pageFromCandidates({ candidates: candidateRows, privateById, pageSize });
+  const certificationTypes = rosterCertificationTypes((await db.collection('certification_setup').get()).docs);
+  const typeIds = certificationTypes.map((type) => type.id);
+
+  // THE PAGE'S RECORDS ONLY, in batches of thirty - never the whole collection, and never the whole roster.
   //
   // `certifications` is append-only: one row per member per certificate period, accumulated for the station's whole life.
   // Reading it whole made every open of the Roster module pay for every record ever recorded, including the ones belonging
-  // to members who have left. The active ids are already in hand, so the query names them - the same batched `in` read
+  // to members who have left. The page's ids are already in hand, so the query names them - the same batched `in` read
   // readAdminCertificationRecords makes, and the same thirty-per-request ceiling Firestore puts on `in`.
   const certificationRows = [];
-  const memberIdList = [...memberIds];
-  for (let start = 0; start < memberIdList.length; start += 30) {
-    const batch = memberIdList.slice(start, start + 30);
+  const pageIds = page.members.map((member) => member.id);
+  for (let start = 0; start < pageIds.length; start += 30) {
+    const batch = pageIds.slice(start, start + 30);
     const snapshot = await db.collection('certifications').where('user_id', 'in', batch).get();
-    certificationRows.push(...snapshot.docs);
+    certificationRows.push(...snapshot.docs.map((row) => ({ id: row.id, ...row.data() })));
   }
 
-  certificationRows.forEach((row) => {
-    const record = row.data();
-    const memberId = String(record.user_id || '');
-    const typeId = String(record.certification_id || '');
-    const effectiveDate = String(record.effective_date || '').trim();
-    const endDate = String(record.end_date || '').trim();
-    if (
-      memberIds.has(memberId) &&
-      visibleTypeIds.has(typeId) &&
-      (!effectiveDate || effectiveDate <= today) &&
-      (!endDate || endDate >= today)
-    ) {
-      memberCertificationIds[memberId].push(typeId);
-    }
-  });
-
-  Object.values(memberCertificationIds).forEach((typeIds) => {
-    typeIds.splice(0, typeIds.length, ...new Set(typeIds));
-  });
-
-  return { members, certificationTypes, memberCertificationIds };
+  return {
+    members: page.members,
+    certificationTypes,
+    memberCertificationIds: certificationIdsForMembers({
+      members: page.members,
+      certificationRows,
+      typeIds,
+      today,
+    }),
+    // WHAT THE CALLER ACTUALLY HAS, rather than what it hoped for: the cursor to continue from, whether there is anything
+    // to continue to, and the search these names answer - so a screen whose search changed mid-read cannot draw one page's
+    // members under another page's heading.
+    roster_page: {
+      size: pageSize,
+      search,
+      has_more: page.hasMore,
+      next_cursor: page.nextCursor,
+      scanned: candidateRows.length,
+    },
+  };
 });
 
 exports.readAdminCertificationRecords = onCall(async (request) => {
@@ -1804,77 +1827,6 @@ exports.sendTestPush = onCall(async (request) => {
       `Sent to ${answer.successCount} of ${devices.length} device${devices.length === 1 ? '' : 's'}.` +
       (dead.length ? ` ${dead.length} stale registration${dead.length === 1 ? '' : 's'} removed.` : ''),
   };
-});
-
-// -------------------------------------------------------------------------------------------------------------
-// The audit trail, read from CLOUD LOGGING on demand.
-// -------------------------------------------------------------------------------------------------------------
-//
-// WHY THIS IS AN API CALL AND NOT A COLLECTION. The audit trail used to be a `system_log` collection: one document per
-// action, plus a whole-collection scan every time the tab was opened, on the one collection in the app that grows
-// without limit. Both are gone - `audit` above writes a Cloud Logging line for nothing - and this reads those lines
-// back when an officer asks for them, and nowhere else. THE READ IS ON DEMAND, which is the property the collection
-// could never offer: a Firestore query bills per document, and a Logging read bills nothing.
-//
-// The filter, the sorts and the row mapping live in ./auditLog.js, which is pure and tested by
-// scripts/verify-audit-log.mjs - a filter string built by concatenation is the part that most needs a test.
-//
-// THE CLIENT LIBRARY IS REQUIRED LAZILY, and that is not a micro-optimisation: the Functions emulator loads this file to
-// run every OTHER function and implements no Logging API at all, so a top-level require would make every harness depend
-// on a package none of them use.
-exports.readSystemLog = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
-  await requirePermission(request.auth.uid, 'can_view_system_log', 'read the audit log');
-
-  const data = request.data || {};
-  const { filter, problem } = buildAuditFilter({
-    action: data.action_filter,
-    member: data.member,
-    from: data.from,
-    to: data.to,
-  });
-  if (problem) throw new HttpsError('invalid-argument', problem);
-
-  let Logging;
-  try {
-    ({ Logging } = require('@google-cloud/logging'));
-  } catch {
-    throw new HttpsError(
-      'failed-precondition',
-      'Reading the audit log needs the Cloud Logging client, which is not installed in this deployment.'
-    );
-  }
-
-  const pageSize = pageSizeFor(data.page_size);
-  const orderBy = orderByFor(data.sort);
-  const pageToken = String(data.page_token || '') || undefined;
-  const logging = new Logging();
-
-  let page;
-  let sample;
-  try {
-    // TWO read-only calls, in parallel: the page the officer asked for, and a recent sample the filter dropdowns are
-    // built from. The sample is what makes the dropdowns possible without scanning the log, and it is deliberately the
-    // recent end - see the note on FACET_SAMPLE_SIZE.
-    [page, sample] = await Promise.all([
-      logging.getEntries({ filter, orderBy, pageSize, pageToken }),
-      logging.getEntries({ filter, orderBy, pageSize: FACET_SAMPLE_SIZE }),
-    ]);
-  } catch (error) {
-    // Log reading is IAM-controlled on the FUNCTION'S service account, and a missing grant surfaces here. Saying so beats
-    // a generic failure: the fix is one role, and it is not something an officer can work out from "internal".
-    throw new HttpsError(
-      'permission-denied',
-      `The audit log could not be read (${(error && error.code) || (error && error.message) || 'unknown'}). ` +
-        'The function’s service account needs permission to read Cloud Logging - see the note in the README.'
-    );
-  }
-
-  const [entries, nextQuery] = page;
-  // The reply is assembled in ./auditLog.js rather than inline here, because its SHAPE is a contract with the tab and the
-  // two halves are deployed separately - so the shape belongs in the pure module the harness already holds. See
-  // logReplyFrom, and the note there on what a missing `api` costs.
-  return logReplyFrom({ entries, nextQuery, sampleEntries: sample[0], data, pageSize, stationTimestamp });
 });
 
 // Identity Platform's own guard on account creation. The app creates members with the Admin SDK from an officer's

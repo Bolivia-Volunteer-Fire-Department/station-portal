@@ -8,6 +8,10 @@
 // that without the VITE_FIREBASE_* values "the app stays entirely on Apps Script" - there is no sheet to stay on any more,
 // so an unconfigured build is a build that cannot reach its data, which is what `firebaseConfigured()` says out loud.)
 import { getApp, getApps, initializeApp } from 'firebase/app';
+// The one analytics call in the app. It is imported rather than required lazily because the entry point is safe in Node -
+// checked, not assumed: the harnesses load this module to assert the wiring, and an import that threw there would take
+// every one of them down.
+import { getAnalytics } from 'firebase/analytics';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { connectAuthEmulator, getAuth } from 'firebase/auth';
 import {
@@ -30,6 +34,12 @@ const env = import.meta.env || {};
 const emulatorHost = typeof process !== 'undefined' ? String(process.env.FIRESTORE_EMULATOR_HOST || '') : '';
 const usingEmulator = env.VITE_FIREBASE_EMULATOR === '1' || Boolean(emulatorHost);
 
+// The Google Analytics measurement id (`G-XXXXXXXXXX`), PUBLIC by design like the rest of the web config. EMPTY in every
+// build that has not enabled Analytics in the console, and that emptiness is what switches the reporting off - there is no
+// second switch to keep in step. Declared above `config` rather than beside the App Check values below, because the
+// config object is built at module load and a `const` declared after it would be in its temporal dead zone.
+const measurementId = String(env.VITE_FIREBASE_MEASUREMENT_ID || '').trim();
+
 const config = {
   apiKey: env.VITE_FIREBASE_API_KEY || (usingEmulator ? 'demo-api-key' : undefined),
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -38,6 +48,8 @@ const config = {
     (usingEmulator ? String((typeof process !== 'undefined' && process.env.GCLOUD_PROJECT) || 'demo-station-portal') : undefined),
   appId: env.VITE_FIREBASE_APP_ID || (usingEmulator ? 'demo-app-id' : undefined),
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  // Carried on the app's own options, which is where the SDK looks for it: `getAnalytics` reports nothing without one.
+  measurementId: measurementId || undefined,
 };
 
 // Whether there is anything to talk to. A build without the config is a build that has not moved yet.
@@ -131,6 +143,38 @@ export const firebaseApp = () => {
           // A misconfigured App Check must not stop the station from working: it is a guard against abuse, not a dependency.
           // The App Check console reports unverified requests, so a failure here is visible without this throwing.
           console.warn('[appcheck] could not initialise App Check:', error && error.message);
+        }
+      }
+    }
+
+    // GOOGLE ANALYTICS: the daily-active-user count, and the only reporting the app does.
+    //
+    // IT IS OPT-IN BY VALUE. A measurement id is what enables it, so every build without one - which is every build until
+    // somebody pastes the id into .env or the repository secrets - behaves exactly as it did before Analytics existed.
+    // There is no separate flag to switch on and forget to switch off.
+    //
+    // A LOOPBACK ORIGIN IS SKIPPED, and that is a deliberate difference from App Check's guard rather than a copy of it: a
+    // developer's own browser is not a station user, and counting it would quietly inflate the very number this exists to
+    // report. The emulator is skipped for the same reason (it reports to no project), and a deployed site is neither, so a
+    // real visit is counted.
+    //
+    // WHAT IS SENT: one page view per visit, and nothing else - the app never calls a logging helper, so no member's name,
+    // screen or action leaves the browser. Tab switches are not page views either, because this is a single-page app: GA4
+    // sees one view per visit, which is exactly what "daily active users" means. See the README's Analytics note.
+    if (measurementId && !usingEmulator && typeof window !== 'undefined') {
+      if (loopbackOrigin()) {
+        // Said once, for the reason `firebaseConfigured()` announces itself: somebody running locally and seeing nothing
+        // in GA4 should learn why from the console rather than from the source.
+        console.info(
+          '[analytics] not counting this visit: a loopback origin is a developer\'s browser rather than a station user.'
+        );
+      } else {
+        try {
+          getAnalytics(app);
+        } catch (error) {
+          // Like App Check, a failure here must not stop the station from working: reporting is not a dependency, and the
+          // GA4 console shows whether a period is missing data.
+          console.warn('[analytics] could not initialise Google Analytics:', error && error.message);
         }
       }
     }

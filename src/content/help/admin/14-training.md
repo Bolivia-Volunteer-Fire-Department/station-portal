@@ -48,6 +48,12 @@ Press **Add training** at the right of the report toolbar, and the editor opens 
 
 **Edit is available here for a training that has been signed.** That is the point of the rule: the Training module closes a training as soon as anybody signs it, and changes from then on are made here, deliberately.
 
+## The other way a training stops accepting signatures
+
+A training also closes when its **signing window** has passed — a number of days after the training's own date, set once in **System Settings** (see **System Settings**). That is the ordinary case; the marker above is for closing one early.
+
+Members see both the same way: the **Sign** button reads **Closed**, and says which reason applies. Neither touches a signature already given. If somebody attended and the window has since closed, widen the window in System Settings, let them sign, and set it back — an administrator cannot add a signature on anybody's behalf.
+
 ## The external-system marker locks a training for good
 
 Checking **Entered into an external system** is permanent. It should be set once the training has been filed in whatever external system records it, and doing so:

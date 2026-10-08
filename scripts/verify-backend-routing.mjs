@@ -112,27 +112,11 @@ for (const [action, feature] of Object.entries(ROUTED_WRITES)) {
 // it by the one hook in dispatchRequest, which every read passes through - so for those, being a real api.js action is
 // the wiring.
 //
-// ONE READ IS COMPOSED RATHER THAN SPELLED OUT, and this is the check that has to know it: the audit log's request body is
-// built by systemLogRequest (utils/systemLog.js), because its filter and its page token have to be assembled in one place
-// where they cannot shadow the action name - so `action: 'ADMIN_GET_SYSTEM_LOG'` appears nowhere in api.js, and a string
-// search alone would report a live feature as unwired.
-//
-// IT IS ASKED IN THE SOURCE, NOT BY CALLING IT, and that is not laziness: utils/systemLog.js imports the app's date helpers
-// with no file extension, which Vite resolves and Node does not - so importing it here would stop this harness from
-// STARTING (ERR_MODULE_NOT_FOUND, the same trap utils/scheduleWindow.js documents). Both halves of the question are
-// therefore checked against the text, and together they are the same guarantee: api.js goes through the composer, AND the
-// composer's constant names this action. Either one changing makes the check fail, exactly as a missing literal would.
-const systemLogSource = readFileSync(new URL('../src/utils/systemLog.js', import.meta.url), 'utf8');
-const composedReads =
-  /SYSTEM_LOG_ACTION = 'ADMIN_GET_SYSTEM_LOG'/.test(systemLogSource) && /systemLogRequest\(/.test(apiSource)
-    ? ['ADMIN_GET_SYSTEM_LOG']
-    : [];
 for (const [action] of Object.entries(ROUTED_READS)) {
   checkIs(
     `${action} is wired, either by its own call site or by the read hook`,
     apiSource.includes(`routeRead('${action}'`) ||
-      apiSource.includes(`action: '${action}'`) ||
-      composedReads.includes(action),
+      apiSource.includes(`action: '${action}'`),
     'neither found in api.js'
   );
 }

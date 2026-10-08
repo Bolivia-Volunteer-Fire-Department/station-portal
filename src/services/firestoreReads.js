@@ -494,8 +494,15 @@ export const READERS = {
     };
   },
   // THE SCHEDULE'S REFERENCE DATA - the templates a shift is drawn from, the assignments that colour and order them, and the shift
-  GET_ROSTER_MODULE: async () => {
-    const answer = await httpsCallable(firebaseFunctions(), 'readRosterModule')({});
+  // ONE PAGE OF THE ROSTER, plus the search and the cursor the screen asked for. What a page IS - its size, which
+  // candidates are members, which columns it draws - is decided by the callable (functions/rosterPage.js, tested without a
+  // database by scripts/verify-roster-page.mjs); this carries the question and nothing else.
+  GET_ROSTER_MODULE: async (uid, body) => {
+    const answer = await httpsCallable(firebaseFunctions(), 'readRosterModule')({
+      page_size: (body && body.page_size) || '',
+      search: (body && body.search) || '',
+      cursor: (body && body.cursor) || '',
+    });
     return answer.data || {};
   },
   // definitions a clock entry is labeled with. Read when a screen that has a schedule (or a clock table) is opened, rather than at

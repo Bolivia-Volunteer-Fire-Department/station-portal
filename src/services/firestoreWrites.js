@@ -26,6 +26,14 @@ import { normalizeFormDefinition } from '../utils/formDefinition.js';
 // exists as far as a member is concerned, and two implementations of that would drift.
 import { visibleDocumentFor } from './firestoreReads.js';
 import { settingSide } from '../utils/systemSettings.js';
+// The signing rule, the SAME function the member's screen draws its button from: one rule, one home, so a tab left open
+// while the window was changed cannot write a signature the screen would now refuse.
+//
+// THIS FILE IS LOADED BY PLAIN-NODE HARNESSES, which resolve no extension-less specifiers - so utils/training.js names
+// every one of ITS imports with the `.js`, and anything added here has to keep that true. The note this replaces said
+// the same thing about the TRUE parser that used to sit further down: that parser is now taken from this module rather
+// than duplicated, so the two ends of a signature cannot disagree about what "locked" means.
+import { normalizeTraining, settingsRowsFrom, signatureWindowDays, trainingSignBlockedReason } from '../utils/training.js';
 // The app's own date parser, shared rather than re-implemented: what the save path materializes below and what the screen
 // compares against must be the same reading of the same column, or an announcement can be live on screen and expired in
 // the query that feeds it.
@@ -33,7 +41,7 @@ import { availabilityMonthId } from '../utils/availability.js';
 // The app's own date parser, shared rather than re-implemented: what the save path materializes below and what the screen
 // compares against must be the same reading of the same column, or an announcement can be live on screen and expired in
 // the query that feeds it.
-import { parseSheetDateKey } from '../utils/scheduleDate.js';
+import { parseSheetDateKey, stationTodayKey } from '../utils/scheduleDate.js';
 // The assessment score's row id and type guard, shared with the reader so the two cannot disagree about which documents
 // carry scores or what a score row is called.
 import {
@@ -876,19 +884,6 @@ export const reorderDocuments = async ({ order }) => {
   return { moved };
 };
 
-// The app's TRUE parsing, kept local rather than imported.
-//
-// It looks like something to share, and there IS a helper for it (utils/rankEligibility) - but that module's own imports
-// are extension-less, which Vite resolves and plain Node does not, and this file is loaded by Node harnesses as well as
-// by the app. One three-line function is cheaper than a dependency that breaks a test runner, and it matches what the
-// audit check in this file already does inline.
-const isTrue = (value) => {
-  if (value === true) return true;
-  if (value === false) return false;
-  const text = String(value === undefined || value === null ? '' : value).trim().toUpperCase();
-  return text === 'TRUE' || text === 'YES' || text === '1';
-};
-
 // Signing trainings, in bulk, because the module collects a set of ticked trainings and saves once.
 //
 // ADD-ONLY, like every other signature: a request carrying removals is REFUSED rather than ignored, so a caller that
@@ -905,16 +900,32 @@ export const signTrainings = async ({ userId, trainingIds }) => {
 
   const trainings = await rowsOf(collection(firestore(), 'trainings'));
   const byId = new Map(trainings.map((training) => [training.id, training]));
-  const closed = wanted.filter((id) => {
-    const training = byId.get(id);
-    return training && isTrue(training.is_entered_into_external);
-  });
+
+  // THE WINDOW IS READ HERE, where the signature is actually written, rather than trusted from the screen: a member's
+  // module can be open across a settings change, so its button is closed from the settings it read at render and this is
+  // the same rule asked again. It comes from the public settings document, which every signed-in member may read.
+  const settingsDoc = await getDoc(doc(firestore(), 'settings', 'public'));
+  const windowDays = signatureWindowDays(settingsRowsFrom(settingsDoc.exists() ? settingsDoc.data() : {}));
+
   // A training that has been entered into an external system is LOCKED, and the lock has to mean its signatures as well
-  // as its fields - otherwise it is only half a lock, and somebody attends a course that is already on the record.
-  if (closed.length) {
+  // as its fields - otherwise it is only half a lock, and somebody attends a course that is already on the record. The
+  // signing window is the other half of the same rule, and `trainingSignBlockedReason` is what decides both, so the
+  // refusal below is worded from the reason the screen would have shown.
+  const blocked = [];
+  wanted.forEach((id) => {
+    const training = byId.get(id);
+    // An id no longer matching a training is reported as `skipped` below, which is what it has always meant.
+    if (!training) return;
+    const reason = trainingSignBlockedReason(normalizeTraining(training), {
+      todayKey: stationTodayKey(),
+      windowDays,
+    });
+    if (reason) blocked.push({ id, reason });
+  });
+  if (blocked.length) {
     return {
       success: false,
-      message: `Training ${closed.join(', ')} has been entered into an external system and is locked, so it cannot be changed.`,
+      message: `Training ${blocked.map((entry) => entry.id).join(', ')} cannot be signed. ${blocked[0].reason}`,
     };
   }
 

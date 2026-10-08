@@ -25,6 +25,14 @@ You cannot **delete** a training: that would throw away other members' signature
 
 The header keeps a count of your changes, such as **3 unsaved signatures**, so you can tell at a glance whether anything is pending.
 
+## Trainings close for signature
+
+A training can be signed for a set number of days after its date — the **signing window**, set by an administrator in System Settings. Once it has passed, the **Sign** button reads **Closed**, and the tooltip says which reason applies: the window, or the training having been filed in an external system. The line above the list states the window, so you can see how long you have before you start.
+
+**Sign what you attended while it is open.** A signature recorded months later is worth much less than one given at the time — which is the whole reason for the window — and a total like *3 of 40 signed* stops meaning anything if a year of signings arrives at once.
+
+If you attended something that has since closed, tell an administrator: they can widen the window if a signature is genuinely missing. Nothing you have already signed is affected either way.
+
 ## A signature cannot be withdrawn
 
 Once a training shows **Signed**, the button is disabled and stays that way. That is deliberate:

@@ -53,12 +53,15 @@ apps → Web app → SDK setup and configuration.
 | `VITE_FIREBASE_API_KEY` / `AUTH_DOMAIN` / `PROJECT_ID` / `APP_ID` | the web app config |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | push sender id |
 | `VITE_FIREBASE_VAPID_KEY` | Web Push certificate key (push notifications) |
+| `VITE_FIREBASE_MEASUREMENT_ID` | Google Analytics id (`G-…`); empty = nothing is reported |
 | `VITE_FIREBASE_APPCHECK_SITE_KEY` | reCAPTCHA Enterprise site key; empty = App Check off |
 | `VITE_FIREBASE_APPCHECK_DEBUG_TOKEN` | **local only, never a repo secret** — App Check debug token for `localhost` |
 | `VITE_FIRESTORE_FEATURES` | kill switch: unset = all routes; a comma list = only those; `off` = none |
 
 For local development against **no real project at all**, set `VITE_FIREBASE_EMULATOR=1` (or export
 `FIRESTORE_EMULATOR_HOST`, which the harnesses do) and skip the config entirely.
+
+**Analytics is opt-in by value.** Paste the web app's measurement id (`G-…`) as `VITE_FIREBASE_MEASUREMENT_ID` and the app reports one page view per visit — that is the daily-active-user count, and it is the **only** thing sent: the app never logs an event, so no member's name, screen or action leaves the browser. With no id, nothing is sent at all, and a **loopback origin** is skipped even when one is set, so local runs cannot inflate the number. Tab switches are not page views either — this is a single-page app, so GA4 sees one view per visit, which is what "daily active users" is supposed to mean.
 
 ## Emulators
 

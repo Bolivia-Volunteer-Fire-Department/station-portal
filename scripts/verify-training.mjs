@@ -14,6 +14,7 @@
 import {
   ENTERED_EXTERNALLY_KEY,
   MEMBER_EDITABLE_FLAGS,
+  SIGNATURE_WINDOW_KEY,
   TRAINING_BADGES,
   TRAINING_FLAGS,
   TRAINING_FLAG_KEYS,
@@ -23,12 +24,18 @@ import {
   normalizeTrainingList,
   parseDuration,
   signatureCounts,
+  signatureDeadlineKey,
+  signatureWindowConfig,
+  settingsRowsFrom,
+  signatureWindowDays,
   signaturesForTraining,
   signedTrainingIds,
   sortTrainingRows,
   trainingEditable,
   trainingEditBlockedReason,
   trainingLocationOptions,
+  trainingSignBlockedReason,
+  trainingSignable,
   trainingTimeLabel,
   trainingTotals,
   emptyTrainingFilters,
@@ -36,6 +43,10 @@ import {
   TRAINING_CATEGORY_OPTIONS,
   TRAINING_NO_CATEGORY,
 } from '../src/utils/training.js';
+// The window's own settings key lives on the public list, and this is the pin that keeps the two in step: the module reads
+// a key that the settings document has to publish, or the member's screen cannot honour it.
+import { PUBLIC_SETTING_KEYS } from '../src/utils/systemSettings.js';
+import { displayDate } from '../src/utils/scheduleDate.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -398,6 +409,73 @@ check('and are all badges', TRAINING_BADGES.length, 8);
 // A row with only the external flag set must therefore show no badges at all.
 check('a row with only the external flag has no badges', normalizeTraining({ ...ROW, is_entered_into_external: 'TRUE', is_hazmat: 'FALSE', is_company_training: 'FALSE' }).flags.length, 0);
 check('and a normal flag still badges', normalizeTraining({ ...ROW, is_hazmat: 'TRUE', is_company_training: 'FALSE' }).flags.map((f) => f.key), ['is_hazmat']);
+
+// --- the signing window ---
+
+console.log('\n--- the signing window: how long a training stays open ---');
+check('the key is the one the settings document carries', SIGNATURE_WINDOW_KEY, 'training_signature_window_days');
+// THE GLUE THE WRITER USES to turn the public settings DOCUMENT (one plain object) into the rows everything above reads.
+// It is the only part of the writer's path that can be got wrong without a database, which is why it lives in this module.
+check('a settings document becomes readable rows', settingsRowsFrom({ training_signature_window_days: '30' }), [
+  { key: 'training_signature_window_days', value: '30' },
+]);
+check('and the window reads straight off it', signatureWindowDays(settingsRowsFrom({ training_signature_window_days: '30' })), 30);
+check('a missing document is no window, not a crash', signatureWindowDays(settingsRowsFrom(undefined)), null);
+check('and neither is a document with no such field', signatureWindowDays(settingsRowsFrom({ time_format: '24' })), null);
+check('and it is PUBLIC, so the member\u2019s own screen may read it', PUBLIC_SETTING_KEYS.includes(SIGNATURE_WINDOW_KEY), true);
+// A BLANK SETTING MEANS NO LIMIT, and an unreadable one is IGNORED rather than applied - the rule the session timeout
+// follows, for the same reason: a typo must not close every training in the station at once.
+check('nothing set means no window', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '' }]), null);
+check('and a missing setting means no window', signatureWindowDays([]), null);
+check('a whole number of days is the window', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '30' }]), 30);
+check('zero is allowed, and means the day itself', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '0' }]), 0);
+check('padding is tolerated', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: ' 14 ' }]), 14);
+check('text after the number is not silently a number', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '30 days' }]), null);
+check('nor is a letter standing in for a digit', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '3O' }]), null);
+check('a negative window is refused', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '-7' }]), null);
+check('a fraction is not a day count', signatureWindowDays([{ key: SIGNATURE_WINDOW_KEY, value: '2.5' }]), null);
+check(
+  'and the config says WHICH of those it was',
+  signatureWindowConfig([{ key: SIGNATURE_WINDOW_KEY, value: '3O' }]),
+  { configured: false, days: null, invalid: true, raw: '3O' }
+);
+check('while a blank is not an error to report', signatureWindowConfig([]).invalid, false);
+check('and a usable value is configured', signatureWindowConfig([{ key: SIGNATURE_WINDOW_KEY, value: '7' }]).days, 7);
+
+// The deadline: date + window, INCLUSIVE, so the last day can still be signed.
+const FIRST_OF_MARCH = normalizeTraining({ ...ROW, date: '2026-03-01' });
+check('the deadline is the date plus the window', signatureDeadlineKey(FIRST_OF_MARCH, 30), '2026-03-31');
+check('a zero-day window closes on the date itself', signatureDeadlineKey(FIRST_OF_MARCH, 0), '2026-03-01');
+check('a month end rolls over', signatureDeadlineKey(normalizeTraining({ ...ROW, date: '2026-01-31' }), 1), '2026-02-01');
+check('and a year end rolls over too', signatureDeadlineKey(normalizeTraining({ ...ROW, date: '2026-12-31' }), 1), '2027-01-01');
+check('no window means no deadline', signatureDeadlineKey(FIRST_OF_MARCH, null), null);
+check('and an unreadable date has no deadline either', signatureDeadlineKey(normalizeTraining({ ...ROW, date: 'sometime' }), 30), null);
+
+check('the last day of the window can still be signed', trainingSignable(FIRST_OF_MARCH, { todayKey: '2026-03-31', windowDays: 30 }), true);
+check('the day after it cannot', trainingSignable(FIRST_OF_MARCH, { todayKey: '2026-04-01', windowDays: 30 }), false);
+check('with no window nothing ever closes', trainingSignable(FIRST_OF_MARCH, { todayKey: '2030-01-01', windowDays: null }), true);
+check(
+  'a row with no readable date stays signable',
+  trainingSignable(normalizeTraining({ ...ROW, date: 'sometime' }), { todayKey: '2030-01-01', windowDays: 30 }),
+  true
+);
+const closedReason = trainingSignBlockedReason(FIRST_OF_MARCH, { todayKey: '2026-06-01', windowDays: 30 });
+check('the reason says how long the window was', /30 days after its date/.test(closedReason), true);
+check('and names the day it closed', closedReason.includes(displayDate('2026-03-31')), true);
+check('and says who can still fix it', /administrator/.test(closedReason), true);
+check('a one-day window is singular in prose', /1 day after/.test(trainingSignBlockedReason(FIRST_OF_MARCH, { todayKey: '2026-06-01', windowDays: 1 })), true);
+check('an open training has no reason at all', trainingSignBlockedReason(FIRST_OF_MARCH, { todayKey: '2026-03-02', windowDays: 30 }), '');
+// THE LOCK AND THE WINDOW ARE SEPARATE REASONS, and the lock is reported first: it is the one no date can explain.
+check(
+  'a locked training reports the lock, not the window',
+  /external system/.test(trainingSignBlockedReason({ ...ROW, is_entered_into_external: 'TRUE' }, { todayKey: '2030-01-01', windowDays: 30 })),
+  true
+);
+check(
+  'and the lock closes a training with no window set at all',
+  trainingSignable({ is_entered_into_external: true, date_key: '2030-01-01' }, { todayKey: '2030-01-01', windowDays: null }),
+  false
+);
 
 // --- the category columns ---
 

@@ -1,4 +1,4 @@
-*System → System Settings* holds the station-wide configuration. Three of the cards are straightforward; **Clock Settings** and **Session Timeout** are the two with real consequences for members.
+*System → System Settings* holds the station-wide configuration. Three of the cards are straightforward; **Clock Settings**, **Session Timeout** and the **Training Signing Window** are the ones with real consequences for members.
 
 > [!IMPORTANT]
 > You must have the **Manage system settings** role permission to edit system settings.
@@ -79,6 +79,32 @@ Two details worth knowing before you set this:
 > **A value that cannot be read switches this OFF rather than on.** A cell holding `30 minutes` or `1,000` is reported as unusable and the timeout is not applied. This is deliberate: a typo that expired every session instantly would lock the whole department out of a shared terminal, and the card tells you when it is happening.
 
 Setting this very low — a minute or two — will sign members out while they are reading a long help guide without touching anything. Fifteen to sixty minutes is the useful range for a station terminal.
+
+## Training Signing Window
+
+How long after its date a training stays open for signatures. The badge reads the number of days when a window is set, and **No limit** when none is.
+
+| Value | Effect |
+|---|---|
+| **Blank** | No window — a training can be signed for as long as it exists |
+| **A whole number of days** (e.g. `30`) | Signing closes after the 30th day past the training's date, counting that date itself |
+
+The window is counted from **each training's own date**, so one number covers every training at once: there is nothing to set per training, and nothing to remember when one is added.
+
+**Two separate things close a training for signature:**
+
+- **the window**, once that many days have passed, and
+- **the external-system marker**, immediately and whatever the date — that marker is an administrator saying "this record is finished", which no date can express (see **Training**).
+
+A closed training shows the member a **Closed** button whose tooltip says which of the two applies, and a line above the list states the window in days. **Signatures already given are untouched**: closing the window stops new ones, and removing one stays an administrator's action in the Training report.
+
+> [!NOTE]
+> A value the app cannot read — `3O`, `30 days`, a negative number — is **ignored rather than applied**, so a typo cannot close every training in the station at once. The card says so while you type it.
+
+> [!IMPORTANT]
+> A member cannot sign on an administrator's behalf and an administrator cannot sign for them, so a signature that is genuinely missing is fixed from this card: widen the window, have them sign, and set it back. Nothing about the window is retroactive.
+
+Set this if members tend to sign in bulk, months later. A signature is an acknowledgment of attendance, and one given six months afterwards is worth much less to the record it lands in.
 
 ## Display Settings
 

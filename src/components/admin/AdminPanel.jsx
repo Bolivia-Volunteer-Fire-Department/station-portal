@@ -151,6 +151,10 @@ export default function AdminPanel({
   onRosterMonth,
   systemSettings,
   logs,
+  // What the clock history holds, and how to ask for more: forwarded to the Clock tab, which draws the same
+  // "entries back to" line and "load older" control the member's own Clock History does.
+  clockLogsFrom = '',
+  onLoadOlderClockLogs,
   timeFormat,
   onDataChanged,
   // The signed-in admin's own user id: the checklist verification view uses it to leave that member's own
@@ -550,6 +554,10 @@ export default function AdminPanel({
           ranks={ranks}
           shifts={shifts}
           logs={logs}
+          // The table opens on the PAY PERIOD, and it says so: see the window note on `logs` in App#loadLogs - a year of the
+          // station's clock entries is tens of thousands of reads for one look.
+          loadedFrom={clockLogsFrom}
+          onLoadOlder={onLoadOlderClockLogs}
           timeFormat={timeFormat}
           // The rounding step, so the hours in this table are the hours the report an officer reconciles it against pays.
           systemSettings={systemSettings}

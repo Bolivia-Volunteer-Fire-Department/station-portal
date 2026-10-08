@@ -422,6 +422,32 @@ const main = async () => {
     /loopback origin with no VITE_FIREBASE_APPCHECK_DEBUG_TOKEN/.test(firebaseSource)
   );
 
+  // ANALYTICS, the daily-active-user count. The measurement id is PUBLIC by design, so none of this is a secrecy question:
+  // it is about the number meaning what it says.
+  checkIs(
+    'the measurement id is read from the build',
+    /const measurementId = String\(env\.VITE_FIREBASE_MEASUREMENT_ID/.test(firebaseSource)
+  );
+  checkIs(
+    'and carried on the app options, or the SDK has nothing to report to',
+    /measurementId: measurementId \|\| undefined/.test(firebaseSource)
+  );
+  checkIs(
+    'reporting only when an id is configured, and never in a harness',
+    /if \(measurementId && !usingEmulator && typeof window !== 'undefined'\)/.test(firebaseSource)
+  );
+  // A developer's own browser is not a station user, so counting it would inflate the very number the setting exists to
+  // report - and a skip that says nothing is one the next person rediscovers from an empty GA4 report.
+  checkIs(
+    'skipped on a loopback origin, and the skip is announced',
+    /if \(loopbackOrigin\(\)\)/.test(firebaseSource) && /\[analytics\] not counting this visit/.test(firebaseSource)
+  );
+  checkIs('documented in the example env', /^VITE_FIREBASE_MEASUREMENT_ID=$/m.test(envExample));
+  checkIs(
+    'and documented as opt-in by value rather than by a second switch',
+    /Leave it EMPTY and nothing is reported at all/.test(envExample)
+  );
+
   const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
   checkIs(
     'the login signs in alongside, and so does the reauth',

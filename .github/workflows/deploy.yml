@@ -85,6 +85,10 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          # OPTIONAL, unlike the four the step above refuses to publish without: an unset secret arrives empty, and an
+          # empty measurement id is a build that reports nothing at all. It is deliberately NOT in that step - analytics is
+          # not a reason to block a deploy.
+          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
           echo "Building with base path /${REPO_NAME}/"

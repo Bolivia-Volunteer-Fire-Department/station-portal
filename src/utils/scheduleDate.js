@@ -38,11 +38,22 @@ export const nextDateKey = (key) => {
   return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
 };
 
+// A 'yyyy-MM-dd' key that many DAYS before another one, defaulting to the STATION's today.
+//
+// The clock history opens on the station's PAY PERIOD - seven days including today, which is `dateKeyDaysBack(6)` at the
+// call site - so this is the helper that window is built from, and the same one its "load older" step uses. Counted on the
+// station's clock for the reason stationTodayKey exists, and in UTC so a phone in another zone cannot shift the edge.
+export const dateKeyDaysBack = (days, fromKey = stationTodayKey()) => {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(fromKey ?? '').trim());
+  if (!parts) return '';
+  const shifted = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]) - Number(days || 0)));
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+};
+
 // A 'yyyy-MM-dd' key that many whole months before another one, defaulting to the STATION's today.
 //
-// The clock history opens on "the last twelve months", and that end has to be measured on the same clock the entries
-// are stamped on. The device's own date is the wrong one to ask (see stationTodayKey), and the arithmetic is done in
-// UTC so a phone in another zone cannot shift the start of the window.
+// Kept for the screens that think in months (a calendar month, a month-scoped claim read). The clock history does NOT use
+// it any more: it opens on the pay period, which is a week - see dateKeyDaysBack above and App#loadLogs.
 export const dateKeyMonthsBack = (months, fromKey = stationTodayKey()) => {
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(fromKey ?? '').trim());
   if (!parts) return '';

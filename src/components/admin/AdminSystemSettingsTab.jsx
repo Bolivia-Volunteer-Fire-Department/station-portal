@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Loader2, Pencil, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2 } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2 } from 'lucide-react';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
+// The signing window's own key and parser, from the module the member's Training module reads them with - so the card's
+// preview of a typed value and the rule the Sign button follows cannot be two different rules.
+import { SIGNATURE_WINDOW_KEY, signatureWindowConfig } from '../../utils/training';
 import { getCurrentCoordinates } from '../../utils/geolocation';
 import {
   getSettingValue,
@@ -28,6 +31,9 @@ const KNOWN_KEYS = [
   'gps_margin_of_error',
   CLOCK_ROUNDING_KEY,
   'session_timeout',
+  // The signing window for trainings: curated because a BLANK value means NO LIMIT rather than "off", which the generic
+  // value editor has no way to say - the same reason the session timeout has a card (see utils/training#signatureWindowConfig).
+  SIGNATURE_WINDOW_KEY,
   ...LOADING_MESSAGE_KEYS,
 ];
 
@@ -43,6 +49,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -491,6 +498,162 @@ function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
             Save Session Timeout
           </button>
         </div>
+      </form>
+    </div>
+  );
+}
+
+// THE TRAINING SIGNING WINDOW: how long after its date a training may still be signed.
+//
+// A card rather than a row in the generic editor, for the session timeout's reason and one more: a BLANK value means NO
+// LIMIT here, which is the opposite of what a blank means in a key/value list. It says what the window does to the
+// member's screen, because that is the only place its effect shows.
+function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
+  const [days, setDays] = useState(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDays(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
+  }, [systemSettings]);
+
+  // Previewed from the TYPED value rather than the stored one, so the effect of a change is visible before it is saved
+  // and a typo is reported here rather than silently switching the window off.
+  const preview = signatureWindowConfig([{ key: SIGNATURE_WINDOW_KEY, value: days }]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await adminSaveSystemSetting(SIGNATURE_WINDOW_KEY, String(days ?? '').trim(), token);
+      if (!result?.success) throw new Error(result?.message || 'Failed to save the signing window.');
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save the signing window.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <PenLine className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Training Signing Window</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              How long after its date a training stays open for signatures.
+            </p>
+          </div>
+          <span
+            className={`ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+              preview.configured
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400'
+                : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400'
+            }`}
+          >
+            {preview.configured ? `${preview.days} day${preview.days === 1 ? '' : 's'}` : 'No limit'}
+          </span>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          {preview.configured ? (
+            <>
+              A training can be signed for{' '}
+              <strong className="text-slate-700 dark:text-slate-300">
+                {preview.days} day{preview.days === 1 ? '' : 's'}
+              </strong>{' '}
+              after its date, counting the date itself — so a 30-day window on 1 March closes after 31 March. After that
+              the <strong className="text-slate-700 dark:text-slate-300">Sign</strong> button reads Closed for every
+              member. A signature that is genuinely missing is then yours to sort out here: widen the window, let them
+              sign, and set it back. A training marked as Locked stays closed, whatever the date.
+            </>
+          ) : preview.invalid ? (
+            <>
+              <strong className="text-amber-600 dark:text-amber-400">
+                &ldquo;{preview.raw}&rdquo; cannot be used, so there is no window at all.
+              </strong>{' '}
+              Enter a whole number of days — for example{' '}
+              <code className="rounded bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 px-1 py-0.5 font-mono text-[11px]">
+                30
+              </code>
+              . An unreadable value is ignored rather than applied, so a typo can never close every training in the
+              station at once.
+            </>
+          ) : (
+            <>
+              Trainings are{' '}
+              <strong className="text-slate-700 dark:text-slate-300">
+                open for signature for as long as they exist
+              </strong>
+              . Leave this blank to keep that, or fill it in to close signing a set number of days after each training's
+              date — which is what stops a member signing six months of trainings in one pass.
+            </>
+          )}
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              Signable for (days after the date)
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 30"
+              value={days}
+              onChange={(e) => {
+                setDays(e.target.value);
+                setSaved(false);
+              }}
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+          <div className="sm:col-span-2 flex items-end">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Counted from the training's own date, so one number covers every training at once. Signatures already given
+              are untouched: closing the window stops new ones, and removing one stays an administrator's action — a
+              signature is an acknowledgment of attendance, not a preference.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setDays('');
+              setSaved(false);
+            }}
+            className="text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+          >
+            Clear (no limit)
+          </button>
+          {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+          <button
+            type="submit"
+            disabled={saving}
+            className="ml-auto flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Signing Window
+          </button>
+        </div>
+
       </form>
     </div>
   );

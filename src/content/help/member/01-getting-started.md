@@ -53,6 +53,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added a "members without availability" card to the Administration module.
 * Added some reports.
 * Fixed an auth session retention issue.
+* Resolved some Firestore reads issues.
 
 ### Version 1.3x
 * Added the **Reports** module

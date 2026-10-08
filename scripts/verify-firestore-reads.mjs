@@ -62,6 +62,34 @@ const auth = firebaseAuth();
 
 const signIn = (username) => signInWithEmailAndPassword(auth, syntheticEmail(username), DEMO_PASSWORD);
 
+// --- what a screen COSTS, counted rather than argued ------------------------------------------------------------
+//
+// Firestore bills by DOCUMENT, so the number that matters is how many a screen's reads hand back. These two turn a payload
+// into that number; the end of this file prints it per section, biggest first.
+//
+// IT ASSERTS NOTHING, deliberately: a budget it deviated from would be a figure nobody agreed to, and the point here is
+// MEASUREMENT. Which reads exist, and which of them are windowed, is pinned by scripts/verify-read-budget.mjs. This is
+// where their SIZE is put in front of you - because "the schedule window is fine" and "the clock history is the biggest
+// read in the app" are both claims until somebody counts them.
+//
+// A MAP IS COUNTED BY ITS KEYS: the badge index is one document per member, keyed by their id, so the keys ARE the rows.
+// Every section is counted the same way, so the comparison between them holds even where the estimate is rough.
+const sectionDocs = (value) => {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === 'object') return Object.keys(value).length;
+  return 0;
+};
+const reportCost = (label, payload) => {
+  const rows = Object.entries(payload || {}).map(([key, value]) => [key, sectionDocs(value)]);
+  const total = rows.reduce((sum, [, count]) => sum + count, 0);
+  console.log(`\n--- ${label}: ${total} documents read ---`);
+  rows
+    .sort((left, right) => right[1] - left[1])
+    .filter(([, count]) => count > 0)
+    .forEach(([key, count]) => console.log(`    ${String(count).padStart(6)}  ${key}`));
+  return total;
+};
+
 const accountFor = (uid) => {
   const entry = DEMO_ACCOUNTS.find((candidate) => candidate.uid === uid);
   return { userId: uid, roleId: entry.role, rankId: entry.rank };
@@ -1108,6 +1136,44 @@ checkIs(
   process.env.VITE_FIRESTORE_FEATURES = 'off';
   check('with the switch off the router answers null', await routeRead('GET_BOOTSTRAP'), null);
   delete process.env.VITE_FIRESTORE_FEATURES;
+
+  // --- WHAT THE SCREENS COST, COUNTED ---------------------------------------------------------------
+  //
+  // The tables below answer "where do the reads go?" as a measurement rather than an argument. Read them as DOCUMENTS PER
+  // READ, which is what Firestore bills: each payload is one read, and each administration section is its own read - a tab
+  // reads the sections it needs and nothing else, which is what the section map is for.
+  //
+  // IT IS ALSO HOW A REGRESSION WOULD LOOK BEFORE IT IS BILLED: a section that suddenly counts in the thousands is either
+  // a read that has stopped being windowed or a collection that has grown, and both are worth seeing on the next run.
+  console.log('\n=== read cost, per payload and per section ===');
+  reportCost('the officer payload (a sign-in)', asOfficer);
+  reportCost("the administrator payload (an officer's sign-in)", asAdmin);
+  const sectionCosts = [];
+  const notReadable = [];
+  // AS AN OFFICER, WHICH IS THE ONLY IDENTITY THAT READS THESE AT ALL. The cases above end signed in as a member (several of
+  // them are about what a member may NOT read), and a member is refused every administration section - so a table taken here
+  // without signing back in reports eleven refusals and no costs, which is exactly what it did the first time.
+  await signOut(auth);
+  await signIn('jane');
+  for (const name of ADMIN_SECTION_NAMES) {
+    try {
+      const data = await readAdminSections([name]);
+      sectionCosts.push([name, Object.values(data).reduce((sum, value) => sum + sectionDocs(value), 0)]);
+    } catch (error) {
+      // A SECTION THIS IDENTITY MAY NOT READ IS NOT A FAILURE, and it is worth saying so rather than swallowing: the app's
+      // section map is per ROLE, so an officer lacking the permission never asks for that section at all - and Firestore
+      // refuses a query outright when a rule cannot prove it. Listed separately from the costs, because "not counted" and
+      // "counted zero" are different facts.
+      notReadable.push(`${name} (${String(error.code || 'refused')})`);
+    }
+  }
+  console.log('\n--- each administration section, biggest first ---');
+  sectionCosts
+    .sort((left, right) => right[1] - left[1])
+    .forEach(([name, count]) => console.log(`    ${String(count).padStart(6)}  ${name}`));
+  if (notReadable.length) {
+    console.log(`\n    not readable by this account, so not counted: ${notReadable.join(', ')}`);
+  }
 
   checkIs('every case ran', cases >= 34, `only ${cases} cases: a section has stopped running`);
 };

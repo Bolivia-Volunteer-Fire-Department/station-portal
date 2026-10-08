@@ -380,15 +380,45 @@ checkIs(
   'the crew directory waits for a screen that lists people',
   /if \(activeTab !== 'schedule' && activeTab !== 'admin'\) return;/.test(appSource) && /fetchRoster\(authToken\)/.test(appSource)
 );
+// THE ROSTER IS READ A PAGE AT A TIME NOW (functions/rosterPage.js), so the reuse is per PAGE AND PER SEARCH: the marker
+// names the read the rows in hand answer, and returning to the tab buys nothing until that changes. A read per KEYSTROKE is
+// what the box being a form is for - committing on submit, not on every change.
 checkIs(
-  'the roster module reuses its response for the same signed-in account',
-  /rosterModuleCache\?\.token === authToken/.test(appSource) &&
-    /\}, \[authToken, activeTab, canViewRoster, rosterModuleCache\]\);/.test(appSource)
+  'the roster module reuses its page for the same account and search',
+  /const key = `\$\{authToken\}\|\$\{rosterSearch\}`/.test(appSource) &&
+    /if \(rosterLoadedFor === key\) return undefined;/.test(appSource) &&
+    /\}, \[authToken, activeTab, canViewRoster, rosterSearch, rosterLoadedFor\]\);/.test(appSource)
 );
 checkIs(
-  'roster-backed admin changes invalidate that cached response',
+  'and a second page is one read, appended rather than replaced',
+  /fetchRosterModule\(token, \{ search, cursor \}\)/.test(appSource) && /append: true/.test(appSource)
+);
+checkIs(
+  'roster-backed admin changes invalidate the page in hand',
   /const rosterSections = \['users', 'certificationSetup', 'certificationRecords'\]/.test(appSource) &&
-    /if \(wanted\.some\(\(name\) => rosterSections\.includes\(name\)\)\) setRosterModuleCache\(null\)/.test(appSource)
+    /setRosterModuleCache\(null\)/.test(appSource) &&
+    /setRosterLoadedFor\(''\)/.test(appSource)
+);
+// THE CLOCK HISTORY OPENS ON THE PAY PERIOD, AND THAT IS A READ DECISION AS MUCH AS A DISPLAY ONE.
+//
+// `timeclock` is the only collection that grows on its own - every clock-in and clock-out, by every member, forever - and
+// the scope is per SESSION, so whatever this window is, every officer pays it on every visit. Opening on twelve months
+// meant ~29,000 reads for one officer's first look at a station of forty clocking in twice a day; the station's pay period
+// is a week, which is both what an officer reconciles and a read of a few hundred. `dateKeyDaysBack(6)` is the first of
+// seven days INCLUDING today, which is why the argument is an offset rather than a span - and the "load older" step is one
+// more pay period, so nothing is out of reach, it is just not paid for by default. If this fails, somebody has widened the
+// default window again.
+checkIs(
+  'the clock history opens on the station pay period, one week per "load older"',
+  /loadLogs\(daysBack\(6\), stationTodayKey\(\)\)/.test(appSource) &&
+    /loadLogs\(daysBack\(6, logsScope\.from\), logsScope\.from\)/.test(appSource)
+);
+// ...AND NOTHING IS HIDDEN BY IT: each half says what it holds and offers the rest - the officer's table and the member's
+// own history. A smaller window with no way to see further back is a cut, not a budget.
+checkIs(
+  'and both halves say what they hold and how to go further back',
+  /entries back to \{loadedFrom\}/.test(readFileSync('src/components/admin/AdminClockManagementTab.jsx', 'utf8')) &&
+    /entries back to \$\{loadedFrom\}/.test(readFileSync('src/components/MyClockHistory.jsx', 'utf8'))
 );
 // ...AND THE EVENTS LISTENER FOLLOWS THE SCREEN RATHER THAN THE SESSION, which is the one live read that does. The sign-in
 // subscription names exactly three handlers - on-duty, announcements and settings - and something on the dashboard draws every
@@ -470,8 +500,9 @@ check(
 // AND A TAB THAT OFFERS SHIFTS HAS TO READ THE SHIFT DEFINITIONS, which is the same class of bug one level down: the
 // availability tab's assign menu lists the day's shifts, and a slot cannot be drawn without a template to expand and the
 // assignment that names it. It had only the directory - so the menu opened EMPTY on a month that plainly had shifts, and
-// nothing about the screen looked broken. The month's ROWS are read when a name is clicked instead (the tab's own
-// windowed read), so only the definitions belong in this list.
+// nothing about the screen looked broken. The month's ROWS are read by the tab itself instead (its own WINDOWED read,
+// asked for once a month when the list opens, so a chip can name who is already rostered), so only the definitions belong
+// in this list.
 checkIs(
   'the availability tab reads the shift definitions it offers',
   sectionListFor('availability').includes("'scheduleTemplates'") &&
@@ -482,6 +513,16 @@ checkIs(
   'and does not pull a whole schedule to show one month of it',
   !sectionListFor('availability').includes("'schedule'"),
   sectionListFor('availability')
+);
+// THE REFRESH AFTER AN AVAILABILITY SAVE IS BOUNDED BY THE WINDOW ON SCREEN. An unnamed range is the WHOLE
+// `availability_months` collection - one document per member per month, which only ever grows - and the tab used to ask for
+// exactly that after every save. It already holds the window it is showing (`loadedFrom`/`loadedTo`, the scope the officer
+// loaded with onLoadMonth), so that is the range the re-read names: the months a save could have changed.
+checkIs(
+  'the availability refresh is bounded by the window on screen',
+  /onDataChanged\?\.\(token, \{ from: loadedFrom, to: loadedTo \}\)/.test(
+    readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8')
+  )
 );
 checkIs(
   'and its section setter unwraps the rows from the window they came in',
@@ -551,6 +592,24 @@ checkIs(
   /collection\('certifications'\)\.where\('user_id', 'in', batch\)/.test(rosterBody)
 );
 checkIs('never the whole collection', !/db\.collection\('certifications'\)\.get\(\)/.test(rosterBody));
+// AND NEVER THE WHOLE ROSTER EITHER, which is what this callable used to read to draw ten names: `users` and
+// `users_private` are one document per member, so both halves grew with the station. The page's candidates are read by
+// query, their private halves BY DOCUMENT (getAll over the candidates' own refs), and the certification columns by the
+// page's ids.
+checkIs(
+  'and it reads a page rather than the roster',
+  /namePrefixRange\(search\)/.test(rosterBody) &&
+    /pageFromCandidates\(\{ candidates: candidateRows/.test(rosterBody) &&
+    /roster_page: \{/.test(rosterBody)
+);
+checkIs(
+  'never the whole users or users_private collections',
+  !/collection\('users'\)\.get\(\)/.test(rosterBody) && !/collection\('users_private'\)\.get\(\)/.test(rosterBody)
+);
+checkIs(
+  'the private halves by document, for the candidates only',
+  /db\.getAll\(\.\.\.candidateRows\.map\(\(candidate\) => db\.collection\('users_private'\)\.doc\(candidate\.id\)\)\)/.test(rosterBody)
+);
 
 // 2. The training count is a stored counter, kept by a trigger on both directions.
 checkIs(

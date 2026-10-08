@@ -10,12 +10,16 @@ The tab opens on **All Members**, because the overview is the point of the scree
 It lists, for each day of the month, the availability windows that fall on it, with:
 
 - the window's nickname and its hours, and
-- the names of the members who claimed it — each carrying their rank's color and icon.
+- the names of the members who claimed it — each carrying their rank's color and icon. A name that has **already been given a shift** on that day is filled in the shift's colour instead, with the shift named underneath, so the list shows who is spoken for at a glance.
 
 Windows come from *Scheduling → Availability Windows*, so the list is short and the same for everybody. An empty window is worth spotting: it is a gap to fill or a window nobody wants.
 
+The list reads **that month's shifts as it opens**, because those are what fill the chips in. It is a month at a time rather than the whole schedule, it is skipped when the app is already holding the month, and it happens once per month — so an officer who has just come from the schedule board pays nothing for it. If the read fails, the list says so above the days rather than leaving a month of blank chips that would read as a month of free members.
+
 > [!NOTE]
 > Availability is **not rank-gated, by design**. A window is an hour of the station's week rather than a slot somebody has to qualify for, so a name on this list means "they could work it", not "they are eligible for the shift that happens to fall then". The rank rules still govern who you may *schedule* — see **Ranks**.
+
+**A name that is already on a shift is filled in with that shift's colour** — the same solid colour the schedule board uses for a staffed shift — with the shift's name printed under the member's name. That colour belongs to the **assignment**, not the rank, so a filled chip is telling you what the shift is; hover it for the full label, and click it to change what they are on.
 
 **Each name carries its rank** — the rank's color, with the rank's icon beside it — so a glance down a shift shows who is senior enough to lead it without opening anything. Hover a name to see the full label, such as *Member 1 — Driver/Operator*.
 
@@ -37,7 +41,7 @@ Three deliberate rules make it readable:
 - A shift **somebody already holds** is struck through and says who holds it, and cannot be picked. If it is already theirs it says so — which is how the same person is kept off the same shift twice.
 - The menu lists the day's shifts in time order, so you can see what else the window holds. To put somebody on a shift **outside** their claimed hours, use *Scheduling → Schedule Management*, where the whole day is on the board.
 
-Each chip you have given something to shows a tick and the shift's name, and the bar at the top counts what is pending.
+Each chip you have given something to shows a tick and the shift's name, and the bar at the top counts what is pending. **The tick is the only mark that means "not saved yet"**: a name the schedule already holds is filled in and names its shift without one, so the two states can be told apart on sight.
 
 > [!IMPORTANT]
 > **Nothing is saved until you press Save.** Every choice is held as a draft, so a whole month can be built in one pass, and **Discard** throws the lot away. That is deliberate: half a month applied because a tab was closed is a schedule nobody asked for.

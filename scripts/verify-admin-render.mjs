@@ -1489,6 +1489,26 @@ check('and an unsigned one offers to sign', String(signerView).includes('Sign<')
 check('the running count is shown', /1 of 3 signed/.test(visibleText(signerView)));
 check('a signer does NOT get the add/edit form', !String(signerView).includes('Add New Training'));
 check('and no Edit action', !String(signerView).includes('>Edit<'));
+
+// --- the signing window, on the member's screen -------------------------------------------------
+//
+// The window is a number of days after the training's date, and the member's screen is where it has teeth: a training
+// older than the window reads Closed rather than offering a button the writer would refuse. THE FIXTURES ARE DATED
+// FEBRUARY AND MARCH, which the app's own clock left behind long ago, so a 30-day window closes every one of them - and
+// the key is written as a LITERAL here on purpose: it is the name the settings document carries, and a rename has to
+// break this.
+const WINDOW_KEY = 'training_signature_window_days';
+const closedWindowView = trainingModule({ systemSettings: [{ key: WINDOW_KEY, value: '30' }] });
+check('the module renders with a window set', typeof closedWindowView === 'string', closedWindowView.error && closedWindowView.error.message);
+check('a training past the window reads Closed', /disabled=""[^>]*>Closed</.test(String(closedWindowView)), true);
+check('and the rule is said once above the table', /can be signed for 30 days after the date/.test(visibleText(closedWindowView)), true);
+// THE TITLE IS THE SAME SENTENCE THE WRITER REFUSES WITH, so a click and a save cannot read differently.
+check('the closed button names the window it missed', /30 days after its date/.test(String(closedWindowView)), true);
+// A SIGNATURE ALREADY GIVEN IS NOT AN OFFER, so a window never turns Signed into Closed.
+check('while the training already signed still reads Signed', /Signed</.test(String(closedWindowView)), true);
+check('and a blank setting leaves every training signable', String(trainingModule({ systemSettings: [{ key: WINDOW_KEY, value: '' }] })).includes('Sign<'), true);
+check('as does an unreadable one, which is ignored rather than enforced', String(trainingModule({ systemSettings: [{ key: WINDOW_KEY, value: '3O' }] })).includes('Sign<'), true);
+check('with no settings at all the list is unchanged', String(signerView).includes('Sign<'), true);
 // Badges come from the member-facing flag set.
 //
 // Matched on the badge's own title attribute rather than on its text, because the Category filter in the bar
@@ -1565,13 +1585,36 @@ check('and a total', /3 trainings · 3 signatures/.test(visibleText(adminTrainin
 check('it offers to add a training', String(adminTrainingView).includes('Add training') && !String(adminTrainingView).includes('training-editor-form'));
 check('and to delete one', String(adminTrainingView).includes('Delete'));
 check('signatures start collapsed', String(adminTrainingView).includes('Nobody has signed this training yet') === false);
-check('the external marker is only in the administrative form', String(adminTrainingView).includes('Entered into an external system'));
+// THE MARKER READS AS A LOCKED TRAINING ON THE REPORT, which is what these two checks are about. They used to be spelled
+// out: the row printed "Entered into an external system", and the Edit and Delete tooltips said "Locked — entered into an
+// external system" (twice per locked row, which is how the count below pinned "exactly one"). 1.45 shortened both
+// tooltips to "Locked" and gave the table a Locked COLUMN, so the phrase now lives where the marker is SET - the flag's
+// own label, drawn as a checkbox by the administrative form - and the report's job is the consequence.
+//
+// A COLUMN AND A BADGE ARE ASSERTED TOGETHER, because either alone still passes while a locked row draws as an ordinary
+// one: a column with nothing under it, or a badge under no heading to read it by. The badge is the count's new anchor -
+// one per locked row, where the two tooltips used to be - so "exactly the one training that carries the marker" is still
+// what the number means.
+check(
+  'the external marker reads as a locked training on the report',
+  /<th[^>]*title="Locked"[^>]*>Locked<\/th>/.test(String(adminTrainingView)),
+  true
+);
+check(
+  'and it is the only locked row',
+  (String(adminTrainingView).match(/title="Locked for everyone\."/g) || []).length,
+  1
+);
+check(
+  'and the phrase itself still has a home, on the flag the form draws',
+  /label: 'Entered into an external system'/.test(readFileSync('src/utils/training.js', 'utf8')),
+  true
+);
 // A locked training cannot be edited or deleted even here. Asserted with the icons stripped - the Edit button
 // carries a pencil and Delete a bin, and a check for the label directly after the tag would be a check on
 // whether those buttons happen to have icons rather than on whether they are locked.
 check('a locked training cannot be edited', /disabled=""[^>]*title="Locked[^"]*"[^>]*>Edit/.test(withoutIcons(adminTrainingView)));
 check('nor deleted', /disabled=""[^>]*title="Locked[^"]*"[^>]*>\s*Delete/.test(withoutIcons(adminTrainingView)));
-check('and it is the only locked row', (String(adminTrainingView).match(/Locked — entered into an external system/g) || []).length === 2);
 
 // Unknown members must not render as a bare id.
 const orphanSignatureView = (() => {
@@ -1726,14 +1769,56 @@ check('a second member gets their own color', /style="[^"]*color:#c3223b[^"]*"[\
 // An unranked member must not break or silently borrow someone else's rank.
 check('an unranked member still appears', String(roster).includes('No Rank Member'));
 
+// AND A MEMBER WHO ALREADY HOLDS A SHIFT IS FILLED IN WITHOUT ANYBODY CLICKING, which is the whole point of drawing the
+// chips from the month's rows rather than from the draft alone. A SERVER RENDER IS ENOUGH TO PROVE IT: the tab draws the
+// `schedule` it is handed, and the read that fetches those rows is asserted as source further down (effects do not run in
+// a server render at all - see the note beside the board's own fixtures).
+//
+// A ONE-OFF SHIFT rather than a template slot, so the fixture needs no weekday arithmetic: `isCustomShift` plus
+// `rowCoversDate` is the whole rule a row satisfies to be a place on a day somebody holds.
+const heldRoster = rosterView({
+  assignments: [{ id: 'a1', description: 'Firefighter', color: '#0f766e' }],
+  schedule: [
+    {
+      id: 's1',
+      user_id: 'u1',
+      schedule_template_id: '',
+      date_from: availDay,
+      date_to: availDay,
+      start_time: '08:00',
+      end_time: '18:00',
+      assignment_id: 'a1',
+      description: 'Night cover',
+    },
+  ],
+});
+check(
+  'a member already on a shift is filled in with that shift’s colour, with nobody having clicked',
+  /style="background-color:#0f766e;border-color:#0f766e;color:#ffffff"/.test(chipFor(heldRoster, 'Member 1')),
+  chipFor(heldRoster, 'Member 1').slice(0, 240)
+);
+check(
+  'and the shift they are on is named under their name',
+  /Night cover/.test(chipFor(heldRoster, 'Member 1')),
+  chipFor(heldRoster, 'Member 1').slice(0, 240)
+);
+check(
+  'while a member holding nothing keeps the plain chip',
+  !/background-color:#0f766e/.test(chipFor(heldRoster, 'Member 2')),
+  chipFor(heldRoster, 'Member 2').slice(0, 240)
+);
+
 // TWO FAILURES EARNED THESE, and both would come back unnoticed:
 //
 //   * THE MENU LANDED TOO HIGH when it flipped above a button near the bottom of the screen. The shared positioning
 //     helper returns a `top` computed as if the panel were maxHeight tall, so a short menu floated a couple of hundred
 //     pixels above the name it belonged to. The flipped case is anchored by its BOTTOM instead - and folding that back
 //     into a spread of the helper's result is exactly the tidy-up that would reintroduce it.
-//   * THE MONTH'S SHIFTS WERE READ WHEN THE TAB OPENED, which is the largest read on this screen, for a menu most visits
-//     never open. They are read on the click now, so this asserts no effect still reaches for them.
+//   * THE MONTH'S SHIFTS WERE READ ON THE FIRST NAME CLICK rather than when the tab opened, because the only thing that
+//     needed them was a menu most visits never open. THE CHIPS CHANGED THAT: a name that already holds a shift is filled
+//     in with that shift's colour (see the check below), so the list DRAWS the month and the read belongs with the paint.
+//     What is pinned here is that the read stays the tab's own WINDOWED one - asked for once a month, and skipped
+//     entirely when App already holds the month - rather than that it waits for a click.
 const availabilityPickerSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
 check(
   'the shift menu is anchored by its bottom when it flips above the button',
@@ -1742,27 +1827,57 @@ check(
   true
 );
 check(
-  'and the month’s shifts are read on the click rather than when the tab opens',
-  /void ensureShifts\(\)/.test(availabilityPickerSource) &&
+  'and the month’s shifts are read when the list opens, so a chip can be filled in',
+  /useEffect\(\(\) => \{\s*void ensureShifts\(\);\s*\}, \[year, month\]\)/.test(availabilityPickerSource) &&
+    /void ensureShifts\(\)/.test(availabilityPickerSource),
+  true
+);
+// THE READ IS STILL BOUNDED, which is the half of the old check worth keeping. It is asked for ONCE PER MONTH - the ref
+// remembers the month it asked about - and skipped entirely when App is already holding the month, which is the common
+// case for an officer arriving from the board. The dependency list is the MONTH rather than the function: `onNeedSchedule`
+// is re-created by App on every render, and an effect that depended on it would re-read the month after every paint.
+check(
+  'and it is asked for once a month, and skipped when the month is already held',
+  /shiftsAsked\.current === askedFor \|\| monthAlreadyHeld/.test(availabilityPickerSource) &&
     !/useEffect\([\s\S]{0,300}?onNeedSchedule/.test(availabilityPickerSource),
   true
 );
 // A MEMBER WHO HAS BEEN GIVEN A SHIFT IS FILLED IN, with that shift's ASSIGNMENT colour, so the same member reads the same
 // way here as on the board. The colour is the assignment's, not the rank's - a filled chip is about the SHIFT.
+//
+// IT IS THE CHOICE IN HAND FIRST, THEN THE SHIFT ALREADY HELD, and that second half is the point of the view: an officer
+// opening this list is asking "who is spoken for?", and a chip that filled in only for a draft would answer that with
+// silence until every name had been clicked.
 check(
   'a member given a shift is filled in with that shift’s assignment colour',
-  /const assignedColor = pending/.test(availabilityPickerSource) &&
-    /assignmentColor\(/.test(availabilityPickerSource) &&
+  /const chosen = pending \? pending\.place : held/.test(availabilityPickerSource) &&
+    /const assignedColor = chosen \? assignmentColor\(/.test(availabilityPickerSource) &&
     /backgroundColor: assignedColor, borderColor: assignedColor, color: '#ffffff'/.test(availabilityPickerSource),
   true
 );
-// AND THE SHIFT GOES UNDER THE NAME. Trailing it made one long chip that pushed the rest of the row about and read as part
-// of the member's name; the draft line is a second row inside the chip, which is what this pins - the name's row is CLOSED
-// before the shift is drawn.
+check(
+  'and the shift a member already holds fills the chip in too, not only the choice in hand',
+  /const held = pending \? null : heldFor\(member, day\.dateKey\)/.test(availabilityPickerSource) &&
+    /for \(const place of placesForDay\(day\.dateKey\)\) \{\s*if \(place\.userId\) map\.set\(/.test(
+      availabilityPickerSource
+    ),
+  true
+);
+// AND THE SHIFT GOES UNDER THE NAME, for either kind of fill. Trailing it made one long chip that pushed the rest of the
+// row about and read as part of the member's name; the shift line is a second row inside the chip, which is what this
+// pins - the name's row is CLOSED before the shift is drawn.
 check(
   'and the shift is stacked under the name rather than trailing it',
   /inline-flex flex-col items-start/.test(availabilityPickerSource) &&
-    /<MemberName user=\{member\}[\s\S]{0,40}\/>\s*<\/span>\s*\{pending && \(/.test(availabilityPickerSource),
+    /<MemberName user=\{member\}[\s\S]{0,40}\/>\s*<\/span>\s*\{chosen && \(/.test(availabilityPickerSource),
+  true
+);
+// THE CHECK MARK IS THE ONE THING THE DRAFT KEEPS TO ITSELF. A filled chip means either "already on this shift" or "about
+// to be put on it, not written yet", and those are not the same fact - so the mark that means unsaved choice is drawn for
+// the draft alone, which is what keeps the Save bar's count matching what is on the screen.
+check(
+  'and only an unsaved choice carries the check',
+  /\{pending && <Check className="h-3 w-3 shrink-0" \/>\} \{chosen\.name\}/.test(availabilityPickerSource),
   true
 );
 check('and keeps an uncoloured chip', !/style="border-color:/.test(chipFor(roster, 'No Rank Member')), true);
@@ -2511,6 +2626,44 @@ check(
   true
 );
 check('and is a curated key, not a generic row', /'session_timeout'/.test(systemSettingsSource), true);
+
+// THE SIGNING WINDOW CARD, the same shape again and one difference that matters: a BLANK value means NO LIMIT rather than
+// "off", which is why the card explains itself instead of being a row in the generic key/value list.
+check('the signing-window card exists', /function SignatureWindowCard/.test(systemSettingsSource), true);
+check('and is mounted in the tab', /<SignatureWindowCard/.test(systemSettingsSource), true);
+check(
+  'it saves the signing-window key',
+  /adminSaveSystemSetting\(SIGNATURE_WINDOW_KEY/.test(systemSettingsSource),
+  true
+);
+check('and is a curated key, not a generic row', /SIGNATURE_WINDOW_KEY,/.test(systemSettingsSource), true);
+
+const windowCardView = (rawValue) => {
+  try {
+    return renderToString(
+      React.createElement(AdminSystemSettingsTab, {
+        token: 't',
+        systemSettings: [{ key: 'training_signature_window_days', value: rawValue }],
+        onDataChanged: () => {},
+      })
+    );
+  } catch (error) {
+    return { error };
+  }
+};
+
+const windowUnset = windowCardView('');
+check('the signing-window card renders with nothing configured', typeof windowUnset === 'string', windowUnset.error && windowUnset.error.message);
+check('reporting No limit', visibleText(windowUnset).includes('No limit'), true);
+check('and saying trainings stay open as long as they exist', visibleText(windowUnset).includes('open for signature for as long as they exist'), true);
+
+const windowSet = windowCardView('30');
+check('a configured window reports its days', visibleText(windowSet).includes('30 days'), true);
+check('and works out the last day for the reader', visibleText(windowSet).includes('closes after 31 March'), true);
+
+const windowBad = windowCardView('3O');
+check('an unreadable value says it cannot be used', visibleText(windowBad).includes('cannot be used, so there is no window at all'), true);
+check('and reports No limit rather than a wrong number', visibleText(windowBad).includes('No limit'), true);
 
 const timeoutCardView = (rawValue) => {
   try {

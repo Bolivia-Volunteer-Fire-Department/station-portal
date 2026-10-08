@@ -12,10 +12,11 @@
 // Everything here is a pure function over the rows the API returns, so the parsing and the
 // sorting can be exercised directly - see scripts/verify-training.mjs.
 
-import { isTruthyFlag } from './rankEligibility';
-import { parseSheetDateKey } from './scheduleDate';
-import { formatClock, timeToMinutes } from './shiftTime';
-import { toTimeInputValue } from './timeInputValue';
+import { isTruthyFlag } from './rankEligibility.js';
+import { displayDate, parseSheetDateKey, toDateKey } from './scheduleDate.js';
+import { getSettingValue } from './systemSettings.js';
+import { formatClock, timeToMinutes } from './shiftTime.js';
+import { toTimeInputValue } from './timeInputValue.js';
 
 // The TRUE/FALSE columns on the training sheet, in the order the form and the table show them.
 // `short` is the badge text, which has to stay compact enough for a table row.
@@ -107,6 +108,84 @@ export const trainingEditBlockedReason = (training) => {
   }
   return '';
 };
+
+// --- the signing window ------------------------------------------------------
+//
+// A TRAINING CAN BE SIGNED FOR A CONFIGURABLE NUMBER OF DAYS AFTER ITS DATE, and not after that. The case it exists for
+// is the member who opens the app in October and signs six months of trainings in one pass: a signature says "I was
+// there", and one given months later is worth much less to the record it lands in.
+//
+// TWO SEPARATE REASONS CLOSE A TRAINING, and they are reported separately rather than boiled into one "locked": the date
+// has gone past the window, or an administrator has marked the record as filed in an external system. The second is not
+// a date at all - it is somebody saying "this record is finished" - which is why the window cannot replace it.
+//
+// THE SETTING IS PUBLIC (see PUBLIC_SETTING_KEYS in utils/systemSettings), because the member's own screen has to know
+// the window in order to close the button. A setting a screen cannot read is a setting the screen cannot honour.
+export const SIGNATURE_WINDOW_KEY = 'training_signature_window_days';
+
+// The window as a settings card needs it: what was typed, whether it can be used, and what it means.
+//
+// A BLANK SETTING MEANS NO LIMIT, and an UNREADABLE ONE IS IGNORED rather than applied - the rule the session timeout
+// already follows, for the same reason: `3O` mistyped must not silently close every training in the station. The pattern
+// is strict so `30 days` cannot quietly become 30, and zero IS allowed: it means "the day of the training only", which
+// is a deliberate choice rather than a typo.
+export const signatureWindowConfig = (systemSettings) => {
+  const raw = text(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
+  if (raw === '') return { configured: false, days: null, invalid: false, raw: '' };
+  if (!/^\d+$/.test(raw)) return { configured: false, days: null, invalid: true, raw };
+  return { configured: true, days: Number(raw), invalid: false, raw };
+};
+
+// The window in days, or null when there is none.
+export const signatureWindowDays = (systemSettings) => signatureWindowConfig(systemSettings).days;
+
+// The PUBLIC SETTINGS DOCUMENT (a plain key/value object, which is what a Firestore document is) as the rows the helpers
+// above read. One line of glue, and it lives here rather than in the writer for a reason: the writer is the backstop that
+// refuses a stale screen's signature, its own path cannot be unit-tested without a database, and this is the only part of
+// it that could be got wrong. scripts/verify-training exercises it directly.
+export const settingsRowsFrom = (data) =>
+  Object.entries(data && typeof data === 'object' ? data : {}).map(([key, value]) => ({ key, value }));
+
+// The last day a training may be signed: its date plus the window, INCLUSIVE - so a 30-day window on 1 March runs through
+// 31 March. Null when there is no window, or when the row carries no readable date.
+//
+// A DATE NOBODY CAN READ IS NOT A REASON TO REFUSE A SIGNATURE - the same rule the slot filter follows in
+// utils/scheduleSlots, which keeps what it cannot judge: a silent refusal is indistinguishable from a broken screen.
+export const signatureDeadlineKey = (training, windowDays) => {
+  // STRICT, and the strictness is load-bearing: `Number(null)` is 0, so a lenient read would turn "no window set" into "a
+  // window that closed on the training's own date" - every training in the station refused at once. Only digits count,
+  // which is the same parse the settings card previews.
+  const days = text(windowDays);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text(training?.date_key));
+  if (!/^\d+$/.test(days) || !match) return null;
+  // Local-calendar arithmetic through the Date constructor, so the end of a month rolls over as it should; only the KEY
+  // is compared afterwards, so no timezone enters into it.
+  return toDateKey(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + Number(days)));
+};
+
+// Why this training cannot be signed - for a tooltip, and for the refusal the writer returns. Empty when it can be signed.
+//
+// THE CLOCK AND THE WINDOW ARE PARAMETERS rather than read here, so this stays a pure function of what the caller knows:
+// the same shape trainingEditable above has, and what scripts/verify-training exercises directly. `todayKey` is the
+// STATION's today (utils/scheduleDate#stationTodayKey) wherever a caller has it, so a member's own timezone cannot move
+// a deadline.
+export const trainingSignBlockedReason = (training, { todayKey = '', windowDays = null } = {}) => {
+  if (trainingLocked(training)) {
+    return 'This training has been entered into an external system, so it cannot be signed.';
+  }
+  const deadline = signatureDeadlineKey(training, windowDays);
+  const today = text(todayKey);
+  if (deadline && today && today > deadline) {
+    const days = Number(windowDays);
+    return `A training can be signed for ${days} day${
+      days === 1 ? '' : 's'
+    } after its date (this one closed on ${displayDate(deadline)}), and this one is older than that. A signature that is genuinely missing is an administrator's to sort out by widening the window in System Settings.`;
+  }
+  return '';
+};
+
+// The same question as a yes/no, for a caller that only has to draw a button.
+export const trainingSignable = (training, options) => trainingSignBlockedReason(training, options) === '';
 
 const text = (value) => String(value ?? '').trim();
 
