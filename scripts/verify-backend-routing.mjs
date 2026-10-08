@@ -262,7 +262,14 @@ const childScript = `
   // The member payload is the first READ to have a dispatcher, so it is the first thing the fourth condition holds
   // back: switched on, configured, prerequisites met - and still the sheet, because nobody is signed in to Firebase.
   const bootstrap = await second.routingBlocker('GET_BOOTSTRAP');
-  console.log(JSON.stringify({ withoutPrerequisite, withoutUser, sent, clockIn, clockOut, bootstrap }));
+  // THE FAULT THAT WAS REPORTED, in the state it was reported in. The adminSaves feature is on, the build is configured,
+  // the prerequisites are met - and there is no Firebase user, which is what an ENDED SESSION leaves behind (the SDK
+  // signs itself out, and the app did not follow). The member saw "ADMIN_SAVE_SCHEDULE_TEMPLATE was not routed ...
+  // there is no sheet behind it", which reads like a missing route or a bad deploy. It was neither: the route is here,
+  // and this is the only condition left standing.
+  process.env.VITE_FIRESTORE_FEATURES = 'memberPayload,adminPayload,adminSaves';
+  const adminSave = await second.routingBlocker('ADMIN_SAVE_SCHEDULE_TEMPLATE');
+  console.log(JSON.stringify({ withoutPrerequisite, withoutUser, sent, clockIn, clockOut, bootstrap, adminSave }));
 `;
 const childOut = execFileSync(process.execPath, ['--input-type=module', '-e', childScript], { encoding: 'utf8' });
 const child = JSON.parse(childOut.trim().split('\n').pop());
@@ -281,6 +288,11 @@ check('the clock answers the same way, both directions', [child.clockIn, child.c
   'not-signed-in-to-firebase',
 ]);
 check('and so does the first routed read', child.bootstrap, 'not-signed-in-to-firebase');
+// The reported action, once its own feature is on: this is the whole diagnosis of the member's error written as a
+// check. Nothing is wrong with the routing table or the build - the session had ended, and that is the only blocker
+// left standing. (api.js now answers this one with "your session ended" rather than a routing message; the app signs
+// the member out and says so. See verify-refresh-wiring and verify-session-timeout.)
+check('the reported admin save is routed, and blocked only by the missing session', child.adminSave, 'not-signed-in-to-firebase');
 
 // --- the reply shape the screens already read ---------------------------------------------------------------------
 check('a success reply carries success', ok({ added: 1 }).success, true);

@@ -5,6 +5,7 @@ import { storedRequiresVerification } from '../utils/documents.js';
 import { systemLogRequest } from '../utils/systemLog';
 import { rankFieldsFromForm } from '../utils/ranks';
 import { isReadAction } from '../utils/readCoalescing';
+import { SESSION_ENDED_MESSAGE } from '../utils/sessionTimeout';
 import { routeRead, routeWrite, routingBlocker, lastReadFailureFor } from './firestoreRouting.js';
 // The payload's section readers, so the refresh after a save reads the same shapes a sign-in does.
 import { readAdminSection, readAdminSections } from './firestorePayload.js';
@@ -81,8 +82,21 @@ export const notificationPrefFields = (settings) => {
 // and anything left out of that list is simply not routed - so the honest message needs the blocker, and the blocker
 // knows what it is. This is the difference between an afternoon spent hunting a phantom Firestore failure and one
 // console line that says which route is off.
+//
+// A SESSION THAT ENDED IS NOT A ROUTING PROBLEM, and saying it as one sends the reader to the wrong place: the action
+// IS routed and the build is fine - what happened is that the Firebase session this tab was holding had gone. The app
+// watches for that and signs the member out with this same sentence (App.jsx), so what arrives here is the race it
+// cannot win: a button pressed in the moment between the session ending and the login screen appearing. The code stays
+// the routing one, so a caller treating it as "this route was not taken" is still right.
+const notSignedIn = () => {
+  const ended = new Error(SESSION_ENDED_MESSAGE);
+  ended.code = 'ROUTE_NOT_TAKEN';
+  return ended;
+};
+
 const notAnswered = async (action) => {
   const blocker = await routingBlocker(action);
+  if (blocker === 'not-signed-in-to-firebase') return notSignedIn();
   // THE REASON, WHEN WE HAVE ONE. A blocked route is a route that is missing; a route that RAN and threw is a different
   // answer entirely, and the app knows which it is - so it says so rather than describing both as "did not answer".
   const failed = blocker ? '' : lastReadFailureFor(action);

@@ -42,7 +42,7 @@ import {
   unregisterPushDevice,
   fetchMyPushDevices
 } from './services/api';
-import { signInAlongside, signOutAlongside } from './services/firebaseAuth.js';
+import { signInAlongside, signOutAlongside, watchAccount } from './services/firebaseAuth.js';
 import { firebaseConfigured } from './services/firebase';
 // The four small collections where a listener is cheaper than re-reading. See the module: the rule for which
 // collections qualify is written there rather than implied by the list.
@@ -108,11 +108,13 @@ import { OFFLINE_CLOCK_MESSAGE, isOffline } from './utils/connectivity';
 import { createWaveReporter, nextWaveId } from './utils/activity';
 import {
   IDLE_RESET_EVENTS,
+  accountChangeEndsSession,
   formatIdleCountdown,
   idleLogoutMessage,
   idleSecondsRemaining,
   idleState,
   sessionTimeoutConfig,
+  SESSION_ENDED_MESSAGE,
   unauthorizedIsStale,
 } from './utils/sessionTimeout';
 import { stationLogoUrl } from './utils/assets';
@@ -1820,6 +1822,31 @@ const getLoadingMessage = () => {
       clearInterval(timer);
     };
   }, [currentUser, activeTab, sessionConfig, endSession, applyIdleWarning]);
+
+  // The Auth SDK's account, watched - because the app and the SDK each hold the same session, and only one of them
+  // notices when it ends.
+  //
+  // WHAT THIS IS FOR: a session that ends without the app asking. The SDK signs out on its own when the refresh token
+  // is refused - expired, revoked, or the account disabled - and it does so in EVERY TAB, since the persistence is
+  // shared. This tab then went on drawing a signed-in screen, and the next save was refused by the gate every routed
+  // call passes through: the member saw "ADMIN_SAVE_SCHEDULE_TEMPLATE was not routed ... there is no sheet behind it",
+  // which reads like a deployment fault rather than like an ended session. Watching the account turns that into the
+  // signed-out screen the idle timer already produces, with the reason in it. See accountChangeEndsSession.
+  //
+  // THE OPENING REPORT IS SKIPPED. Subscribing makes the SDK report the account it holds straight away, and that first
+  // report is about the session the app has just established - so it is the CHANGES that are news, and treating a null
+  // opening report as an ending would sign a member out for the crime of opening the app.
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    let opening = true;
+    return watchAccount((account) => {
+      const isOpeningReport = opening;
+      opening = false;
+      if (isOpeningReport) return;
+      if (!accountChangeEndsSession(currentUser, account)) return;
+      endSession(SESSION_ENDED_MESSAGE);
+    });
+  }, [currentUser, endSession]);
 
   // "Stay signed in". On Apps Script this also had to push the SERVER session window out, or the button would have
   // dismissed the warning while the session quietly lapsed anyway - that is what pingSession was for, and it went with

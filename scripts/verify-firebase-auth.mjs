@@ -433,6 +433,16 @@ const main = async () => {
     (appSource.match(/signOutAlongside\(/g) || []).length >= 2,
     'both logout paths'
   );
+  // The SDK's account, watched. Without this the app keeps drawing a signed-in screen after the session has gone -
+  // which is what turned "your session ended" into a save refused as "that route is not there".
+  checkIs(
+    'and the Auth account is watched, so a session that ends on its own ends the app session too',
+    appSource.includes('watchAccount(') && appSource.includes('accountChangeEndsSession(currentUser, account)')
+  );
+  checkIs(
+    'with the reason in the same words the fetch layer uses',
+    appSource.includes('endSession(SESSION_ENDED_MESSAGE)')
+  );
 
   // The harness's own guard: a section that stopped running would otherwise look like a pass.
   console.log('\n--- the harness itself ---');

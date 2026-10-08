@@ -14,8 +14,10 @@
  */
 import {
   MIN_SESSION_TIMEOUT_MINUTES,
+  SESSION_ENDED_MESSAGE,
   SESSION_TIMEOUT_KEY,
   SESSION_WARNING_SECONDS,
+  accountChangeEndsSession,
   formatIdleCountdown,
   idleLogoutMessage,
   idleRemainingMs,
@@ -119,6 +121,33 @@ check(
   idleLogoutMessage(null),
   'You were signed out after a period of inactivity. Sign in again to continue.'
 );
+
+// A SESSION THAT ENDS WITHOUT ANYBODY SIGNING OUT. The app and the Auth SDK hold the same session in two places, and
+// the SDK is the one that ACTS when it ends: it signs out on its own (an expired or revoked refresh token, a disabled
+// account) and it does so in every tab, because the persistence is shared. The app has to follow, or the tab keeps
+// drawing a signed-in screen whose every save is refused by the gate all routed calls pass through.
+console.log('');
+console.log('--- a session the SDK ends on its own ---');
+check(
+  'the message names the ending',
+  SESSION_ENDED_MESSAGE,
+  'Your session ended, so you were signed out. Sign in again to continue.'
+);
+check(
+  'and never talks about routing or a sheet, which is what made this confusing',
+  /routed|sheet|feature/i.test(SESSION_ENDED_MESSAGE),
+  false
+);
+// The app has somebody and the SDK has nobody: the session ended under the app's feet. This is the reported fault.
+check('an account that goes away ends the app session', accountChangeEndsSession({ id: 'u1' }, null), true);
+// The app's session object carries the id as `id`, the SDK's User carries it as `uid`, and they are the same person.
+check('the same account is not an ending', accountChangeEndsSession({ id: 'u1' }, { uid: 'u1' }), false);
+// Somebody else at the same computer: this tab's screens, and its next write, would be theirs.
+check('and a different person is an ending too', accountChangeEndsSession({ id: 'u1' }, { uid: 'u2' }), true);
+// The login screen's ordinary state, which must stay quiet - including the moment the app signs out, when the SDK has
+// not reported the sign-out yet and the app's state is already clear.
+check('a signed-out app stays quiet with no account', accountChangeEndsSession(null, null), false);
+check('and quiet while the SDK still holds one', accountChangeEndsSession(null, { uid: 'u1' }), false);
 
 console.log('\n--- the client tick is cheap ---');
 const tickStart = process.hrtime.bigint();

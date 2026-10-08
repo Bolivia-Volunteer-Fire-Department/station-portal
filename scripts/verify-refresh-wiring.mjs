@@ -612,6 +612,14 @@ check(
   /const blocker = await routingBlocker\(action\)/.test(fetchLayerSource) &&
     /VITE_FIRESTORE_FEATURES pins a list of routes/.test(fetchLayerSource)
 );
+// The one blocker that is the MEMBER's business rather than the build's: a session that ended is not a routing fault,
+// and reporting it as one ("was not routed ... there is no sheet behind it") sent a real user looking at the
+// deployment for a fault that was their own expired session.
+check(
+  'and a session that ended is answered with that, not with a routing message',
+  fetchLayerSource.includes("blocker === 'not-signed-in-to-firebase'") && fetchLayerSource.includes('SESSION_ENDED_MESSAGE'),
+  'a member whose session had ended would be told the route was missing'
+);
 check(
   'and nothing in the fetch layer reaches the sheet any more',
   // Matched with the call paren, because the comments in api.js deliberately still NAME the function they replaced -

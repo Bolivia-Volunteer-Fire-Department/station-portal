@@ -52,6 +52,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed a bug in document permissions.
 * Added a "members without availability" card to the Administration module.
 * Added some reports.
+* Fixed an auth session retention issue.
 
 ### Version 1.3x
 * Added the **Reports** module

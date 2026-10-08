@@ -629,7 +629,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
             </div>
           </div>
 {/* Per-day add buttons */}
-          <div className="grid grid-cols-7">
+          {/* <div className="grid grid-cols-7">
             {DAYS.map((day) => (
               <button
                 key={day.value}
@@ -641,7 +641,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
                 Add
               </button>
             ))}
-          </div>
+          </div> */}
         </div>
       </div>
 

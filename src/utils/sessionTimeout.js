@@ -131,6 +131,34 @@ export const idleLogoutMessage = (minutes) => {
   return `You were signed out after ${label} of inactivity. Sign in again to continue.`;
 };
 
+// WHAT THE LOGIN SCREEN SAYS WHEN THE SESSION ENDED WITHOUT ANYBODY SIGNING OUT.
+//
+// The app and the Auth SDK hold the same session in two places, and only one of them notices when it ends. The SDK
+// signs out on its own when the refresh token is refused - an expired or revoked session, an account disabled - and it
+// does so in EVERY TAB, because the persistence is shared: a sign-out in one tab (or that tab's idle timer, which
+// signs out of Firebase as it ends the app's session) leaves this one drawing a signed-in screen whose next save is
+// refused by the gate every routed call passes through. That refusal arrived as "was not routed ... there is no sheet
+// behind it", which reads like a deployment fault rather than like an ended session.
+export const SESSION_ENDED_MESSAGE = 'Your session ended, so you were signed out. Sign in again to continue.';
+
+// Whether a report from the Auth SDK should end the app's session.
+//
+// `appUser` is who the APP believes is signed in (its own state, or null); `account` is who the SDK reports (its User,
+// or null). The two agree in every ordinary moment, and it is the moments they disagree that matter:
+//
+//   * NOBODY WHILE THE APP HAS SOMEBODY: the session ended under the app's feet, which is the message above.
+//   * SOMEBODY ELSE: the browser has since been signed in as another member - a shared station computer is exactly the
+//     case this portal is built for - so this tab's screens, and its next write, would belong to the wrong person.
+//     Both of the app's own sign-outs clear its state BEFORE they sign out of Firebase, so neither can be mistaken for
+//     this.
+//
+// A null account with no app session is the login screen's ordinary state, and ends nothing.
+export const accountChangeEndsSession = (appUser, account) => {
+  if (!appUser) return false;
+  if (!account) return true;
+  return String(account.uid || '') !== String(appUser.id || '');
+};
+
 // Is an UNAUTHORIZED reply ABOUT the session we are holding?
 //
 // No, when the request that got it used a different token: that answer belongs to a superseded session and is
