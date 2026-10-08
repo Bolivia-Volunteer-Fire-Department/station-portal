@@ -48,6 +48,20 @@ export const FIREBALL_SHOT_BANDS = [
 const FIREBALL_COOLDOWN_START = { min: 1, max: 2 };
 const FIREBALL_COOLDOWN_END = { min: 0.45, max: 0.9 };
 
+// THE COMMENTARY, in the gaps between shots. Three numbers decide when a bubble is on screen:
+//
+//   * SAYING_DELAY_SECONDS - the beat of silence after a shot before it appears. Without it the bubble lands with the
+//     fireball, which reads as part of the attack rather than as something said about it.
+//   * SAYING_SECONDS - how long it stays when nothing interrupts it: "a moment or two". Long enough to read a short
+//     line, short enough that it is gone before the next shot needs your eyes.
+//   * SAYING_MIN_COOLDOWN - the shortest gap the chief will talk over. A bubble that appears for a fifth of a second
+//     and is cut off by the next fireball is worse than no bubble at all, and the END of the fight is exactly where
+//     that would happen: the cooldowns there are shorter than the delay. So he only speaks when the gap can hold a
+//     line - which also makes him go quiet as he grows meaner, without anybody writing that rule down.
+const SAYING_DELAY_SECONDS = 0.35;
+const SAYING_SECONDS = 2;
+const SAYING_MIN_COOLDOWN = 1.2;
+
 // A fresh run: ordinary play, at the base speed, with no boss cycle behind it.
 export const createLevel = () => ({
   phase: "normal", // "normal" | "boss" | "leaving"
@@ -68,7 +82,8 @@ export const chiefFrame = (chief) =>
 //   { type: "boss-ended" }      a cycle finished (so the caller can restart its obstacle timer)
 //
 // `random` is injectable so a test can pin the cooldown. `bounds` carries the play area, the chief's
-// drawn size, and the two durations.
+// drawn size, the two durations, and the lines the chief may say - content handed in rather than kept
+// here, so this file stays arithmetic and the sayings stay a setting.
 export function stepLevel(level, dt, bounds, random = Math.random) {
   const events = [];
   level.elapsed += dt;
@@ -126,6 +141,19 @@ function pickShotBand(previous, random) {
 // Where the chief floats to for a shot to leave its mouth at that height above the ground.
 const restYForShot = (bounds, shot) => bounds.groundY - shot.above - CHIEF_FLAME_OFFSET_Y;
 
+// The line to say next: one of the chief's, at random, but never the one he just said - the same rule the shot bands
+// follow, and for the same reason. A comment that repeats itself stops reading as a comment, and with five configured
+// lines this also guarantees all five get used.
+//
+// A single configured line has to repeat, because silence would be a strange way to honour a rule about variety. NO
+// lines at all is silence, which is exactly what a station that has blanked the card is asking for.
+function pickSaying(previous, sayings, random) {
+  if (!sayings.length) return "";
+  const options = sayings.filter((line) => line !== previous);
+  const pool = options.length ? options : sayings;
+  return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+}
+
 // Bring the chief on: it rises from the bottom edge, then hovers on the right and starts firing.
 //
 // Exported because the game's admin-only debug button calls it on demand; stepLevel calls it itself
@@ -148,6 +176,12 @@ export function startBoss(level, bounds, random = Math.random) {
     fireSeq: -1, // idle: frozen on CHIEF_IDLE_FRAME
     fireSeqT: 0,
     cooldown: fireballCooldown(level, bounds, random),
+    // The bubble: what is on screen right now, the line this gap is going to say (or null for a quiet one), how long it
+    // has been since the last shot, and the last thing said - so the same line is never said twice in a row.
+    saying: "",
+    sayingPlan: null,
+    sayingT: 0,
+    lastSaying: "",
   };
 }
 
@@ -170,6 +204,18 @@ function stepChief(level, dt, bounds, random, events) {
     chief.restY += Math.max(-step, Math.min(step, gap));
     chief.hover += dt * CHIEF_HOVER_SPEED;
     chief.y = chief.restY + Math.sin(chief.hover) * CHIEF_HOVER_AMPLITUDE;
+  }
+
+  // THE COMMENTARY. A beat after each shot the chief says something, and the bubble goes when either the line has had
+  // its moment OR the next fireball arrives - the second of which is what "between the blasts" means. Both timings run
+  // off the same clock, and the shot itself is what resets it (below), so there is one number to reason about.
+  chief.sayingT += dt;
+  if (chief.saying) {
+    if (chief.sayingT >= SAYING_DELAY_SECONDS + SAYING_SECONDS) chief.saying = "";
+  } else if (chief.sayingPlan && chief.sayingT >= SAYING_DELAY_SECONDS) {
+    chief.saying = chief.sayingPlan;
+    // Consumed as it is shown, so the same line cannot drift back on its own a moment later.
+    chief.sayingPlan = null;
   }
 
   // A firing sequence plays frames 0..3 once, then drops back to the frozen idle frame - one
@@ -195,6 +241,16 @@ function stepChief(level, dt, bounds, random, events) {
     chief.fireSeq = 0;
     chief.fireSeqT = 0;
     chief.cooldown = fireballCooldown(level, bounds, random);
+    // The bubble goes the instant a shot leaves: the gap is over, and a chief talking through his own fireball is one
+    // nobody can read anyway. The line for THIS gap is chosen now rather than when it is shown, so the decision is
+    // made once and the delay is only ever about timing.
+    chief.saying = "";
+    chief.sayingT = 0;
+    const sayings = Array.isArray(bounds.sayings) ? bounds.sayings : [];
+    // Silence unless the gap can actually hold a line - see SAYING_MIN_COOLDOWN.
+    const saying = chief.cooldown >= SAYING_MIN_COOLDOWN ? pickSaying(chief.lastSaying, sayings, random) : "";
+    chief.sayingPlan = saying || null;
+    if (saying) chief.lastSaying = saying;
     // Line up the next shot now - never the same band as the one going out, so no two shots in a row
     // can be answered with one held key. The head starts floating to it while the cooldown runs.
     chief.shot = pickShotBand(chief.shot, random);

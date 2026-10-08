@@ -29,6 +29,15 @@ import {
   startBoss,
   stepLevel,
 } from '../src/utils/runnerLevel.js';
+// The chief's lines: five settings, and the two rules that decide what the game is handed (see utils/systemSettings).
+import {
+  BOSS_SAYING_KEYS,
+  DEFAULT_BOSS_SAYINGS,
+  bossSayingSavePlan,
+  bossSayingsFrom,
+  getBossSayings,
+  PUBLIC_SETTING_KEYS,
+} from '../src/utils/systemSettings.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -426,6 +435,187 @@ console.log('\n--- dying ---');
     /dyingAnimation\.frame >= SPRITES\.dead\.length - 1[\s\S]{0,90}player\.grounded[\s\S]{0,90}endGame\(\);/.test(
       component
     )
+  );
+}
+
+console.log('\n--- the touch pads, for a phone ---');
+const stylesheet = readFileSync('src/components/FirefighterRunner/FirefighterRunner.css', 'utf8');
+{
+  // WHERE THEY SIT is the ask, and the order in the source is the only thing that decides it: below the play area,
+  // above the leaderboard. Asserted by index rather than by eye.
+  checkIs(
+    'a pad for each control',
+    /ffr__touch-button--duck/.test(component) && /ffr__touch-button--jump/.test(component)
+  );
+  checkIs(
+    'placed below the play area and above the leaderboard',
+    component.indexOf('ffr__touch"') > component.indexOf('ffr__sky"') &&
+      component.indexOf('ffr__touch"') < component.indexOf('ffr__board"')
+  );
+  // A DEVICE TEST, not a width one: a narrow window on a desktop gets a mouse and a keyboard, and two dead buttons in
+  // the tab order would be worse than nothing. `display: none` by default is what keeps them out of it.
+  checkIs(
+    'hidden unless the device cannot hover',
+    /\.ffr__touch \{\n  display: none;\n\}/.test(stylesheet) &&
+      /@media \(hover: none\) and \(pointer: coarse\)/.test(stylesheet)
+  );
+  checkIs(
+    'with a thumb-sized target',
+    /width: 72px;/.test(stylesheet) && /height: 72px;/.test(stylesheet)
+  );
+  // A control that is held, or tapped repeatedly, must not behave like a web page: the double-tap wait, the scroll that
+  // steals the gesture, the text selection and the grey tap flash are all suppressed, and a duck that cannot be held is
+  // a duck that cannot be played.
+  checkIs(
+    'that does not behave like a web page when tapped and held',
+    /touch-action: none;/.test(stylesheet) &&
+      /-webkit-tap-highlight-color: transparent;/.test(stylesheet) &&
+      /user-select: none;/.test(stylesheet)
+  );
+  // The jump pad goes through startOrJump - the SAME call the keyboard and the whole-screen tap make - so it starts a
+  // run, restarts one and jumps mid-run without any of that being a second implementation of the rule.
+  checkIs(
+    'the jump pad starts or jumps through the shared call',
+    /ffr__touch-button--jump[\s\S]{0,400}startOrJump\(\)/.test(component)
+  );
+  // Duck is the one control that is HELD, so every way a finger can leave the pad has to release it: up, a cancelled
+  // pointer, and losing the capture. A stuck duck is an unplayable game, not a cosmetic bug.
+  checkIs(
+    'and the duck pad holds it, releasing on lift, cancel and lost capture',
+    /setDuck\(true\)[\s\S]{0,700}onPointerUp=\{\(\) => setDuck\(false\)\}/.test(component) &&
+      /onPointerCancel=\{\(\) => setDuck\(false\)\}/.test(component) &&
+      /onLostPointerCapture=\{\(\) => setDuck\(false\)\}/.test(component)
+  );
+  // THE WHOLE CABINET IS ONE POINTER SURFACE THAT JUMPS, so a tap that reached it would jump twice - once from the pad
+  // and once from the cabinet. Both pads stop it, and so does everything else that is interactive in here.
+  checkIs(
+    'and each one stops the tap reaching the cabinet',
+    (component.match(/onPointerDown=\{\(event\) => \{\s*event\.stopPropagation\(\);/g) || []).length >= 2
+  );
+}
+
+console.log("\n--- the chief's commentary, in the gaps between shots ---");
+{
+  const SAYINGS = ['One', 'Two', 'Three', 'Four', 'Five'];
+  const LONG = { ...BOUNDS, duration: 30, sayings: SAYINGS };
+  const mid = () => 0.5;
+  const level = createLevel();
+  startBoss(level, LONG, mid);
+
+  // Watched frame by frame from OUTSIDE the chief: when the bubble appears, what it says, how long it stays, and
+  // whether a shot ever leaves while one is up. Nothing here reads the chief's own timers, so a change to how they are
+  // kept cannot make these pass by accident.
+  const bubbles = [];
+  let current = '';
+  let shownAt = 0;
+  let longest = 0;
+  let sim = 0;
+  let shotWithBubble = 0;
+  let saidAfterHalfway = 0;
+
+  for (let i = 0; i < Math.round(LONG.duration / DT) + 200 && level.phase === 'boss'; i += 1) {
+    const before = level.chief.saying;
+    for (const event of stepLevel(level, DT, LONG, mid)) {
+      if (event.type === 'fireball' && level.chief.saying) shotWithBubble += 1;
+    }
+    const after = level.chief.saying;
+
+    if (after !== before) {
+      if (after) {
+        // A new line on screen.
+        if (current) longest = Math.max(longest, sim - shownAt);
+        current = after;
+        shownAt = sim;
+        bubbles.push(after);
+        if (sim > LONG.duration / 2) saidAfterHalfway += 1;
+      } else {
+        longest = Math.max(longest, sim - shownAt);
+        current = '';
+      }
+    }
+    sim += DT;
+  }
+
+  // A fight that lasts half a minute with a cooldown that starts near 1.5s and tightens: the chief has room to talk for
+  // roughly the first third of it (see SAYING_MIN_COOLDOWN), which is several bubbles.
+  checkIs('the chief speaks several times', bubbles.length >= 3, `${bubbles.length}: ${bubbles.join(' | ')}`);
+  checkIs(
+    'always with one of the configured lines',
+    bubbles.every((line) => SAYINGS.includes(line)),
+    bubbles.join(' | ')
+  );
+  checkIs(
+    'and never the same line twice in a row',
+    bubbles.slice(1).every((line, index) => line !== bubbles[index]),
+    bubbles.join(' | ')
+  );
+  // The bubble is between the BLASTS: a fireball never leaves with one still on screen.
+  check('no shot is fired with a bubble up', shotWithBubble, 0);
+  // READABLE, and no longer: the delay plus the two seconds, plus a frame of slack for the step that ends it.
+  checkIs('a bubble stays for a moment or two, never longer', longest > 0 && longest <= 2.35 + 2 * DT, `${longest.toFixed(3)}s`);
+  // SILENT AS IT GETS MEANER: the end of the fight fires faster than a line can be read, so the chief stops talking -
+  // which is the same rule as the one above seen from the other end, asserted because it is the part that would look
+  // like a bug (a bubble flashing for a fifth of a second) if the delay alone decided it.
+  check('and he says nothing in the back half of the fight', saidAfterHalfway, 0);
+
+  // WHERE IT IS DRAWN, and the two details that make it decoration rather than a second game object: it comes from the
+  // view the loop already publishes, and the stylesheet puts it to the LEFT of the head and lets pointers through it -
+  // the whole cabinet is a tap-to-jump surface, so a box that swallowed a tap would be a hole in the runway.
+  const sheet = readFileSync('src/components/FirefighterRunner/FirefighterRunner.css', 'utf8');
+  checkIs(
+    'drawn from the view, in a bubble beside the head',
+    /view\.boss\.saying \? <div className="ffr__bubble">/.test(component) && /saying: chief\.saying/.test(component)
+  );
+  checkIs(
+    'which lets the tap through and sits out of the clipping',
+    /\.ffr__bubble \{[\s\S]{0,220}right: 100%;/.test(sheet) && /pointer-events: none;/.test(sheet)
+  );
+}
+
+console.log('\n--- and a station that wants him quiet gets quiet ---');
+{
+  const silent = { ...BOUNDS, duration: 30, sayings: [] };
+  const level = createLevel();
+  startBoss(level, silent, () => 0.5);
+
+  let spoke = false;
+  for (let i = 0; i < Math.round(silent.duration / DT) + 200 && level.phase === 'boss'; i += 1) {
+    stepLevel(level, DT, silent, () => 0.5);
+    if (level.chief.saying) spoke = true;
+  }
+  checkIs('with no lines configured there is no bubble at all', !spoke);
+}
+
+console.log('\n--- the sayings are settings, and five of them ---');
+{
+  check('five keys, one per saying', BOSS_SAYING_KEYS.length, 5);
+  check('a station that has never set them gets the defaults', bossSayingsFrom([]), DEFAULT_BOSS_SAYINGS);
+  // THE TWO KINDS OF EMPTY, which is the whole of bossSayingsFrom: an UNSET key speaks with its default, a key set to
+  // nothing says nothing. A station clearing a box is turning that line off, and clearing all five is turning the
+  // bubbles off - not being overruled by the defaults.
+  check(
+    'a cleared line is left out, not replaced by its default',
+    bossSayingsFrom([{ key: 'boss_saying0', value: '' }]),
+    DEFAULT_BOSS_SAYINGS.slice(1)
+  );
+  check(
+    'and clearing all five is silence',
+    bossSayingsFrom(BOSS_SAYING_KEYS.map((key) => ({ key, value: '   ' }))),
+    []
+  );
+  check(
+    'the editor always shows five fields, defaults included',
+    getBossSayings([]).map((row) => row.value),
+    DEFAULT_BOSS_SAYINGS
+  );
+  check(
+    'and a save carries every key, blanks included',
+    bossSayingSavePlan(getBossSayings([{ key: 'boss_saying0', value: 'Oi' }])).map((row) => row.key),
+    BOSS_SAYING_KEYS
+  );
+  checkIs(
+    'they are PUBLIC, because the member playing the game draws them',
+    BOSS_SAYING_KEYS.every((key) => PUBLIC_SETTING_KEYS.includes(key))
   );
 }
 

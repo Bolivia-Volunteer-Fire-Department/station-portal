@@ -19,6 +19,10 @@ export default function App() {
 - Arrow Down: duck
 - Click: jump / start / restart
 - Holding Arrow Down while jumping increases downward acceleration
+- On a phone: two pads **below the play area and above the leaderboard** — DUCK on the left, JUMP on the right, the way
+  a controller puts them. They appear only on a device that cannot hover (`hover: none` and `pointer: coarse`), so a
+  desktop never sees them and they are never in its tab order. Duck holds while it is pressed; jump is one press, and
+  doubles as start and restart, because it goes through the same call the keyboard does.
 - Getting hit: the four death frames play out, the firefighter falls to the ground if it was caught in
   the air, and the last frame stays on screen behind the game-over panel
 
@@ -38,7 +42,10 @@ the boss takes over. It holds the right edge, floating up and down between two f
 fireballs the player has to read: a **high** one passes over a ducking player, so duck it, and a
 **low** one skims the ground under both hitboxes, so jump it. It never fires the same height twice in
 a row — no held key survives the fight — and each ball leaves from the chief's own mouth, at whatever
-height it is floating. Both boss sheets are four-frame strips: the fireball loops, while the chief is
+height it is floating. Between shots it says something: a speech bubble beside its head, one of the station's five
+**Boss Sayings** from System Settings, never the same line twice in a row. That part is decoration — nothing collides
+with it, nothing is dodged because of it, and the level never waits for it. Both boss sheets are four-frame strips: the
+fireball loops, while the chief is
 frozen on its last frame until it fires, when its four-frame sequence plays once per fireball (with
 `fireball.mp3`). The gap between shots opens at 1–2 seconds and closes to under a second as the fight
 goes on. After 30 seconds the chief floats up out of the frame and the normal run resumes. Each
@@ -73,11 +80,18 @@ pure decision in `src/utils/runnerMusic.js`; both switches are covered by `npm r
   token={authToken}
   currentUser={currentUser}
   isAdmin={isAdmin}
+  bossSayings={['Nice dodge. Try it again.', 'Too slow!']}
 />
 ```
 
 `isAdmin` shows a small **SKIP TO BOSS** debug control (left of the HUD) that jumps straight into
 the boss scene for testing. It is off by default, so an ordinary member never sees it.
+
+`bossSayings` is the list the floating head may come out with between fireball blasts — the station's own, from
+System Settings, which is where they are edited. It is a list of short strings and it **must keep the same identity
+between renders**: it ends up in the level's bounds, and the game loop's effect depends on those, so an array rebuilt
+every render would restart the loop every render. App memoises it against the settings it comes from. An empty list
+means the chief says nothing, which is what a station that has cleared all five is asking for.
 
 No additional npm dependencies are required.
 

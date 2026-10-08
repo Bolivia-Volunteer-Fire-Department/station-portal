@@ -277,6 +277,12 @@ export default function FirefighterRunner({
   // Shows the admin-only debug control that jumps straight to the boss scene. False for everyone
   // else, so an ordinary member never sees it.
   isAdmin = false,
+  // The lines the chief may come out with between fireball blasts, from the station's system settings. A short list of
+  // short strings, and it MUST BE A STABLE ARRAY: it goes into the level's bounds, and the game loop's effect depends on
+  // those bounds - an array rebuilt on every render would restart the loop on every render, which is a stutter nobody
+  // would ever think to look for here. App memoises it against the settings it comes from. An empty list means the chief
+  // says nothing, which is what a station that has blanked all five is asking for.
+  bossSayings = [],
 }) {
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
@@ -410,8 +416,9 @@ export default function FirefighterRunner({
 
   const groundY = height - GROUND_HEIGHT;
 
-  // The play area the level clock needs, plus the chief's drawn size and the two durations. Memoised
-  // so the loop's effect, which reads it every frame, does not re-subscribe on every render.
+  // The play area the level clock needs, plus the chief's drawn size, the two durations, and the lines he may say.
+  // Memoised so the loop's effect, which reads it every frame, does not re-subscribe on every render - which is also why
+  // bossSayings has to be a stable array (see the prop above).
   const levelBounds = useMemo(
     () => ({
       width,
@@ -420,8 +427,9 @@ export default function FirefighterRunner({
       chiefSize: CHIEF_DISPLAY_SIZE,
       interval: BOSS_INTERVAL_SECONDS,
       duration: BOSS_DURATION_SECONDS,
+      sayings: bossSayings,
     }),
-    [width, height, groundY]
+    [width, height, groundY, bossSayings]
   );
 
   const makePlayer = useCallback(
@@ -1066,8 +1074,9 @@ export default function FirefighterRunner({
         particles: particlesRef.current.map((p) => ({ ...p })),
         fireballs: fireballsRef.current.map((f) => ({ ...f })),
         // The chief sits frozen on its right-most frame while fireSeq is -1, and plays 0..3 while
-        // firing - one firing sequence per fireball.
-        boss: chief ? { x: chief.x, y: chief.y, frame: chiefFrame(chief) } : null,
+        // firing - one firing sequence per fireball. `saying` is whatever its bubble is showing right
+        // now, or "" for a quiet gap (the timing lives in utils/runnerLevel).
+        boss: chief ? { x: chief.x, y: chief.y, frame: chiefFrame(chief), saying: chief.saying } : null,
         animation: animation.name,
         frame: animation.frame,
       });
@@ -1246,6 +1255,11 @@ export default function FirefighterRunner({
               frame={view.boss.frame}
               displaySize={CHIEF_DISPLAY_SIZE}
             />
+
+            {/* THE CHIEF'S LINE, in a bubble beside the head. It has nothing to do with the game: it does not
+                collide, it is not dodged, and nothing in the level waits for it. It is drawn here because this is
+                where the chief is, and it comes and goes on its own - see the sayings in utils/runnerLevel. */}
+            {view.boss.saying ? <div className="ffr__bubble">{view.boss.saying}</div> : null}
           </div>
         )}
 
@@ -1307,6 +1321,50 @@ export default function FirefighterRunner({
             )}
           </div>
         )}
+      </div>
+
+      {/* TOUCH CONTROLS, for the device this is most likely played on. The keyboard the game was built around is not
+          there, and tapping the screen is a poor substitute for a jump button: the same tap starts the run, and the
+          thumb ends up over the thing it is trying to jump. The two pads sit BELOW the play area and above the
+          leaderboard - out of the way of the game, and where the thumbs already rest.
+
+          Shown only on a device that cannot hover (see the media query in the stylesheet), so on a desktop they are
+          `display: none` and never in the tab order. And each one stops propagation, which is not optional: the whole
+          cabinet is one pointer surface that jumps, so a tap here would otherwise jump twice. */}
+      <div className="ffr__touch">
+        <button
+          type="button"
+          className="ffr__touch-button ffr__touch-button--duck"
+          aria-label="Duck"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            // Captured, so the release always comes back here even if the thumb slides off the pad - which is what
+            // makes holding to duck dependable rather than a way to get stuck bent double.
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setDuck(true);
+          }}
+          onPointerUp={() => setDuck(false)}
+          onPointerCancel={() => setDuck(false)}
+          onLostPointerCapture={() => setDuck(false)}
+        >
+          <span className="ffr__touch-arrow">▼</span>
+          DUCK
+        </button>
+
+        <button
+          type="button"
+          className="ffr__touch-button ffr__touch-button--jump"
+          aria-label="Jump"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            // The same call the keyboard and the whole-screen tap make, so this pad starts a run, restarts one after
+            // a crash, and jumps mid-run, without any of that being a second implementation.
+            startOrJump();
+          }}
+        >
+          <span className="ffr__touch-arrow">▲</span>
+          JUMP
+        </button>
       </div>
 
       <div className="ffr__footer">

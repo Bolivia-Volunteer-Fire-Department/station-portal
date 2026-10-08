@@ -123,6 +123,8 @@ import {
   SESSION_ENDED_MESSAGE,
   unauthorizedIsStale,
 } from './utils/sessionTimeout';
+// The chief's lines for the runner's boss level, derived from the public system settings (see utils/systemSettings).
+import { bossSayingsFrom } from './utils/systemSettings';
 import { stationLogoUrl } from './utils/assets';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
@@ -567,6 +569,12 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
     }
     setLoadingMessages(messages);
   }, [systemSettings]);
+
+  // The chief's five lines for the runner's boss level, derived rather than stored: MEMOISED because the array is handed
+  // to the game as a prop and ends up in the level's bounds, which the game loop's effect depends on - so it has to keep
+  // the same identity between renders, and change only when the settings themselves do. An array rebuilt every render
+  // would restart the loop every render, which is a stutter that would look like a rendering bug in the game.
+  const bossSayings = useMemo(() => bossSayingsFrom(systemSettings), [systemSettings]);
 
 // Helper to get a loading message (random from available ones, or default)
 const getLoadingMessage = () => {
@@ -2745,6 +2753,8 @@ const getLoadingMessage = () => {
                 soundProfile={runnerSoundProfile}
                 // Administrators get a hidden debug control that skips straight to the boss scene.
                 isAdmin={isAdmin}
+                // What the boss level's floating head says between fireball blasts, from System Settings.
+                bossSayings={bossSayings}
               />
             )}
             </Suspense>

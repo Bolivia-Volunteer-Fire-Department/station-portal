@@ -150,6 +150,17 @@ The rotating messages shown on the loading screen while the app fetches data. Te
 
 All ten fields are always there, whether or not a message has been set, so the first one can be added from this screen rather than by adding a row by hand. Saving writes all ten: clearing a field removes that message, and an empty field stays empty.
 
+## Boss Sayings
+
+Up to **five lines** the floating head says between fireballs, in the **Firefighter Runner** — the little game behind the logo on the Dashboard. One is picked at random each time, and the same line is never said twice in a row.
+
+A saying appears in the gap after a shot and goes when the next fireball comes, so it is on screen for a moment or two — long enough to read a short line and no longer. The chief says nothing at all through the fast part at the end of a fight, when the gap between shots is shorter than a line takes to read, and nothing while he is in the air on the way in or out. The bubbles are decoration: they do not affect the game, nothing collides with them, and a member who never opens the game will never see one.
+
+**A blank field is a real answer.** A line this station has never set is shown with the one the game ships with — so an empty box means "say nothing here", not "put the default back" — and clearing all five is how you stop him talking altogether. Nothing else has to be switched off.
+
+> [!TIP]
+> Short works best: these are read in the second or two they are on screen, in the middle of a game whose whole point is the fireballs flying at you. Two to five words lands; a sentence does not.
+
 ## Custom Settings
 
 Any other settings the station has stored, listed here so you can see and edit them without going anywhere else. The three clock-location keys and everything in the cards above are managed by their own cards and are deliberately not duplicated here.

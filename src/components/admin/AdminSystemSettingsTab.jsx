@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays, MessageSquare } from 'lucide-react';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
@@ -21,6 +21,12 @@ import {
   loadingMessageSavePlan,
   updateLoadingMessages,
   LOADING_MESSAGE_KEYS,
+  // The chief's five lines for the runner's boss level. The same card shape as the loading messages, and the same two
+  // helpers underneath it - see utils/systemSettings, where the sharing is explicit rather than duplicated.
+  getBossSayings,
+  updateBossSayings,
+  bossSayingSavePlan,
+  BOSS_SAYING_KEYS,
 } from '../../utils/systemSettings';
 import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
@@ -46,6 +52,10 @@ const KNOWN_KEYS = [
   PAY_PERIOD_DAYS_KEY,
   PAY_WEEK_START_KEY,
   ...LOADING_MESSAGE_KEYS,
+  // The chief's sayings are curated too - five of them, named rather than repeated here, and for the same reason as the
+  // loading messages: a card of five fields is a screen, and the generic value editor below it is for everything a
+  // station adds by itself.
+  ...BOSS_SAYING_KEYS,
 ];
 
 function isTruthySetting(value) {
@@ -65,6 +75,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <BossSayingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <CustomSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
     </CenteredContent>
   );
@@ -1235,6 +1246,134 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
     </div>
   );
 }
+// The five lines the runner's boss level puts in the floating head's mouth, between fireball blasts. Saved all five at
+// once, like the loading messages below and for the same reason: the backend validates every pair before writing any of
+// them, so one bad value cannot leave the card half saved.
+//
+// A BLANK FIELD IS A REAL ANSWER HERE, and the whole point of showing the defaults: a line the station has never set is
+// shown with what the game is actually saying, so an empty box means "say nothing in that slot", and emptying all five
+// is how the bubbles are turned off - no separate switch to keep in step with five values (see
+// utils/systemSettings#bossSayingsFrom, which is where the two kinds of empty are told apart).
+function BossSayingsCard({ token, systemSettings, onDataChanged }) {
+  const [sayings, setSayings] = useState(() => getBossSayings(systemSettings));
+  // The card mirrors a prop, so a settings reload has to replace what is on screen. Done DURING RENDER rather than in an
+  // effect, which is the pattern React documents for exactly this and the one the lint rule asks for: an effect that
+  // calls setState costs a second render pass and paints the stale values once first. (The cards above use the effect -
+  // this is not a reason to change them, only a reason not to add another.)
+  const [settingsSeen, setSettingsSeen] = useState(systemSettings);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (settingsSeen !== systemSettings) {
+    setSettingsSeen(systemSettings);
+    setSayings(getBossSayings(systemSettings));
+  }
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const plan = bossSayingSavePlan(sayings);
+      const result = await adminSaveSystemSettings(
+        plan.map(({ key, value }) => ({ key, value })),
+        token
+      );
+
+      // The deployment in front of us may predate this action - the page and the backend are deployed separately.
+      // UNKNOWN_ACTION is exactly that case, so fall back to the per-key save rather than reporting a failure for an
+      // action the server has never heard of.
+      if (isUnknownAction(result)) {
+        console.warn('This deployment has no batch settings action; saving each saying on its own.');
+        for (const { key, value, label } of plan) {
+          const one = await adminSaveSystemSetting(key, value, token);
+          if (!one?.success) throw new Error(one?.message || `Failed to save ${label}.`);
+        }
+        void onDataChanged();
+        setSaved(true);
+        return;
+      }
+
+      if (!result?.success) throw new Error(result?.message || "Failed to save the chief's sayings.");
+
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || "Failed to save the chief's sayings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <MessageSquare className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Boss Sayings</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Up to five things the floating head says between fireballs in the Firefighter Runner. One is picked at
+              random and the same line is never said twice in a row. Clear a line to leave it out; clear all five to
+              keep him quiet.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {saved && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-green-50 text-green-600 border border-green-200 dark:bg-green-950/80 dark:text-green-400 dark:border-green-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>Changes saved!</span>
+          </div>
+        )}
+
+        {sayings.map((saying) => (
+          <div key={saying.id}>
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+              {saying.label}
+            </label>
+            <input
+              type="text"
+              // A bubble is a bubble: a line long enough to wrap past three lines is one nobody reads before it goes.
+              maxLength={60}
+              placeholder="Leave blank for silence"
+              value={saying.value}
+              // Matched by the saying's own id, never by position - the mistake that made the loading messages
+              // uneditable, and the reason both cards share updateSettingRow.
+              onChange={(e) =>
+                setSayings((current) => updateBossSayings(current, saying.id, e.target.value))
+              }
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+        ))}
+
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Saving...' : 'Save Sayings'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
   const [loadingMessages, setLoadingMessages] = useState(() => getLoadingMessages(systemSettings));
   const [saving, setSaving] = useState(false);

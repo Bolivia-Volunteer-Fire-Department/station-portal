@@ -39,22 +39,83 @@ export const getLoadingMessages = (systemSettings) =>
 
 // One field edited, by id. Returns a NEW list and never mutates: the untouched rows are returned as they are,
 // and a value can never land on the wrong row.
-export const updateLoadingMessages = (messages, id, value) =>
-  (Array.isArray(messages) ? messages : []).map((message) =>
-    message.id === id ? { ...message, value: String(value ?? '') } : message
+// One row of a CARD OF IDENTICAL FIELDS edited, by id - that field's value changed, the rest returned as they are.
+// Shared by the loading messages and by the chief's sayings, which are the same shape of thing: a fixed list of
+// settings with a label each, saved together.
+export const updateSettingRow = (rows, id, value) =>
+  (Array.isArray(rows) ? rows : []).map((row) =>
+    row.id === id ? { ...row, value: String(value ?? '') } : row
   );
 
-// What a save writes: every key, in order, INCLUDING the blank ones - clearing a message is a save too, and
-// skipping blanks would leave the old text in the sheet with no way to remove it from this screen.
+// What such a card writes: every key, in order, INCLUDING the blank ones - clearing a field is a save too, and
+// skipping blanks would leave the old text in the store with no way to remove it from this screen.
 //
 // Returning the pairs is what makes the save testable without a browser: the value a member typed is asserted
 // against the key it goes to, rather than the two being joined by an index inside an event handler.
-export const loadingMessageSavePlan = (messages) =>
-  (Array.isArray(messages) ? messages : []).map((message) => ({
-    key: message.key,
-    value: String(message.value ?? ''),
-    label: message.label,
+export const settingRowSavePlan = (rows) =>
+  (Array.isArray(rows) ? rows : []).map((row) => ({
+    key: row.key,
+    value: String(row.value ?? ''),
+    label: row.label,
   }));
+
+// The two cards that are that shape, named as their screens and harnesses have always named them. Aliases rather than
+// second implementations, because the arithmetic is identical and two copies of it would eventually disagree about
+// what an empty field means.
+export const updateLoadingMessages = updateSettingRow;
+export const loadingMessageSavePlan = settingRowSavePlan;
+export const updateBossSayings = updateSettingRow;
+export const bossSayingSavePlan = settingRowSavePlan;
+
+// THE CHIEF'S SAYINGS: five lines the floating head comes out with between fireball blasts, in the runner's boss
+// level. Five separate settings rather than one delimited value, for the same reason the loading messages are separate:
+// a blank one is simply an empty setting, and adding a sixth later needs no migration.
+export const BOSS_SAYING_COUNT = 5;
+export const BOSS_SAYING_KEYS = Array.from(
+  { length: BOSS_SAYING_COUNT },
+  (_, index) => `boss_saying${index}`
+);
+
+// What the chief says on a station that has never configured any, so the bubbles exist the first time somebody reaches
+// the boss rather than looking broken until an administrator finds the card. Short lines, because they are read in the
+// second or two they are on screen, in the voice of a fire chief who is enjoying himself - the head is a cartoon, and
+// the station may well have a chief who plays it.
+export const DEFAULT_BOSS_SAYINGS = [
+  'Nice dodge. Try it again.',
+  'My grandmother ducks faster.',
+  'Is that all you have?',
+  'Stay down, rookie.',
+  'You missed one...',
+];
+
+// The five editable rows, always all five and always in key order, whatever order the backend returned them in. A row
+// exists even when the station has no such key - a field that only appears once a value is stored could never be used
+// to add the first one - and an UNSET key shows its DEFAULT, because that is what the boss is actually saying.
+export const getBossSayings = (systemSettings) =>
+  BOSS_SAYING_KEYS.map((key, index) => ({
+    // The key IS the identity, as it is for a loading message: matched by id and never by position, so a keystroke
+    // survives the next render.
+    id: key,
+    index,
+    key,
+    label: `Saying ${index + 1}`,
+    value: String(getSettingValue(systemSettings, key, DEFAULT_BOSS_SAYINGS[index] || '') ?? ''),
+  }));
+
+// The five lines as the RUNNER wants them: the ones with something in them, in key order, and nothing else.
+//
+// THE TWO KINDS OF EMPTY ARE DIFFERENT, and this is the whole of the function. A key the station has never set falls
+// back to its default, so the boss speaks on day one. A key that HAS a value and it is blank is a deliberate silence
+// and is left out. Blanking all five is therefore how an administrator turns the bubbles off - the honest reading of an
+// empty box, rather than a station arguing with its own settings.
+export const bossSayingsFrom = (systemSettings) => {
+  const rows = Array.isArray(systemSettings) ? systemSettings : [];
+  return BOSS_SAYING_KEYS.map((key, index) => {
+    const row = rows.find((candidate) => String(candidate?.key ?? '').trim() === key);
+    if (row === undefined) return String(DEFAULT_BOSS_SAYINGS[index] || '').trim();
+    return String(row?.value ?? '').trim();
+  }).filter((line) => line !== '');
+};
 
 // Which system settings are PUBLIC, in one place, because three things have to agree about it: the migration that
 // filled `settings/public` and `settings/private`, that migration's plan (which prints which side each key lands on),
@@ -88,6 +149,10 @@ export const PUBLIC_SETTING_KEYS = [
   // two keys above avoid); scripts/verify-clock-logs pins the names together so they cannot drift.
   'pay_period_days',
   'pay_week_start',
+  // THE CHIEF'S SAYINGS, public because the RUNNER draws them: a member's own game cannot read a private setting, and
+  // the bubbles would simply never appear. Nothing in them is station business - they are five lines an administrator
+  // writes for a cartoon head to say.
+  ...BOSS_SAYING_KEYS,
   'is_dark_mode',
   'time_format',
 ];

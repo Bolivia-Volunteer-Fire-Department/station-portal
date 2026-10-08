@@ -137,6 +137,45 @@
   z-index: 3;
 }
 
+/* The chief's speech bubble. To the LEFT of the head and centred on it, and both halves of that are the reason it goes
+   there rather than above: the head holds the right edge AND floats as high as 48px from the top of the frame, so a
+   bubble over its head would be clipped by the sky's own overflow on the high pass-overs. To the left there is always
+   room, and it is the direction the fireballs travel - which is also why they draw over it: the bubble is decoration,
+   and the ball it is heading towards is not. */
+.ffr__bubble {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  transform: translateY(-50%);
+  margin-right: 12px;
+  max-width: 190px;
+  padding: 7px 10px;
+  border: 2px solid var(--ffr-ink);
+  border-radius: 12px;
+  background: var(--ffr-paper);
+  color: var(--ffr-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: .02em;
+  text-align: center;
+  /* NOTHING TO DO WITH THE GAME, and that includes the pointer: the whole cabinet is a jump-on-any-tap surface, so a
+     decorative box that swallowed a tap would be a runway with a hole in it. */
+  pointer-events: none;
+}
+
+/* The tail: a triangle on the bubble's right edge, pointing at the head - the two-borders trick, in the ink the bubble
+   is outlined in. */
+.ffr__bubble::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  margin-top: -6px;
+  border: 6px solid transparent;
+  border-left-color: var(--ffr-ink);
+}
+
 .ffr__obstacle--hydrant {
   width: 34px;
   height: 44px;
@@ -360,5 +399,75 @@
   .ffr__footer {
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+/* -------------------------------------------------------------------------------------------------------------
+ * The touch pads: duck and jump, for a phone.
+ * -------------------------------------------------------------------------------------------------------------
+ *
+ * HIDDEN BY DEFAULT, and the media query below is the only thing that shows them. The test is the DEVICE, not the
+ * width: a pointer that can hover means a mouse and a keyboard are probably both there, and what a narrow window on a
+ * desktop needs is not two dead buttons in the tab order. `display: none` is what keeps them out of it.
+ *
+ * `pointer: coarse` + `hover: none` is the standard pair for "a finger is the input": a phone or a tablet matches,
+ * a touchscreen laptop with a mouse does not - which is right, because that one has a keyboard.
+ */
+.ffr__touch {
+  display: none;
+}
+
+.ffr__touch-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  /* Thumb-sized rather than mouse-sized. 72px is a comfortable target for a control pressed while the other thumb is
+     already on the screen, and the round shape is what stops a corner being missed. */
+  width: 72px;
+  height: 72px;
+  border: 2px solid var(--ffr-ink);
+  border-radius: 999px;
+  background: var(--ffr-paper);
+  color: var(--ffr-ink);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  cursor: pointer;
+  /* A control that is HELD, or tapped again and again, must not behave like a web page: no 300ms wait for a
+     double-tap that is never coming, no scrolling out from under the thumb, no text selection, and no grey flash on
+     every press. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The right-hand pad is the action, in the cabinet's own yellow - the colour the HUD already uses for the buttons you
+   press. Duck keeps the paper, so the two are told apart at a glance without reading either of them. */
+.ffr__touch-button--jump {
+  background: var(--ffr-yellow);
+}
+
+.ffr__touch-button:active {
+  transform: translateY(1px);
+  filter: brightness(.96);
+}
+
+.ffr__touch-arrow {
+  font-size: 18px;
+  line-height: 1;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .ffr__touch {
+    display: flex;
+    /* One pad under each thumb, and the same way round a controller puts them: duck on the left, jump on the right. */
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    padding: 0 4px;
   }
 }
