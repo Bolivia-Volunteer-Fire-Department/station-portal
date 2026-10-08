@@ -13,6 +13,9 @@ import normalMusic2 from "./normal_music2.mp3";
 import bossMusic from "./boss_music.mp3";
 import { soundsForProfile } from "../../utils/runnerSounds";
 import { MUSIC_VOLUME, musicTrackFor } from "../../utils/runnerMusic";
+// How much of the fixed 800x280 world fits in the box the cabinet has been given - see the note on the helper, and on
+// the stage below.
+import { gameFit } from "../../utils/runnerFit";
 import {
   BOSS_INTERVAL_SECONDS,
   BOSS_DURATION_SECONDS,
@@ -1139,6 +1142,38 @@ export default function FirefighterRunner({
     []
   );
 
+  // THE STAGE, and the scale that fits the game into it.
+  //
+  // The runner is a fixed 800x280 world and the cabinet around it is responsive, so on a screen narrower than that the
+  // world used to be CROPPED - and the first thing to go was the right-hand edge, which is where the chief holds
+  // station. A phone showed a game with no boss in it, being shot at from off-screen. So the world is scaled to fit
+  // instead (utils/runnerFit), and this measures the room it has.
+  //
+  // The STAGE is what gets measured, not the sky: the sky carries the transform, and a transformed element's own box
+  // still reports its unscaled width - measuring it would read 800 for ever and never scale at all.
+  const stageRef = useRef(null);
+  const [fit, setFit] = useState(1);
+
+  useEffect(() => {
+    const node = stageRef.current;
+    if (!node) return undefined;
+
+    const measure = () => setFit(gameFit(node.clientWidth, width));
+    measure();
+
+    // No ResizeObserver - a test renderer, an old browser - is not a reason to leave the game cropped: the call above
+    // has already measured what it could, and a window resize is the next best signal. In a renderer with no layout at
+    // all the width reads 0, which gameFit answers with 1, so the harnesses draw the world at its own size.
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [width]);
+
   const player = view.player;
   const formattedScore = String(score).padStart(5, "0");
   const formattedHighScore = String(highScore).padStart(5, "0");
@@ -1206,7 +1241,24 @@ export default function FirefighterRunner({
         <span>{formattedScore}</span>
       </div>
 
-      <div className="ffr__sky">
+      {/* THE STAGE holds the game's fixed-size world at whatever scale fits the room the cabinet has. It is what the
+          measurement watches, and its height is the SCALED height, so a narrow screen loses the empty space under the
+          game rather than leaving a gap the size of the part that was cropped. See the fit effect above. */}
+      <div
+        className="ffr__stage"
+        ref={stageRef}
+        style={{ height: `${Math.round(height * fit)}px` }}
+      >
+        <div
+          className="ffr__sky"
+          style={{
+            // translateZ(0) is in the stylesheet and has to be carried through here: an inline transform REPLACES the
+            // CSS one, and that promotion is the WebKit compositing fix documented on .ffr__sky - without it Safari goes
+            // back to re-clipping and re-compositing every sprite every frame, which is the stutter it was fixing.
+            transform: `translateZ(0) scale(${fit})`,
+            transformOrigin: "top left",
+          }}
+        >
         <div className="ffr__cloud ffr__cloud--one" />
         <div className="ffr__cloud ffr__cloud--two" />
 
@@ -1297,9 +1349,16 @@ export default function FirefighterRunner({
         <div className="ffr__ground">
           <div className="ffr__ground-lines" />
         </div>
+      </div>
 
+        {/* The overlay is OUTSIDE the sky, and so outside the scale: it is text, and text that shrinks with the game is
+            text nobody can read on the phone this is for. It is positioned against the stage instead, which is why its
+            bottom is set inline - the ground it sits above is 42 game pixels, and those are 42 * fit screen pixels. */}
         {(gameState === "ready" || gameState === "gameover") && (
-          <div className="ffr__overlay">
+          <div
+            className="ffr__overlay"
+            style={{ bottom: `${Math.round(GROUND_HEIGHT * fit)}px` }}
+          >
             {gameState === "ready" ? (
               <>
                 <div className="ffr__title">🚨 FIREHOUSE RUNNER</div>

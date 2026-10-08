@@ -38,6 +38,8 @@ import {
   getBossSayings,
   PUBLIC_SETTING_KEYS,
 } from '../src/utils/systemSettings.js';
+// The arithmetic that fits the fixed 800x280 world into the box it is given - the bug the last block here is about.
+import { gameFit } from '../src/utils/runnerFit.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -616,6 +618,52 @@ console.log('\n--- the sayings are settings, and five of them ---');
   checkIs(
     'they are PUBLIC, because the member playing the game draws them',
     BOSS_SAYING_KEYS.every((key) => PUBLIC_SETTING_KEYS.includes(key))
+  );
+}
+
+console.log('\n--- the fixed world, fitted to the box it is given ---');
+{
+  // THE BUG THIS PINS: the game is a fixed 800x280 world drawn inside a responsive cabinet, and the play area clips. On
+  // a screen narrower than the world, what vanished was the RIGHT-HAND edge - and the chief holds it, at `width - 118`,
+  // which on a 390px phone is x = 682, outside the box and throwing fireballs from off-screen. So the world is scaled
+  // to fit rather than cropped, and the arithmetic of that is here where it can be asked directly.
+  check('the world at its own size is not scaled', gameFit(800, 800), 1);
+  check('nor is it stretched up on a wider screen', gameFit(1200, 800), 1);
+  check('a narrower box scales it to fit', gameFit(400, 800), 0.5);
+  check('a phone in portrait', gameFit(390, 800), 0.4875);
+  // A MEASUREMENT THAT CANNOT BE USED IS THE WORLD AT ITS OWN SIZE, never a collapsed game: a renderer with no layout
+  // engine (every harness that imports this component), a hidden container, a division by zero upstream. The caller
+  // measures again as soon as it has a real width, so the safe direction is the only sensible one.
+  check('no measurement yet is no scaling', gameFit(0, 800), 1);
+  check('neither is nonsense', gameFit(undefined, 800), 1);
+  check('nor is a missing design width a scale of anything', gameFit(400, 0), 1);
+
+  // WHERE IT IS APPLIED, and the details that would each be a bug on their own. The first is the subtle one: the SKY
+  // carries the transform, so measuring the sky would read its unscaled 800 for ever - the stage is measured instead.
+  const css = readFileSync('src/components/FirefighterRunner/FirefighterRunner.css', 'utf8');
+  checkIs(
+    'the component measures the stage',
+    /className="ffr__stage"[\s\S]{0,160}ref=\{stageRef\}/.test(component) &&
+      /new ResizeObserver\(measure\)/.test(component)
+  );
+  checkIs(
+    'and scales the world inside it, keeping the WebKit layer promotion an inline transform would replace',
+    /transform: `translateZ\(0\) scale\(\$\{fit\}\)`/.test(component) &&
+      /transformOrigin: "top left"/.test(component)
+  );
+  checkIs(
+    'with the play area carrying the world width rather than a share of the room',
+    /\.ffr__sky \{[\s\S]{0,500}width: var\(--ffr-width\);/.test(css)
+  );
+  // OUTSIDE THE SCALE, because it is text: an overlay shrunk with the game is an overlay nobody can read on the phone
+  // this is all for. Its bottom tracks the scaled ground rather than the unscaled 42px the stylesheet used to name.
+  const skyAt = component.indexOf('className="ffr__sky"');
+  const overlayAt = component.indexOf('ffr__overlay');
+  const closing = component.lastIndexOf('</div>', overlayAt);
+  checkIs(
+    'and the overlay outside it, sitting above the SCALED ground',
+    skyAt > -1 && overlayAt > skyAt && closing > skyAt && closing < overlayAt &&
+      /className="ffr__overlay"[\s\S]{0,80}bottom: `\$\{Math.round\(GROUND_HEIGHT \* fit\)\}px`/.test(component)
   );
 }
 

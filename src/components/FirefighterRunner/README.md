@@ -26,6 +26,13 @@ export default function App() {
 - Getting hit: the four death frames play out, the firefighter falls to the ground if it was caught in
   the air, and the last frame stays on screen behind the game-over panel
 
+The play area is a **fixed 800×280 world** — every sprite position, the ground line and the boss's right-hand edge are
+arithmetic on that rectangle — and it is **scaled to fit** the room the cabinet has rather than cropped. That matters on
+anything narrower than 800px, which is most phones: the world used to lose its right-hand edge, and that edge is where
+the chief holds station, so a phone showed a boss fight with no boss in it, being shot at from off-screen. The fit is
+measured from the stage (`utils/runnerFit`), never above 1, and the text around the game — the HUD, the ready and
+game-over panel, the touch pads — deliberately stays its own size rather than shrinking with it.
+
 ## The obstacles
 
 Two kinds come at the player. At ground level, jumped over: a fire hydrant, or — just as often — a

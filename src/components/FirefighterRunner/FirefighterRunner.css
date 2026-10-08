@@ -57,8 +57,11 @@
 
 .ffr__sky {
   position: relative;
-  width: 100%;
+  /* The WORLD's width, not the room's: this element carries the game's own coordinate space, and the stage scales it to
+     fit. A `100%` here would resize the world instead of scaling it, which is the bug this replaced. */
+  width: var(--ffr-width);
   height: var(--ffr-height);
+  transform-origin: top left;
   overflow: hidden;
   /* Own compositor layer, and the reason is WebKit.
    *
@@ -129,6 +132,22 @@
 
 .ffr__obstacle {
   z-index: 3;
+}
+
+/* THE STAGE: the box the fixed-size game is fitted into and measured against.
+ *
+ * The runner draws itself in a fixed 800x280 world - every sprite position and the boss's right-hand edge are arithmetic
+ * on that rectangle - while the cabinet around it is responsive. Without this the world was CROPPED on anything narrower
+ * than 800px, and because the play area clips, the first casualty was the right-hand edge: the floating chief, which sat
+ * at x = 682 on a 390px phone, off-screen and throwing fireballs from nowhere.
+ *
+ * So the stage is as wide as the room it has, and the sky inside it is SCALED to fit (the transform is set inline from
+ * the measured width - see FirefighterRunner). The stage's height is set inline too, from the scaled height, so the page
+ * below it sits directly under the game rather than after 280px of empty box. */
+.ffr__stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* The chief and its fireballs share the obstacle plane: in front of the ground, behind the player. */
@@ -261,7 +280,10 @@
 
 .ffr__overlay {
   position: absolute;
-  inset: 0 0 42px;
+  /* The bottom is set INLINE, because the ground it sits above is 42 game pixels and those are 42 * fit screen pixels -
+     see FirefighterRunner. It is a child of the STAGE rather than the sky, deliberately: it is text, and text scaled
+     down with the game is text nobody can read on the phone this is for. */
+  inset: 0;
   display: grid;
   place-content: center;
   justify-items: center;
