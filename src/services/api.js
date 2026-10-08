@@ -368,6 +368,30 @@ export const fetchMyPushDevices = async (token, deviceToken) =>
 // bootstrap carries all three at sign-in; this is for a re-read without signing in again.
 export const fetchCertifications = async (token) => dispatchRequest({ action: 'GET_CERTIFICATIONS', token });
 
+// --- the scan attached to a certification record ---
+//
+// ONE OPTIONAL FILE PER RECORD, and an officer is the one who attaches it. The BYTES never pass through these calls:
+// the browser uploads straight to the bucket (services/certificationFileStorage.js) and storage.rules decides whether
+// it may. What is here is the RECORD of it, which the server writes only after reading the record and the uploaded
+// object together.
+
+// The member's own scans, keyed by the record each hangs off - read alongside the certifications themselves, and never
+// part of the sign-in payload: it is a small read for the one screen that shows them.
+export const fetchMyCertificationFiles = async (token) =>
+  dispatchRequest({ action: 'GET_MY_CERTIFICATION_FILES', token });
+
+// An officer's: the scan attached to the record open in the editor, asked for when that record is opened.
+export const fetchCertificationFiles = async (recordId, token) =>
+  dispatchRequest({ action: 'ADMIN_GET_CERTIFICATION_FILES', token, recordId });
+
+// Record the file an officer has just uploaded against a record, or remove the one that is on it. Both are callables,
+// and the server re-checks the permission and the file rather than trusting anything sent from here.
+export const adminSaveCertificationFile = async ({ recordId, fileId, name }, token) =>
+  dispatchRequest({ action: 'ADMIN_SAVE_CERTIFICATION_FILE', token, recordId, fileId, name });
+
+export const adminDeleteCertificationFile = async (fileId, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_CERTIFICATION_FILE', token, fileId });
+
 // The catalog: what the station tracks, how each one is shown, and what should happen when it runs out.
 export const adminSaveCertificationSetup = async (certification, token) =>
   dispatchRequest({

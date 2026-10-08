@@ -4,6 +4,13 @@
 
 The page is a readout, deliberately: your certifications are recorded by an administrator, and there is nothing here to change. Ask an administrator if something is missing, wrong, or has been renewed and not yet recorded.
 
+## The scan, where there is one
+
+Where an officer attached the certificate itself — a scan or a photo of the card — the record carries a **View upload** button beside it, which opens the file in a new tab.
+
+> [!NOTE]
+> The link is asked for each time you press it, and the server hands one over only to you and to the officers who keep these records. Nothing is emailed to anybody, and there is nothing here for you to change: if a scan is missing, or it is the wrong one, that is an administrator's to fix.
+
 ## What the statuses mean
 
 | Status | Meaning |

@@ -318,6 +318,21 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // The scan attached to a certification record: one optional file per period, attached by an officer in the
+  // Certifications tab and opened by the member it belongs to.
+  //
+  // TWO CALLABLES AND NO CLIENT WRITES AT ALL, which is the unusual part of this one. The BYTES go straight from the
+  // browser to the bucket, where storage.rules decides whether they may; the ROW is written by a function, because the
+  // check that matters - that the file belongs to the member on the record it names - needs two documents read
+  // together, which a rule cannot do. The READS are ordinary reader queries through the rules, so opening a scan costs
+  // no function invocation at all.
+  certificationFiles: {
+    requires: ['memberPayload'],
+    writes: ['ADMIN_SAVE_CERTIFICATION_FILE', 'ADMIN_DELETE_CERTIFICATION_FILE'],
+    reads: ['GET_MY_CERTIFICATION_FILES', 'ADMIN_GET_CERTIFICATION_FILES'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -625,6 +640,20 @@ const DISPATCH = {
   // after a worse run without a second read - and `improved` is what tells it whether to celebrate or to keep the score
   // it already had. Both names come from the sheet handler the component was written against.
   SAVE_RUNNER_SCORE: async (body) => ok(await callable('saveRunnerScore', { score: body.score })),
+
+  // Attaching and removing the scan on a certification record. Both are callables for the same reason the row is
+  // written by a function at all: the file and the record have to be read together, and neither a browser nor a
+  // security rule can do that. The BYTES do not come through here - see services/certificationFileStorage.js.
+  ADMIN_SAVE_CERTIFICATION_FILE: async (body) =>
+    ok(
+      await callable('saveCertificationFile', {
+        recordId: String(body.recordId || ''),
+        fileId: String(body.fileId || ''),
+        name: String(body.name || ''),
+      })
+    ),
+  ADMIN_DELETE_CERTIFICATION_FILE: async (body) =>
+    ok(await callable('deleteCertificationFile', { fileId: String(body.fileId || '') })),
 
   // Deleting a member. The callable does all of it - the documents, the devices and the Auth account - and answers with
   // the { success, message } shape the members tab already branches on. `id` is the sheet's field name, kept here

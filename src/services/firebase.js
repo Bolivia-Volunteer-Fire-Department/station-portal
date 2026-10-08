@@ -22,6 +22,7 @@ import {
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
+import { connectStorageEmulator, getStorage } from 'firebase/storage';
 
 // `import.meta.env` is Vite's, so it is absent when a Node harness imports this module to check the wiring (see
 // scripts/verify-firebase-auth.mjs). Reading through this makes the module importable in both places rather than
@@ -185,6 +186,8 @@ export const firebaseApp = () => {
 let authInstance = null;
 let firestoreInstance = null;
 let functionsInstance = null;
+// The bucket, for the certification scans - see firebaseStorage below for why the name cannot be guessed.
+let storageInstance = null;
 
 export const firebaseAuth = () => {
   if (!authInstance) {
@@ -239,3 +242,29 @@ export const firebaseFunctions = () => {
   }
   return functionsInstance;
 };
+
+// THE BUCKET, for the one thing in this app that is a file rather than a row: the scan attached to a certification.
+//
+// The bucket NAME is not optional, and it is not guessable either. A Firebase project created after September 2024 has
+// `<project>.firebasestorage.app` as its default bucket; an older one has `<project>.appspot.com`. `getStorage(app)`
+// reads `storageBucket` off the app's options and, with none set, builds requests with no bucket in them at all - which
+// fails at the first upload rather than at startup, so the value is required rather than derived. It comes from
+// VITE_FIREBASE_STORAGE_BUCKET, exactly as public as the rest of the web config (a bucket name is not a secret; the
+// rules are what protect it), and it is in the Firebase console's SDK snippet beside the others.
+//
+// In the emulator the bucket name is only a namespace - the emulator serves whatever it is asked for - so a demo one
+// stands in, and storage.rules is what the rules harness runs against.
+export const firebaseStorage = () => {
+  if (!storageInstance) {
+    const bucket = String(env.VITE_FIREBASE_STORAGE_BUCKET || '').trim() || (usingEmulator ? `${config.projectId}.appspot.com` : undefined);
+    storageInstance = getStorage(firebaseApp(), bucket);
+    if (usingEmulator) connectStorageEmulator(storageInstance, '127.0.0.1', 9199);
+  }
+  return storageInstance;
+};
+
+// Whether a build can reach the bucket at all, which is what the certification-attachment screen asks before offering
+// an Upload button it could not honour. Public, because anything that fails at the first byte uploaded should be able
+// to say so before somebody chooses a file.
+export const storageConfigured = () =>
+  Boolean(String(env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()) || usingEmulator;

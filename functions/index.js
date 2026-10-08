@@ -5,6 +5,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { FieldValue, getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+const { getStorage } = require('firebase-admin/storage');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
 // The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
 // searchable in the Firebase console. See the note on `audit` below.
@@ -47,6 +48,14 @@ const {
   rosterPageSize,
 } = require('./rosterPage');
 
+// The attached scans, for the same reason and by the same rule: what may be attached, where it goes and what is
+// written about it are pure decisions, asked directly by scripts/verify-certifications.mjs.
+const {
+  certificationFileError,
+  certificationFilePath,
+  certificationFileRow,
+} = require('./certificationFiles');
+
 // WHAT BELONGS IN A FUNCTION, and why:
 //
 // Everything a client may do directly lives in firestore.rules. What is here is work that needs the Admin SDK, and the
@@ -62,6 +71,22 @@ const {
 initializeApp();
 const db = getFirestore();
 const auth = getAuth();
+
+// THE BUCKET, RESOLVED EXPLICITLY, and this is a trap worth knowing about. A project created after September 2024
+// has <project>.firebasestorage.app as its default bucket rather than <project>.appspot.com, and the Admin SDK's
+// no-argument default is the older name - so "just ask for the default bucket" is how a correct-looking function
+// writes to a bucket nobody ever uploaded to, and fails with a 404 that names a bucket you never created.
+// FIREBASE_CONFIG is set by the runtime and carries the right one; the fallback is for a local run only.
+const storageBucket = () => {
+  const configured = (() => {
+    try {
+      return String(JSON.parse(process.env.FIREBASE_CONFIG || '{}').storageBucket || '').trim();
+    } catch {
+      return '';
+    }
+  })();
+  return getStorage().bucket(configured || undefined);
+};
 
 // The synthetic email domain, decided for the department: RFC-reserved, so nothing can ever be delivered to it and
 // an administrator reading the Auth console can see at a glance that an account is synthetic. THE CLIENT DERIVES
@@ -352,6 +377,152 @@ exports.readAdminCertificationRecords = onCall(async (request) => {
     records: recordSnapshots.map((row) => ({ ...row.data(), id: row.id })),
     activeUserIds,
   };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// The scans attached to those records: one optional file per certification, and the only two ways one is written or
+// removed. THE BYTES NEVER PASS THROUGH HERE - the browser uploads straight to the bucket, and storage.rules decides
+// whether it may - because a callable in the path of every upload pays for the transfer twice and caps the file at a
+// callable's payload limit. What this does is the part a rule CANNOT do: read two documents and check them against
+// each other, which is the difference between "an officer is attaching something" and "an officer is attaching THIS
+// to THAT member's record".
+// -------------------------------------------------------------------------------------------------------------
+
+// Record the file an officer has just uploaded. The request names the RECORD and the FILE ID, never the path: the
+// path is derived from the record's own member, so a file cannot be filed under one member and recorded against
+// another. Everything the row says about the file is read off the OBJECT, not from the caller's description of it.
+exports.saveCertificationFile = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_manage_certifications', 'attach a file to a certification');
+
+  const data = request.data || {};
+  const recordId = String(data.recordId || '').trim();
+  const fileId = String(data.fileId || '').trim();
+  const name = String(data.name || '').trim();
+  if (!recordId || !fileId || !name) {
+    throw new HttpsError('invalid-argument', 'A record, a file id and a file name are required.');
+  }
+
+  const record = await db.doc(`certifications/${recordId}`).get();
+  if (!record.exists) throw new HttpsError('not-found', 'That certification record does not exist.');
+  const userId = String(record.get('user_id') || '').trim();
+  if (!userId) throw new HttpsError('failed-precondition', 'That certification record has no member on it.');
+
+  const storagePath = certificationFilePath({ userId, recordId, fileId });
+  const file = storageBucket().file(storagePath);
+  const [exists] = await file.exists();
+  if (!exists) throw new HttpsError('failed-precondition', 'That upload did not arrive. Try attaching it again.');
+
+  const [metadata] = await file.getMetadata();
+  const size = Number(metadata.size || 0);
+  const contentType = String(metadata.contentType || '');
+  const problem = certificationFileError({ size, contentType });
+  if (problem) {
+    // The bytes go too. They are already in the bucket - the client put them there - and a file that may not be
+    // recorded is a file that should not be sitting there either.
+    await file.delete({ ignoreNotFound: true });
+    throw new HttpsError('invalid-argument', problem);
+  }
+
+  const row = certificationFileRow({
+    id: fileId,
+    recordId,
+    userId,
+    storagePath,
+    name,
+    contentType,
+    size,
+    uploadedBy: caller.uid,
+    uploadedAt: stationTimestamp(),
+  });
+
+  // ONE FILE PER RECORD, so attaching a second one REPLACES the first: the old row is deleted in the same batch, and
+  // the old OBJECT follows from that row's own trigger. A replace therefore cannot leave yesterday's scan in the
+  // bucket with nothing pointing at it. (The batch applies in order, so a re-save of the same id sets the row it
+  // just deleted rather than losing it.)
+  const previous = await db.collection('certification_files').where('certification_id', '==', recordId).get();
+  const batch = db.batch();
+  previous.forEach((existing) => batch.delete(existing.ref));
+  batch.set(db.doc(`certification_files/${fileId}`), row);
+  // THE RECORD CARRIES THE ANSWER TOO, and this is the one deliberate DENORMALIZATION in the feature. The admin table
+  // reads every certification on every open, and asking each row "is there a scan?" would add a read per FILE on top
+  // of that - a collection that only grows. One boolean, written by the only two writers of a file, keeps that list
+  // free. It is a summary of the row above, not a second source of truth: the attachment section reads the rows
+  // themselves, so an officer looking at a record always sees the real thing.
+  batch.set(db.doc(`certifications/${recordId}`), { has_upload: true }, { merge: true });
+  await batch.commit();
+
+  await audit(caller.uid, 'ADMIN_ATTACH_CERTIFICATION_FILE', `${name} to certifications/${recordId}`);
+  return row;
+});
+
+// Remove the file, which is what the officer sees on screen: the row goes, and the bytes follow from its trigger.
+exports.deleteCertificationFile = onCall(async (request) => {
+  const caller = request.auth;
+  if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(caller.uid, 'can_manage_certifications', 'remove a certification file');
+
+  const fileId = String((request.data || {}).fileId || '').trim();
+  if (!fileId) throw new HttpsError('invalid-argument', 'A file id is required.');
+
+  const ref = db.doc(`certification_files/${fileId}`);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new HttpsError('not-found', 'There is no file recorded against that record.');
+
+  await ref.delete();
+  // The record's own flag goes with it, in the same act - see the note in saveCertificationFile for why the boolean
+  // exists at all. `false` rather than a deleted field, so "no scan" is written down rather than implied: an absent
+  // key and a false one have to mean the same thing to every reader, and only one of them is obvious.
+  const recordId = String(snapshot.get('certification_id') || '').trim();
+  if (recordId) {
+    await db.doc(`certifications/${recordId}`).set({ has_upload: false }, { merge: true });
+  }
+
+  await audit(
+    caller.uid,
+    'ADMIN_REMOVE_CERTIFICATION_FILE',
+    `${String(snapshot.get('name') || fileId)} on ${recordId}`
+  );
+  return { id: fileId };
+});
+
+// -------------------------------------------------------------------------------------------------------------
+// THE BYTES FOLLOW THE ROW, in both directions - and it is a FUNCTION that does it rather than the browser that
+// pressed Remove. Storage has no cascade and no undo, so an object is only ever deleted because something arranged
+// it, and a tab closed halfway through a delete would otherwise leave somebody's ID card in the bucket with nothing
+// in the app pointing at it. Firestore triggers each row's deletion, and the row is the only place the path is
+// written down.
+// -------------------------------------------------------------------------------------------------------------
+
+exports.onCertificationFileDeleted = onDocumentDeleted('certification_files/{fileId}', async (event) => {
+  const storagePath = String((event.data && event.data.get('storage_path')) || '').trim();
+  if (!storagePath) return;
+
+  await storageBucket().file(storagePath).delete({ ignoreNotFound: true });
+  logger.info({
+    audit: {
+      // No actor, and that is not an omission: nobody pressed anything. This is the second half of a delete that was
+      // already audited when it happened, and saying so is more honest than guessing at who it was.
+      action: 'CERTIFICATION_FILE_BYTES_REMOVED',
+      path: storagePath,
+    },
+  });
+});
+
+// DELETING A RECORD TAKES ITS EVIDENCE WITH IT. This deletes ROWS, and the bytes follow from each row's own trigger
+// above. The order is worth stating, because the reverse - deleting the objects from here instead - would be a second
+// implementation of the same idea, and one of the two would eventually drift.
+exports.onCertificationRecordDeleted = onDocumentDeleted('certifications/{recordId}', async (event) => {
+  const recordId = String(event.params.recordId || '').trim();
+  if (!recordId) return;
+
+  const rows = await db.collection('certification_files').where('certification_id', '==', recordId).get();
+  if (rows.empty) return;
+
+  const batch = db.batch();
+  rows.forEach((row) => batch.delete(row.ref));
+  await batch.commit();
 });
 
 const reportActorFor = async (uid) => {

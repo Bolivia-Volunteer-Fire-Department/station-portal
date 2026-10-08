@@ -1,6 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, X, Users, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
-import { adminSaveCertification, adminDeleteCertification, adminBulkSaveCertification, fetchAdminCertificationRecords } from '../../services/api';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, X, Users, ChevronDown, ChevronLeft, ChevronRight, FileText, Eye, Paperclip } from 'lucide-react';
+import { adminSaveCertification, adminDeleteCertification, adminBulkSaveCertification, adminSaveCertificationFile, adminDeleteCertificationFile, fetchAdminCertificationRecords, fetchCertificationFiles } from '../../services/api';
+import {
+  discardCertificationUpload,
+  openCertificationFile,
+  storageConfigured,
+  uploadCertificationFile,
+} from '../../services/certificationFileStorage';
+import {
+  CERTIFICATION_FILE_ACCEPT,
+  certificationFileProblem,
+  formatFileSize,
+} from '../../utils/certificationFiles';
 import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
 import ConfirmModal from '../ConfirmModal';
@@ -53,6 +64,188 @@ const EDITABLE_FIELDS = [
 
 const TOOLBAR_BUTTON_CLASS =
   'inline-flex h-9 min-w-32 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500';
+
+const FILE_BUTTON_CLASS =
+  'inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700';
+
+// THE SCAN ATTACHED TO A RECORD - one optional file per period, and the only place one is attached.
+//
+// Its own component, with its own state, on purpose: the editor around it is a form that saves a ROW, and this is not a
+// field of that row. It writes nothing at all until the record exists, because the server has to read the record to
+// know whose file it is - so a record that has not been saved yet says so, rather than offering an upload that could
+// only fail.
+//
+// Attaching is TWO steps, and both live in services: the bytes go straight to the bucket
+// (services/certificationFileStorage), where storage.rules decides whether they may, and the row is written by a
+// callable (api#adminSaveCertificationFile) once the server has read the record and the uploaded object together. A
+// failure between the two removes the bytes again, so a refused file cannot be left sitting in the bucket with nothing
+// pointing at it.
+function CertificationFileField({ recordId, memberId, token }) {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    let canceled = false;
+    // With no record there is nothing to read, and nothing to clear either: the JSX says so in words, and it branches
+    // on `recordId` BEFORE it looks at `file` - so a file from the record that was open a moment ago is never shown.
+    if (!recordId) return undefined;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetchCertificationFiles(recordId, token);
+        // One file per record, so the first row IS the file.
+        if (!canceled) setFile(response?.success ? (response.files || [])[0] || null : null);
+      } catch (err) {
+        if (!canceled) setError(err?.message || 'Could not read what is attached to this record.');
+      } finally {
+        if (!canceled) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      canceled = true;
+    };
+  }, [recordId, token]);
+
+  const attach = async (event) => {
+    const chosen = event.target.files && event.target.files[0];
+    // Cleared before anything is awaited, so choosing the SAME file again after a failure still fires a change.
+    event.target.value = '';
+    if (!chosen) return;
+
+    const problem = certificationFileProblem(chosen);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+
+    setError(null);
+    setBusy(true);
+    setProgress(0);
+    let uploaded = null;
+    try {
+      uploaded = await uploadCertificationFile({
+        userId: memberId,
+        recordId,
+        file: chosen,
+        onProgress: setProgress,
+      });
+      const saved = await adminSaveCertificationFile(
+        { recordId, fileId: uploaded.fileId, name: uploaded.name },
+        token
+      );
+      if (!saved?.success) throw new Error(saved?.message || 'That file could not be recorded.');
+      setFile({ ...saved });
+    } catch (err) {
+      setError(err?.message || 'That file could not be attached.');
+      // The bytes are removed as well: an object with no row is a scan in the bucket that nothing points at.
+      if (uploaded) await discardCertificationUpload(uploaded.storagePath);
+    } finally {
+      setBusy(false);
+      setProgress(0);
+    }
+  };
+
+  const remove = async () => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await adminDeleteCertificationFile(file.id, token);
+      if (!response?.success) throw new Error(response?.message || 'That file could not be removed.');
+      setFile(null);
+    } catch (err) {
+      setError(err?.message || 'That file could not be removed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const view = () => {
+    openCertificationFile(file.storage_path).catch(() => setError('That scan could not be opened.'));
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2 dark:border-slate-700 dark:bg-slate-900">
+      <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+        Attached scan (optional)
+      </span>
+
+      {!storageConfigured() ? (
+        // A build with no bucket configured can still record a certification; it cannot store the card. Said here, in
+        // words, rather than offered as a button that fails at the first byte - see VITE_FIREBASE_STORAGE_BUCKET in
+        // .env.example.
+        <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+          This build has no storage bucket configured, so a scan cannot be attached here.
+        </p>
+      ) : !recordId ? (
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Save this record first — a scan belongs to a record that exists, because the server reads it to know whose
+          file it is.
+        </p>
+      ) : loading ? (
+        <p className="mt-2 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Reading what is attached…
+        </p>
+      ) : file ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <FileText className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-300" />
+          <span className="min-w-0 flex-1 truncate text-sm text-slate-800 dark:text-slate-100">{file.name}</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">{formatFileSize(file.size)}</span>
+          <button type="button" onClick={view} disabled={busy} className={FILE_BUTTON_CLASS}>
+            <Eye className="h-3.5 w-3.5" /> View
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+            className={FILE_BUTTON_CLASS}
+          >
+            <Paperclip className="h-3.5 w-3.5" /> Replace
+          </button>
+          <button type="button" onClick={remove} disabled={busy} className={FILE_BUTTON_CLASS}>
+            <Trash2 className="h-3.5 w-3.5" /> Remove
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+            className={FILE_BUTTON_CLASS}
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+            Attach a scan
+          </button>
+          <span className="text-xs text-slate-500 dark:text-slate-400">A PDF, a JPEG or a PNG, up to 5 MB.</span>
+        </div>
+      )}
+
+      {busy && progress > 0 && (
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          Uploading… {Math.round(progress * 100)}%
+        </p>
+      )}
+
+      {error && (
+        <p className="mt-2 flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </p>
+      )}
+
+      <input ref={inputRef} type="file" accept={CERTIFICATION_FILE_ACCEPT} onChange={attach} className="hidden" />
+    </div>
+  );
+}
 
 // The Certifications tab: one row per member per certification PERIOD.
 //
@@ -566,6 +759,11 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
               className={FIELD_CLASS}
             />
           </label>
+
+          {/* THE SCAN, which is not a field of the row: a record saves with or without one, and this writes nothing
+              until the record exists. It is the last thing in the form because that is the order an officer works in -
+              record what somebody holds, then attach the card they showed you. */}
+          <CertificationFileField recordId={formData.id} memberId={formData.user_id} token={token} />
         </div>
 
         </div>
@@ -777,13 +975,14 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                 <th className="px-4 py-3">Ends</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-center">Notes</th>
+                <th className="px-4 py-3 text-center">Upload</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
                     {searchesActive
                       ? 'No records match these searches — clear them to see the rest.'
                       : 'Nothing to show for this filter.'}
@@ -846,6 +1045,22 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                         <span
                           className="inline-flex text-emerald-600 dark:text-emerald-400"
                           title="This record has notes — open it to read them"
+                        >
+                          <Check className="h-4 w-4" />
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                      )}
+                    </td>
+                    {/* The scan, as a check - the same shape as the Notes column and for the same reason: there is one
+                        file per record, so the only question a row can answer is whether there is one at all. The fact
+                        is kept on the record as the file is attached (see functions/index.js), which is what lets this
+                        list draw the column without reading a single file. */}
+                    <td className="px-4 py-3 text-center">
+                      {row.has_upload ? (
+                        <span
+                          className="inline-flex text-emerald-600 dark:text-emerald-400"
+                          title="This record has a scan attached — open it to view, replace or remove it"
                         >
                           <Check className="h-4 w-4" />
                         </span>

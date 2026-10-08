@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { BadgeCheck, CalendarDays, AlertTriangle } from 'lucide-react';
+import { BadgeCheck, CalendarDays, AlertTriangle, FileText, Loader2 } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CenteredContent from './CenteredContent';
-import { fetchCertifications } from '../services/api';
+import { fetchCertifications, fetchMyCertificationFiles } from '../services/api';
+import { openCertificationFile } from '../services/certificationFileStorage';
 import {
   certificationStateLabel,
   certificationStateBadge,
@@ -11,12 +12,19 @@ import {
 
 // The member's own certifications. Read-only on purpose: this is the member's side of a record their
 // supervisors keep, and "who says I am certified" is not a question a form on this page should be able to
-// answer. Dates and status only.
+// answer. Dates, status, and - where an officer attached one - the scan itself, which a member may open and
+// may not change.
 //
 // It reads on open rather than carrying the rows in the bootstrap: this is the only screen that shows the full
-// set, and what the bootstrap does carry (the sign-in notice) is a subset of it.
+// set, and what the bootstrap does carry (the sign-in notice) is a subset of it. The ATTACHED SCANS are a second
+// small read in the same wave, because the button that opens one is drawn per row.
 export default function CertificationsModule({ token }) {
   const [certifications, setCertifications] = useState([]);
+  // Keyed by the record's own id, because a record has at most one scan: see the one-file-per-record rule in
+  // functions/index.js#saveCertificationFile.
+  const [files, setFiles] = useState({});
+  const [openingId, setOpeningId] = useState('');
+  const [openError, setOpenError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -27,13 +35,20 @@ export default function CertificationsModule({ token }) {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetchCertifications(token);
+        const [response, fileResponse] = await Promise.all([
+          fetchCertifications(token),
+          fetchMyCertificationFiles(token),
+        ]);
         if (canceled) return;
         if (!response?.success) {
           setError(response?.message || 'Could not load your certifications.');
           return;
         }
         setCertifications(response.certifications || []);
+        // A failed file read must not empty the page: the certifications are what this screen is for, so the worst
+        // case is a missing button rather than a missing list.
+        const rows = fileResponse?.success ? fileResponse.files || [] : [];
+        setFiles(Object.fromEntries(rows.map((file) => [String(file.certification_id || ''), file])));
       } catch (err) {
         if (!canceled) setError(err.message || 'Could not load your certifications.');
       } finally {
@@ -48,6 +63,23 @@ export default function CertificationsModule({ token }) {
       canceled = true;
     };
   }, [token]);
+
+  // Opening a scan asks the bucket for a short-lived URL (see services/certificationFileStorage): the rules hand one
+  // over only if this member may read the file at all, so a refusal here is the server saying no rather than a broken
+  // link - which is worth saying differently on screen.
+  const openFile = async (recordId) => {
+    const file = files[recordId];
+    if (!file) return;
+    setOpeningId(recordId);
+    setOpenError(null);
+    try {
+      await openCertificationFile(file.storage_path);
+    } catch (err) {
+      setOpenError(err?.message || 'That scan could not be opened.');
+    } finally {
+      setOpeningId('');
+    }
+  };
 
   const current = certifications.filter((row) => row.state === 'active' || row.state === 'expiring');
   const attention = certifications.filter((row) => row.state === 'expiring' || row.state === 'expired');
@@ -75,6 +107,12 @@ export default function CertificationsModule({ token }) {
           </div>
         </div>
 
+        {openError && (
+          <p className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-800 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-200">
+            {openError}
+          </p>
+        )}
+
         {certifications.length === 0 ? (
           <p className="p-6 text-sm text-slate-500 dark:text-slate-400">
             Your certifications will appear here once an administrator records them.
@@ -99,6 +137,22 @@ export default function CertificationsModule({ token }) {
                       : ''}
                   </p>
                 </div>
+
+                {files[row.id] && (
+                  <button
+                    type="button"
+                    onClick={() => openFile(row.id)}
+                    disabled={openingId === row.id}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    {openingId === row.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5" />
+                    )}
+                    View upload
+                  </button>
+                )}
 
                 <span
                   className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${certificationStateBadge(

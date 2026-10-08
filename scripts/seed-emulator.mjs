@@ -97,6 +97,19 @@ export const DEMO_ACCOUNTS = [
     role: 'r3',
     claims: { role_id: 'r3', is_admin: false },
   },
+  {
+    // The certification officer: holds `can_manage_certifications` and is NOT an administrator. Fourth identity, and
+    // for exactly the reason u3 exists - "an officer may attach a scan to a member's certification" cannot be tested
+    // with the administrator, because `is_admin` passes every permission and would answer "allowed" for the wrong
+    // reason. scripts/verify-storage-rules.mjs uploads as this member, and so does nothing else.
+    uid: 'u4',
+    username: 'sam',
+    email: 'sam@boliviavfd.invalid',
+    name: 'Sam Ortiz',
+    rank: 'k2',
+    role: 'r4',
+    claims: { role_id: 'r4', is_admin: false },
+  },
 ];
 
 // Firestore's REST API wants typed values, which is verbose enough to hide a mistake inside a fixture. This maps
@@ -178,6 +191,15 @@ export const seed = async () => {
     roleRow('Assessor', false, [
       'can_view_documents',
       'can_add_assessment_scores',
+    ])
+  );
+  // The certification officer: may record certifications (and so attach a scan to one) without being an
+  // administrator. See u4 in DEMO_ACCOUNTS.
+  await put(
+    'roles/r4',
+    roleRow('Certification Officer', false, [
+      'can_view_certifications',
+      'can_manage_certifications',
     ])
   );
 
@@ -359,6 +381,26 @@ export const seed = async () => {
     end_date: '2027-01-01',
     notes: '',
     updated_at: '2025-01-01 08:00:00',
+    // The record's own summary of the file below - the field the admin table's Upload column reads, written in
+    // production by the two callables that attach and remove one (functions/index.js).
+    has_upload: true,
+  });
+  // THE EVIDENCE ROW for cr1: one optional file per record, holding the PATH of the object in the bucket and never a
+  // download URL - a download URL carries a token, which is a secret that works for whoever holds it, so it is
+  // minted when somebody opens the file and never stored.
+  //
+  // It is written by a function in production (functions/index.js#saveCertificationFile) and by hand here, the way
+  // the badge index above is. There is no object behind it in the bucket: this fixture is for the Firestore rules and
+  // the reads, and scripts/verify-storage-rules.mjs uploads real bytes of its own.
+  await put('certification_files/cf1', {
+    certification_id: 'cr1',
+    user_id: 'u2',
+    storage_path: 'certifications/u2/cr1/cf1',
+    name: 'emt-card.pdf',
+    content_type: 'application/pdf',
+    size: 184320,
+    uploaded_by: 'u4',
+    uploaded_at: '2025-01-02 09:15:00',
   });
 
   // --- announcements and events, with the audience MATERIALIZED as `audience_keys` ---

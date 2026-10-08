@@ -6,6 +6,10 @@
   "functions": {
     "source": "functions"
   },
+  "storage": {
+    "rules": "storage.rules",
+    "bucket": "fire-clock-76df723.firebasestorage.app"
+  },
   "emulators": {
     "firestore": {
       "port": 8080
@@ -15,6 +19,9 @@
     },
     "functions": {
       "port": 5001
+    },
+    "storage": {
+      "port": 9199
     },
     "ui": {
       "enabled": true,

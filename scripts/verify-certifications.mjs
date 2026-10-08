@@ -15,6 +15,17 @@
  * Run with: npm run verify:certifications
  */
 import { readFileSync } from 'node:fs';
+// The certification-file logic, from BOTH sides of it: the pure module the callables use, and the client copy the file
+// picker offers. They state the same cap and the same three types as each other and as storage.rules, and the checks at
+// the foot of this file are what hold those three statements together.
+import {
+  CERTIFICATION_FILE_MAX_BYTES as FUNCTION_FILE_MAX_BYTES,
+  CERTIFICATION_FILE_TYPES as FUNCTION_FILE_TYPES,
+  certificationFileError,
+  certificationFilePath,
+  certificationFileRow,
+} from '../functions/certificationFiles.js';
+import { CERTIFICATION_FILE_MAX_BYTES, CERTIFICATION_FILE_TYPES } from '../src/utils/certificationFiles.js';
 // The badge rule, from the pure module the app's rebuild AND scripts/normalize-certification-badges.mjs both use - plus
 // that script's plan, so the decision that deletes badge documents is tested without a database.
 import { badgeForRecord, badgeIndexFor } from '../src/utils/certificationBadges.js';
@@ -343,12 +354,28 @@ checkIs(
   /\{row\.notes \? \(/.test(adminTab) && /title="This record has notes/.test(adminTab)
 );
 checkIs('with an em dash where there are none', /text-slate-300 dark:text-slate-600">—<\/span>/.test(adminTab));
+// The Upload column: the same kind of check as Notes, for the scan attached to a record. It reads a flag the RECORD
+// carries - `has_upload` - rather than the files themselves, and that is the point of it: the table reads every
+// certification on every open, so asking each row about its file would add a read per attached scan on top of that, on
+// a collection that only grows. The flag is written by the two callables that attach and remove one, and a source
+// assertion is the honest way to check that (this repo runs no Functions emulator, so nothing in functions/index.js is
+// executed by the suite).
+checkIs('the records table has an Upload column', /text-center">Upload<\/th>/.test(adminTab));
+checkIs(
+  'drawn from the record\'s own flag',
+  /\{row\.has_upload \? \(/.test(adminTab) && /title="This record has a scan attached/.test(adminTab)
+);
+checkIs(
+  'which the callables set on attach and clear on remove',
+  /has_upload: true \}, \{ merge: true \}\)/.test(functionsSource) &&
+    /has_upload: false \}, \{ merge: true \}\)/.test(functionsSource)
+);
 // The empty state has to span the whole table - and "the whole table" is however many columns there are, so the
 // count is taken from the header cells rather than written down here. It has drifted twice while this screen grew
 // (the selection column is the latest), and a colSpan that disagrees with the header leaves a ragged row rather than
 // anything that looks broken.
 const recordColumns = (adminTab.match(/<th[\s>]/g) || []).length;
-checkIs('the records table has a column per header cell', recordColumns >= 8, `only ${recordColumns} header cells`);
+checkIs('the records table has a column per header cell', recordColumns >= 9, `only ${recordColumns} header cells`);
 checkIs('and the empty table still spans every column', new RegExp(`colSpan=\\{${recordColumns}\\}`).test(adminTab));
 // The column is only as good as the payload: `notes` has to be on every record the client is handed. The
 // decoration spreads the stored row, so notes survive it by construction - asserted against the helper.
@@ -920,6 +947,59 @@ console.log('--- twenty at a time ---');
   );
   // A selection can outlive the page it was made on, so the pager offers a way out of it that is not "save it".
   checkIs('with a way out of a selection that spans pages', /Clear selection \(\{selectedRows\.length\}\)/.test(tab));
+}
+
+console.log('\n--- the attached scans: one rule, stated three times ---');
+{
+  // The cap and the three types are written in three places, and there is no way around it: a security rule cannot
+  // import a module, and neither the browser nor a Cloud Function can import the rules. So storage.rules ENFORCES
+  // them, functions/certificationFiles.js repeats them where the metadata row is written, and
+  // src/utils/certificationFiles.js offers them in the file picker. This block is what holds the three together - a cap
+  // raised in one place and not the others fails HERE rather than shipping as a file the picker offers and the server
+  // refuses, or worse, one the server accepts and the picker cannot show.
+  const rules = readFileSync('storage.rules', 'utf8');
+  const row = certificationFileRow({
+    id: 'f1',
+    recordId: 'cr1',
+    userId: 'u2',
+    storagePath: 'certifications/u2/cr1/f1',
+    name: 'emt-card.pdf',
+    contentType: 'application/pdf',
+    size: 184320,
+    uploadedBy: 'u4',
+    uploadedAt: '2026-01-02 09:15:00',
+  });
+
+  check('the client copy of the cap is the function\'s', CERTIFICATION_FILE_MAX_BYTES, FUNCTION_FILE_MAX_BYTES);
+  check('and the client copy of the types is too', CERTIFICATION_FILE_TYPES, FUNCTION_FILE_TYPES);
+  check(
+    'the rules enforce the same 5 MB',
+    /request\.resource\.size <= 5 \* 1024 \* 1024/.test(rules),
+    true
+  );
+  check(
+    'and exactly the same three types',
+    /contentType\.matches\('application\/pdf\|image\/jpeg\|image\/png'\)/.test(rules),
+    true
+  );
+
+  check('a HEIC photo is refused, and told why', /HEIC/.test(certificationFileError({ contentType: 'image/heic', size: 1024 })), true);
+  check('an .svg is refused - a picture that can carry script', certificationFileError({ contentType: 'image/svg+xml', size: 1024 }) !== null, true);
+  check('a 6 MB PDF is refused for its size', /5 MB/.test(certificationFileError({ contentType: 'application/pdf', size: 6 * 1024 * 1024 })), true);
+  check('an empty file is refused', certificationFileError({ contentType: 'image/png', size: 0 }), 'That file is empty.');
+  check('and a 400 KB PDF is accepted', certificationFileError({ contentType: 'application/pdf', size: 400 * 1024 }), null);
+  check(
+    'the path files a scan under its member, its record and its file id',
+    certificationFilePath({ userId: 'u2', recordId: 'cr1', fileId: 'f1' }),
+    'certifications/u2/cr1/f1'
+  );
+  // THE POINT OF THE WHOLE DESIGN, as an assertion: the row holds the PATH and no URL. A download URL carries a token,
+  // which is a secret that works for whoever holds it, so it is minted when somebody opens the file and never stored.
+  check(
+    'and the row records the path, never a download URL',
+    Object.keys(row).sort(),
+    ['certification_id', 'content_type', 'id', 'name', 'size', 'storage_path', 'uploaded_at', 'uploaded_by', 'user_id']
+  );
 }
 
 const SUMMARY = `\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`;

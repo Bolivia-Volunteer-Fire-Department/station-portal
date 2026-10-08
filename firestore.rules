@@ -514,6 +514,26 @@ service cloud.firestore {
       allow write: if permission('can_manage_certifications');
     }
 
+    // The evidence attached to a certification record: one optional file per period, holding the object's PATH in
+    // the bucket and never a download URL - a download URL carries a token, which is a secret that works for
+    // whoever holds it, so it is minted when somebody opens the file and never stored.
+    //
+    // READ-ONLY FROM HERE, and that is the whole difference from `certifications` above: the row is written by
+    // functions/index.js#saveCertificationFile, which is the only place that can check the two things a rule
+    // cannot - that the file it names is really in the bucket, and that it belongs to the member on the record it
+    // claims. A browser has no business inventing an attachment.
+    //
+    // `resource == null` first, for the reason the offers rule below spells out: asking "is there a file against
+    // this record?" reads a document that may not exist, and `.data` off null is a null value error rather than a
+    // false - which a client cannot tell apart from a refusal.
+    match /certification_files/{fileId} {
+      allow read: if signedIn()
+        && (resource == null
+          || resource.data.user_id == uid()
+          || permission('can_manage_certifications'));
+      allow write: if false;
+    }
+
     // Offers: a member raises one for an open shift, withdraws their own, and an officer approves one - the approval
     // is what writes the schedule row, so it is an officer's write either way.
     match /schedule_offers/{offerId} {

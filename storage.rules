@@ -1,0 +1,166 @@
+rules_version = '2';
+
+// THE EVIDENCE ATTACHED TO A CERTIFICATION: one optional file per record, and nothing else in this bucket.
+//
+// A certification scan is a photocopy of somebody's ticket, so exactly two kinds of people may open one - the
+// member it belongs to, and an officer who may record certifications. That is the same pair firestore.rules
+// names on `certifications` itself, so the checks below are a COPY of the ones there rather than a second
+// opinion about who may see what.
+//
+// WHY A COPY IS UNAVOIDABLE, and what keeps it honest. Security rules cannot import each other, and Storage rules
+// cannot read firestore.rules, so `viewerRole` / `roleFor` / `granted` / `permission` are repeated here in
+// Storage's spelling - `firestore.get` and `firestore.exists`, against the same two documents, and no others.
+// Two readings of one rule is precisely the arrangement that drifts, so scripts/verify-storage-rules.mjs runs the
+// cases firestore.rules is held to as well, and the pair that matters most is asserted by name: an officer who
+// holds `can_manage_certifications` and is NOT an administrator may upload a scan, and a plain member may not.
+//
+// WHAT IS DELIBERATELY NOT HERE. The metadata row (Firestore, `certification_files`) is written by a function,
+// never by a browser - a rule cannot check the thing that matters there, which is that the file it names belongs
+// to the member on the record it claims. But the BYTES go straight between the browser and this bucket: a
+// function in the path of every upload would pay for the transfer twice and cap the file size at a callable's
+// payload limit.
+//
+// scripts/verify-storage-rules.mjs runs against the emulator: it seeds the demo station, signs in for real, and
+// asserts each refusal below by name - including the ones that are easy to get wrong. A member reading somebody
+// else's scan. A file over the cap. A scanned HEIC photo. And an .svg, which is a picture that can carry script.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      // Guarded, because the rules language evaluates BOTH sides of an `||`: on a signed-out request
+      // `request.auth.uid` is a null value error, which the emulator logs as an evaluation failure and a
+      // client sees as permission-denied. A refusal for the right reason is not the same thing as a rule that
+      // could not be evaluated, and the second one hides the first.
+      return request.auth == null ? null : request.auth.uid;
+    }
+
+    // The viewer's roster row and their role, each read ONCE per evaluation - the same two documents, and the
+    // same guarded reads, as firestore.rules. `get(key, default)` is what makes an absent key a false rather than
+    // an evaluation error, and an evaluation error is indistinguishable from a refusal: guard every segment
+    // (an empty path, a missing document) and every field.
+    //
+    // THIS IS A CROSS-SERVICE RULE, and there are three things about that worth knowing before touching it.
+    //
+    //   * THE PROJECT HAS TO BE SET UP FOR IT, ONCE. The first time rules using firestore.get() are published, the
+    //     console says "Your rules make use of cross-service database calls, but your project is not configured to
+    //     execute those calls" and offers Fix Issue. That grants the Cloud Storage service account read access to
+    //     Firestore - read access for the RULES ENGINE, not for anybody's account. Until it is granted every upload
+    //     and every download is refused with storage/unauthorized, which looks exactly like a wrong rule.
+    //
+    //     AND THEN IT TAKES UP TO FIVE MINUTES TO TAKE EFFECT: Cloud Firestore caches IAM permissions for five
+    //     minutes, so a grant that has just been approved still evaluates as "denied" until that cache turns over.
+    //     The first retry after clicking Fix Issue is therefore not a test of anything - which is worth knowing
+    //     before concluding the rules are wrong.
+    //
+    //     THE RELIABLE WAY TO CHECK IS gcloud, because the rules service agent's roles are hidden in the console by
+    //     default:
+    //
+    //       gcloud projects get-iam-policy fire-clock-76723 \
+    //         --flatten="bindings[].members" \
+    //         --filter="bindings.members:gcp-sa-firebasestorage" --format="table(bindings.role)"
+    //
+    //     WITHOUT gcloud (the machine that hit this had none), the same thing is two console clicks:
+    //     console.cloud.google.com/iam-admin/iam?project=fire-clock-76723 - filter for "firebasestorage", and the
+    //     agent should carry Cloud Datastore Viewer. If it does not, press Grant Access, paste
+    //     service-<PROJECT_NUMBER>@gcp-sa-firebasestorage.iam.gserviceaccount.com and pick that role. The project
+    //     NUMBER (not the id) is on the Firebase console's Project settings page, or from `npx firebase
+    //     projects:list`.
+    //
+    //     If nothing is listed for that agent, the grant did not land and the manual equivalent is one command
+    //     (roles/datastore.viewer is the Firestore READ role - the same access the console would add):
+    //
+    //       gcloud projects add-iam-policy-binding fire-clock-76723 \
+    //         --member="serviceAccount:service-<PROJECT_NUMBER>@gcp-sa-firebasestorage.iam.gserviceaccount.com" \
+    //         --role="roles/datastore.viewer"
+    //
+    //     AND THE EMULATOR NEEDS NONE OF IT - it wires Storage and Firestore together automatically, which is why
+    //     scripts/verify-storage-rules.mjs passes green while production refuses everything. That gap is the whole
+    //     reason this note exists.
+    //
+    //   * TWO DOCUMENTS IS THE CEILING. The platform allows two Firestore documents per rules evaluation, cached, so
+    //     the two below (users/{uid}, then roles/{roleId}) are exactly the allowance - the same pair, and the same
+    //     cost, as firestore.rules. A THIRD lookup would not be slow, it would be a refusal: "Querying more than two
+    //     unique documents will result in rules denying access."
+    //       The `||` in the rules below is worth knowing about too: an evaluation touches BOTH sides, so the officer
+    //       lookup runs even when the member's own path already matched. A member opening their own scan therefore
+    //       costs two reads, not none - roughly 150ms, which is the price of one rule instead of two.
+    //
+    //   * THE READS ARE BILLED, even when the rules say no. Two Firestore reads per Storage request, at the same rate
+    //     as any other read. A scan is attached once and opened rarely, which is why that is a rounding error here.
+    function viewerRole() {
+      return uid() == null
+        ? null
+        : (firestore.exists(/databases/(default)/documents/users/$(uid()))
+          ? firestore.get(/databases/(default)/documents/users/$(uid())).data
+          : null);
+    }
+
+    function roleFor(viewer) {
+      let roleRef = viewer == null ? '' : viewer.get('role_id', '');
+      return roleRef == ''
+        ? null
+        : (firestore.exists(/databases/(default)/documents/roles/$(roleRef))
+          ? firestore.get(/databases/(default)/documents/roles/$(roleRef)).data
+          : null);
+    }
+
+    // A flag is granted when it is a real boolean true or the roles sheet's `"TRUE"`, read EXACTLY as the client
+    // reads it (utils/rankEligibility.js), so the buttons a member can see are the writes the server accepts.
+    //
+    // THE TYPE CHECK IS A NESTED TERNARY, not `&&`. Written as `value == true || (value is string && ...)` this
+    // errored on a role holding a real boolean false - the `.trim()` was reached anyway, `.trim` came back
+    // undefined, and every permission-gated rule in the file failed at once with no clue which line was wrong.
+    // A ternary evaluates one branch and never the other. See the same function in firestore.rules.
+    function granted(value) {
+      return value == true ? true : (value is string ? value.trim().upper() == 'TRUE' : false);
+    }
+
+    function permission(name) {
+      let role = roleFor(viewerRole());
+      return role != null && (granted(role.get('is_admin', false)) || granted(role.get(name, false)));
+    }
+
+    // The evidence for one certification record: certifications/{member uid}/{record id}/{file id}.
+    //
+    // The member's uid is IN THE PATH, and that is the whole reason for the shape: their own read is a string
+    // comparison rather than another pair of document reads, so opening your own scan costs one role lookup and
+    // the file is never reached by anybody who has not proved who they are.
+    match /certifications/{memberUid}/{recordId}/{fileId} {
+
+      // 5 MB, and three types. The cap is generous for a one- or two-page scan and small enough that nothing here
+      // can hold a video. The list is deliberately short, and two omissions are the point:
+      //
+      //   * NO image/svg+xml. An SVG is a picture that can carry script, and these files are served from a domain
+      //     the app trusts. A scan is a raster image or a PDF; there is no third case.
+      //   * NO image/heic. An iPhone will upload one happily and no browser can display it, so a file nobody can
+      //     open is refused HERE - at the moment an officer can still do something about it (screenshot it, or
+      //     switch the camera to JPEG) - rather than stored and discovered later.
+      function acceptableUpload() {
+        return request.resource.size <= 5 * 1024 * 1024
+          && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
+      }
+
+      allow read: if signedIn()
+        && (uid() == memberUid || permission('can_manage_certifications'));
+
+      // Create and update carry the size and type checks; delete cannot, and the split is not tidiness.
+      // A DELETE has no incoming file to measure - `request.resource` is null there, and reading `.size` off it
+      // is an evaluation error rather than a false - so a combined `allow write` would make removing a scan
+      // impossible while appearing to allow it.
+      allow create, update: if permission('can_manage_certifications') && acceptableUpload();
+      allow delete: if permission('can_manage_certifications');
+    }
+
+    // Everything else in this bucket is closed, which is the rule the console writes when a bucket is created in
+    // Production mode. It is kept rather than loosened by the addition above: nothing else in the app needs a
+    // file, and a bucket that only ever holds one kind of thing is a bucket whose rules can be read at a glance.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

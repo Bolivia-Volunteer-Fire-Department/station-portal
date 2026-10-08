@@ -390,8 +390,31 @@ export const visibleDocumentFor = async (uid, id) => {
 // and "of 40" tells a member who has not played yet that there is a board to join.
 const RUNNER_LEADERBOARD_LIMIT = 25;
 
+// THE SCANS ATTACHED TO CERTIFICATIONS: two readers, because the two sides ask different questions of the same small
+// collection. A member asks "what is attached to MY records"; an officer asks "what is attached to the record in front
+// of me". Both are plain queries through the rules, with no callable in the read path at all - which is half the reason
+// the metadata lives in its own collection rather than in a field on the certification row: the bulk read that fills
+// the Certifications table never touches these, so a station with a thousand scans reads no more for them than a
+// station with none.
+//
+// `user_id` is written onto every row from the RECORD's own member (functions/index.js), never from the request, so the
+// member's query and the rules' `resource.data.user_id == uid()` are asking about the same fact.
+export const certificationFilesForMember = async (uid) => ({
+  files: await rowsFor('certification_files', 'user_id', String(uid || '').trim()),
+});
+
+export const certificationFilesForRecord = async (recordId) => {
+  const wanted = String(recordId || '').trim();
+  // No record, no query: an empty id would be a read of every file in the collection, which the rules would refuse and
+  // which nothing on screen can have asked for.
+  if (!wanted) return { files: [] };
+  return { files: await rowsFor('certification_files', 'certification_id', wanted) };
+};
+
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
+  GET_MY_CERTIFICATION_FILES: (uid) => certificationFilesForMember(uid),
+  ADMIN_GET_CERTIFICATION_FILES: (_uid, body) => certificationFilesForRecord(body && body.recordId),
   // The member's own clock history, optionally WINDOWED — and windowed is how the APP asks for it, because this is the one
   // per-member table that grows without limit: a five-year member has thousands of entries, and reading all of them at every
   // sign-in was the largest single read in the app.
