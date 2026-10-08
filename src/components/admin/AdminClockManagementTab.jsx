@@ -401,8 +401,8 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
             Timeclock Entries {filteredSortedLogs.length > 0 && `(${filteredSortedLogs.length})`}
             {/* WHAT THIS TABLE HOLDS, said out loud: the count is what is LOADED, not the station's lifetime total, and
                 this line is what stops the two being read as the same thing (the member's Clock History says it the same
-                way). It opens on the PAY PERIOD - seven days including today - because `timeclock` grows on its own: see
-                App#loadLogs. */}
+                way). It opens on the PAY PERIOD - as many days as System Settings says, ending today - because `timeclock`
+                grows on its own: see App#loadLogs. */}
             {loadedFrom ? (
               <span className="ml-2 font-normal text-xs text-slate-500 dark:text-slate-400">
                 · entries back to {loadedFrom}

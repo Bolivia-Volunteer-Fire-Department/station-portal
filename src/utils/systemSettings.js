@@ -82,6 +82,12 @@ export const PUBLIC_SETTING_KEYS = [
   // imported from utils/training, which reads settings through this module (the same cycle the rounding key above avoids);
   // scripts/verify-training pins the two names together so they cannot drift.
   'training_signature_window_days',
+  // THE PAY PERIOD, both halves public: the LENGTH is the window the member's own Clock History opens on - a screen cannot
+  // honour a setting it may not read - and the day a period STARTS is a fact about the station rather than about the person
+  // looking. Literals rather than imports from utils/payPeriod, which reads settings through this module (the same cycle the
+  // two keys above avoid); scripts/verify-clock-logs pins the names together so they cannot drift.
+  'pay_period_days',
+  'pay_week_start',
   'is_dark_mode',
   'time_format',
 ];

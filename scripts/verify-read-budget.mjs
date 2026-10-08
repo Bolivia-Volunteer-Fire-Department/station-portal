@@ -399,19 +399,20 @@ checkIs(
     /setRosterModuleCache\(null\)/.test(appSource) &&
     /setRosterLoadedFor\(''\)/.test(appSource)
 );
-// THE CLOCK HISTORY OPENS ON THE PAY PERIOD, AND THAT IS A READ DECISION AS MUCH AS A DISPLAY ONE.
+// THE CLOCK HISTORY OPENS ON THE PAY PERIOD, WHICH IS NOW A SETTING (utils/payPeriod), AND THAT IS A READ DECISION AS MUCH
+// AS A DISPLAY ONE.
 //
 // `timeclock` is the only collection that grows on its own - every clock-in and clock-out, by every member, forever - and
-// the scope is per SESSION, so whatever this window is, every officer pays it on every visit. Opening on twelve months
-// meant ~29,000 reads for one officer's first look at a station of forty clocking in twice a day; the station's pay period
-// is a week, which is both what an officer reconciles and a read of a few hundred. `dateKeyDaysBack(6)` is the first of
-// seven days INCLUDING today, which is why the argument is an offset rather than a span - and the "load older" step is one
-// more pay period, so nothing is out of reach, it is just not paid for by default. If this fails, somebody has widened the
-// default window again.
+// the scope is per SESSION, so whatever this window is, every officer pays it on every visit. It opened on twelve months
+// once: ~29,000 reads for one officer's first look at a station of forty clocking in twice a day. The window is now the
+// station's own period, ending today, and the "load older" step is one more period - so what an officer reconciles is what
+// is paid for, and nothing is out of reach (the table says what it holds and offers the rest).
 checkIs(
-  'the clock history opens on the station pay period, one week per "load older"',
-  /loadLogs\(daysBack\(6\), stationTodayKey\(\)\)/.test(appSource) &&
-    /loadLogs\(daysBack\(6, logsScope\.from\), logsScope\.from\)/.test(appSource)
+  'the clock history opens on the CONFIGURED pay period, one period per "load older"',
+  /const payPeriod = payPeriodConfig\(systemSettings\)/.test(appSource) &&
+    /const logsWindow = payPeriodWindow\(payPeriod, stationTodayKey\(\)\)/.test(appSource) &&
+    /loadLogs\(logsWindow\.from, logsWindow\.to\)/.test(appSource) &&
+    /loadLogs\(payPeriodWindow\(payPeriod, fromKey\)\.from, fromKey\)/.test(appSource)
 );
 // ...AND NOTHING IS HIDDEN BY IT: each half says what it holds and offers the rest - the officer's table and the member's
 // own history. A smaller window with no way to see further back is a cut, not a budget.

@@ -13,7 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import {
-  PRINT_WEEKDAYS,
+  printWeekdayLabels,
   printHeader,
   printLinesForDate,
   printMonth,
@@ -52,17 +52,36 @@ const TUESDAY = '2026-03-03';
 console.log('--- the month grid ---');
 const march = printMonthGrid(2026, 2);
 check('March 2026 starts on a Sunday', new Date(2026, 2, 1).getDay(), 0);
-check('so the grid leads with six blank cells', march[0].filter((c) => c.outside).length, 6);
-// A Sunday start lands the 1st in the LAST column of a Monday-first week, not the second.
-check('and the 1st sits in the Sunday column', march[0][6].dayOfMonth, 1);
+// THE LEAD-IN IS THE 1st's OWN WEEKDAY, MEASURED FROM THE WEEK'S FIRST DAY: a Sunday-first week (the default) begins ON the
+// 1st, so the first row leads with nothing. The six-blank version of this is the same arithmetic seen from a Monday-first
+// week - and the rotation itself is exercised at three different starts in scripts/verify-month-picker, where that
+// arithmetic lives.
+check('so the grid leads with no blank cells: a Sunday-first week starts on the 1st', march[0].filter((c) => c.outside).length, 0);
+// A SUNDAY START - the default week - LANDS THE 1st IN THE FIRST COLUMN. The printed month lays out exactly like the one on
+// screen, which is the point of following the setting at all: a print is of a screen, and two orders is how the two come to
+// disagree.
+check('and the 1st sits under its own weekday', march[0][0].dayOfMonth, 1);
 check('every week has seven cells', march.every((week) => week.length === 7), true);
 check('no day is missing', march.flat().filter((c) => !c.outside).length, 31);
 check('the 31st is the last day', march.flat().filter((c) => !c.outside).pop().dayOfMonth, 31);
-check('the weekday headings run Monday first', PRINT_WEEKDAYS[0], 'Mon');
-// A month starting on a Monday needs no lead-in at all.
-check('June 2026 starts on a Monday and needs no lead', printMonthGrid(2026, 5)[0][0].dayOfMonth, 1);
-check('and its first cell is not blank', printMonthGrid(2026, 5)[0][0].outside, false);
-check('every day sits in its own weekday column', march.flat().filter((c) => !c.outside).every((c) => c.weekdayIndex === (new Date(c.dateKey + 'T12:00:00').getDay() + 6) % 7), true);
+check('the weekday headings begin on the week’s first day', printWeekdayLabels()[0], 'Sun');
+// ...FROM THE MODULE THE SCREEN READS, so the two cannot hold different opinions about which day starts a week. The rotation
+// itself is exercised in scripts/verify-month-picker (where that arithmetic lives); what is pinned here is that the printed
+// sheet ASKS it rather than keeping its own list.
+check(
+  'and the printed headings come from the shared week, not a second list of their own',
+  /printWeekdayLabels = \(\) => weekdayLabels\(\)/.test(readFileSync('src/utils/printSchedule.js', 'utf8')) &&
+    /weekIndex = \(date\) => \(date\.getDay\(\) - calendarWeekStart\(\) \+ 7\) % 7/.test(
+      readFileSync('src/utils/printSchedule.js', 'utf8')
+    ),
+  true
+);
+// MONDAY, MEASURED FROM THE WEEK'S FIRST DAY: in a Sunday-first week (the default) a Monday start leads with ONE blank cell,
+// and the 1st lands in the second column. The no-lead case is a month that BEGINS on the week's first day - the same
+// arithmetic seen from the other side, exercised directly in scripts/verify-month-picker.
+check('June 2026 starts on a Monday, so a Sunday-first week leads with one blank cell', printMonthGrid(2026, 5)[0][0].outside, true);
+check('and the 1st sits in the second column', printMonthGrid(2026, 5)[0][1].dayOfMonth, 1);
+check('every day sits in its own weekday column', march.flat().filter((c) => !c.outside).every((c) => c.weekdayIndex === new Date(c.dateKey + 'T12:00:00').getDay()), true);
 check('February 2026 has 28 days', printMonthGrid(2026, 1).flat().filter((c) => !c.outside).length, 28);
 check('a leap February has 29', printMonthGrid(2028, 1).flat().filter((c) => !c.outside).length, 29);
 

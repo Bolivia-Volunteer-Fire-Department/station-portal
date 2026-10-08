@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import '../print.css';
 import { stationLogoUrl } from '../utils/assets';
 import {
-  PRINT_WEEKDAYS,
+  printWeekdayLabels,
   printHeader,
   printMonth,
   printShiftCount,
@@ -99,9 +99,10 @@ export default function PrintableSchedule({
         </p>
       ) : (
         <>
-          {/* Weekday headings, Monday first to match the schedule grid. */}
+          {/* Weekday headings, beginning on the day the week begins - the same rule the screen's grid follows, from the same
+              module, so the paper and the screen cannot disagree about which column is which. */}
           <div className="mt-4 grid grid-cols-7 border border-black">
-            {PRINT_WEEKDAYS.map((label) => (
+            {printWeekdayLabels().map((label) => (
               <div
                 key={label}
                 className="border-b border-black bg-slate-200 px-1.5 py-1 text-center text-[11px] font-bold uppercase tracking-wide"

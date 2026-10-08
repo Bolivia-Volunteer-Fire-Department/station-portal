@@ -1,4 +1,4 @@
-*System → System Settings* holds the station-wide configuration. Three of the cards are straightforward; **Clock Settings**, **Session Timeout** and the **Training Signing Window** are the ones with real consequences for members.
+*System → System Settings* holds the station-wide configuration. **Clock Settings**, **Session Timeout**, the **Training Signing Window** and the **Pay Period** are the cards with real consequences for members; the rest are cosmetic or one-off values.
 
 > [!IMPORTANT]
 > You must have the **Manage system settings** role permission to edit system settings.
@@ -105,6 +105,20 @@ A closed training shows the member a **Closed** button whose tooltip says which 
 > A member cannot sign on an administrator's behalf and an administrator cannot sign for them, so a signature that is genuinely missing is fixed from this card: widen the window, have them sign, and set it back. Nothing about the window is retroactive.
 
 Set this if members tend to sign in bulk, months later. A signature is an acknowledgment of attendance, and one given six months afterwards is worth much less to the record it lands in.
+
+## Pay Period
+
+How long a pay period covers, and the day it begins on.
+
+| Value | Effect |
+|---|---|
+| **Days in a pay period** | **This is the Clock History's window**: it opens on the last N days, including today, and **Load older entries** walks back one period at a time |
+| **First day of the pay week** | **Every month calendar in the app starts its week on it** — the schedule, the officer's board, both month pickers, the availability grid and the printed sheet. The reports that will total by pay period will read the same field |
+
+The number is not cosmetic. The clock history is the largest read in the app and it grows on its own, because every clock-in and clock-out is a row that stays for good — so a longer period is paid by **every officer on every visit**. Nothing is hidden by a shorter one: the table says what it holds (*entries back to …*) and the button fetches the rest on demand, which is also how an officer asks for more before exporting a CSV.
+
+> [!NOTE]
+> A length the app cannot read — `7O`, `fortnight`, `0` — is **ignored rather than applied**, so a typo cannot collapse the window onto a single day or widen it to the whole history. The card says so while you type it.
 
 ## Display Settings
 

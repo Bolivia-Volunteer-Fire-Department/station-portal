@@ -24,6 +24,12 @@ import {
   hasClockLogFilters,
 } from '../src/utils/clockLogs.js';
 import { CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes, roundClockHours } from '../src/utils/clockRounding.js';
+// The pay period: how many days the clock history opens on, and which weekday a period starts. Settings rather than
+// constants, so this is where their parsing and their window arithmetic are asked directly.
+import { PAY_PERIOD_DAYS_KEY, PAY_WEEK_START_KEY, PAY_WEEKDAYS, payPeriodConfig, payPeriodWindow } from '../src/utils/payPeriod.js';
+// ...and public, because the member's own Clock History reads the same window. A setting a screen may not read is one it
+// cannot honour, so the two lists are pinned together here.
+import { PUBLIC_SETTING_KEYS } from '../src/utils/systemSettings.js';
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -240,6 +246,60 @@ check(
   clockLogTotals(roundingRows, { roundingMinutes: 30 }).hours,
   Math.round((roundClockHours(13.75, 30) + roundClockHours(0.4, 30)) * 100) / 100
 );
+
+console.log('\n--- the pay period: how long the clock window is, and when it starts ---');
+check('the keys are the ones the settings document carries', [PAY_PERIOD_DAYS_KEY, PAY_WEEK_START_KEY], ['pay_period_days', 'pay_week_start']);
+check(
+  'and both are public, so the member\u2019s own Clock History may read them',
+  PUBLIC_SETTING_KEYS.includes(PAY_PERIOD_DAYS_KEY) && PUBLIC_SETTING_KEYS.includes(PAY_WEEK_START_KEY),
+  true
+);
+// AN UNREADABLE LENGTH IS IGNORED RATHER THAN APPLIED: a typo must not collapse the window to a day, and it must not widen
+// it to a year of the station's clock entries either.
+check('nothing set means a week', payPeriodConfig([]).days, 7);
+check('a length is the length', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: '14' }]).days, 14);
+check('one day is allowed', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: '1' }]).days, 1);
+check('padding is tolerated', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: ' 14 ' }]).days, 14);
+check('zero is refused rather than read as a one-day window', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: '0' }]).days, 7);
+check('text is refused', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: 'fortnight' }]).days, 7);
+check('a letter standing in for a digit is refused', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: '7O' }]).days, 7);
+check('and a period longer than a year is refused', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: '4000' }]).days, 7);
+check('a refused length is REPORTED as refused', payPeriodConfig([{ key: PAY_PERIOD_DAYS_KEY, value: '7O' }]).invalidDays, true);
+check('while a blank one is not an error to report', payPeriodConfig([]).invalidDays, false);
+
+// THE WINDOW: N days INCLUDING today, which is the off-by-one this helper exists to keep in one place.
+check('a seven-day window starts six days back', payPeriodWindow({ days: 7 }, '2026-10-08'), {
+  days: 7,
+  from: '2026-10-02',
+  to: '2026-10-08',
+});
+check('a one-day window is today alone', payPeriodWindow({ days: 1 }, '2026-10-08'), {
+  days: 1,
+  from: '2026-10-08',
+  to: '2026-10-08',
+});
+check('a longer period reaches further back', payPeriodWindow({ days: 14 }, '2026-10-08').from, '2026-09-25');
+check('and a month boundary is crossed correctly', payPeriodWindow({ days: 7 }, '2026-11-03'), {
+  days: 7,
+  from: '2026-10-28',
+  to: '2026-11-03',
+});
+check('nothing configured still yields the default window', payPeriodWindow(payPeriodConfig([]), '2026-10-08').days, 7);
+check('and a nonsense config falls back rather than collapsing to a day', payPeriodWindow({ days: 'lots' }, '2026-10-08').days, 7);
+
+// THE FIRST DAY IS STORED, NOT USED, so only two things are asked of it: that it survives, and that a value nobody could
+// have meant falls back rather than reaching a report as a weekday that does not exist.
+check('the first day of the pay week defaults to Sunday', payPeriodConfig([]).weekStart, 'sunday');
+check('a weekday is kept', payPeriodConfig([{ key: PAY_WEEK_START_KEY, value: 'wednesday' }]).weekStart, 'wednesday');
+check('and matched without regard to casing or padding', payPeriodConfig([{ key: PAY_WEEK_START_KEY, value: ' Wednesday ' }]).weekStart, 'wednesday');
+check('an invented weekday falls back', payPeriodConfig([{ key: PAY_WEEK_START_KEY, value: 'octember' }]).weekStart, 'sunday');
+check('and is reported as unusable', payPeriodConfig([{ key: PAY_WEEK_START_KEY, value: 'octember' }]).invalidWeekStart, true);
+check(
+  'every weekday the dropdown offers is usable',
+  PAY_WEEKDAYS.every((day) => payPeriodConfig([{ key: PAY_WEEK_START_KEY, value: day.value }]).weekStart === day.value),
+  true
+);
+check('and the dropdown offers all seven', PAY_WEEKDAYS.length, 7);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

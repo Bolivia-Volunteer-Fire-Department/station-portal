@@ -46,6 +46,7 @@ import {
 } from '../../utils/rankEligibility';
 import {
   WEEKDAYS,
+  weekdayLabels,
   MONTHS,
   DAY_ORDER,
   MONTH_VIEW,
@@ -2514,7 +2515,7 @@ export default function AdminScheduleManagementTab({
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         {!dayView && (
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 grid grid-cols-7 gap-1">
-            {WEEKDAYS.map((d) => (
+            {weekdayLabels().map((d) => (
               <div key={d} className="text-center text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
                 {d}
               </div>

@@ -5,6 +5,46 @@ export const MONTHS = [
 ];
 export const DAY_ORDER = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
+// WHICH WEEKDAY A CALENDAR STARTS ON, and it is a SETTING rather than a constant: the station's pay period begins on a
+// chosen day (System → System Settings → Pay Period), and a month grid whose columns started somewhere else would draw the
+// period's boundaries in the wrong place. Sunday unless somebody says otherwise.
+//
+// HELD HERE RATHER THAN THREADED THROUGH EVERY PARENT, and that is a deliberate exception to how this app passes things.
+// The alternative is a prop on four calendars and on every screen that renders one - the member's schedule, the officer's
+// board, both month pickers, the availability grid - all the way down from App, which holds the settings. A station-wide
+// display value that changes only when an officer saves it is exactly the case where one module-level value, set once from
+// the settings, is less code AND less to get wrong; the two functions below are the whole surface.
+//
+// A CALENDAR READS IT AT RENDER (`calendarWeekStart()`), so a settings save shows up on the next paint, and every harness
+// gets the default unless it sets one - which is what keeps the existing grid expectations valid.
+export const DEFAULT_WEEK_START = 'sunday';
+
+// The weekday a name (or an already-converted index) refers to, as 0 = Sunday. Anything unreadable is Sunday, the same
+// fallback the setting's own parser uses, so a typo cannot rotate every calendar in the station.
+export const weekStartIndex = (value) => {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 6) return value;
+  const named = DAY_ORDER.indexOf(String(value ?? '').trim().toLowerCase());
+  return named === -1 ? 0 : named;
+};
+
+let currentWeekStart = 0;
+
+// What every month grid in the app starts its week on, as 0 = Sunday.
+export const calendarWeekStart = () => currentWeekStart;
+
+// Set once when the settings arrive (App), and by a harness that wants to check the rotated case.
+export const setCalendarWeekStart = (value) => {
+  currentWeekStart = weekStartIndex(value);
+  return currentWeekStart;
+};
+
+// The weekday HEADINGS a grid draws, rotated to match it: `['Wed', 'Thu', ...]` for a Wednesday start. The label list and
+// the cells come from the same start value, so a heading cannot end up over the wrong column.
+export const weekdayLabels = (weekStartsOn = calendarWeekStart()) => {
+  const start = weekStartIndex(weekStartsOn);
+  return [...WEEKDAYS.slice(start), ...WEEKDAYS.slice(0, start)];
+};
+
 // A MONTH AS A GRID: leading blanks up to the 1st's weekday, one cell per day, trailing blanks to the row's end.
 //
 // ONE BUILDER FOR THREE CALLERS. Both calendars built this inline - identically, down to the variable names - and the
@@ -15,11 +55,16 @@ export const DAY_ORDER = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'
 // Blanks are `null` rather than an empty Date, because "no day here" is a branch every caller has to take anyway (a
 // padding cell is not clickable, not a drop target, and not a date) - and a sentinel Date would invite one of them to
 // forget.
-export const monthGridCells = (year, month) => {
+export const monthGridCells = (year, month, weekStartsOn = calendarWeekStart()) => {
   const cells = [];
+  const start = weekStartIndex(weekStartsOn);
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  // HOW MANY BLANKS BEFORE THE 1st: its weekday, measured from the day the week STARTS. The `+ 7) % 7` is what makes a
+  // month that begins on the start day have none, and one that begins the day before have six - where `firstWeekday - start`
+  // alone would be negative and draw nothing.
+  const blanks = (firstWeekday - start + 7) % 7;
+  for (let i = 0; i < blanks; i++) cells.push(null);
   for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
   while (cells.length % 7 !== 0) cells.push(null);
   return cells;

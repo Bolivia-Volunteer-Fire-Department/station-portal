@@ -102,7 +102,13 @@ import { mergeSavedUser } from './utils/userRow';
 import { mergeSavedRow, mergeRowsById, replaceRowsInRange } from './utils/savedRow';
 // Date keys, for the windows this screen asks for (the clock history, and the schedule before it). The history's
 // window is measured on the STATION's clock, because that is the clock its entries are stamped on.
-import { dateKeyDaysBack, stationTodayKey, toDateKey } from './utils/scheduleDate';
+import { stationTodayKey, toDateKey } from './utils/scheduleDate';
+// The pay period: how many days the clock history opens on. A SETTING rather than a constant, because the window is the
+// biggest read in the app and the station's own period is the range worth paying for - see utils/payPeriod.js.
+import { payPeriodConfig, payPeriodWindow } from './utils/payPeriod';
+// The first day of the calendar week, which is the same setting (System → Pay Period). It is PUSHED into this module rather
+// than threaded through every screen that draws a month - see the note there for why that one value is the exception.
+import { setCalendarWeekStart } from './utils/calendarConstants';
 // The trustworthy-clock rule, for the clock card: it must not offer a button it cannot honour, and it must say why.
 import { OFFLINE_CLOCK_MESSAGE, isOffline } from './utils/connectivity';
 import { createWaveReporter, nextWaveId } from './utils/activity';
@@ -1227,28 +1233,29 @@ const getLoadingMessage = () => {
     return rows;
   };
 
-  // THE WINDOW IS THE STATION'S PAY PERIOD, AND THAT IS A READ DECISION AS MUCH AS A DISPLAY ONE.
+  // WHERE THE WINDOW COMES FROM: the PAY PERIOD, which is a System Settings value (utils/payPeriod). N days INCLUDING today,
+  // and the "load older" step is one more period - so the range an officer reconciles is the range this reads, rather than a
+  // number written into this file by whoever last thought about the read budget.
   //
-  // `timeclock` is the one collection that grows on its own: every clock-in and clock-out, by every member, forever. Forty
-  // members clocking in twice a day is roughly 2,400 entries a month, so the twelve months this screen used to open on was
-  // ~29,000 reads for ONE officer's first look - paid again on every visit by every officer, because the scope is per
-  // session rather than per save, and paid by the member's own Clock History too (which reads the same list, narrowed by
-  // the reader to their own rows).
+  // IT IS STILL THE BIGGEST READ IN THE APP, which is why it is worth saying what the number costs: `timeclock` grows on its
+  // own - every clock-in and clock-out, by every member, forever - and the scope is per SESSION, so every officer pays this
+  // window on every visit. Forty members clocking in twice a day is ~2,400 entries a month, so a thirty-day period is
+  // ~2,400 reads for one look and a seven-day one is ~560. Nothing is hidden by a shorter period: the table says what it
+  // holds - "entries back to X" - and offers "load older entries" one period at a time.
   //
-  // SEVEN DAYS INCLUDING TODAY, which is the period the station pays by, so the default is the range somebody actually
-  // reconciles - not a compromise between what they want and what a read costs. `dateKeyDaysBack(6)` is the first of those
-  // seven days; the count is deliberately the offset rather than the span, and the harness pins the pair.
-  //
-  // NOTHING IS HIDDEN, which is what makes a small default safe rather than a cut: the table says what it holds and offers
-  // "load older entries", which walks back ONE PAY PERIOD at a time. The button is the older look; the default is the one
-  // paid for on every visit - and the CSV export exports what is LOADED, so the button is also how an officer asks for more
-  // before exporting.
-  //
-  // MEASURED ON THE STATION'S CLOCK, not the device's. Entries are stamped with `stationTimestamp` (Eastern), so a
-  // phone whose own date has already rolled over - or has not yet - would put the window's edge on the wrong day and
-  // hide exactly the entry just written. The end of a window is the one bound that must not be approximate, which is
-  // what makes this the same `stationTodayKey` the rest of the app asks "is this in force today?" with.
-  const daysBack = (days, fromKey) => dateKeyDaysBack(days, fromKey || stationTodayKey());
+  // MEASURED ON THE STATION'S CLOCK, not the device's: entries are stamped with `stationTimestamp` (Eastern), so a phone
+  // whose own date has already rolled over - or has not yet - would put the window's edge on the wrong day and hide exactly
+  // the entry just written. See utils/scheduleDate#stationTodayKey.
+  const payPeriod = payPeriodConfig(systemSettings);
+  const logsWindow = payPeriodWindow(payPeriod, stationTodayKey());
+
+  // THE CALENDARS' FIRST DAY, from the same setting the clock window comes from: every month grid in the app rotates to it,
+  // so the columns line up with the period the station actually pays by. Pushed into that module rather than passed to four
+  // calendars through every screen in between (see utils/calendarConstants) - and an effect, so an officer's save rotates
+  // the grids on the next paint rather than at the next sign-in.
+  useEffect(() => {
+    setCalendarWeekStart(payPeriod.weekStart);
+  }, [payPeriod.weekStart]);
 
   // ONCE PER SESSION PER WINDOW, which is what makes this different from re-fetching a module on every visit: the guard is
   // the scope itself, so moving between tabs costs nothing after the first look.
@@ -1270,7 +1277,7 @@ const getLoadingMessage = () => {
   useEffect(() => {
     const wantsTheHistory = activeTab === 'clock-history' || (activeTab === 'admin' && adminSubTab === 'clock');
     if (!wantsTheHistory || !authToken || logsScope) return;
-    void loadLogs(daysBack(6), stationTodayKey()).catch((error) => {
+    void loadLogs(logsWindow.from, logsWindow.to).catch((error) => {
       console.error('[logs] could not load the clock history', error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2476,7 +2483,7 @@ const getLoadingMessage = () => {
                 loadedFrom={logsScope ? logsScope.from : ''}
                 onLoadOlder={() => {
                   if (!logsScope || !logsScope.from) return undefined;
-                  return loadLogs(daysBack(6, logsScope.from), logsScope.from);
+                  return loadLogs(payPeriodWindow(payPeriod, logsScope.from).from, logsScope.from);
                 }}
               />
             )}
@@ -2698,9 +2705,10 @@ const getLoadingMessage = () => {
                 // so an officer sees that the table is a quarter and can ask for older entries - rather than reading a
                 // truncated list as the station's whole history (see the window note in `loadLogs`).
                 clockLogsFrom={logsScope ? logsScope.from : ''}
-                onLoadOlderClockLogs={() =>
-                  loadLogs(daysBack(6, logsScope ? logsScope.from : stationTodayKey()), logsScope ? logsScope.from : stationTodayKey())
-                }
+                onLoadOlderClockLogs={() => {
+                  const fromKey = logsScope ? logsScope.from : stationTodayKey();
+                  return loadLogs(payPeriodWindow(payPeriod, fromKey).from, fromKey);
+                }}
                 onAdminDataChanged={refreshAdminCollections}
                 // A certification or setup save returns the rebuilt badge index. `setCertificationBadges` REPLACES rather
                 // than merges, which is right here: this is the whole index, freshly computed, so it supersedes anything

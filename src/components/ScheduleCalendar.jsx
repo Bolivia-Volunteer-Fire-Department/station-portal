@@ -5,7 +5,7 @@ import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
 import RankIcon from './RankIcon';
 import { rowTimeText, templateTimeText, timeToMinutes, prettyRange, shiftTimeLabel } from '../utils/shiftTime';
-import { WEEKDAYS, MONTHS, DAY_ORDER, MONTH_VIEW, monthGridCells, dayViewSpan, spanDayDates } from '../utils/calendarConstants';
+import { MONTHS, DAY_ORDER, MONTH_VIEW, monthGridCells, dayViewSpan, spanDayDates, weekdayLabels } from '../utils/calendarConstants';
 import {
   desktopViewport,
   phoneViewport,
@@ -726,7 +726,7 @@ export default function ScheduleCalendar({
               weekday and date instead, which is more useful than a row of seven abbreviations over one column. */}
           {!dayView && (
             <div className="grid grid-cols-7 gap-1 text-center">
-              {WEEKDAYS.map((label) => (
+              {weekdayLabels().map((label) => (
                 <div
                   key={label}
                   className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400 py-1"

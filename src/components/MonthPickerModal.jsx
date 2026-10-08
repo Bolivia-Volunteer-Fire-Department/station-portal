@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { MONTHS, WEEKDAYS, monthGridCells } from '../utils/calendarConstants';
+import { MONTHS, monthGridCells, weekdayLabels } from '../utils/calendarConstants';
 import { toDateKey } from '../utils/scheduleDate';
 // Which tone a modal opens with is decided in one table - see MODAL_SOUNDS in utils/uiSounds.
 import { playSound, modalSoundFor } from '../utils/uiSounds';
@@ -107,7 +107,7 @@ export default function MonthPickerModal({ viewDate, selectedKey, todayKey, onPi
         </div>
 
         <div className="mt-3 grid grid-cols-7 gap-1 text-center">
-          {WEEKDAYS.map((label) => (
+          {weekdayLabels().map((label) => (
             <div key={label} className="py-1 text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
               {label}
             </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2 } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays } from 'lucide-react';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
@@ -7,6 +7,13 @@ import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
 // The signing window's own key and parser, from the module the member's Training module reads them with - so the card's
 // preview of a typed value and the rule the Sign button follows cannot be two different rules.
 import { SIGNATURE_WINDOW_KEY, signatureWindowConfig } from '../../utils/training';
+import {
+  DEFAULT_PAY_WEEK_START,
+  PAY_PERIOD_DAYS_KEY,
+  PAY_WEEK_START_KEY,
+  PAY_WEEKDAYS,
+  payPeriodConfig,
+} from '../../utils/payPeriod';
 import { getCurrentCoordinates } from '../../utils/geolocation';
 import {
   getSettingValue,
@@ -34,6 +41,10 @@ const KNOWN_KEYS = [
   // The signing window for trainings: curated because a BLANK value means NO LIMIT rather than "off", which the generic
   // value editor has no way to say - the same reason the session timeout has a card (see utils/training#signatureWindowConfig).
   SIGNATURE_WINDOW_KEY,
+  // The pay period: the window the clock history opens on, and the weekday a period starts. Curated because the LENGTH is a
+  // read budget as much as a display choice, and because the weekday is a dropdown rather than a value somebody types.
+  PAY_PERIOD_DAYS_KEY,
+  PAY_WEEK_START_KEY,
   ...LOADING_MESSAGE_KEYS,
 ];
 
@@ -50,6 +61,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <PayPeriodCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -651,6 +663,185 @@ function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save Signing Window
+          </button>
+        </div>
+
+      </form>
+    </div>
+  );
+}
+
+// THE PAY PERIOD: how many days one period covers, and which weekday it begins on.
+//
+// THE LENGTH IS NOT COSMETIC. It is the window the clock history opens on - the largest read in the app, and the one that
+// grows on its own (see App#loadLogs) - which is why it is curated here rather than left to the generic value editor.
+//
+// THE WEEKDAY IS STORED, NOT YET USED, and the card says so rather than leaving somebody to wonder why changing it does
+// nothing: it is here because reports that total by pay period will need it, and because the day a period starts is a fact
+// about the station rather than a constant guessed later. Nothing does arithmetic with it today.
+function PayPeriodCard({ token, systemSettings, onDataChanged }) {
+  const [days, setDays] = useState(getSettingValue(systemSettings, PAY_PERIOD_DAYS_KEY, ''));
+  const [weekStart, setWeekStart] = useState(
+    getSettingValue(systemSettings, PAY_WEEK_START_KEY, '') || DEFAULT_PAY_WEEK_START
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDays(getSettingValue(systemSettings, PAY_PERIOD_DAYS_KEY, ''));
+    setWeekStart(getSettingValue(systemSettings, PAY_WEEK_START_KEY, '') || DEFAULT_PAY_WEEK_START);
+  }, [systemSettings]);
+
+  // Previewed from the TYPED values rather than the stored ones, so a change is visible before it is saved and a typo is
+  // reported here rather than quietly falling back to the default.
+  const preview = payPeriodConfig([
+    { key: PAY_PERIOD_DAYS_KEY, value: days },
+    { key: PAY_WEEK_START_KEY, value: weekStart },
+  ]);
+  const weekdayLabel = (PAY_WEEKDAYS.find((day) => day.value === preview.weekStart) || {}).label || 'Sunday';
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      // BOTH KEYS IN ONE REQUEST, so a failure cannot save the length and lose the weekday - the rule the loading messages
+      // card follows, for the same reason.
+      const result = await adminSaveSystemSettings(
+        [
+          { key: PAY_PERIOD_DAYS_KEY, value: String(days ?? '').trim() },
+          { key: PAY_WEEK_START_KEY, value: weekStart },
+        ],
+        token
+      );
+      if (!result?.success) throw new Error(result?.message || 'Failed to save the pay period.');
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save the pay period.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <CalendarDays className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Pay Period</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              How long a period covers, and the day it begins on.
+            </p>
+          </div>
+          <span
+            className={`ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+              preview.invalidDays
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/80 dark:text-amber-400'
+                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400'
+            }`}
+          >
+            {preview.days} day{preview.days === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          The clock history opens on{' '}
+          <strong className="text-slate-700 dark:text-slate-300">
+            the last {preview.days} day{preview.days === 1 ? '' : 's'}, including today
+          </strong>
+          , and <strong className="text-slate-700 dark:text-slate-300">Load older entries</strong> walks back one period at
+          a time. That window is the largest read in the app and it grows on its own, so a longer period is paid by every
+          officer on every visit — while nothing is hidden by a shorter one, because the table says what it holds.
+          {preview.invalidDays ? (
+            <>
+              {' '}
+              <strong className="text-amber-600 dark:text-amber-400">
+                &ldquo;{preview.rawDays}&rdquo; cannot be used, so the window is the default of 7 days.
+              </strong>{' '}
+              Enter a whole number of days — for example{' '}
+              <code className="rounded bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 px-1 py-0.5 font-mono text-[11px]">
+                14
+              </code>
+              .
+            </>
+          ) : null}
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              Days in a pay period
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 7"
+              value={days}
+              onChange={(e) => {
+                setDays(e.target.value);
+                setSaved(false);
+              }}
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              First day of the pay week
+            </label>
+            <select
+              value={weekStart}
+              onChange={(e) => {
+                setWeekStart(e.target.value);
+                setSaved(false);
+              }}
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            >
+              {PAY_WEEKDAYS.map((day) => (
+                <option key={day.value} value={day.value}>
+                  {day.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              A period begins on <strong className="text-slate-700 dark:text-slate-300">{weekdayLabel}</strong> —{' '}
+              <strong className="text-slate-700 dark:text-slate-300">Used for all calendars</strong>. The clock window is the number of days beside it, counted back from today.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setDays('');
+              setWeekStart(DEFAULT_PAY_WEEK_START);
+              setSaved(false);
+            }}
+            className="text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+          >
+            Clear (back to 7 days)
+          </button>
+          {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+          <button
+            type="submit"
+            disabled={saving}
+            className="ml-auto flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Pay Period
           </button>
         </div>
 

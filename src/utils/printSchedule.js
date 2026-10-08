@@ -21,6 +21,9 @@
 import { parseSheetDateKey, toDateKey } from './scheduleDate';
 import { MONTHS } from './calendarConstants';
 import { isShiftDay } from './shiftPlacement';
+// The week's first day and the weekday labels every calendar uses - so the printed sheet and the screen cannot hold two
+// opinions about which day starts a week (see the note on printWeekdayLabels below).
+import { calendarWeekStart, weekdayLabels } from './calendarConstants';
 import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from './events';
 import { prettyRange, rowTimeText, shiftTimeLabel, timeToMinutes } from './shiftTime';
 import { unnamedLabel } from './displayLabel';
@@ -31,13 +34,19 @@ import { memberCanFillAssignment } from './rankEligibility';
 
 const text = (value) => String(value ?? '').trim();
 
-// Monday-first weekday headings, matching the week grid and the printed week.
-export const PRINT_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// THE PRINTED WEEK FOLLOWS THE SAME WEEK THE SCREEN DRAWS: the first day of the pay week (System → Pay Period), read through
+// the one module every calendar reads (utils/calendarConstants). It was Monday-first by its own rule, and a second answer is
+// exactly how a print comes to disagree with the screen it is a print OF - on paper, where there is nothing to click to
+// discover the difference.
+export const printWeekdayLabels = () => weekdayLabels();
 
-// Monday-first index of a Date, matching how the schedule weeks are laid out elsewhere in the app.
-const mondayIndex = (date) => (date.getDay() + 6) % 7;
+// The column a date sits in, measured from the day the week starts. `(getDay() - start + 7) % 7`, for the same reason the
+// screen grid uses it: a plain subtraction is NEGATIVE for a day before the week's start, and a negative column draws
+// nothing.
+const weekIndex = (date) => (date.getDay() - calendarWeekStart() + 7) % 7;
 
-// The month laid out as whole Monday-first weeks.
+// The month laid out as whole weeks - beginning on the day the WEEK begins (System → Pay Period), which is what the screen
+// draws and therefore what the paper should show.
 //
 // Cells outside the month are returned too, flagged `outside`, so the grid keeps its shape - a short
 // month must not stretch its last row across the page.
@@ -46,7 +55,7 @@ export const printMonthGrid = (year, month) => {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells = [];
 
-  for (let i = 0; i < mondayIndex(first); i += 1) {
+  for (let i = 0; i < weekIndex(first); i += 1) {
     cells.push({ outside: true, key: `lead-${i}` });
   }
 
@@ -57,7 +66,7 @@ export const printMonthGrid = (year, month) => {
       key: toDateKey(date),
       dateKey: toDateKey(date),
       dayOfMonth: day,
-      weekdayIndex: mondayIndex(date),
+      weekdayIndex: weekIndex(date),
     });
   }
 

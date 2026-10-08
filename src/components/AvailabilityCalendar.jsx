@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Eye, Loader2, Save } from 'lucide-react';
 import { toDateKey } from '../utils/scheduleDate';
-import { WEEKDAYS, MONTHS } from '../utils/calendarConstants';
+import { MONTHS, monthGridCells, weekdayLabels } from '../utils/calendarConstants';
 import { formatClockRange, timeToMinutes } from '../utils/shiftTime';
 import { availabilityKey, claimedKeysFor, claimsMapFromKeys, windowDaysForMonth } from '../utils/availability';
 import EventPill from './EventPill';
@@ -225,14 +225,10 @@ export default function AvailabilityCalendar({
 
   const monthLabel = `${MONTHS[month]} ${year}`;
 
-  // Leading blanks, one cell per day, trailing blanks - the grid the schedule calendar
-  // builds, so the two months line up.
-  const firstWeekday = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = [];
-  for (let i = 0; i < firstWeekday; i++) cells.push(null);
-  for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
-  while (cells.length % 7 !== 0) cells.push(null);
+  // THE GRID, from the one builder every calendar in the app uses (utils/calendarConstants) - including the day the week
+  // STARTS on, which is a station setting rather than a constant. It was built inline here, and that copy is exactly how
+  // this screen and the schedule calendar would have come to lay out the same month differently.
+  const cells = monthGridCells(year, month);
 
   // Month movement goes through the slide (see utils/motion), so the day grid travels out to one side and
   // the new month arrives from the other - the weekday row and the month label stay put, as they do in a
@@ -357,7 +353,7 @@ export default function AvailabilityCalendar({
         )}
 
         <div className="grid grid-cols-7 gap-1 text-center">
-          {WEEKDAYS.map((label) => (
+          {weekdayLabels().map((label) => (
             <div key={label} className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
               {label}
             </div>

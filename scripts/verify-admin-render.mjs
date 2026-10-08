@@ -2665,6 +2665,53 @@ const windowBad = windowCardView('3O');
 check('an unreadable value says it cannot be used', visibleText(windowBad).includes('cannot be used, so there is no window at all'), true);
 check('and reports No limit rather than a wrong number', visibleText(windowBad).includes('No limit'), true);
 
+// THE PAY PERIOD CARD, the same shape again, with one difference that matters: its number IS the clock history's window, so
+// it is a read budget as much as a display choice - and its second field is stored for later rather than used now.
+check('the pay-period card exists', /function PayPeriodCard/.test(systemSettingsSource), true);
+check('and is mounted in the tab', /<PayPeriodCard/.test(systemSettingsSource), true);
+check(
+  'it saves both keys in one request, so neither can be saved without the other',
+  /adminSaveSystemSettings\(\s*\[\s*\{ key: PAY_PERIOD_DAYS_KEY[\s\S]{0,160}?PAY_WEEK_START_KEY/.test(systemSettingsSource),
+  true
+);
+check('and both are curated keys, not generic rows', /PAY_PERIOD_DAYS_KEY,\n  PAY_WEEK_START_KEY,/.test(systemSettingsSource), true);
+
+const payPeriodView = (daysValue) => {
+  try {
+    return renderToString(
+      React.createElement(AdminSystemSettingsTab, {
+        token: 't',
+        systemSettings: [{ key: 'pay_period_days', value: daysValue }],
+        onDataChanged: () => {},
+      })
+    );
+  } catch (error) {
+    return { error };
+  }
+};
+
+const payPeriodUnset = payPeriodView('');
+check('the pay-period card renders with nothing configured', typeof payPeriodUnset === 'string', payPeriodUnset.error && payPeriodUnset.error.message);
+check('naming the default window', visibleText(payPeriodUnset).includes('the last 7 days, including today'), true);
+check('a configured period is named', visibleText(payPeriodView('14')).includes('the last 14 days, including today'), true);
+check('and one day reads singular', visibleText(payPeriodView('1')).includes('the last 1 day, including today'), true);
+check(
+  'an unusable length says so and names the fallback',
+  visibleText(payPeriodView('7O')).includes('cannot be used, so the window is the default of 7 days'),
+  true
+);
+// THE WEEKDAY FIELD SAYS WHAT IT IS FOR, which is the difference between "stored for later" and a control that looks broken
+// because changing it changes nothing.
+check('the weekday field is offered', String(payPeriodUnset).includes('First day of the pay week'), true);
+// ...AND IT SAYS WHAT IT NOW DOES. The card read "stored for later, nothing uses it yet" until the calendars started
+// following it, and a card that undersells its own control is one an officer will not touch. Asserted against the card's
+// own wording ("Used for all calendars"), not a sentence invented here.
+check(
+  'and says what it actually does: it is used for the calendars',
+  visibleText(payPeriodUnset).includes('Used for all calendars'),
+  true
+);
+
 const timeoutCardView = (rawValue) => {
   try {
     return renderToString(

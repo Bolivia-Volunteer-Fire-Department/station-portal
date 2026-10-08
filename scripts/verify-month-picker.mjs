@@ -198,7 +198,9 @@ check('it imports nothing but the calendar and a dialog', pickerImports, [
   'lucide-react',
   'react',
 ]);
-checkIs('it draws the weekday row', /WEEKDAYS\.map/.test(picker));
+// The row is the shared list ROTATED to the week's first day (utils/calendarConstants#weekdayLabels), so the headings and
+// the cells cannot disagree about which column is which - the rotation is a station setting (System → Pay Period).
+checkIs('it draws the weekday row', /weekdayLabels\(\)\.map/.test(picker));
 checkIs('and one button per day', /onPick\(key\)/.test(picker));
 checkIs('marking the day the screen is on', /aria-current=\{isSelected \? 'date' : undefined\}/.test(picker));
 checkIs(
@@ -241,6 +243,69 @@ checkIs(
     (adminBoard.match(/setPickerOpen\(true\)/g) || []).length === 1,
   'the picker would have a second way in, which is one more than a picker needs'
 );
+
+// --- which day the week starts on, everywhere ---------------------------------------------------
+//
+// THE FIRST DAY OF THE PAY WEEK is a System Settings value (utils/payPeriod), and every month grid in the app rotates to it:
+// the member's schedule, the officer's board, both month pickers and the availability grid all build their cells from
+// utils/calendarConstants#monthGridCells and their headings from #weekdayLabels. This is the proof that the rotation is
+// arithmetic rather than a second table - and, the part that matters, that every date still sits under the heading for its
+// own weekday. A grid whose cells were rotated and whose labels were not would look like a calendar and be wrong about
+// every column.
+console.log('\n--- the first day of the week is a setting ---');
+const monthWith = (weekStart, year, month) => {
+  setCalendarWeekStart(weekStart);
+  return monthGridCells(year, month);
+};
+const dateCell = (cells, day) => cells.find((cell) => cell instanceof Date && cell.getDate() === day);
+const columnOf = (cells, day) => cells.findIndex((cell) => cell instanceof Date && cell.getDate() === day) % 7;
+
+check('a Sunday week is the default', weekStartIndex('sunday'), 0);
+check('a Wednesday one is index 3', weekStartIndex('wednesday'), 3);
+check('and casing or padding does not matter', weekStartIndex(' Wednesday '), 3);
+check('an invented weekday falls back to Sunday', weekStartIndex('octember'), 0);
+check('and so does nothing at all', weekStartIndex(undefined), 0);
+check('an index is accepted as itself', weekStartIndex(5), 5);
+
+const labelsSunday = weekdayLabels(0);
+const labelsWednesday = weekdayLabels(3);
+check('the headings begin on the week’s first day', labelsSunday[0], 'Sun');
+check('and rotate with it', labelsWednesday[0], 'Wed');
+check('while keeping all seven, none repeated', [labelsWednesday.length, new Set(labelsWednesday).size], [7, 7]);
+check('and wrapping around the end of the week', labelsWednesday[labelsWednesday.length - 1], 'Tue');
+
+const MARCH_2026 = [2026, 2];
+const sundayCells = monthWith(0, ...MARCH_2026);
+const wednesdayCells = monthWith(3, ...MARCH_2026);
+check('the 1st sits under its own weekday, Sunday-first', columnOf(sundayCells, 1), dateCell(sundayCells, 1).getDay());
+check('and under its own weekday, Wednesday-first', columnOf(wednesdayCells, 1), (dateCell(wednesdayCells, 1).getDay() + 7 - 3) % 7);
+check(
+  'every day of the month does, whichever day the week starts',
+  [0, 3, 5].every((start) => {
+    const cells = monthWith(start, ...MARCH_2026);
+    return Array.from({ length: 31 }, (_, index) => index + 1).every(
+      (day) => columnOf(cells, day) === (dateCell(cells, day).getDay() - start + 7) % 7
+    );
+  }),
+  true
+);
+check('the grid is still whole weeks, whichever day the week starts', [sundayCells.length % 7, wednesdayCells.length % 7], [0, 0]);
+check(
+  'and a month begins with exactly the blanks its own weekday needs',
+  [0, 3, 5].every((start) => {
+    const cells = monthWith(start, ...MARCH_2026);
+    const blanks = (dateCell(cells, 1).getDay() - start + 7) % 7;
+    return cells.slice(0, blanks).every((cell) => cell === null) && cells[blanks] instanceof Date;
+  }),
+  true
+);
+// A month that begins ON the week's start day needs no blanks at all - the edge the `+ 7) % 7` exists for.
+const februaryStart = new Date(2026, 1, 1).getDay();
+check('a month whose 1st IS the week’s first day has no blanks', monthWith(februaryStart, 2026, 1)[0] instanceof Date, true);
+// LEFT AS THE APP LEAVES IT, so every case above this section stays valid whichever order this file is read in.
+setCalendarWeekStart('sunday');
+
+import { setCalendarWeekStart, weekStartIndex, weekdayLabels } from '../src/utils/calendarConstants.js';
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
