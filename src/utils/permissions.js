@@ -146,13 +146,6 @@ export const ADMIN_PERMISSIONS = [
     requires: 'can_manage_certifications',
   },
   {
-    key: 'can_view_system_log',
-    tab: 'system-log',
-    label: 'View the audit log',
-    description:
-      'Read the station audit trail: sign-ins and failures, the account actions officers take, and notification events. Read on demand from Cloud Logging when the tab is opened, so it costs nothing to keep.',
-  },
-  {
     key: 'can_access_debug',
     tab: 'debug',
     label: 'Access the debug page',

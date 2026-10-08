@@ -454,7 +454,7 @@ checkIs('and the schedule board reads the schedule rows, not just its templates'
 // anybody without can_edit_users, which is why a tab cannot use it just to label a row.
 const NAME_DRAWING_TABS = [
   'schedule', 'assignments', 'clock', 'certifications', 'availability', 'approvals',
-  'announcements', 'events', 'training', 'system-log',
+  'announcements', 'events', 'training',
   // DOCUMENTS WAS MISSING FROM THIS LIST, and that is why the gap it describes went unnoticed until somebody
   // tried to use the screen: the tab names members in three places - the signature report, the verification
   // panel and the back-fill panel - and the back-fill panel's member list is not a label but its only control.

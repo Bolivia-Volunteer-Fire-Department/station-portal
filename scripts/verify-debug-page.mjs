@@ -80,7 +80,7 @@ checkEqual('with a bar label for the app bar', adminBarLabel('debug'), 'Debug');
 checkEqual(
   'and System is still the last group before Help',
   ADMIN_NAV_CATEGORIES.find((c) => c.id === 'catSystem').items.map((item) => item.id),
-  ['system', 'notifications', 'system-log', 'debug', 'help']
+  ['system', 'notifications', 'debug', 'help']
 );
 
 const panelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
