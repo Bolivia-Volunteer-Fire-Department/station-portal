@@ -42,7 +42,7 @@ The game has its own music and its own sound effects, with two switches in the H
 - ordinary play plays `normal_music.mp3`, alternating with `normal_music2.mp3` each time a boss cycle ends;
 - the boss level plays `boss_music.mp3`.
 
-One track plays at a time, looped, at `MUSIC_VOLUME` (0.35 — under the effects). **SOUNDS** switches
+One track plays at a time, looped, at `MUSIC_VOLUME` (0.175 — under the effects). **SOUNDS** switches
 the effects — jump, die, the point chime and the fireball — on and off. Which track should play is a
 pure decision in `src/utils/runnerMusic.js`; both switches are covered by `npm run verify:runner-audio`.
 

@@ -10,7 +10,8 @@
 export const MUSIC_TRACKS = ["menu", "normal", "normal2", "boss"];
 
 // Music sits under the effects (the loudest effect is 1.0, the fireball 0.6), so it never fights them.
-export const MUSIC_VOLUME = 0.35;
+// Halved from 0.35: at that level the tunes were still competing with the effects.
+export const MUSIC_VOLUME = 0.175;
 
 // What should be playing right now:
 //
