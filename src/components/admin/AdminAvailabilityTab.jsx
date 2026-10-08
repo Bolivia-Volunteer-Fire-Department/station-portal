@@ -3,13 +3,13 @@ import { AlertCircle, CalendarRange, Check, Eye, Loader2, Save, Users, X } from 
 import { adminBulkSaveSchedule, adminSetAvailability } from '../../services/api';
 import AvailabilityCalendar, { MonthNav } from '../AvailabilityCalendar';
 import ViewToggle from '../ViewToggle';
-import CenteredContent from '../CenteredContent';
 import MemberName from '../MemberName';
 import RankIcon from '../RankIcon';
+import NoAvailabilityCard from './NoAvailabilityCard';
 import { renderInViewport } from '../../utils/viewportLayer';
 import { viewportPopoverPosition } from '../../utils/viewportPopover';
 import { MONTHS } from '../../utils/calendarConstants';
-import { windowDaysForMonth } from '../../utils/availability';
+import { membersWithNoAvailability, monthAvailabilityLoaded, windowDaysForMonth } from '../../utils/availability';
 import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { toDateKey } from '../../utils/scheduleDate';
 // WHAT A SLOT IS, and every place on a day somebody can be put - the same rule the Schedule Management board draws from
@@ -37,9 +37,10 @@ const PICKER_MARGIN = 8;
 // One member selected: the same month grid the member sees, toggling that member's rows - useful when someone phones in
 // and needs a change made for them.
 //
-// All Members: each day of the month, the availability windows that fall on it, and the members who claimed them. That
-// list is now the whole view - it used to be built from the month's shift templates, with their times, assignments and
-// ranks, which is a lot of machinery to answer "who can cover Tuesday night?".
+// All Members: each day of the month, the availability windows that fall on it, and the members who claimed them -
+// and BESIDE it, a card naming the members who claimed nothing at all this month, which is the other half of the
+// answer. That list is now the whole view: it used to be built from the month's shift templates, with their times,
+// assignments and ranks, which is a lot of machinery to answer "who can cover Tuesday night?".
 //
 // BOTH views read the SAME two things: the windows (station reference data, loaded once) and a month of claims. That is
 // the simplification the windows model buys: one short list instead of templates, assignments and ranks per member.
@@ -73,10 +74,32 @@ export default function AdminAvailabilityTab({
   // overview, and the picker sits right above it to drill into one person.
   const [selected, setSelected] = useState(ALL_MEMBERS);
 
+  // The month the All Members view is showing. It lives HERE rather than inside the roster because two things read
+  // it - the roster's day list and the no-availability card beside it - and they must agree. (The single-member
+  // view keeps its own month: it is a different screen with its own arrows.)
+  const [today] = useState(() => new Date());
+  const [rosterDate, setRosterDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const rosterYear = rosterDate.getFullYear();
+  const rosterMonth = rosterDate.getMonth();
+  const rosterIsCurrentMonth = rosterYear === today.getFullYear() && rosterMonth === today.getMonth();
+  const goByMonth = (delta) =>
+    setRosterDate((date) => new Date(date.getFullYear(), date.getMonth() + delta, 1));
+  const goToMonth = (date) => setRosterDate(new Date(date.getFullYear(), date.getMonth(), 1));
+
   const showingAll = selected === ALL_MEMBERS;
   const selectedMember = showingAll
     ? null
     : users.find((u) => String(u.id) === String(selected)) || null;
+
+  // The All Members view's two month-scoped readings: whether the month's claims have been read at all, and who
+  // said nothing. Both come from utils/availability, so the card and the day list cannot disagree.
+  const rosterLoaded = monthAvailabilityLoaded(loadedFrom, loadedTo, rosterYear, rosterMonth);
+  const noAvailability = membersWithNoAvailability({
+    users,
+    availability: rosterAvailability,
+    year: rosterYear,
+    month: rosterMonth,
+  });
 
   // The calendar owns the draft; this performs the batch save and refreshes. The token is passed explicitly on purpose:
   // refreshAvailability expects one, and calling it bare would come back UNAUTHORIZED and raise the re-auth prompt.
@@ -123,32 +146,49 @@ export default function AdminAvailabilityTab({
       </div>
 
       {showingAll ? (
-        // A date-grouped reading list, so it is capped and centred; the single-member view below renders the
-        // seven-column month grid and deliberately is not.
-        <CenteredContent>
-          <AvailabilityRoster
-            windows={windows}
-            availability={rosterAvailability}
-            users={users}
-            ranks={ranks}
-            loadedFrom={loadedFrom}
-            loadedTo={loadedTo}
-            onLoadMonth={onLoadMonth}
-            // The events, in each day's heading. The All Members list names WHO is free, and an event is very often why
-            // fewer of them are - so it belongs beside the day, not only on the single-member grid below.
-            events={events}
-            timeFormat={timeFormat}
-            hideEventsByDefault={hideEventsByDefault}
-            // The schedule the assign control reads and writes. NOT gated on `can_edit_schedule`: an officer whose role
-            // lacks it will be refused by the callable when they save, and the refusal is reported as what it is (see
-            // saveError) rather than hidden behind a control that is missing for no visible reason.
-            scheduleTemplates={scheduleTemplates}
-            assignments={assignments}
-            schedule={schedule}
-            onNeedSchedule={onNeedSchedule}
-            token={token}
+        // The All Members view FILLS the content frame - it is a board, like the schedule's, so there is no reading
+        // column to cap it to. The members who have said nothing sit BESIDE the day list on a computer and ABOVE it
+        // on a phone: `lg` rather than `md` because the sidebar takes 256px, so the panel only has room for both
+        // columns once the window is a computer rather than a tablet. The list takes whatever the card leaves.
+        <div className="flex w-full flex-col gap-4 lg:flex-row lg:items-start">
+          <NoAvailabilityCard
+            members={noAvailability}
+            year={rosterYear}
+            month={rosterMonth}
+            loaded={rosterLoaded}
+            className="lg:w-56 lg:shrink-0"
           />
-        </CenteredContent>
+          <div className="min-w-0 flex-1">
+            <AvailabilityRoster
+              year={rosterYear}
+              month={rosterMonth}
+              isCurrentMonth={rosterIsCurrentMonth}
+              onPrev={() => goByMonth(-1)}
+              onNext={() => goByMonth(1)}
+              onToday={() => goToMonth(today)}
+              windows={windows}
+              availability={rosterAvailability}
+              users={users}
+              ranks={ranks}
+              loadedFrom={loadedFrom}
+              loadedTo={loadedTo}
+              onLoadMonth={onLoadMonth}
+              // The events, in each day's heading. The All Members list names WHO is free, and an event is very often why
+              // fewer of them are - so it belongs beside the day, not only on the single-member grid below.
+              events={events}
+              timeFormat={timeFormat}
+              hideEventsByDefault={hideEventsByDefault}
+              // The schedule the assign control reads and writes. NOT gated on `can_edit_schedule`: an officer whose role
+              // lacks it will be refused by the callable when they save, and the refusal is reported as what it is (see
+              // saveError) rather than hidden behind a control that is missing for no visible reason.
+              scheduleTemplates={scheduleTemplates}
+              assignments={assignments}
+              schedule={schedule}
+              onNeedSchedule={onNeedSchedule}
+              token={token}
+            />
+          </div>
+        </div>
       ) : selectedMember ? (
         <AvailabilityCalendar
           member={selectedMember}
@@ -180,6 +220,14 @@ export default function AdminAvailabilityTab({
 // it is a short list now: the windows in the month, not every shift occurrence the station knows about. Nothing here is
 // editable; an officer changes a claim by picking that member in the picker above.
 function AvailabilityRoster({
+  // The visible month and its arrows - owned by the tab above, because the no-availability card this view draws
+  // beside the list reads the same month and the two must not be able to drift apart.
+  year,
+  month,
+  isCurrentMonth,
+  onPrev,
+  onNext,
+  onToday,
   windows = [],
   availability = [],
   users = [],
@@ -203,8 +251,6 @@ function AvailabilityRoster({
   onNeedSchedule,
   token,
 }) {
-  const now = new Date();
-  const [viewDate, setViewDate] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const [showEvents, setShowEvents] = useState(() => !hideEventsByDefault);
 
   // WHAT AN OFFICER HAS DECIDED AND NOT YET SAVED.
@@ -221,17 +267,13 @@ function AvailabilityRoster({
   const pickerAnchorRef = useRef(null);
   // Which month's shifts have been asked for, so a click does not re-read one.
   const shiftsAsked = useRef('');
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
-
-  const goBy = (delta) => setViewDate((date) => new Date(date.getFullYear(), date.getMonth() + delta, 1));
-  const goTo = (date) => setViewDate(new Date(date.getFullYear(), date.getMonth(), 1));
 
   const days = windowDaysForMonth({ year, month, windows, availability, users });
   const monthStart = toDateKey(new Date(year, month, 1));
   const monthEnd = toDateKey(new Date(year, month + 1, 0));
-  const loaded = (!loadedFrom || monthStart >= loadedFrom) && (!loadedTo || monthEnd <= loadedTo);
+  // Whether this month's claims have been read - the SAME derivation the no-availability card uses, so the two
+  // cannot disagree about whether "everyone has said nothing" is the truth or just a month nobody has asked for.
+  const loaded = monthAvailabilityLoaded(loadedFrom, loadedTo, year, month);
 
   const assignmentById = useCallback(
     (id) => assignments.find((a) => String(a?.id ?? '') === String(id ?? '')) || null,
@@ -451,9 +493,9 @@ function AvailabilityRoster({
       <MonthNav
         year={year}
         month={month}
-        onPrev={() => goBy(-1)}
-        onNext={() => goBy(1)}
-        onToday={() => goTo(now)}
+        onPrev={onPrev}
+        onNext={onNext}
+        onToday={onToday}
         isCurrentMonth={isCurrentMonth}
       />
 

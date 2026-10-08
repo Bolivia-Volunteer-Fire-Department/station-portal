@@ -54,6 +54,7 @@ import PasswordChangeModal from './components/PasswordChangeModal';
 import { mustChangePassword, MUST_CHANGE_PASSWORD_COLUMN } from './utils/passwordPolicy';
 import ClockBlockedModal from './components/ClockBlockedModal';
 import Sidebar from './components/Sidebar';
+import PixelBurst from './components/PixelBurst';
 import ClockCard from './components/ClockCard';
 import OnDutyCard from './components/OnDutyCard';
 import SplashScreen from './components/SplashScreen';
@@ -280,7 +281,11 @@ export default function App() {
   }, []);
 
   const [easterEggCount, setEasterEggCount] = React.useState(0);
+  // Every press of the logo fires the pixel burst, whether or not that press also counts towards the
+  // easter egg. See App's own handleEasterEgg below and Sidebar's, which is a second counter.
+  const [easterBurst, setEasterBurst] = React.useState(0);
   const handleEasterEgg = () => {
+      setEasterBurst((n) => n + 1);
       if (easterEggCount < 5) setEasterEggCount(prev => prev + 1);
       else if (activeTab !== 'runner') {
           setActiveTab('runner');
@@ -2241,11 +2246,13 @@ const getLoadingMessage = () => {
               backdrop and z-30 drawer, so opening the menu dims the whole page including this bar. */}
           <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
             <div className="flex min-w-0 items-center gap-2">
-              <a href="#" onClick={(e) => {
+              {/* The burst is placed off the anchor, so the anchor is the containing block. */}
+              <a href="#" className="relative inline-block" onClick={(e) => {
                 e.preventDefault();
                 handleEasterEgg();
               }}>
                 <img src={stationLogoUrl()} alt="Bolivia Fire Department Logo" className="w-8 h-8" />
+                <PixelBurst trigger={easterBurst} />
                 {/* <Shield className="w-7 h-7 text-red-500" /> */}
               </a>
               <span className="font-bold text-lg text-slate-900 dark:text-white shrink-0">Station Portal</span>
@@ -2620,6 +2627,8 @@ const getLoadingMessage = () => {
                 currentUser={currentUser}
                 // Which sound set to play, chosen by an administrator on the Users tab.
                 soundProfile={runnerSoundProfile}
+                // Administrators get a hidden debug control that skips straight to the boss scene.
+                isAdmin={isAdmin}
               />
             )}
             </Suspense>

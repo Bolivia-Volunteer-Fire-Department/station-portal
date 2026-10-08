@@ -1,6 +1,27 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import firefighterSheet from "./firefighter.png";
+import chiefSheet from "./chief.png";
+import fireballSheet from "./fireball.png";
+// The boss's own effect. An mp3, and deliberately NOT part of the member sound profile below: that
+// profile is a filename PREFIX for the .wav effects (jump / die / point), and it resolves .wav only.
+// The music that will sit beside this file will follow the same "fixed, not personalised" rule.
+import fireballSound from "./fireball.mp3";
+import menuMusic from "./menu_music.mp3";
+import normalMusic from "./normal_music.mp3";
+import normalMusic2 from "./normal_music2.mp3";
+import bossMusic from "./boss_music.mp3";
 import { soundsForProfile } from "../../utils/runnerSounds";
+import { MUSIC_VOLUME, musicTrackFor } from "../../utils/runnerMusic";
+import {
+  BOSS_INTERVAL_SECONDS,
+  BOSS_DURATION_SECONDS,
+  CHIEF_DISPLAY_SIZE,
+  FIREBALL_SPEED,
+  chiefFrame,
+  createLevel,
+  startBoss,
+  stepLevel,
+} from "../../utils/runnerLevel";
 
 // Every .wav beside this component, as a path -> URL map.
 //
@@ -48,6 +69,39 @@ const SPRITES = {
   duck: [[0, 3], [1, 3], [2, 3], [3, 3]],
   dead: [[0, 4], [1, 4], [2, 4], [3, 4]],
 };
+
+// --- the boss level's rendering ----------------------------------------------------------------
+//
+// The chief's arrival, hover, firing and departure are decisions, and they live in
+// utils/runnerLevel so they can be tested without a browser (the same split utils/soundRules uses).
+// What stays here is how the two boss sheets are drawn.
+//
+// Both are one row of four 128px cells (a 512x128 png), drawn at half source scale exactly as the
+// firefighter sheet is.
+const BOSS_STRIP_FRAMES = 4;
+// The flame art is small and centred inside its 128px cell, so the sprite box is mostly transparent
+// margin and must be drawn much larger than the fireball looks. These are the flame's real bounds
+// within the cell (measured from the sheet); it is the FLAME - not the box - that collides and that
+// the level positions, so the spawn adds this offset and the hitbox is exactly this rectangle.
+const FIREBALL_DISPLAY_SIZE = 128;
+const FIREBALL_FLAME = { x: 46, y: 52, width: 40, height: 24 };
+// The fireball is always animating; the chief holds its last frame between shots.
+const FIREBALL_FRAME_SECONDS = 0.085;
+
+// The music, by the track names utils/runnerMusic deals in. All four loop.
+const MUSIC_SOURCES = {
+  menu: menuMusic,
+  normal: normalMusic,
+  normal2: normalMusic2,
+  boss: bossMusic,
+};
+
+// Remembers the music mute for the next visit, the way the high score is remembered.
+const MUSIC_MUTED_KEY = "firefighter-runner-music-muted";
+
+// And the same for the game's own sound effects (jump / die / point / fireball), which switch
+// separately from the music.
+const SFX_MUTED_KEY = "firefighter-runner-sfx-muted";
 
 function intersects(a, b) {
   return (
@@ -132,6 +186,24 @@ function SpriteFrame({ animation, frame }) {
   );
 }
 
+// One row of equal-width cells. The chief and the fireball are both a 4-cell strip, so unlike
+// SpriteFrame this needs no frame table - the cell is just `frame` along the row.
+function StripSprite({ sheet, frame, frames = BOSS_STRIP_FRAMES, displaySize }) {
+  return (
+    <div
+      className="ffr__sprite"
+      style={{
+        width: `${displaySize}px`,
+        height: `${displaySize}px`,
+        backgroundImage: `url(${sheet})`,
+        backgroundPosition: `-${frame * displaySize}px 0`,
+        backgroundSize: `${displaySize * frames}px ${displaySize}px`,
+      }}
+      aria-hidden="true"
+    />
+  );
+}
+
 function getAnimation(player) {
   if (player.dead) return "dead";
   if (player.ducking && player.grounded) return "duck";
@@ -139,6 +211,32 @@ function getAnimation(player) {
     return player.velocityY >= 0 ? "fall" : "jump";
   }
   return "run";
+}
+
+// A boolean the member can toggle that is remembered on the device - the two audio switches. A ref
+// mirrors it so the game loop, which runs outside React, can read the value it needs without the flag
+// becoming a dependency of the effect that drives the loop.
+function useStoredFlag(key) {
+  const [on, setOn] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const ref = useRef(on);
+
+  useEffect(() => {
+    ref.current = on;
+    try {
+      window.localStorage.setItem(key, on ? "1" : "0");
+    } catch {
+      /* storage unavailable - the choice still holds for this session */
+    }
+  }, [key, on]);
+
+  return [on, setOn, ref];
 }
 
 export default function FirefighterRunner({
@@ -154,6 +252,9 @@ export default function FirefighterRunner({
   // A prefix for this member's sound files, from their user_settings row. Empty means the
   // defaults, which is what a station that never sets one hears.
   soundProfile = "",
+  // Shows the admin-only debug control that jumps straight to the boss scene. False for everyone
+  // else, so an ordinary member never sees it.
+  isAdmin = false,
 }) {
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
@@ -169,6 +270,19 @@ export default function FirefighterRunner({
   const dieAudioRef = useRef(null);
   const pointAudioRef = useRef(null);
   const diePlayedRef = useRef(false);
+  const fireballAudioRef = useRef(null);
+  const fireballsRef = useRef([]);
+  // The level clock and the chief - the whole boss cycle, owned by utils/runnerLevel. The loop hands
+  // it the elapsed time and applies the events it hands back.
+  const levelRef = useRef(createLevel());
+
+  // Music: one element, switched between tracks by utils/runnerMusic's decision.
+  const musicAudioRef = useRef(null);
+  const musicTrackRef = useRef(null);
+  // The two audio switches - the music, and the game's own effects. Each is remembered on the device,
+  // and each has a ref the loop can read without the flag becoming a dependency.
+  const [musicMuted, setMusicMuted, musicMutedRef] = useStoredFlag(MUSIC_MUTED_KEY);
+  const [sfxMuted, setSfxMuted, sfxMutedRef] = useStoredFlag(SFX_MUTED_KEY);
 
   useEffect(() => {
     // Resolved once per profile: a profile of `bird` picks up bird-*.wav, while an empty profile -
@@ -178,6 +292,8 @@ export default function FirefighterRunner({
     jumpAudioRef.current = sounds.jump ? new Audio(sounds.jump) : null;
     dieAudioRef.current = sounds.die ? new Audio(sounds.die) : null;
     pointAudioRef.current = sounds.point ? new Audio(sounds.point) : null;
+    // The boss's effect, from its fixed mp3 rather than the wav profile.
+    fireballAudioRef.current = new Audio(fireballSound);
 
     // These are short game effects, so they shouldn't need to loop.
     if (jumpAudioRef.current) jumpAudioRef.current.preload = "auto";
@@ -187,15 +303,23 @@ export default function FirefighterRunner({
       // Cut point audio volume by half
       pointAudioRef.current.volume = 0.4;
     }
+    if (fireballAudioRef.current) {
+      fireballAudioRef.current.preload = "auto";
+      fireballAudioRef.current.volume = 0.6;
+    }
 
     return () => {
       jumpAudioRef.current = null;
       dieAudioRef.current = null;
       pointAudioRef.current = null;
+      fireballAudioRef.current = null;
     };
   }, [soundProfile]);
 
   const playSound = useCallback((audioRef) => {
+    // The effects switch gates every one-shot: jump, die, point and the boss's fireball.
+    if (sfxMutedRef.current) return;
+
     const audio = audioRef.current;
 
     if (!audio) return;
@@ -206,7 +330,37 @@ export default function FirefighterRunner({
     // hasn't been satisfied. The game controls are user-driven,
     // so this should normally resolve successfully.
     audio.play().catch(() => {});
-  }, []);
+    // The ref is stable, so naming it keeps the lint rule happy without re-making the callback.
+  }, [sfxMutedRef]);
+
+  // Switches the music to `track`, or does nothing when it is already playing. The element is built on
+  // demand, so only the tracks a run actually reaches are fetched, and it loops.
+  const playMusic = useCallback((track) => {
+    if (musicTrackRef.current === track) return;
+
+    const current = musicAudioRef.current;
+    if (current) {
+      current.pause();
+      current.currentTime = 0;
+    }
+
+    musicTrackRef.current = track;
+    const source = MUSIC_SOURCES[track];
+    if (!source) {
+      musicAudioRef.current = null;
+      return;
+    }
+
+    const audio = new Audio(source);
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = MUSIC_VOLUME;
+    musicAudioRef.current = audio;
+    // Browsers block playback until the page has been interacted with. The catch keeps that silent
+    // rather than fatal; the next press - or the mute switch - starts it.
+    if (!musicMutedRef.current) audio.play().catch(() => {});
+    // The ref is stable, so naming it keeps the lint rule happy without re-making the callback.
+  }, [musicMutedRef]);
 
   const [gameState, setGameState] = useState("ready");
   const [score, setScore] = useState(0);
@@ -223,11 +377,27 @@ export default function FirefighterRunner({
     player: null,
     obstacles: [],
     particles: [],
+    fireballs: [],
+    boss: null,
     animation: "idle",
     frame: 0,
   });
 
   const groundY = height - GROUND_HEIGHT;
+
+  // The play area the level clock needs, plus the chief's drawn size and the two durations. Memoised
+  // so the loop's effect, which reads it every frame, does not re-subscribe on every render.
+  const levelBounds = useMemo(
+    () => ({
+      width,
+      height,
+      groundY,
+      chiefSize: CHIEF_DISPLAY_SIZE,
+      interval: BOSS_INTERVAL_SECONDS,
+      duration: BOSS_DURATION_SECONDS,
+    }),
+    [width, height, groundY]
+  );
 
   const makePlayer = useCallback(
     () => ({
@@ -252,12 +422,17 @@ export default function FirefighterRunner({
     scoreRef.current = 0;
     animationStateRef.current = { name: "idle", frame: 0, timer: 0 };
     diePlayedRef.current = false;
+    fireballsRef.current = [];
+    // A new run starts in normal play, at the base speed, with no boss cycle behind it.
+    levelRef.current = createLevel();
 
     setScore(0);
     setView({
       player: { ...playerRef.current },
       obstacles: [],
       particles: [],
+      fireballs: [],
+      boss: null,
       animation: "idle",
       frame: 0,
     });
@@ -360,6 +535,18 @@ export default function FirefighterRunner({
       playSound(jumpAudioRef);
     }
   }, [gameState, resetGame, playSound]);
+
+  // Admin-only debug: jump straight into the boss scene. From the ready or game-over screen it also
+  // starts a run, so the boss is playable the moment it is clicked. `startBoss` is the module's own
+  // function - the same one the schedule uses when the interval elapses - so it arrives as it really does.
+  const skipToBoss = useCallback(() => {
+    if (gameState !== "playing") {
+      resetGame();
+      setSavedNotice(null);
+      setGameState("playing");
+    }
+    startBoss(levelRef.current, levelBounds);
+  }, [gameState, resetGame, levelBounds]);
 
   const setDuck = useCallback(
     (isDucking) => {
@@ -603,7 +790,33 @@ export default function FirefighterRunner({
       lastTimeRef.current = timestamp;
 
       const player = playerRef.current;
-      const speed = Math.min(maxSpeed, initialSpeed + scoreRef.current * 2.8);
+      // The run's own speed, and the same speed stepped by the boss-cycle multiplier. Distance (and
+      // so the score) follows the base, so a cycle raises what flies at you but not the score.
+      const level = levelRef.current;
+      const baseSpeed = Math.min(maxSpeed, initialSpeed + scoreRef.current * 2.8);
+      const speed = baseSpeed * level.speed;
+
+      // The level clock. utils/runnerLevel decides when the chief comes, fires and goes; the two
+      // events back here are the things that need this loop's own state.
+      for (const event of stepLevel(level, dt, levelBounds)) {
+        if (event.type === "fireball") {
+          fireballsRef.current.push({
+            id: crypto.randomUUID(),
+            // `event` is where the FLAME goes; the sprite is drawn so the flame lands there.
+            x: event.x - FIREBALL_FLAME.x,
+            y: event.y - FIREBALL_FLAME.y,
+            frame: 0,
+            frameTimer: 0,
+          });
+          playSound(fireballAudioRef);
+        } else if (event.type === "boss-ended") {
+          spawnTimerRef.current = 1; // a beat before the hydrants and trucks come back
+        }
+      }
+
+      // The run's music: ordinary play or the boss, the two normal tracks alternating each cycle. The
+      // menu screens are covered by their own effect, since this loop only runs while playing.
+      playMusic(musicTrackFor({ playing: true, boss: !!level.chief, cycle: level.cycle }));
 
       if (player) {
         if (!player.grounded) {
@@ -626,13 +839,16 @@ export default function FirefighterRunner({
         // }
       }
 
-      spawnTimerRef.current -= dt;
+      // Obstacles only during normal play: the boss level replaces them with fireballs.
+      if (level.phase === "normal") {
+        spawnTimerRef.current -= dt;
 
-      if (spawnTimerRef.current <= 0) {
-        spawnObstacle();
+        if (spawnTimerRef.current <= 0) {
+          spawnObstacle();
 
-        const difficulty = Math.min(scoreRef.current / 900, 0.42);
-        spawnTimerRef.current = 1.1 - difficulty + Math.random() * 0.55;
+          const difficulty = Math.min(scoreRef.current / 900, 0.42);
+          spawnTimerRef.current = 1.1 - difficulty + Math.random() * 0.55;
+        }
       }
 
       for (const obstacle of obstaclesRef.current) {
@@ -641,6 +857,20 @@ export default function FirefighterRunner({
 
       obstaclesRef.current = obstaclesRef.current.filter(
         (obstacle) => obstacle.x + obstacle.width > -40
+      );
+
+      // Fireballs: always animating, always heading left, gone once they are past the player.
+      for (const fireball of fireballsRef.current) {
+        fireball.x -= FIREBALL_SPEED * level.speed * dt;
+        fireball.frameTimer += dt;
+        while (fireball.frameTimer >= FIREBALL_FRAME_SECONDS) {
+          fireball.frameTimer -= FIREBALL_FRAME_SECONDS;
+          fireball.frame = (fireball.frame + 1) % BOSS_STRIP_FRAMES;
+        }
+      }
+
+      fireballsRef.current = fireballsRef.current.filter(
+        (fireball) => fireball.x + FIREBALL_DISPLAY_SIZE > -20
       );
 
       for (const particle of particlesRef.current) {
@@ -653,7 +883,7 @@ export default function FirefighterRunner({
         (particle) => particle.life > 0
       );
 
-      distanceRef.current += speed * dt;
+      distanceRef.current += baseSpeed * dt;
 
       const previousScore = scoreRef.current;
       const nextScore = Math.floor(distanceRef.current / 20);
@@ -683,7 +913,7 @@ export default function FirefighterRunner({
         height: hitbox.height,
       };
 
-      const collision = obstaclesRef.current.some((obstacle) =>
+      const hitObstacle = obstaclesRef.current.some((obstacle) =>
         intersects(playerHitbox, {
           x: obstacle.x + 4,
           y: obstacle.y + 4,
@@ -691,6 +921,17 @@ export default function FirefighterRunner({
           height: obstacle.height - 8,
         })
       );
+
+      const hitFireball = fireballsRef.current.some((fireball) =>
+        intersects(playerHitbox, {
+          x: fireball.x + FIREBALL_FLAME.x,
+          y: fireball.y + FIREBALL_FLAME.y,
+          width: FIREBALL_FLAME.width,
+          height: FIREBALL_FLAME.height,
+        })
+      );
+
+      const collision = hitObstacle || hitFireball;
 
       if (collision) {
         endGame();
@@ -700,10 +941,15 @@ export default function FirefighterRunner({
 
       const animation = animationStateRef.current;
 
+      const chief = levelRef.current.chief;
       setView({
         player: { ...player },
         obstacles: obstaclesRef.current.map((o) => ({ ...o })),
         particles: particlesRef.current.map((p) => ({ ...p })),
+        fireballs: fireballsRef.current.map((f) => ({ ...f })),
+        // The chief sits frozen on its right-most frame while fireSeq is -1, and plays 0..3 while
+        // firing - one firing sequence per fireball.
+        boss: chief ? { x: chief.x, y: chief.y, frame: chiefFrame(chief) } : null,
         animation: animation.name,
         frame: animation.frame,
       });
@@ -729,14 +975,41 @@ export default function FirefighterRunner({
     groundY,
     height,
     initialSpeed,
+    levelBounds,
     maxSpeed,
     width,
     playSound,
+    playMusic,
   ]);
 
   useEffect(() => {
     resetGame();
   }, [resetGame]);
+
+  // The music on the screens either side of a run. While a run is on, the loop owns it.
+  useEffect(() => {
+    if (gameState === "playing") return;
+    playMusic(musicTrackFor({ playing: false }));
+  }, [gameState, playMusic]);
+
+  // The music switch silences or resumes the track in hand. The sounds switch needs no effect of its
+  // own: it only gates future one-shots, which playSound reads.
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    if (musicMuted) audio.pause();
+    else audio.play().catch(() => {});
+  }, [musicMuted]);
+
+  // Leaving the game stops the music, so nothing plays on behind another screen.
+  useEffect(
+    () => () => {
+      if (musicAudioRef.current) musicAudioRef.current.pause();
+      musicAudioRef.current = null;
+      musicTrackRef.current = null;
+    },
+    []
+  );
 
   const player = view.player;
   const formattedScore = String(score).padStart(5, "0");
@@ -767,6 +1040,40 @@ export default function FirefighterRunner({
       }}
     >
       <div className="ffr__hud">
+        {/* The controls sit at the far left; the scores keep their place on the right. The whole
+            cabinet is a pointer surface, so a press on either must not also start a run or a jump. */}
+        <div className="ffr__hud-tools">
+          {isAdmin && (
+            <button
+              type="button"
+              className="ffr__hud-button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={skipToBoss}
+            >
+              SKIP TO BOSS
+            </button>
+          )}
+          <button
+            type="button"
+            className="ffr__hud-button"
+            aria-pressed={musicMuted}
+            aria-label={musicMuted ? "Unmute the music" : "Mute the music"}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setMusicMuted((muted) => !muted)}
+          >
+            {musicMuted ? "🔇 MUSIC OFF" : "🔊 MUSIC ON"}
+          </button>
+          <button
+            type="button"
+            className="ffr__hud-button"
+            aria-pressed={sfxMuted}
+            aria-label={sfxMuted ? "Unmute the game sounds" : "Mute the game sounds"}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setSfxMuted((muted) => !muted)}
+          >
+            {sfxMuted ? "🔇 SOUNDS OFF" : "🔊 SOUNDS ON"}
+          </button>
+        </div>
         <span>HI {formattedHighScore}</span>
         <span>{formattedScore}</span>
       </div>
@@ -799,6 +1106,39 @@ export default function FirefighterRunner({
             ) : (
               <FireTruckSprite />
             )}
+          </div>
+        ))}
+
+        {/* The chief and the fireballs it throws. Both sit in front of the ground but behind the
+            player, and the fireball is always animating while the chief holds its last frame. */}
+        {view.boss && (
+          <div
+            className="ffr__boss"
+            style={{
+              transform: `translate3d(${view.boss.x}px, ${view.boss.y}px, 0)`,
+            }}
+          >
+            <StripSprite
+              sheet={chiefSheet}
+              frame={view.boss.frame}
+              displaySize={CHIEF_DISPLAY_SIZE}
+            />
+          </div>
+        )}
+
+        {view.fireballs.map((fireball) => (
+          <div
+            key={fireball.id}
+            className="ffr__fireball"
+            style={{
+              transform: `translate3d(${fireball.x}px, ${fireball.y}px, 0)`,
+            }}
+          >
+            <StripSprite
+              sheet={fireballSheet}
+              frame={fireball.frame}
+              displaySize={FIREBALL_DISPLAY_SIZE}
+            />
           </div>
         ))}
 

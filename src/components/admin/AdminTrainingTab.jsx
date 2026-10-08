@@ -317,7 +317,7 @@ export default function AdminTrainingTab({
                 <th className="px-4 py-3">Location</th>
                 <th className="px-4 py-3">Instructors</th>
                 <th className="px-4 py-3">Signed</th>
-                <th className="px-4 py-3 text-center" title="Entered into an external system">Ext.</th>
+                <th className="px-4 py-3 text-center" title="Locked">Locked</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -372,7 +372,7 @@ export default function AdminTrainingTab({
                         {training.locked ? (
                           <span
                             className="inline-flex text-emerald-600 dark:text-emerald-400"
-                            title="Entered into an external system — this training is locked for everyone"
+                            title="Locked for everyone."
                           >
                             <Lock className="w-4 h-4" />
                           </span>
@@ -399,7 +399,7 @@ export default function AdminTrainingTab({
                             setEditorOpen(true);
                           }}
                           disabled={training.locked}
-                          title={training.locked ? 'Locked — entered into an external system' : 'Edit this training'}
+                          title={training.locked ? 'Locked' : 'Edit this training'}
                           className="inline-flex items-center text-xs gap-1.5 font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-white mr-3"
                         >
                           <Pencil className="w-3.5 h-3.5" />
@@ -409,7 +409,7 @@ export default function AdminTrainingTab({
                           type="button"
                           onClick={() => handleDeleteTraining(training)}
                           disabled={saving || training.locked}
-                          title={training.locked ? 'Locked — entered into an external system' : 'Delete this training'}
+                          title={training.locked ? 'Locked' : 'Delete this training'}
                           className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-500 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -423,7 +423,7 @@ export default function AdminTrainingTab({
                           {training.locked && (
                             <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
                               <Lock className="w-3.5 h-3.5" />
-                              Locked: entered into an external system, so its signatures cannot be changed.
+                              Locked, so its signatures cannot be changed.
                             </p>
                           )}
                           {trainingSignatures.length === 0 ? (
@@ -444,7 +444,7 @@ export default function AdminTrainingTab({
                                     disabled={removingId === signature.id || training.locked}
                                     title={
                                       training.locked
-                                        ? 'Locked — this training was entered into an external system'
+                                        ? 'Locked'
                                         : 'Remove this signature'
                                     }
                                     className="text-red-500 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -507,8 +507,7 @@ export default function AdminTrainingTab({
           message={
             pending.kind === 'lock' ? (
               <>
-                Mark <strong className="text-slate-900 dark:text-white">{pending.values.title}</strong> as entered
-                into an external system? This locks the training and its signatures for everyone, including
+                Mark <strong className="text-slate-900 dark:text-white">{pending.values.title}</strong> as locked? This locks the training and its signatures for everyone, including
                 administrators, and cannot be undone in the app. Only the training sheet can clear it.
               </>
             ) : pending.kind === 'train' ? (

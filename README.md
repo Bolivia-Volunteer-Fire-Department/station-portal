@@ -87,6 +87,8 @@ it imports the real modules rather than copies of them.
 | `verify:permissions` | the permission catalog, its dependencies and the tab mapping agree |
 | `verify:help` | the help guides load, are numbered `01..N`, and cover every tab and member module |
 | `verify:sounds` / `verify:motion` | the sound wiring and the motion budgets |
+| `verify:runner-boss` | the Firefighter Runner's boss level: the schedule, the chief and the fireball |
+| `verify:runner-audio` | the Firefighter Runner's audio: which music track plays when, and the two switches |
 | `verify:app-shell` | every `verify:*` script is actually listed in `verify:all` |
 
 A credential guard runs before all of it: `scripts/check-secrets.py` scans tracked files for key

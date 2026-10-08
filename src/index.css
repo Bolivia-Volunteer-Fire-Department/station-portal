@@ -370,6 +370,50 @@ select,
   animation: monthInLeft var(--motion-slide) var(--motion-settle) backwards;
 }
 
+/* THE LOGO BURST: a scatter of square particles fired from a logo on each press - the hint that the
+// logo is worth pressing (the easter egg opens on the sixth). Squares, not dots, drawn from the game's
+// own red and yellow, so the hint looks like the thing it points at.
+//
+// It decorates a press rather than a change of state, so it takes the interaction vocabulary like
+// every other entrance and never loops. Each particle is placed by two custom properties the component
+// sets inline (its own angle and distance), which is why the keyframe reads them.
+//
+// The reduced-motion block drops it WHOLE rather than freezing it: with no animation the particles
+// would sit piled on the logo as a clump of squares. */
+@keyframes pixelBurst {
+  from {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    transform: translate(calc(-50% + var(--pixel-x)), calc(-50% + var(--pixel-y))) scale(0.4);
+    opacity: 0;
+  }
+}
+
+.pixel-burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.pixel-burst__particle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--pixel-size);
+  height: var(--pixel-size);
+  background: var(--pixel-color);
+  image-rendering: pixelated;
+  animation: pixelBurst var(--motion-base) var(--motion-settle) forwards;
+}
+
 /* Press feedback on controls.
 //
 // The cheapest way to make a screen feel alive: a press that shows NOTHING for a frame reads as a miss,
@@ -537,6 +581,12 @@ html.dark .splash-shimmer::before {
   .splash-logo-wrap,
   .splash-shimmer::before {
     animation: none;
+  }
+
+  /* The logo burst is dropped whole: with its animation gone the particles would sit frozen on the
+     logo as a clump of squares, which is worse than no hint at all. */
+  .pixel-burst__particle {
+    display: none;
   }
 
   .splash-screen {

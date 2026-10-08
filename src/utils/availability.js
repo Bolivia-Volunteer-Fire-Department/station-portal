@@ -218,6 +218,52 @@ export const availableMembersForWindow = (availability, windowId, dateKey, users
   return members.sort((a, b) => a.name.localeCompare(b.name));
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// the month's SHAPE, for the two things that ask about the whole month rather than one day: whether its claims
+// have been read at all, and who claimed nothing in it.
+
+// Whether the claims for a month have actually been read. The read is a RANGE (the roster holds whatever months
+// have been asked for), so a month is covered when it sits inside that range. Either end may be blank - a blank
+// end means "not known", which reads as covered and the roster says so itself when it is not.
+export const monthAvailabilityLoaded = (loadedFrom, loadedTo, year, month) => {
+  if (!Number.isInteger(year) || !Number.isInteger(month)) return false;
+  const monthStart = toDateKey(new Date(year, month, 1));
+  const monthEnd = toDateKey(new Date(year, month + 1, 0));
+  return (!loadedFrom || monthStart >= loadedFrom) && (!loadedTo || monthEnd <= loadedTo);
+};
+
+// The members who claimed NOTHING in a month - the list an officer works from when they are chasing people before
+// the month closes. The rows are scoped to the month HERE rather than by the caller, because the roster holds
+// whatever range has been read and a claim in another month must not count as a claim in this one.
+//
+// An unread month makes every member look unclaimed, which is why the caller pairs this with monthAvailabilityLoaded
+// and says so rather than printing the whole crew.
+export const membersWithNoAvailability = ({ users = [], availability = [], year, month } = {}) => {
+  if (!Number.isInteger(year) || !Number.isInteger(month)) return [];
+  const monthStart = toDateKey(new Date(year, month, 1));
+  const monthEnd = toDateKey(new Date(year, month + 1, 0));
+
+  const claimed = new Set();
+  for (const row of Array.isArray(availability) ? availability : []) {
+    const dateKey = rowDayOf(row);
+    if (!dateKey || dateKey < monthStart || dateKey > monthEnd) continue;
+    const userId = String(row?.user_id ?? '').trim();
+    if (userId) claimed.add(userId);
+  }
+
+  return (Array.isArray(users) ? users : [])
+    .filter((user) => {
+      const id = String(user?.id ?? '').trim();
+      return id && !claimed.has(id);
+    })
+    .map((user) => ({
+      id: String(user.id).trim(),
+      name: String(user?.name ?? '').trim() || unnamedLabel('member'),
+      rank_id: String(user?.rank_id ?? '').trim(),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+};
+
 // Every day of a month with at least one window, and - when `availability` is given - who claimed each one. ONE
 // derivation for the member's grid and the administration's roster, so the two cannot disagree about which windows fall
 // on a day.

@@ -30,11 +30,47 @@
   letter-spacing: .08em;
 }
 
+/* The HUD controls (the admin skip and the music mute), pinned to the left so the scores keep their
+   place on the right. `margin-right: auto` on the group does that. */
+.ffr__hud-tools {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.ffr__hud-button {
+  padding: 2px 9px;
+  border: 2px solid var(--ffr-ink);
+  border-radius: 6px;
+  background: var(--ffr-yellow);
+  color: var(--ffr-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  cursor: pointer;
+}
+
+.ffr__hud-button:hover {
+  filter: brightness(1.06);
+}
+
 .ffr__sky {
   position: relative;
   width: 100%;
   height: var(--ffr-height);
   overflow: hidden;
+  /* Own compositor layer, and the reason is WebKit.
+   *
+   * The sprites in here move every frame and are composited layers of their own (`will-change:
+   * transform`, below), while this box clips them with a rounded mask (`overflow` + `border-radius`).
+   * WebKit will not apply a rounded clip to a descendant's compositor layer unless the CLIPPING
+   * ancestor is composited too, so on Safari it re-clipped and re-composited the sprites each frame -
+   * the stutter seen on the MacBook Air and iPhone, where the same game is smooth in Chrome. Promoting
+   * this box to its own layer is the fix WebKit documents for that class of bug: `isolation` contains
+   * the child layers, `translateZ(0)` forces the layer. */
+  isolation: isolate;
+  transform: translateZ(0);
   background:
     linear-gradient(to bottom, rgba(255,255,255,.55), transparent 40%),
     var(--ffr-sky);
@@ -68,7 +104,9 @@
 }
 
 .ffr__player,
-.ffr__obstacle {
+.ffr__obstacle,
+.ffr__boss,
+.ffr__fireball {
   position: absolute;
   left: 0;
   top: 0;
@@ -90,6 +128,12 @@
 }
 
 .ffr__obstacle {
+  z-index: 3;
+}
+
+/* The chief and its fireballs share the obstacle plane: in front of the ground, behind the player. */
+.ffr__boss,
+.ffr__fireball {
   z-index: 3;
 }
 

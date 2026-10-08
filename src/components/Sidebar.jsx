@@ -3,6 +3,7 @@ import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, Calendar
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl } from '../utils/assets';
+import PixelBurst from './PixelBurst';
 import AnnouncementList from './AnnouncementList';
 
 export default function Sidebar({
@@ -29,7 +30,11 @@ export default function Sidebar({
     announcementAudience = {},
 }) {
     const [easterEggCount, setEasterEggCount] = React.useState(0);
+    // Every press fires the pixel burst, whether or not that press is also counting towards the
+    // easter egg (the sixth does not increment, and the burst must not skip it).
+    const [easterBurst, setEasterBurst] = React.useState(0);
     const handleEasterEgg = () => {
+        setEasterBurst((n) => n + 1);
         if (easterEggCount < 5) setEasterEggCount(prev => prev + 1);
         else if (activeTab !== 'runner') {
             setActiveTab('runner');
@@ -57,11 +62,13 @@ export default function Sidebar({
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
                 <div className="hidden md:flex items-center gap-3 p-6 border-b border-slate-200 dark:border-slate-700">
-                    <a href="#" onClick={(e) => {
+                    {/* The burst is placed off the anchor, so the anchor is the containing block. */}
+                    <a href="#" className="relative inline-block" onClick={(e) => {
                         e.preventDefault();
                         handleEasterEgg();
                     }}>
                         <img src={stationLogoUrl()} alt="Bolivia Fire Department Logo" className="w-8 h-8" />
+                        <PixelBurst trigger={easterBurst} />
                         {/* <Shield className="w-8 h-8 text-red-500" /> */}
                     </a>
                     <span className="font-bold text-xl text-slate-900 dark:text-white">Station Portal</span>

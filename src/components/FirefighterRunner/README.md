@@ -20,6 +20,32 @@ export default function App() {
 - Click: jump / start / restart
 - Holding Arrow Down while jumping increases downward acceleration
 
+## The boss level
+
+Every 1:16 of play the **chief** rises in on the right and the hydrants and trucks stop — the boss
+takes over. It holds the right edge, hovering, and lobs fireballs the player has to **duck** under
+(they fly at chest height). Both boss sheets are four-frame strips: the fireball loops, while the
+chief is frozen on its last frame until it fires, when its four-frame sequence plays once per
+fireball (with `fireball.mp3`). After 30 seconds the chief floats up out of the frame and the normal
+run resumes. Each completed cycle makes everything that flies at the player 5% faster.
+
+The schedule and the chief's behaviour are pure decisions in `src/utils/runnerLevel.js`, so they are
+tested without a browser by `npm run verify:runner-boss`; this component is only the sprites,
+collision and rendering.
+
+## Music and sound
+
+The game has its own music and its own sound effects, with two switches in the HUD — **MUSIC** and
+**SOUNDS** — each remembered on the device. The music follows the game:
+
+- the menu screens — before a run and after one ends — play `menu_music.mp3`;
+- ordinary play plays `normal_music.mp3`, alternating with `normal_music2.mp3` each time a boss cycle ends;
+- the boss level plays `boss_music.mp3`.
+
+One track plays at a time, looped, at `MUSIC_VOLUME` (0.35 — under the effects). **SOUNDS** switches
+the effects — jump, die, the point chime and the fireball — on and off. Which track should play is a
+pure decision in `src/utils/runnerMusic.js`; both switches are covered by `npm run verify:runner-audio`.
+
 ## Configuration
 
 ```jsx
@@ -31,8 +57,12 @@ export default function App() {
   onGameOver={(score) => console.log(score)}
   token={authToken}
   currentUser={currentUser}
+  isAdmin={isAdmin}
 />
 ```
+
+`isAdmin` shows a small **SKIP TO BOSS** debug control (left of the HUD) that jumps straight into
+the boss scene for testing. It is off by default, so an ordinary member never sees it.
 
 No additional npm dependencies are required.
 

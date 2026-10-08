@@ -669,6 +669,8 @@ const adminAvailabilityHtml = (() => {
         token: 'test-token',
         users: [availMember, { id: 'u2', name: 'Member 3', rank_id: 'k1', status: 'active' }],
         windows: [availWindow],
+        // Member 1's one claim, so the day list has a chip and the no-availability card has exactly one name.
+        rosterAvailability: availRows,
         ranks: [{ id: 'k1', description: 'Firefighter', rank_order: 1 }],
         onDataChanged: async () => {},
       })
@@ -683,14 +685,24 @@ check(
   adminAvailabilityHtml.error && adminAvailabilityHtml.error.message
 );
 check('with All Members first in the picker', String(adminAvailabilityHtml).includes('>All Members<'));
-// Both members are in the picker, so the meaningful assertion is about the ROSTER rows: a member who claimed the window
-// appears as a chip in it, and the one who did not appears only as an <option>. The name is rendered through MemberName,
-// so it is wrapped in its own spans - which is why this looks for the name rather than for a bare `>Member 1</span>`.
-check('and naming the members who claimed the window', String(adminAvailabilityHtml).includes('Member 1'));
+// Both members are in the picker, so the assertions that mean something are about the two lists BELOW it: the day
+// list's chips name who CLAIMED a window, and the no-availability card names who claimed nothing.
+//
+// The card is drawn before the day list (beside it on a computer, above it on a phone), so the slice between its
+// heading and the first window is the card itself - and that is how the member who claimed is told apart from the one
+// who did not. The names go through MemberName, so they are wrapped in their own spans rather than bare text.
+const adminAvailabilityRosterHtml = String(adminAvailabilityHtml);
+const noAvailCardAt = adminAvailabilityRosterHtml.indexOf('No availability');
+const dayListAt = adminAvailabilityRosterHtml.indexOf('Day shift cover');
+const noAvailCard = adminAvailabilityRosterHtml.slice(noAvailCardAt, dayListAt);
+check('and naming the members who claimed the window', adminAvailabilityRosterHtml.includes('Member 1'));
 check(
-  'while the member who said nothing is not listed as available',
-  !String(adminAvailabilityHtml).includes('>Member 3</span>')
+  'the no-availability card is drawn before the day list',
+  noAvailCardAt > -1 && noAvailCardAt < dayListAt,
+  `card at ${noAvailCardAt}, day list at ${dayListAt}`
 );
+check('naming the member who claimed nothing', noAvailCard.includes('Member 3'));
+check('and not the member who did claim', !noAvailCard.includes('Member 1'));
 
 console.log('\n--- the availability windows tab, with nothing in it ---');
 // THE STATE A STATION STARTS IN, and the one this tab shipped broken in. The list and the empty message were two panels
@@ -1998,9 +2010,10 @@ check('using the shared width so both screens match', /CONTENT_MAX_WIDTH/.test(m
 
 // --- the part-of-a-screen mechanism -------------------------------------------------------------
 //
-// Three administration screens cannot use the whole-module rule: they are sub-tabs, and Member
-// Availability needs the cap on one of its two views only. They opt in by wrapping that part of the
-// screen in CenteredContent, so this checks each of them does - and that the availability grid does NOT.
+// Two administration screens cannot use the whole-module rule, because they are sub-tabs: they opt in by wrapping
+// their content in CenteredContent. Member Availability is the OTHER side of that rule - BOTH of its views fill the
+// content frame, because each is a board rather than a document (the All Members list with the no-availability card
+// beside it, and the seven-column member grid) - so it wraps nothing.
 const centered = readFileSync('src/components/CenteredContent.jsx', 'utf8');
 check('CenteredContent is the only place a content max-width lives', /CONTENT_MAX_WIDTH/.test(centered), true);
 check('it uses the one shared width', /CONTENT_MAX_WIDTH/.test(centered) && !/max-w-3xl/.test(centered), true);
@@ -2026,13 +2039,24 @@ for (const [path, name] of adminCenteredTabs) {
   check(`${name} sets no max-width of its own`, !/\bmax-w-(2xl|3xl|4xl|5xl|6xl|7xl)\b/.test(source), true);
 }
 
-// Member Availability: the All Members list is capped, the seven-column member grid is not.
+// Member Availability: BOTH views fill the content frame - the All Members list is a board with the no-availability
+// card beside it, and the member grid is a grid - so neither is wrapped and neither names a max-width.
 const availabilitySource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
-check('Member Availability imports the wrapper', /import CenteredContent from '\.\.\/CenteredContent'/.test(availabilitySource), true);
+check('Member Availability opts out of the reading column', !/CenteredContent/.test(availabilitySource), true);
 const showingAllBranch = availabilitySource.slice(availabilitySource.indexOf('{showingAll ? ('), availabilitySource.indexOf(') : selectedMember ?'));
-check('the All Members list is wrapped', /<CenteredContent>[\s\S]*?<AvailabilityRoster/.test(showingAllBranch), true);
+// The no-availability card sits BESIDE the list on a computer and ABOVE it on a phone - one column until `lg`, a row
+// after it - and that row is the full width of the frame, so the list takes whatever the card leaves.
+check(
+  'the All Members list spans the frame, with the card beside it',
+  /<NoAvailabilityCard/.test(showingAllBranch) &&
+    /lg:flex-row/.test(showingAllBranch) &&
+    /\bw-full\b/.test(showingAllBranch) &&
+    !/\bmax-w-/.test(showingAllBranch),
+  true
+);
+check('and the card stacks above it on a phone', /flex-col/.test(showingAllBranch), true);
 const memberBranch = availabilitySource.slice(availabilitySource.indexOf(') : selectedMember ?'));
-check('the single-member grid is NOT wrapped', /<AvailabilityCalendar/.test(memberBranch) && !/<CenteredContent/.test(memberBranch.slice(0, memberBranch.indexOf('<AvailabilityCalendar'))), true);
+check('the single-member grid fills the frame too', /<AvailabilityCalendar/.test(memberBranch) && !/CenteredContent/.test(memberBranch), true);
 check('and the whole tab is not wrapped', !/^export default function[\s\S]{0,200}<CenteredContent/.test(availabilitySource), true);
 
 // The runtime behavior, not just the presence of a class: the same expression the component evaluates, run

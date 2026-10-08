@@ -19,6 +19,8 @@ import {
   claimsMapFromKeys,
   isAvailableForWindow,
   memberDayKeys,
+  membersWithNoAvailability,
+  monthAvailabilityLoaded,
   monthKeyOf,
   monthKeysBetween,
   windowCoversDate,
@@ -182,6 +184,45 @@ check('the warning reads user|day, because a window does not name a shift', [...
 ]);
 check('a day with two claims is one key', memberDayKeys([{ user_id: 'u2', date_from: '2026-09-01' }, { user_id: 'u2', date_from: '2026-09-01' }]).size, 1);
 check('nothing claimed is no keys', memberDayKeys([]).size, 0);
+
+console.log('\n--- who said nothing this month, and whether the month was read at all ---');
+// The card beside the All Members day list is only as good as these two: an unread month makes every member look
+// unclaimed, and a claim in another month must not count as a claim in this one - the roster holds a RANGE of months.
+check(
+  'September 2026: the one member who claimed nothing',
+  membersWithNoAvailability({ users: directory, availability: claims, year: 2026, month: 8 }),
+  [{ id: 'u3', name: 'Nobody', rank_id: '' }]
+);
+// c4 is a JUNE 2024 claim by Abe, so asking about June 2024 must not credit his September claims.
+check(
+  'a claim in another month is not a claim in this one',
+  membersWithNoAvailability({ users: directory, availability: claims, year: 2024, month: 5 }).map((m) => m.name),
+  ['Nobody', 'Zoe']
+);
+check(
+  'a month nobody claimed lists everyone, in name order',
+  membersWithNoAvailability({ users: directory, availability: claims, year: 2027, month: 0 }).map((m) => m.name),
+  ['Abe', 'Nobody', 'Zoe']
+);
+check(
+  'a claim by somebody not in the directory adds nobody',
+  membersWithNoAvailability({ users: directory, availability: [{ user_id: 'u9', date_from: '2026-09-01' }], year: 2026, month: 8 }).length,
+  3
+);
+check(
+  'a member with no name falls back to the unnamed label',
+  membersWithNoAvailability({ users: [{ id: 'u7' }], availability: [], year: 2026, month: 8 }),
+  [{ id: 'u7', name: 'Unnamed member', rank_id: '' }]
+);
+check('a month nobody gave is nobody missing', membersWithNoAvailability({ users: directory, availability: claims }), []);
+check('and a member with no id is never listed', membersWithNoAvailability({ users: [{ name: 'Ghost' }], availability: [], year: 2026, month: 8 }), []);
+
+check('a blank range counts as read', monthAvailabilityLoaded('', '', 2026, 8), true);
+check('a range that covers the month is read', monthAvailabilityLoaded('2026-09-01', '2026-09-30', 2026, 8), true);
+check('a range starting inside the month is not', monthAvailabilityLoaded('2026-09-15', '2026-09-30', 2026, 8), false);
+check('nor one ending inside it', monthAvailabilityLoaded('2026-09-01', '2026-09-15', 2026, 8), false);
+check('a wider range covers it', monthAvailabilityLoaded('2026-08-01', '2026-10-31', 2026, 8), true);
+check('an unknown month is not read', monthAvailabilityLoaded('', '', undefined, undefined), false);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
