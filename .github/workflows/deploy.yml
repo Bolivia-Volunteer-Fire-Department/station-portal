@@ -93,6 +93,14 @@ jobs:
           # empty measurement id is a build that reports nothing at all. It is deliberately NOT in that step - analytics is
           # not a reason to block a deploy.
           VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+          # OPTIONAL TOO, and for a reason worth writing down: a KLIPY web key is PUBLIC. It travels in the request PATH
+          # (`api.klipy.com/api/v1/{KEY}/gifs/search`), and KLIPY issues a separate key per platform precisely so a web app
+          # can hold one - so keeping it in a repository secret is for the REPOSITORY's sake, not the browser's. The value
+          # is visible in the built bundle either way; what the secret buys is that it is not in the git history.
+          #
+          # An unset secret arrives empty, and an empty key is a build where the picture picker says it is not set up
+          # rather than one that fails at the first search. See src/services/gifSearch.js and .env.example.
+          VITE_KLIPY_API_KEY: ${{ secrets.VITE_KLIPY_API_KEY }}
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
           echo "Building with base path /${REPO_NAME}/"
