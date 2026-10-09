@@ -324,7 +324,11 @@ checkIs(
 );
 // A text score is not `> 0`, so the filter cannot see it and its owner leaves the board: the column has to be TYPED wherever a
 // value is written, and the migration is the only other writer there has ever been.
-checkIs('with the column typed by the migration', /NUMERIC_COLUMNS = new Set\(\[[\s\S]{0,1400}?'runner_score',/.test(mapSource));
+// POSITION-INDEPENDENT ON PURPOSE. This looked for `'runner_score'` within 1400 characters of the array's opening bracket, so
+// it broke the day somebody added a column above it - a legitimate change to a migration breaking a check about whether the
+// column is TYPED at all. Reading the array and asking whether the name is IN it says the same thing and cannot be outgrown.
+const numericColumns = /NUMERIC_COLUMNS = new Set\(\[([\s\S]*?)\]\)/.exec(mapSource);
+checkIs('with the column typed by the migration', Boolean(numericColumns) && /'runner_score'/.test(numericColumns[1]));
 checkIs('and a repair for scores a migration left as text', /export const scoreToStore/.test(scoreSource));
 
 // 4. A scoped refresh may only name sections that EXIST, in both halves of the wire: the section readers the payload
@@ -453,10 +457,16 @@ checkIs(
 // token. A token refreshes hourly, and re-attaching on each one would pay a fresh initial snapshot - a read of every document
 // the listener matches - for no new data at all. Firestore re-authenticates its own streams when the token changes, so the
 // effect has no business watching it.
-checkIs(
-  'App attaches the live reads for the signed-in member',
-  /useEffect\(\(\) => \{[\s\S]{0,1400}?subscribeLive\(\{[\s\S]{0,1400}?\}, \[currentUser\?\.id\]\)/.test(appSource)
-);
+// THE WINDOW IS BOUNDED BY THE NEXT EFFECT, NOT BY A CHARACTER COUNT - and it used to be a character count, which is why this
+// failed a build for a change that had nothing wrong with it. `{0,1400}` meant "these two things are in the same effect", but
+// it also meant "and that effect is shorter than this", so adding a paragraph of comments inside the effect turned a check
+// about STRUCTURE into a check about LENGTH. Anchoring on the next `useEffect(` says the thing that was always meant: the
+// attach happens in the same effect, and that effect is keyed on the member's id rather than on the token.
+const liveReadEffect =
+  /useEffect\(\(\) => \{(?:(?!useEffect\()[\s\S])*?subscribeLive\(\{(?:(?!useEffect\()[\s\S])*?\}, \[currentUser\?\.id\]\)/.test(
+    appSource
+  );
+checkIs('App attaches the live reads for the signed-in member', liveReadEffect);
 checkIs('and re-attaches on the member, never on the token', !/\], \[currentUser\?\.id, authToken\]\)/.test(appSource));
 const setterBlock = /const ADMIN_SECTION_SETTERS = \{([\s\S]*?)\n  \};/.exec(appSource);
 checkIs('App has a setter block for them', Boolean(setterBlock));
