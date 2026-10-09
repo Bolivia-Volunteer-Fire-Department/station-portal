@@ -8,13 +8,16 @@ import ViewportModal from '../ViewportModal';
 const ROLE_FORM_ID = 'role-editor-form';
 import { recordHeading } from '../../utils/displayLabel';
 import {
+  ADMIN_PERMISSION_GROUPS,
   ADMIN_PERMISSIONS,
   ALL_PERMISSIONS,
   MASTER_PERMISSION_KEY,
+  MEMBER_PERMISSION_GROUPS,
   MEMBER_PERMISSIONS,
   permissionBlockedByDependency,
   permissionGranted,
   permissionLockedByAdmin,
+  permissionsByGroup,
 } from '../../utils/permissions';
 
 // A new role starts as an ordinary member: they can see their own schedule and use
@@ -348,8 +351,20 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
               Administrator access. Each grants its own tab only.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {ADMIN_PERMISSIONS.map((permission) => (
-                <PermissionCheckbox key={permission.key} permission={permission} />
+              {permissionsByGroup(ADMIN_PERMISSIONS, ADMIN_PERMISSION_GROUPS).map((group) => (
+                <div key={group.label} className="md:col-span-2 space-y-2">
+                  {/* A HEADING PER GROUP, and the row still lays out in two columns beneath it - which is the whole point
+                      of the change: twenty-two checkboxes in one grid is a wall, and the same twenty-two under six
+                      headings is a form somebody can read. */}
+                  <h5 className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    {group.label}
+                  </h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {group.permissions.map((permission) => (
+                      <PermissionCheckbox key={permission.key} permission={permission} />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -358,9 +373,18 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
             <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Member modules
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {MEMBER_PERMISSIONS.map((permission) => (
-                <PermissionCheckbox key={permission.key} permission={permission} />
+            <div className="grid grid-cols-1 gap-5">
+              {permissionsByGroup(MEMBER_PERMISSIONS, MEMBER_PERMISSION_GROUPS).map((group) => (
+                <div key={group.label} className="space-y-2">
+                  <h5 className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    {group.label}
+                  </h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {group.permissions.map((permission) => (
+                      <PermissionCheckbox key={permission.key} permission={permission} />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

@@ -49,13 +49,43 @@ export const NOTIFICATION_TYPES = [
     stationLabel: 'Announcements',
     stationDescription: 'Push announcements to members\u2019 devices. They still show in the app either way.',
   },
+  {
+    key: 'notify_chat_direct',
+    // THE SAME PROMISE AS ANNOUNCEMENTS, for the other half of chat: the push is silenced, the message is not. A member who
+    // turns this off still sees the badge and still finds the conversation where it was - so this switch is about a phone
+    // buzzing, never about missing something.
+    label: 'Direct messages',
+    description: 'Push private conversations. The message and its badge are still there either way.',
+    stationLabel: 'Direct messages',
+    stationDescription: 'Push private conversations to members\u2019 devices. The message still arrives in the app either way.',
+    chatOnly: true,
+  },
+  {
+    key: 'notify_chat_rooms',
+    label: 'Room messages',
+    description: 'Push messages in the station rooms you are in. The message and its badge are still there either way.',
+    stationLabel: 'Room messages',
+    stationDescription: 'Push room messages to members\u2019 devices. The message still arrives in the app either way.',
+    chatOnly: true,
+  },
 ];
 
-// The switches to show this member. Approver-only types are dropped unless the
-// member's role can approve shifts.
+// The switches to show this member.
 //
-// The flag is read with `isTruthyFlag`, the same TRUE-parsing used for other
-// sheet-backed booleans, so it behaves whether the caller passes a real boolean
-// (as App.jsx does) or a raw `can_approve_shifts` cell value.
-export const visibleNotificationTypes = (canApproveShifts) =>
-  NOTIFICATION_TYPES.filter((type) => !type.approverOnly || isTruthyFlag(canApproveShifts));
+// APPROVER-ONLY TYPES ARE DROPPED for a member whose role cannot approve shifts, and CHAT TYPES for one whose role cannot use
+// chat at all - and that second one is not cosmetic: a member without `can_use_chat` is never sent a chat push (the fan-out
+// does not reach them and neither does the notification), so the switch would be a control that does nothing. That is the
+// same judgement the note at the top of this file makes about approver-only types, applied to the permission chat rests on.
+//
+// The flags are read with `isTruthyFlag`, the same TRUE-parsing used for other sheet-backed booleans, so it behaves whether
+// the caller passes a real boolean (as App.jsx does) or a raw `can_approve_shifts` cell value.
+//
+// `canUseChat` DEFAULTS TO TRUE, deliberately: it is the permissive direction, and a caller that has not been taught the new
+// argument yet shows a member one extra switch rather than hiding a switch they were meant to have. The two callers that
+// must pass it - My Settings and the admin tab - both do (see verify-notification-prefs.mjs, which asserts it).
+export const visibleNotificationTypes = (canApproveShifts, canUseChat = true) =>
+  NOTIFICATION_TYPES.filter((type) => {
+    if (type.approverOnly && !isTruthyFlag(canApproveShifts)) return false;
+    if (type.chatOnly && !isTruthyFlag(canUseChat)) return false;
+    return true;
+  });

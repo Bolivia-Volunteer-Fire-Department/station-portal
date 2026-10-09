@@ -10,7 +10,7 @@ const { HttpsError, onCall } = require('firebase-functions/v2/https');
 // The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
 // searchable in the Firebase console. See the note on `audit` below.
 const { logger } = require('firebase-functions/logger');
-const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { countPendingDocumentVerifications } = require('./documentVerification');
 const {
   aggregateReconciliation,
@@ -1916,7 +1916,39 @@ const accountsForAudience = async (audienceKeys) => {
   return [...byId.values()];
 };
 
-// An announcement: whoever the audience names, by the same keys the rules check with hasAny - so an audience cannot mean
+// THE SCHEDULE'S SENTINEL: one tiny document that changes whenever the schedule does, so a screen looking at a month can be
+// told it is out of date WITHOUT holding a listener on the month itself. See src/services/liveReads.js for the client's half
+// and src/utils/freshness.js for what it does about it.
+//
+// WHY A SENTINEL RATHER THAN A LISTENER ON THE SCHEDULE. A listener's first snapshot bills one read per document in the window,
+// which is what a screen already pays to look at that month - and only CHANGES are billed after that, so it is not the cliff it
+// looks like. What it does cost is a held socket per open screen, and a read on every listener for every write. A document the
+// client watches for a penny - one read to attach, one per change - buys the same result: "something changed, read the window
+// again". The big read stays one-shot and lazy, which is how the schedule was designed in the first place.
+//
+// A COUNT, NOT A TIMESTAMP. The client only ever asks "is this different from what I last read", which a number answers without
+// either side having to trust the other's clock; a bump per write means the value changes even for two edits in the same
+// second. `at` rides along for a human reading the console, and for the "updated X ago" line a screen shows.
+//
+// THE BUMP IS A SERVER WRITE, in a trigger rather than in the client, because a version a browser can set is a version a
+// browser can leave out. It cannot loop either: this writes a different document from the one it watches.
+//
+// THE PATH IS ALSO IN src/utils/freshness.js, and scripts/verify-freshness.mjs asserts the two agree - a server bumping one
+// document while clients watch another is a sentinel that never fires, which is a failure with no symptom at all.
+const SCHEDULE_SENTINEL_PATH = 'live/schedule';
+
+exports.onShiftWritten = onDocumentWritten('shifts/{shiftId}', async () => {
+  try {
+    await db
+      .doc(SCHEDULE_SENTINEL_PATH)
+      .set({ version: FieldValue.increment(1), at: FieldValue.serverTimestamp() }, { merge: true });
+  } catch (error) {
+    // A sentinel that fails must not take the schedule write with it: the shift is the record, the freshness note is a courtesy.
+    console.error(`[live] the schedule sentinel could not be bumped: ${(error && error.message) || error}`);
+  }
+});
+
+// AN ANNOUNCEMENT: whoever the audience names, by the same keys the rules check with hasAny - so an audience cannot mean
 // one thing to the rules and another thing to the push.
 exports.onAnnouncementCreated = onDocumentCreated('announcements/{announcementId}', async (event) => {
   try {
@@ -1937,6 +1969,561 @@ exports.onAnnouncementCreated = onDocumentCreated('announcements/{announcementId
     });
   } catch (error) {
     console.error(`[push] the announcement notification failed: ${(error && error.message) || error}`);
+  }
+});
+
+// THE CHAT TRUSTED HALF: what a message may contain, who may change one, and what the fan-out writes. Pure, so
+// scripts/verify-chat.mjs can ask it directly - a callable cannot be exercised by this suite at all (no Functions
+// emulator), which is the arrangement functions/rosterPage.js and functions/certificationFiles.js already follow.
+const {
+  CHAT_BODY_MAX: CHAT_BODY_LIMIT,
+  chatConversationFields,
+  chatEditPatch,
+  chatInboxFields,
+  chatMemberProblem,
+  chatGifProblem,
+  chatMessageDoc,
+  chatParticipantPatch,
+  chatParticipantProblem,
+  chatPermissionForAction,
+  chatPreviewOf,
+  chatPushPreferenceFor,
+  chatPushRecipients,
+  chatPushSummary,
+  chatReceiptsDoc,
+  chatReceiptsMembership,
+  chatReactionProblem,
+  chatReactionToggled,
+  chatReachablePeople,
+  chatRecipientsFor,
+  chatRemovalPatch,
+  chatThreadDoc,
+  chatThreadIdFor,
+  chatThreadMembersIn,
+  chatThreadProblem,
+  chatWriteProblem,
+} = require('./chat');
+
+// The caller's audience keys - the three shapes the rules check with hasAny, built from the caller's own roster row. The
+// `*` key is deliberately NOT among them: chatMemberProblem asks about everyone separately, so a member cannot pass
+// their way into a room by carrying a key they were never granted.
+const chatKeysForCaller = (uid, roster) => [
+  `user:${uid}`,
+  `role:${String((roster || {}).role_id || '')}`,
+  `rank:${String((roster || {}).rank_id || '')}`,
+];
+
+// One conversation and the caller's own document, read together because every message action needs both - and the
+// membership check is the same question whichever action it is.
+const chatContext = async (uid, conversationId) => {
+  const id = String(conversationId || '').trim();
+  if (!id) throw new HttpsError('invalid-argument', 'Which conversation?');
+  const [conversation, roster] = await Promise.all([
+    db.doc(`chat_conversations/${id}`).get(),
+    db.doc(`users/${uid}`).get(),
+  ]);
+  const row = conversation.exists ? { id, ...conversation.data() } : null;
+  // THREE things are read off this row beyond the caller's name, and all three were already in hand - which is the point:
+  //
+  //   * `role_id` and `rank_id`, because the reaction check asks whether a message's stamped audience reaches this member, and
+  //     for a station room - whose audience is a role or a rank rather than a list of people - knowing WHO the caller is says
+  //     nothing about it (functions/chat.js#chatReactionProblem).
+  //   * `avatar_url`, which is stamped onto every message the caller writes (functions/chat.js#chatMessageDoc), so that a
+  //     conversation's pictures cost no directory read at all.
+  const me = {
+    id: uid,
+    name: String((roster.exists && roster.get('name')) || ''),
+    role_id: String((roster.exists && roster.get('role_id')) || ''),
+    rank_id: String((roster.exists && roster.get('rank_id')) || ''),
+    avatar_url: String((roster.exists && roster.get('avatar_url')) || ''),
+  };
+  const problem = chatMemberProblem({
+    conversation: row,
+    member: me,
+    keys: chatKeysForCaller(uid, roster.exists ? roster.data() : {}),
+  });
+  if (problem) throw new HttpsError('permission-denied', problem);
+  return { conversation: row, me };
+};
+
+// SENDING. The row is written here rather than by the browser, for the reasons at the top of functions/chat.js: the
+// audience proof on a message has to be unforgeable, and who wrote it and when are not the client's to say.
+exports.sendChatMessage = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_use_chat', 'send a chat message');
+
+  const data = request.data || {};
+  // THE PICTURE IS CHECKED BEFORE ANYTHING ELSE IS WASTED ON IT, and the check is the server's own - the client's copy
+  // exists so somebody sees why, this one is what decides. See functions/chat.js#chatGifProblem.
+  const gifProblem = chatGifProblem(data.gif);
+  if (gifProblem) throw new HttpsError('invalid-argument', gifProblem);
+
+  // A MESSAGE MAY BE A PICTURE AND NOTHING ELSE, which is why the empty-body answer depends on whether one was attached:
+  // requiring a caption for every GIF would mean inventing a sentence to send a joke.
+  const problem = chatWriteProblem(data.body, { max: CHAT_BODY_LIMIT, allowEmpty: Boolean(String((data.gif || {}).url || '').trim()) });
+  if (problem) throw new HttpsError('invalid-argument', problem);
+
+  const { conversation, me } = await chatContext(request.auth.uid, data.conversationId);
+  const at = stationTimestamp();
+  const ref = db.collection(`chat_conversations/${conversation.id}/messages`).doc();
+  const row = chatMessageDoc({
+    conversation,
+    author: me,
+    body: data.body,
+    gif: data.gif,
+    at,
+    serverTimestamp: FieldValue.serverTimestamp(),
+  });
+
+  await ref.set(row);
+  // The conversation's own preview and activity, so a room list is drawn without reading a single message - and so a
+  // removal has ONE document to clear rather than every member's copy of it.
+  //
+  // A PICTURE WITH NO CAPTION SAYS SO in the preview, because the alternative is a room list row with nothing beside the
+  // name - which reads as a bug rather than as a message somebody chose not to caption.
+  await db
+    .doc(`chat_conversations/${conversation.id}`)
+    .set(
+      chatConversationFields({
+        message: { ...row, id: ref.id },
+        preview: chatPreviewOf(row.body || (row.gif_url ? 'Picture' : '')),
+      }),
+      { merge: true }
+    );
+
+  // The row comes back with its id, so the sender's own screen can draw it before the listener echoes it. The listener
+  // WILL echo it too - the client's merge replaces by id, which is what stops one message being drawn twice.
+  return { success: true, id: ref.id, message: { ...row, id: ref.id } };
+});
+
+// OPENING A PRIVATE CONVERSATION. See the section at the top of functions/chat.js: a thread IS a conversation whose audience
+// is its members, so this mints one - or FINDS THE ONE THAT ALREADY EXISTS, because the id is derived from the members
+// rather than generated. Two members pressing "message" on each other find the same conversation, from either end.
+//
+// WHO MAY BE MESSAGED, and why this is a callable at all: a member naming an audience is the one place in chat where they
+// name other people rather than choosing from rooms somebody else built. The audience for a thread is "these members", and
+// the only honest way to check that they may each be in a conversation is to read their roles - which is a lookup across
+// other people's documents, exactly what a callable is for. A member whose role does not grant Chat cannot be pulled into a
+// conversation they could not open themselves.
+exports.openChatThread = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const uid = request.auth.uid;
+  await requirePermission(uid, 'can_use_chat', 'start a private conversation');
+
+  const data = request.data || {};
+  const wanted = chatThreadMembersIn(data.memberIds);
+
+  const [roster, userRows] = await Promise.all([
+    db.doc(`users/${uid}`).get(),
+    wanted.length ? db.getAll(...wanted.map((id) => db.doc(`users/${id}`))) : Promise.resolve([]),
+  ]);
+  const people = userRows.filter((row) => row.exists).map((row) => ({ id: row.id, ...row.data() }));
+
+  // One role read per DISTINCT role rather than per member: a station's members share a handful of roles between them, and
+  // this is the same reason the roster read resolves roles in one pass.
+  const roleIds = [...new Set(people.map((person) => String(person.role_id || '')).filter(Boolean))];
+  const roleRows = roleIds.length ? await db.getAll(...roleIds.map((id) => db.doc(`roles/${id}`))) : [];
+  const grantsChat = new Map(
+    roleRows.filter((row) => row.exists).map((row) => [row.id, isGranted(row.get('can_use_chat'))])
+  );
+
+  const me = { id: uid, name: String((roster.exists && roster.get('name')) || '') };
+  const members = people.map((person) => ({
+    id: person.id,
+    name: String(person.name || ''),
+    can_use_chat: grantsChat.get(String(person.role_id || '')) === true,
+  }));
+
+  const problem = chatThreadProblem({ member: me, memberIds: wanted, members });
+  if (problem) throw new HttpsError('invalid-argument', problem);
+
+  const ids = chatThreadMembersIn([uid, ...members.map((person) => person.id)]);
+  const id = chatThreadIdFor(ids);
+  if (!id) throw new HttpsError('failed-precondition', 'That conversation cannot be created.');
+
+  const ref = db.doc(`chat_conversations/${id}`);
+  const existing = await ref.get();
+  if (existing.exists) {
+    // FOUND RATHER THAN CREATED - and A MEMBER ASKING FOR A CONVERSATION THEY ARE NOT IN IS PUT BACK INTO IT. That is what
+    // makes LEAVING recoverable: the id is derived from the members (chatThreadIdFor), so "start a conversation with these
+    // people" finds this one - and without this, the member who left would be handed a conversation they cannot read a word of,
+    // which looks exactly like the app losing their messages.
+    const row = { id, ...existing.data() };
+    if (!chatThreadMembersIn(row.member_ids).includes(uid)) {
+      const patch = chatParticipantPatch({ conversation: row, add: [uid], members: [me] });
+      await ref.set(patch, { merge: true });
+      return { success: true, created: false, rejoined: true, id, conversation: { ...row, ...patch } };
+    }
+    return { success: true, created: false, id, conversation: row };
+  }
+
+  const row = chatThreadDoc({
+    memberIds: ids,
+    memberNames: [me, ...members].map((person) => ({ id: person.id, name: person.name })),
+    creator: me,
+    now: stationTimestamp(),
+  });
+  await ref.set(row);
+  // AND ITS RECEIPTS, so a thread exists with everything that belongs to it rather than growing a document the first time
+  // somebody happens to read it. Written here rather than by a member: this is a callable, and firestore.rules refuses a client
+  // create on that path (see chatReceiptsDoc for why the receipts have a document of their own at all).
+  await db.doc(`chat_receipts/${id}`).set(chatReceiptsDoc({ conversationId: id, memberIds: ids }));
+  return { success: true, created: true, id, conversation: { id, ...row } };
+});
+
+// REACTING TO A MESSAGE: one emoji, toggled, written onto the message's own row. See the note in functions/chat.js for why the
+// map lives there (the window a member is already reading carries it, so a screen draws every reaction with no extra read) and
+// why this is a callable at all: the messages collection refuses every client write, because the audience proof that makes a
+// listener provable travels ON the message, and opening that document to browsers would open the proof with it.
+//
+// THE ROW COMES BACK, so the member's own screen draws the change at once rather than waiting for the listener - exactly as
+// sending and editing do, and the listener's echo replaces it by id rather than doubling it.
+exports.reactToChatMessage = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const uid = request.auth.uid;
+  await requirePermission(uid, 'can_use_chat', 'react to a chat message');
+
+  const data = request.data || {};
+  // Membership is settled here, by the conversation's own audience - which is the one check that works for a room AND a thread.
+  const { conversation, me } = await chatContext(uid, data.conversationId);
+  const messageId = String(data.messageId || '').trim();
+  const ref = db.doc(`chat_conversations/${conversation.id}/messages/${messageId}`);
+  const existing = await ref.get();
+  const row = existing.exists ? existing.data() || {} : null;
+
+  const problem = chatReactionProblem({
+    message: row,
+    member: me,
+    emoji: data.emoji,
+    keys: chatKeysForCaller(uid, me),
+  });
+  if (problem) throw new HttpsError('failed-precondition', problem);
+
+  const reactions = chatReactionToggled({ reactions: row.reactions, emoji: data.emoji, memberId: uid });
+  await ref.set({ reactions }, { merge: true });
+  return { success: true, id: messageId, message: { ...row, reactions, id: messageId } };
+});
+
+// ADDING AND REMOVING PEOPLE FROM A PRIVATE CONVERSATION - and LEAVING, which is a removal of yourself rather than a fourth
+// thing. See the section in functions/chat.js for the two rules that govern it (only a member of a thread may change it, and
+// only a thread can change at all) and for the three fields it writes together.
+//
+// THE PEOPLE ARE RESOLVED THE SAME WAY AS WHEN A THREAD IS OPENED: their roles are read to ask whether they may use chat at
+// all, because a member cannot read other people's roles and this is the same question openChatThread asks. One role read per
+// DISTINCT role, not per person.
+exports.updateChatParticipants = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const uid = request.auth.uid;
+  await requirePermission(uid, 'can_use_chat', 'change who is in a conversation');
+
+  const data = request.data || {};
+  // chatContext proves the caller is in the conversation, which is the first rule - a member cannot add themselves to somebody
+  // else's thread by asking nicely.
+  const { conversation } = await chatContext(uid, data.conversationId);
+
+  const wanted = chatThreadMembersIn(data.add);
+  const [roster, userRows] = await Promise.all([
+    db.doc(`users/${uid}`).get(),
+    wanted.length ? db.getAll(...wanted.map((id) => db.doc(`users/${id}`))) : Promise.resolve([]),
+  ]);
+  const people = userRows.filter((row) => row.exists).map((row) => ({ id: row.id, ...row.data() }));
+  const roleIds = [...new Set(people.map((person) => String(person.role_id || '')).filter(Boolean))];
+  const roleRows = roleIds.length ? await db.getAll(...roleIds.map((id) => db.doc(`roles/${id}`))) : [];
+  const grantsChat = new Map(
+    roleRows.filter((row) => row.exists).map((row) => [row.id, isGranted(row.get('is_admin')) || isGranted(row.get('can_use_chat'))])
+  );
+  const members = people.map((person) => ({
+    id: person.id,
+    name: String(person.name || ''),
+    can_use_chat: grantsChat.get(String(person.role_id || '')) === true,
+  }));
+
+  const member = { id: uid, name: String((roster.exists && roster.get('name')) || '') };
+  const remove = chatThreadMembersIn(data.remove);
+  const problem = chatParticipantProblem({ conversation, member, add: wanted, remove, members });
+  if (problem) throw new HttpsError('failed-precondition', problem);
+
+  const patch = chatParticipantPatch({ conversation, add: wanted, remove, members });
+  const before = chatThreadMembersIn(conversation.member_ids);
+
+  // A CHANGE THAT CHANGES NOTHING IS NOT WRITTEN. Two members pressing "add" on the same person at the same moment, or a screen
+  // acting on a list that has already moved, must not rewrite the document - and more to the point must not play anybody an
+  // entry sound for somebody who was already there (the panel's tones come from this list changing).
+  if (JSON.stringify(patch.member_ids) === JSON.stringify(before)) {
+    return { success: true, changed: false, added: [], removed: [], conversation: { ...conversation, ...patch } };
+  }
+
+  await db.doc(`chat_conversations/${conversation.id}`).set(patch, { merge: true });
+  // THE RECEIPTS LEARN WHO IS IN IT, in the same call, so the rule that decides who may record their place keeps answering
+  // correctly. Only the member list moves: whoever left keeps their own entry in `read_at` and cannot reach the document to
+  // remove it, which is harmless - the receipts a screen draws come from the conversation's list, so a stale key is invisible.
+  await db.doc(`chat_receipts/${conversation.id}`).set(chatReceiptsMembership({ memberIds: patch.member_ids }), { merge: true });
+
+  // WHOEVER LEFT LOSES THEIR BADGE. The inbox row is the fan-out's and nothing else removes it, so without this a member who is
+  // no longer in a conversation keeps a count they can never read down - the messages behind it are not theirs any more.
+  const leaving = before.filter((id) => !patch.member_ids.includes(id));
+  if (leaving.length) {
+    const batch = db.batch();
+    leaving.forEach((id) => batch.delete(db.doc(`chat_inbox/${id}/rooms/${conversation.id}`)));
+    await batch.commit();
+  }
+
+  return {
+    success: true,
+    changed: true,
+    added: patch.member_ids.filter((id) => !before.includes(id)),
+    removed: leaving,
+    conversation: { ...conversation, ...patch },
+  };
+});
+
+// WHO A MEMBER MAY MESSAGE, for the picker that starts a private conversation.
+//
+// A CALLABLE RATHER THAN A READ, and that is not a preference: the answer is not in anything a member may read. A member
+// sees a minimal roster projection with no roles on it, and the question here is which of their colleagues' ROLES grant
+// Chat - a lookup across other people's documents, which is what a callable is for, exactly as it is for opening a thread.
+//
+// The list comes from chatReachablePeople, the same function openChatThread checks its members with, so the people offered
+// and the people accepted cannot drift apart.
+exports.getChatPeople = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_use_chat', 'see who you can message');
+
+  // THE ROLES COME FIRST, BECAUSE THEY NARROW THE READ THAT FOLLOWS. This used to read the whole `users` collection and then
+  // work out which of them might chat, which bills for every member of the station to answer a question about a few of them.
+  // Which roles grant Chat is a handful of documents, and from it the member query below asks only for the people it can
+  // possibly return - so the cost of opening the picker is the people who can be messaged, not the size of the station.
+  //
+  // (At station scale those are often the same number, and this saves nothing - a station where every role has Chat gets a
+  // list as long as its roster either way. It matters in the shape stations actually differ in: a station where Chat is for
+  // officers and the office, which is exactly the shape where a picker full of people you may not message would be wrong.)
+  const roleRows = await db.collection('roles').get();
+  // The master switch is applied HERE, once, for both this and the thread opener: a role with `is_admin` may chat whatever
+  // its own column says, which is how the client's own chatPermissionsFrom reads it too.
+  const roles = roleRows.docs.map((row) => ({
+    id: row.id,
+    can_use_chat: isGranted(row.get('is_admin')) || isGranted(row.get('can_use_chat')),
+  }));
+  const chatty = roles.filter((role) => role.can_use_chat).map((role) => role.id);
+
+  // `in` takes at most thirty values, so the roles are walked in chunks rather than sliced - a slice would quietly stop
+  // offering the members of whichever role fell off the end, which is the kind of missing person nobody reports.
+  const users = [];
+  for (let at = 0; at < chatty.length; at += 30) {
+    const rows = await db
+      .collection('users')
+      .where('role_id', 'in', chatty.slice(at, at + 30))
+      .get();
+    rows.docs.forEach((row) => users.push({ id: row.id, ...row.data() }));
+  }
+
+  return { success: true, people: chatReachablePeople({ viewerId: request.auth.uid, users, roles }) };
+});
+
+// EDITING. Four permissions govern two acts, and which pair applies is decided by ONE question - is this the caller's
+// own message - asked in one place (chatPermissionForAction) so a callable cannot ask about the wrong half of the pair.
+exports.editChatMessage = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_use_chat', 'edit a chat message');
+
+  const data = request.data || {};
+  const problem = chatWriteProblem(data.body, { max: CHAT_BODY_LIMIT });
+  if (problem) throw new HttpsError('invalid-argument', problem);
+
+  const uid = request.auth.uid;
+  const { conversation } = await chatContext(uid, data.conversationId);
+  const messageId = String(data.messageId || '').trim();
+  const ref = db.doc(`chat_conversations/${conversation.id}/messages/${messageId}`);
+  const existing = await ref.get();
+  if (!existing.exists) throw new HttpsError('not-found', 'That message is not there any more.');
+  const row = existing.data() || {};
+  if (row.deleted_at) throw new HttpsError('failed-precondition', 'A removed message cannot be edited.');
+
+  const flag = chatPermissionForAction({ action: 'edit', mine: String(row.author_id || '') === uid });
+  if (!(await callerMay(uid, flag))) {
+    throw new HttpsError('permission-denied', 'You do not have permission to edit that message.');
+  }
+
+  const at = stationTimestamp();
+  const patch = chatEditPatch({ body: data.body, at, serverTimestamp: FieldValue.serverTimestamp() });
+  await ref.set(patch, { merge: true });
+
+  // The room list's line is this message's text while it is the newest one, so an edit has to reach it too - and the
+  // conversation is already in hand, which makes this a write rather than another read.
+  if (String(conversation.last_message_id || '') === messageId) {
+    await db.doc(`chat_conversations/${conversation.id}`).set({ last_preview: chatPreviewOf(patch.body) }, { merge: true });
+  }
+
+  return { success: true, id: messageId, message: { ...row, ...patch, id: messageId } };
+});
+
+// REMOVING. Nothing is deleted: the body is emptied and the row keeps the shape of having been there, which is what the
+// station asked for - and WHO removed it is recorded, because the difference between "Deleted by author" and "Deleted by
+// Jane Smith" is the whole reason an officer's removal is worth having.
+exports.deleteChatMessage = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  await requirePermission(request.auth.uid, 'can_use_chat', 'remove a chat message');
+
+  const uid = request.auth.uid;
+  const data = request.data || {};
+  const { conversation, me } = await chatContext(uid, data.conversationId);
+  const messageId = String(data.messageId || '').trim();
+  const ref = db.doc(`chat_conversations/${conversation.id}/messages/${messageId}`);
+  const existing = await ref.get();
+  if (!existing.exists) throw new HttpsError('not-found', 'That message is not there any more.');
+  const row = existing.data() || {};
+  if (row.deleted_at) throw new HttpsError('failed-precondition', 'That message has already been removed.');
+
+  const flag = chatPermissionForAction({ action: 'delete', mine: String(row.author_id || '') === uid });
+  if (!(await callerMay(uid, flag))) {
+    throw new HttpsError('permission-denied', 'You do not have permission to remove that message.');
+  }
+
+  const at = stationTimestamp();
+  const patch = chatRemovalPatch({ actor: me, at, serverTimestamp: FieldValue.serverTimestamp() });
+  await ref.set(patch, { merge: true });
+
+  // A PREVIEW MUST NOT OUTLIVE THE MESSAGE. If the removed message is the newest one, the room list's line would go on
+  // showing text the station has just removed - so it is cleared here, on the one document that holds it, rather than
+  // left for somebody to notice.
+  if (String(conversation.last_message_id || '') === messageId) {
+    await db.doc(`chat_conversations/${conversation.id}`).set({ last_preview: '' }, { merge: true });
+  }
+
+  return { success: true, id: messageId, message: { ...row, ...patch, id: messageId } };
+});
+
+// THE FAN-OUT: one message becomes one small row per member who can see it, so a badge costs ONE listener over a handful
+// of documents rather than a listener per room.
+//
+// THE MESSAGE CARRIES ITS OWN AUDIENCE, which is why this trigger reads no conversation at all: `audience_keys` was
+// stamped on the row by the sender's callable, un-forgeably, and the recipients fall straight out of it. The only read
+// here is the directory those keys resolve against, and that is CACHED - see DIRECTORY_TTL_MS below.
+//
+// `count` IS AN INCREMENT, never a read-modify-write: two messages arriving together would otherwise both read the same
+// number and write the same number back, and one of them would vanish from every badge on the station. `merge: true`
+// keeps the member's own `read_count` and `muted` exactly where they were - a fan-out that replaced the document would
+// silently mark every room as read.
+const DIRECTORY_TTL_MS = 5 * 60 * 1000;
+let chatDirectoryCache = { at: 0, rows: [] };
+
+// The station's directory, briefly. A member who joined a minute ago may miss ONE badge from this - their room list
+// comes from a query rather than from the inbox, so they still see the room, and the next message reaches them. What the
+// cache buys is the difference between reading the whole station once per message and once every five minutes.
+const chatDirectory = async () => {
+  if (Date.now() - chatDirectoryCache.at < DIRECTORY_TTL_MS) return chatDirectoryCache.rows;
+  const snapshot = await db.collection('users').get();
+  const rows = snapshot.docs.map((entry) => ({
+    id: entry.id,
+    role_id: (entry.data() || {}).role_id,
+    rank_id: (entry.data() || {}).rank_id,
+  }));
+  chatDirectoryCache = { at: Date.now(), rows };
+  return rows;
+};
+
+// The station's roles, as a lookup, cached on the same clock - and for a reason of its own: the fan-out must not write an
+// inbox row for a member who cannot open Chat at all.
+//
+// "WITHOUT THIS PERMISSION, FCM PUSH IGNORES THIS USER" is the promise made on the permission, and the only place that
+// promise can be kept for a badge is here: an inbox row is a notification in waiting, so a member whose role has no
+// `can_use_chat` gets none - no badge, and (when chat pushes arrive) no push. The role document is the source of truth
+// rather than the token, exactly as it is in the rules, so a role change takes effect within the cache's five minutes.
+let chatRolesCache = { at: 0, byId: {} };
+
+const chatRoles = async () => {
+  if (Date.now() - chatRolesCache.at < DIRECTORY_TTL_MS) return chatRolesCache.byId;
+  const snapshot = await db.collection('roles').get();
+  const byId = Object.fromEntries(snapshot.docs.map((entry) => [entry.id, entry.data() || {}]));
+  chatRolesCache = { at: Date.now(), byId };
+  return byId;
+};
+
+const chatMayUseChat = (rolesById, row) => {
+  const role = rolesById[String((row || {}).role_id || '')] || {};
+  return isGranted(role.is_admin) || isGranted(role.can_use_chat);
+};
+
+exports.onChatMessageCreated = onDocumentCreated(
+  'chat_conversations/{conversationId}/messages/{messageId}',
+  async (event) => {
+    try {
+      const message = { ...((event.data && event.data.data()) || {}), id: event.params.messageId };
+      const conversation = { id: event.params.conversationId };
+      const [directory, roles] = await Promise.all([chatDirectory(), chatRoles()]);
+      const byId = Object.fromEntries(directory.map((row) => [row.id, row]));
+      const recipients = chatRecipientsFor({
+        audienceKeys: message.audience_keys,
+        memberIds: message.member_ids,
+        users: directory,
+      }).filter((uid) => chatMayUseChat(roles, byId[uid]));
+
+      // THE SENDER GETS A ROW TOO, and it is not a mistake: "unread" means "not read yet", and nobody has read their own
+      // sentence back into the conversation. It is their own row, cleared by their own read mark, so opening the room
+      // settles it like any other - one rule instead of a special case.
+      const fields = chatInboxFields({ conversation, message });
+      const batch = db.batch();
+      for (const uid of recipients) {
+        batch.set(
+          db.doc(`chat_inbox/${uid}/rooms/${conversation.id}`),
+          { ...fields, count: FieldValue.increment(1) },
+          { merge: true }
+        );
+      }
+      if (recipients.length) await batch.commit();
+
+      // THE PUSH, which is where chat stops being purely in-app. Its audience is the inbox's list MINUS THE AUTHOR (who should
+      // not have their phone buzz because they pressed Send - see chatPushRecipients), and its SWITCH is the member's own
+      // preference, with the station's default behind it: deliverPush does that reading for every notification the app sends,
+      // so chat does not re-implement it.
+      //
+      // WHICH SWITCH is the conversation's, not the message's: a private conversation and a station room are two different
+      // interruptions, and a member can keep one and mute the other.
+      //
+      // The conversation is read for two facts the message does not carry - its kind and its name - because "a private
+      // conversation has no name of its own, so the notification leads with the author" is a rule about conversations
+      // (functions/chat.js#chatPushSummary).
+      const conversationRow = await db.doc(`chat_conversations/${conversation.id}`).get();
+      const row = conversationRow.exists ? { id: conversation.id, ...conversationRow.data() } : conversation;
+      const summary = chatPushSummary({ conversation: row, message, preview: chatPreviewOf(message.body) });
+      await deliverPush({
+        action: 'CHAT_PUSHED',
+        actor: text(message.author_id),
+        recipients: chatPushRecipients({ recipients, authorId: message.author_id }),
+        preference: chatPushPreferenceFor(row),
+        title: summary.title,
+        body: summary.body,
+        data: { event: 'CHAT', conversation_id: conversation.id, message_id: message.id },
+      });
+    } catch (error) {
+      // A fan-out that fails must not roll back the message: the conversation is the record, the badge is a courtesy.
+      console.error(`[chat] the inbox fan-out failed: ${(error && error.message) || error}`);
+    }
+  }
+);
+
+// DELETING A ROOM takes its messages and every member's inbox row with it.
+//
+// A room is deleted by an administrator, and a Firestore document delete does not touch its subcollections - so without
+// this the messages would outlive the room, invisible in the UI and billable forever, and every member would carry a
+// badge counting messages in a room that no longer exists. The inbox rows are found by the field the fan-out wrote, from
+// every member's own document, which is what `collectionGroup` is for.
+exports.onChatConversationDeleted = onDocumentDeleted('chat_conversations/{conversationId}', async (event) => {
+  const conversationId = event.params.conversationId;
+  try {
+    await db.recursiveDelete(db.collection(`chat_conversations/${conversationId}/messages`));
+  } catch (error) {
+    console.error(`[chat] removing the messages of room ${conversationId} failed: ${(error && error.message) || error}`);
+  }
+  try {
+    const rows = await db.collectionGroup('rooms').where('conversation_id', '==', conversationId).get();
+    for (let start = 0; start < rows.docs.length; start += 400) {
+      const batch = db.batch();
+      rows.docs.slice(start, start + 400).forEach((row) => batch.delete(row.ref));
+      await batch.commit();
+    }
+  } catch (error) {
+    console.error(`[chat] clearing the inboxes of room ${conversationId} failed: ${(error && error.message) || error}`);
   }
 });
 

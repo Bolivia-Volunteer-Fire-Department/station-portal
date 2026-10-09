@@ -30,6 +30,17 @@ import soundOnSound from '../assets/sound_on.mp3';
 import toastErrorSound from '../assets/toast_error.mp3';
 import toastNormalSound from '../assets/toast_normal.mp3';
 import toastSuccessSound from '../assets/toast_success.mp3';
+// Chat's six. They live here with the app's other sounds rather than in the Chat folder, because a message arriving is the
+// same kind of event as a toast or a push - and because this list is what the fetch-once engine, the Debug page's mix
+// sliders and scripts/verify-sounds.mjs are all built around. Which one a moment makes is decided in utils/chatSounds.js.
+import chatCloseSound from '../assets/chat_close.mp3';
+import chatEnterSound from '../assets/chat_enter.mp3';
+import chatExitSound from '../assets/chat_exit.mp3';
+import chatNotifySound from '../assets/chat_notify.mp3';
+import chatOpenSound from '../assets/chat_open.mp3';
+import chatSendSound from '../assets/chat_send.mp3';
+// The station's welcome, played once per device after a sign-in - see utils/firstVisit.js.
+import introShortSound from '../assets/intro_short.mp3';
 import {
   SOUNDS_DEFAULT,
   createPressTracker,
@@ -54,6 +65,13 @@ export const SOUND_FILES = {
   toast_success: toastSuccessSound,
   toast_error: toastErrorSound,
   toast_normal: toastNormalSound,
+  chat_open: chatOpenSound,
+  chat_close: chatCloseSound,
+  chat_enter: chatEnterSound,
+  chat_exit: chatExitSound,
+  chat_notify: chatNotifySound,
+  chat_send: chatSendSound,
+  intro_short: introShortSound,
 };
 
 // Everything else a call site needs, re-exported so a component imports one module rather than two.

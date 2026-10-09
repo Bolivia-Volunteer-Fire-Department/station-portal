@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl } from '../utils/assets';
@@ -24,6 +24,7 @@ export default function Sidebar({
     canViewReports = false,
     canGenerateForms = false,
     canViewRoster = false,
+    canUseChat = false,
     ranks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
@@ -127,6 +128,18 @@ export default function Sidebar({
                         <span>Clock History</span>
                     </button>
                     )}
+
+                    {canUseChat && (
+                    <button
+                        onClick={() => { setActiveTab('chat'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'chat'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <MessagesSquare className="w-5 h-5" />
+                        <span>Chat</span>
+                    </button>)}
 
                     {canViewRoster && (
                     <button

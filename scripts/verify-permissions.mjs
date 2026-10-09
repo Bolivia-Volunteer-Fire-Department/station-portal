@@ -9,15 +9,19 @@
 //
 // Run with: npm run verify:permissions
 import {
+  ADMIN_PERMISSION_GROUPS,
   ADMIN_PERMISSIONS,
   ADMIN_PERMISSIONLESS_TABS,
   ALL_PERMISSIONS,
   MASTER_PERMISSION_KEY,
+  MEMBER_PERMISSION_GROUPS,
+  MEMBER_PERMISSIONS,
   PERMISSION_KEYS,
   allowedAdminTabs,
   permissionBlockedByDependency,
   permissionColumnState,
   permissionGranted,
+  permissionsByGroup,
   permissionLockedByAdmin,
   permissionTab,
   resolvePermissionValue,
@@ -59,6 +63,41 @@ check(
 check('permissionTab maps approvals to its tab', permissionTab('can_approve_shifts'), 'approvals');
 check('permissionTab is null for a member permission', permissionTab('can_use_timeclock'), null);
 check('View roster is a member permission, not an Administration tab', permissionTab('can_view_roster'), null);
+
+console.log('\n--- the catalog is grouped for the form ---');
+// THE GROUPS ARE A SECOND STATEMENT ABOUT THE SAME LIST, so what matters is that they agree with it: every permission is
+// under exactly one heading, no heading is empty, and a permission nobody mentions is a failure rather than a permission
+// that quietly stops being grantable (permissionsByGroup would file it under "Other").
+const adminSections = permissionsByGroup(ADMIN_PERMISSIONS, ADMIN_PERMISSION_GROUPS);
+const memberSections = permissionsByGroup(MEMBER_PERMISSIONS, MEMBER_PERMISSION_GROUPS);
+const groupedKeys = [...ADMIN_PERMISSION_GROUPS, ...MEMBER_PERMISSION_GROUPS].flatMap((group) => group.keys);
+check('no permission is filed under "Other"', [...adminSections, ...memberSections].some((s) => s.label === 'Other'), false);
+check('every group names real permissions', groupedKeys.every((key) => PERMISSION_KEYS.includes(key)), true);
+check('no permission is named twice', new Set(groupedKeys).size, groupedKeys.length);
+check(
+  'and every permission is named somewhere',
+  ALL_PERMISSIONS.every((permission) => groupedKeys.includes(permission.key)),
+  true
+);
+check('no group is empty', [...adminSections, ...memberSections].every((section) => section.permissions.length > 0), true);
+check(
+  'no heading is used twice in a list',
+  [ADMIN_PERMISSION_GROUPS, MEMBER_PERMISSION_GROUPS].every(
+    (groups) => new Set(groups.map((group) => group.label)).size === groups.length
+  ),
+  true
+);
+// THE COUNTS ARE PINNED so that adding a permission makes somebody choose a heading for it, which is the moment the
+// grouping is worth re-reading. Both lists are drawn whole: nothing may be lost between the array and the form.
+check('the admin list is drawn whole, under six headings', [adminSections.length, adminSections.reduce((n, s) => n + s.permissions.length, 0)], [6, ADMIN_PERMISSIONS.length]);
+check('and the member list under three', [memberSections.length, memberSections.reduce((n, s) => n + s.permissions.length, 0)], [3, MEMBER_PERMISSIONS.length]);
+check('the headings are in the order they were written', adminSections.map((s) => s.label), ['People', 'Scheduling', 'Records', 'Communication', 'Reports & forms', 'Station setup']);
+check('and the chat permissions share one', memberSections[memberSections.length - 1].label, 'Chat');
+check('with the door first', memberSections[memberSections.length - 1].permissions[0].key, 'can_use_chat');
+// An empty list is an empty list rather than a crash - the form draws this on the way in, before any role is chosen.
+check('and an empty catalog is an empty form', permissionsByGroup(undefined, undefined), []);
+check('a permission with no heading is still drawn', permissionsByGroup([{ key: 'can_use_chat', label: 'Chat' }], []), [{ label: 'Other', permissions: [{ key: 'can_use_chat', label: 'Chat' }] }]);
+check('and an empty group leaves no bare heading', permissionsByGroup([{ key: 'can_use_chat' }], [{ label: 'People', keys: ['can_edit_users'] }]), [{ label: 'Other', permissions: [{ key: 'can_use_chat' }] }]);
 
 console.log('\n--- TRUE parsing (the sheet stores booleans or the text TRUE) ---');
 check('boolean true', permissionGranted({ can_edit_users: true }, 'can_edit_users'), true);

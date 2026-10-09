@@ -20,6 +20,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { isReadAction } from '../src/utils/readCoalescing.js';
 
 let failures = 0;
 const checkIs = (label, condition, detail = '') => {
@@ -80,6 +81,37 @@ checkIs('every prerequisite names a feature that exists', requiresAreReal);
 
 const writes = Object.values(ROUTED_FEATURES).flatMap((spec) => spec.writes);
 checkIs('no action is claimed by two features', new Set(writes).size === writes.length);
+
+// --- and nothing is named as something it is not ---------------------------------------------------------------
+// THE DISPATCHER CLASSIFIES ACTIONS BY NAME (utils/readCoalescing#isReadAction: `^(?:ADMIN_)?GET_|^PING$`), so a callable
+// whose name begins `GET_` is offered to the Firestore readers, finds no reader, and fails with "Firestore did not answer" -
+// an error that names Firestore for a problem that is a noun. That is exactly what chat's `GET_CHAT_PEOPLE` did: a callable,
+// correctly listed as a write, routed as a read by its own name. It cost a debugging session on a member's screen, so the
+// pairing is asserted here for EVERY feature rather than remembered.
+//
+// This is the check that would have caught it, and it is placed with the router rather than with chat because the rule it
+// states is the router's: a name is not decoration, it is a routing decision.
+// WHAT THESE TWO LISTS ARE, since it is not what they look like. They say what a FEATURE NEEDS - a read it depends on, an
+// action it dispatches - and NOT how an action travels. HOW an action travels is decided by its NAME
+// (utils/readCoalescing#isReadAction), which is why a callable that reads (MY_ANNOUNCEMENTS, LIST_CHAT_PEOPLE) belongs in
+// `reads` beside the Firestore queries: the list is the feature's, the mechanism is the name's.
+//
+// The one thing the name must therefore never do is CONTRADICT the half it is dispatched by: an action called `GET_*` is
+// offered to the Firestore readers whatever list it sits in, so a callable named that way finds no reader and fails with
+// "Firestore did not answer" - which names a backend for a problem that is a noun. That is exactly what chat's
+// `GET_CHAT_PEOPLE` did, and scripts/verify-backend-routing.mjs now asserts it for every feature.
+const misnamed = [];
+for (const [feature, spec] of Object.entries(ROUTED_FEATURES)) {
+  // `reads` and `writes` are both OPTIONAL - a feature that only writes has no read list - so both are defaulted rather than
+  // assumed: an assumption here threw instead of checking, which is the one outcome a verifier must never have.
+  for (const action of spec.writes || []) {
+    if (isReadAction(action)) misnamed.push(`${feature}: ${action} is dispatched as a callable but named like a Firestore read`);
+  }
+}
+check('every action is named like the half it is listed in', misnamed, []);
+// AND THE CHECK HAS TEETH: the classifier it asks is the one the dispatcher uses, so a name that passes here cannot be routed
+// the other way. Proved on a name that is deliberately wrong rather than by trusting the loop above to have found anything.
+checkIs('and it is asked of the real classifier', isReadAction('GET_SOMETHING') === true && isReadAction('LIST_SOMETHING') === false);
 
 // The check above has to read the raw lists: ROUTED_WRITES is keyed by action, so a duplicate would collapse there
 // and every count taken from it would agree with itself. Proved by doubling one action on purpose.

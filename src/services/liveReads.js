@@ -27,8 +27,10 @@
 //   4. IT IS WORTH KEEPING LIVE. `on_duty` changes when somebody clocks in or out, on the screen every member lands on, so
 //      the connection buys something a member can see. If that stops being true, delete the subscription - a listener
 //      nobody answers is a socket held open for nothing.
-import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { firestore } from './firebase.js';
+// How many messages a chat window holds - the number that keeps an open conversation from re-reading its whole history.
+import { CHAT_PAGE_SIZE } from '../utils/chat.js';
 // The same key derivation and the same settings shaping the readers use, so a live row and a read row cannot drift apart.
 import { audienceKeysFor, settingRows, usersByIds } from './firestorePayload.js';
 // The date key the announcements listener bounds by, from the same helper the reader uses.
@@ -70,9 +72,30 @@ const onDutyFrom = async (snapshot) => {
 // see. A one-shot `getDocs` still works when streaming does not, so the data is refreshed the same way the screen's
 // own read refreshes it, and the SDK's own reconnect keeps trying for the stream in the background - the next error
 // simply refreshes again. Nothing here is load-bearing, so a failed fallback is just logged.
+// A SINGLE DOCUMENT'S CONTENTS, for the one listener that watches a document rather than a collection: `{ ... }` when it is
+// there and `{}` when it is not yet. The sentinel does not exist until the first schedule write, so "no document" is a real
+// answer rather than a failure - and an empty object is what the caller's own decision (utils/freshness.js) expects to be asked
+// about.
+const snapshotData = (snapshot) => (snapshot && typeof snapshot.data === 'function' ? snapshot.data() || {} : {});
+
+// WHETHER THIS IS A DOCUMENT OR A COLLECTION, and it decides how the listener is attached and how it is refreshed. The modular
+// SDK marks both: a DocumentReference has `type: 'document'` and a Query has `type: 'query'`.
+export const isDocumentTarget = (target) => Boolean(target && target.type === 'document');
+
 const watch = (target, shape, handler, onError) => {
+  // A DOCUMENT TAKES NO OPTIONS, AND THAT COST EVERY DOCUMENT LISTENER IN THE APP.
+  //
+  // `onSnapshot(ref, options, next, error)` is the QUERY signature. Handed a DocumentReference in the first slot, the SDK
+  // dispatches on the target and expects `(ref, next, error)` - so the options object landed where a callback belonged and the
+  // whole call was refused with `Expected type 'Query', but it was: a custom aa object`. Nothing attached, nothing threw
+  // anywhere a screen could see, and the collection listeners beside it worked perfectly - which is why it looked like "the
+  // schedule sentinel does nothing" and "the delivery ticks never move" rather than like one shared bug.
+  //
+  // The one-shot fallback below had the same fault in the other direction: `getDocs` on a document reference is also wrong.
+  const isDocument = isDocumentTarget(target);
+  const readOnce = () => (isDocument ? getDoc(target) : getDocs(target));
   const refreshOnce = () => {
-    getDocs(target)
+    readOnce()
       .then((snapshot) => Promise.resolve(shape(snapshot)).then(handler))
       .catch((error) => {
         if (onError) onError(error);
@@ -82,14 +105,81 @@ const watch = (target, shape, handler, onError) => {
     if (onError) onError(error);
     refreshOnce();
   };
-  return onSnapshot(
-    target,
-    { includeMetadataChanges: false },
-    (snapshot) => {
-      Promise.resolve(shape(snapshot)).then(handler).catch(fail);
-    },
-    fail
-  );
+  const onNext = (snapshot) => {
+    Promise.resolve(shape(snapshot)).then(handler).catch(fail);
+  };
+  return isDocument
+    ? onSnapshot(target, onNext, fail)
+    : onSnapshot(target, { includeMetadataChanges: false }, onNext, fail);
+};
+
+// CHAT'S LISTENERS: the badge, and the conversation that is open. Two subscriptions, and no more.
+//
+// WHAT QUALIFIES HERE, against the four conditions at the top of this file:
+//
+//   1. SMALL. The inbox is one document per room PER MEMBER - a handful - and the conversation listener is WINDOWED to
+//      the last CHAT_PAGE_SIZE messages. That window is the whole reason chat can be live at all: a listener's first
+//      snapshot bills every document it matches, so an unscoped one on a conversation would re-read the station's entire
+//      history every time anybody opened a chat. "Load older" fetches backwards on demand instead.
+//   2. THE RULES CAN PROVE IT. A message carries its own audience keys - stamped by the sending callable, never by a
+//      client - so the query and the rule are the SAME keys, exactly as they are for announcements. That is what makes
+//      this listener legal rather than refused.
+//   3. NOT THE MEMBER'S OWN EDITS. The one thing a member writes here is their read mark, and the inbox listener is what
+//      shows it: the two agree by construction, since both are the same document.
+//   4. WORTH KEEPING LIVE. A badge that only updates when you look at it is not a badge.
+//
+// THE CONVERSATION LISTENER IS DETACHED WHEN THE ROOM CLOSES, which is condition 4 taken seriously: a socket nobody is
+// reading is a socket held open for nothing. The SDK's own cache means re-opening a room paints from memory before the
+// stream says anything, so closing and reopening costs no reads.
+export const subscribeChat = ({ userId, roleId = '', rankId = '', conversationId = '', handlers = {}, onError } = {}) => {
+  const id = String(userId || '').trim();
+  const room = String(conversationId || '').trim();
+  if (!id) return () => {};
+
+  const db = firestore();
+  const stops = [];
+
+  if (handlers.inbox) {
+    stops.push(watch(collection(db, 'chat_inbox', id, 'rooms'), rowsFrom, handlers.inbox, onError));
+  }
+
+  if (room && handlers.messages) {
+    const keys = audienceKeysFor({ userId: id, roleId, rankId });
+    stops.push(
+      watch(
+        query(
+          collection(db, 'chat_conversations', room, 'messages'),
+          where('audience_keys', 'array-contains-any', keys),
+          orderBy('created_at', 'desc'),
+          limit(CHAT_PAGE_SIZE)
+        ),
+        // NEWEST FIRST, as the query orders them: the window is taken from the tail of the conversation, and the panel
+        // draws it bottom-up. Reversing here would mean the limit took the OLDEST thirty, which is the opposite of what
+        // a chat window is for.
+        rowsFrom,
+        handlers.messages,
+        onError
+      )
+    );
+  }
+
+  return () => stops.forEach((stop) => stop());
+};
+
+// A PRIVATE CONVERSATION'S RECEIPTS: how far each member has read, for the ticks beside a member's own messages.
+//
+// A DOCUMENT OF ITS OWN IS THE POINT, not a detail. The receipt could have lived on the conversation, where a client is already
+// looking - but that document carries the room list's own fields, and the send callable rewrites them on EVERY message, so a
+// listener on it would be woken per message for a fact that changes when somebody READS. This one is woken only when a
+// receipt moves, which is a handful of times a day (see functions/chat.js#chatReceiptsDoc).
+//
+// ATTACHED ONLY WHILE A PRIVATE CONVERSATION IS OPEN, and only for one: a station room has no receipts document at all, so a
+// caller that watches one is holding a listener on a document that cannot exist.
+export const subscribeChatReceipts = ({ conversationId, onChange } = {}) => {
+  const room = String(conversationId || '').trim();
+  if (!room) return () => {};
+  const db = firestore();
+  return watch(doc(db, 'chat_receipts', room), snapshotData, onChange, () => {});
 };
 
 // Subscribing is ONE call for the whole signed-in session, because these pieces belong together: they attach together, they
@@ -109,6 +199,17 @@ export const subscribeLive = ({ userId, handlers = {}, onError } = {}) => {
   if (handlers.onDuty) stops.push(watch(collection(db, 'on_duty'), onDutyFrom, handlers.onDuty, onError));
   if (handlers.systemSettings) {
     stops.push(watch(doc(db, 'settings', 'public'), settingRows, handlers.systemSettings, onError));
+  }
+  // THE SCHEDULE'S SENTINEL: one tiny document, bumped by a trigger whenever the schedule changes, so a screen can be told its
+  // window is stale WITHOUT holding a listener on the window itself. See functions/index.js#onShiftWritten for the bump and
+  // utils/freshness.js for what the caller decides to do about it.
+  //
+  // THIS IS THE LISTENER THE SCHEDULE CANNOT HAVE, expressed as the one it can. The note at the top of this file says why the
+  // schedule stays windowed and one-shot: a listener's first snapshot bills every document it matches, and the schedule holds
+  // every shift the station has ever written. A single document costs one read to attach and one per change, and says the thing
+  // a listener was wanted for - "something moved, read the window again".
+  if (handlers.scheduleVersion) {
+    stops.push(watch(doc(db, 'live', 'schedule'), snapshotData, handlers.scheduleVersion, onError));
   }
 
   if (handlers.announcements || handlers.events) {

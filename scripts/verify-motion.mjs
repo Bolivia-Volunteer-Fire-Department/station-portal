@@ -212,8 +212,20 @@ const popovers = linesWith(componentFiles, 'animate-popoverIn');
 checkIs('the popovers were found', popovers.length >= 5, `${popovers.length} found`);
 check('each one is positioned off its control', offenders(popovers, (text) => /\b(?:absolute|fixed)\b/.test(text)), []);
 // Without an origin the scale grows from the middle, which reads as the panel inflating out of nowhere rather
-// than opening downwards from the button that was pressed.
-check('and each grows from the edge it is anchored to', offenders(popovers, (text) => /origin-(?:top|top-left|top-right)\b/.test(text)), []);
+// than opening from the button that was pressed.
+//
+// THE EDGE IS THE ONE IT HANGS FROM, and chat's emoji picker is why this asks that rather than naming `origin-top`:
+// every popover before it opens DOWNWARDS (`top-full` or a `fixed` panel, `origin-top…`), while the picker sits in a
+// composer at the bottom of the panel and opens UPWARDS (`bottom-full`). Asserting `origin-top` alone would have forced
+// the picker to grow from the wrong edge to satisfy a test - so the rule is the one an eye would apply: no origin at
+// all fails, and an origin that disagrees with the edge the panel hangs from fails.
+const growsFromItsAnchor = (text) => {
+  const origin = /origin-(top|bottom)(?:-(?:left|right))?\b/.exec(text);
+  if (!origin) return false;
+  const opensUpwards = /\bbottom-full\b/.test(text);
+  return (origin[1] === 'bottom') === opensUpwards;
+};
+check('and each grows from the edge it is anchored to', offenders(popovers, growsFromItsAnchor), []);
 
 console.log('\n--- the page transition, on elements that are new by construction ---');
 // The first attempt animated the CONTAINER and restarted it from JavaScript on every tab change, and it

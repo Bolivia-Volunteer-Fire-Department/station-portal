@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -19,6 +19,7 @@ import AdminTrainingTab from './AdminTrainingTab';
 import AdminCertificationsTab from './AdminCertificationsTab';
 import AdminCertificationSetupTab from './AdminCertificationSetupTab';
 import AdminAnnouncementsTab from './AdminAnnouncementsTab';
+import AdminChatTab from './AdminChatTab';
 import AdminDocumentsTab from './AdminDocumentsTab';
 import AdminEventsTab from './AdminEventsTab';
 import AdminReportsConfigurationTab from './AdminReportsConfigurationTab';
@@ -98,6 +99,16 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'reports-config', label: 'Reports Configuration', icon: BarChart3 },
       { id: 'forms-config', label: 'Forms', icon: FileText },
     ],
+  },
+  {
+    // Chat Rooms sits in its own group rather than under People, because it is not about people: it is the station's
+    // conversation structure, and an officer given this permission is not thereby given a seat in any room (see
+    // utils/chat.js#chatPermissionsFrom). Nothing else lives here yet, and that is fine - a group of one is clearer than
+    // a tab filed under a heading that does not describe it.
+    id: 'catChat',
+    label: 'Communication',
+    icon: MessagesSquare,
+    items: [{ id: 'chat', label: 'Chat Rooms', icon: MessagesSquare }],
   },
   {
     id: 'catSystem',
@@ -460,6 +471,19 @@ export default function AdminPanel({
           setup={certificationSetup}
           onDataChanged={onAdminDataChanged}
           onBadgesChanged={onBadgesChanged}
+        />
+      )}
+
+      {activeSubTab === 'chat' && (
+        // The roster rows and the rank list come from the caller's own payload - the tab needs to name a room's audience
+        // in words ("Officers", "Captain") rather than as keys, and the read it makes for itself is the rooms.
+        <AdminChatTab
+          token={token}
+          roles={roles}
+          ranks={ranks}
+          users={nameRows}
+          onDataChanged={onAdminDataChanged}
+          onRowSaved={onRowSaved}
         />
       )}
 

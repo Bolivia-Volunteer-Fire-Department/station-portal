@@ -36,7 +36,7 @@ Each button opens one of the app's real dialogs, which opens on its own tone:
 
 ## Sounds
 
-One button per sound file the app ships: `click`, `click_double`, `modal_positive`, `modal_error`, `notification`, `sound_on`, `sound_off`, `toast_success`, `toast_error`, `toast_normal`.
+One button per sound file the app ships: `click`, `click_double`, `modal_positive`, `modal_error`, `notification`, `sound_on`, `sound_off`, `toast_success`, `toast_error`, `toast_normal`, chat's six — `chat_open`, `chat_close`, `chat_enter`, `chat_exit`, `chat_notify`, `chat_send` — and `intro_short`, the station's welcome.
 
 These buttons play **even when sounds are switched off** — which is the point, because "the app is silent" is usually a setting rather than a fault — and the buttons themselves make no sound, so what you hear is the sample and nothing else.
 
@@ -61,3 +61,8 @@ Each sound has a slider for how loud the app plays it. The row shows the level i
 - **"The click is too loud"** (or too quiet). Move that sound's level slider until it sounds right, then note the percentage — making it permanent is a code change, and the levels themselves are temporary.
 - **"What does a refused clock-in look like?"** Open it here rather than walking outside with a phone.
 - **"The session expired and I lost my work."** Show the re-authentication prompt, and the forced password change beside it, to whoever needs to see what the member was looking at.
+- **"A button does something and nothing happens, and the console says `internal [0]` — or shows a CORS error."** That is what a Cloud Function the browser cannot reach looks like, and the name of the error is misleading: the browser has no word for "the server refused me before the request arrived", so it reports the nearest thing it understands. The usual cause is a **newly deployed function**, which arrives set to require authentication. Fix it at **Cloud Run → the service (the function's name in lower case, e.g. `reacttochatmessage`) → Security → Authentication → Allow public access**, then **Redeploy** — this is part of the revision, so it does nothing until you redeploy, and then takes about a minute to roll out.
+
+  **This does not make the function public.** It removes a second lock that only Google Cloud identities could satisfy — and a browser signing in as a member is not one. The function still refuses anyone who is not signed in (ask it from a terminal and it answers "Sign in first."), and every action behind it still checks the member's role and their membership of the conversation.
+
+- **"Something that should update on its own does not"** — the delivery ticks, the online dots, the schedule's freshness notice. The console reports `[live] a live read could not be kept open: Missing or insufficient permissions`, and the usual cause is not the member's account but a **rule that has not been deployed**: a document the app listens to has to be named in `firestore.rules`, or the catch-all at the bottom of that file refuses the read. Run `firebase deploy --only firestore:rules` and reload the page. A path the app *watches* is easy to forget, because reading it once and watching it are the same permission and only the second one keeps failing quietly.

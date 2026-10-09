@@ -181,6 +181,34 @@ service cloud.firestore {
           || (!roleIsAdministrator(resource.data.get('role_id', ''))
             && !roleIsAdministrator(request.resource.data.get('role_id', ''))));
       allow delete: if permission('can_edit_users');
+
+      // A MEMBER KEEPS THEIR OWN PICTURE UP TO DATE, and this branch is the whole of that permission: `avatar_url` on
+      // their own row, and nothing else.
+      //
+      // WHY IT IS THEIRS AND NOT AN OFFICER'S. The picture is a fact about how somebody APPEARS beside their name, not
+      // a fact about what they may do - so the person it is a picture of is the right person to choose it. A rank or a
+      // role is not theirs, and those are keys this door does not name.
+      //
+      // THE DIFF CHECK IS THE POINT. `affectedKeys().hasOnly(['avatar_url'])` makes "they can only change this one
+      // thing" a property of the shape rather than a check somebody has to remember: a member who sends a picture AND
+      // a `role_id` in the same write is refused outright, rather than having the role silently dropped. It is the
+      // same clause the officer branches above use to say which fields exist.
+      //
+      // `privateText` bounds it and requires a real string, and the `matches` requires a real link. Both matter, and
+      // neither is about trusting the member: Firestore charges for what is stored, so a `data:` URL holding an image
+      // would put the bytes of a photo in the document where a link belongs; and a link is what every reader draws in
+      // an `<img>`.
+      //
+      // LOCALHOST IS ALLOWED WITH HTTPS, which looks like a hole and is not one. The Storage emulator serves
+      // `http://127.0.0.1:9199/...`, so an https-only rule would make this feature impossible to try before it ships
+      // - and a rule that cannot be satisfied in development is a rule somebody eventually deletes. The worst a
+      // `http://localhost` URL can do in production is fail to load, which the chat already handles by hiding the
+      // picture.
+      allow update: if uid() == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avatar_url'])
+        && privateText('avatar_url', 512)
+        && (request.resource.data.get('avatar_url', '').matches('https://.*')
+          || request.resource.data.get('avatar_url', '').matches('http://(localhost|127\\.0\\.0\\.1).*'));
     }
 
     // The private half: the username, the account status, the officer notes. Read by the member (it is their own
@@ -700,6 +728,154 @@ service cloud.firestore {
       // Removal is the scorer's, and deliberately not the manager's-only: an assessment that is withdrawn is cleaned up
       // by whoever runs assessments. Kept separate from the update above so the two rules can be reasoned about alone.
       allow delete: if signedIn() && permission('can_add_assessment_scores');
+    }
+
+    // =========================================================================================================
+    // CHAT
+    // =========================================================================================================
+    //
+    // THE ONE THING TO UNDERSTAND ABOUT CHAT'S RULES: A MESSAGE CARRIES ITS OWN AUDIENCE PROOF.
+    //
+    // A member's client listens to the last thirty messages of a room, which means the rule has to be able to PROVE that
+    // query - and a rule cannot read a message's parent conversation to find out who may see it. So each message carries
+    // the same key list its conversation carries (`audience_keys`), exactly as an announcement carries its own, checked
+    // with the same `hasAny(viewerKeys())` the client queries with `array-contains-any`. The proof is stamped by the
+    // sending CALLABLE and never by a client: a client-written proof is a client-forgeable one, and a member could stamp
+    // `['*']` on a message inside an officers-only room and leak it through a collection-group query. That is why
+    // `allow create, update, delete: if false` stands over the messages below.
+    //
+    // The reads are cheap by this file's own standard: one document (the message) plus the two the permission helpers
+    // already read, which is inside the allowance the note at the top of this file describes.
+    match /chat_conversations/{conversationId} {
+      // WHO MAY READ A ROOM: the officer who manages them, or somebody the room's audience names. The officer branch is
+      // not decoration - the rooms tab reads the WHOLE collection, and a query Firestore cannot prove is refused, so the
+      // permission is what makes that read possible.
+      //
+      // `resource != null` is this file's rule of the road: a get by id on a document that does not exist evaluates the
+      // read rule with resource null, and `.data` off null is an evaluation error - which a client sees as denied and an
+      // engineer reads as a rules bug.
+      allow read: if signedIn()
+        && permission('can_use_chat')
+        && (permission('can_manage_chat_rooms')
+          || (resource != null && resource.data.get('audience_keys', []).hasAny(viewerKeys()))
+          // A PRIVATE CONVERSATION, whose audience IS its members: the branch above already proves it, because a thread is
+          // created with `user:<id>` for each member (functions/chat.js#chatThreadDoc). This is the same fact said a second
+          // way, so that a thread a member is in stays readable even if its keys were ever rebuilt wrongly - and so the
+          // intent is written down where the rest of chat's audience rules are.
+          || (resource != null && resource.data.get('member_ids', []).hasAny([uid()])));
+
+      // A ROOM IS AN ADMINISTRATOR'S ROW, written straight from the rooms tab rather than through a callable: there is
+      // nothing here a browser cannot be trusted with once the permission has been checked, and the fields are asserted
+      // rather than assumed. A room with no name is a row nobody can find; a room with no audience is one nobody can see,
+      // which would look exactly like a room that was never created.
+      //
+      // THE VALIDATION IS WRITTEN AGAINST THE MERGED DOCUMENT, not against what the caller sent. A save from the rooms
+      // tab is a merge, so it carries the form's fields and leaves the activity fields (`last_at`, `last_preview`) that
+      // the message callables keep up to date - and `request.resource.data` is the result of that merge, which is what
+      // these checks want to see.
+      allow create, update: if signedIn()
+        && permission('can_manage_chat_rooms')
+        && request.resource.data.get('name', '') is string
+        && request.resource.data.get('name', '').size() > 0
+        && request.resource.data.get('name', '').size() <= 60
+        && request.resource.data.get('audience_keys', []) is list
+        && request.resource.data.get('audience_keys', []).size() > 0;
+
+      // Deleting a room takes its messages and every member's inbox row with it, which is a TRIGGER's job rather than a
+      // rule's (see onChatConversationDeleted): no client can reach into another member's documents.
+      allow delete: if signedIn() && permission('can_manage_chat_rooms');
+
+      match /messages/{messageId} {
+        // READ, and only read. The proof travels on the row (see the note above), and `member_ids` is the same idea for
+        // the private conversations that arrive in a later phase - an empty list for a room, where `hasAny([uid()])` is
+        // false, which is the safe direction.
+        allow read: if signedIn()
+          && permission('can_use_chat')
+          && resource != null
+          && (resource.data.get('audience_keys', []).hasAny(viewerKeys())
+            || resource.data.get('member_ids', []).hasAny([uid()]));
+
+        // NOTHING A CLIENT WRITES HERE. Sending, editing and removing are three callables, and each checks the permission
+        // that governs it - four permissions, paired by whether the message is the caller's own, which is a question
+        // functions/chat.js#chatPermissionForAction answers in one place. A rule could not ask it without reading the
+        // document it is deciding about, and it cannot stamp an unforgeable author or time.
+        allow create, update, delete: if false;
+      }
+    }
+
+    // HOW FAR EACH MEMBER HAS READ, in a document of its own - and the receipts a private conversation shows against its
+    // messages.
+    //
+    // WHY NOT ON THE CONVERSATION, which is where this started: that document carries the room list's own fields - `last_preview`
+    // and the rest - and the send callable rewrites them on EVERY message. A listener on it would therefore fire per message, for
+    // a receipt that changes a handful of times a day. Here it fires only when somebody reads, which is the whole reason these
+    // have a document to themselves.
+    //
+    // PRIVATE CONVERSATIONS ONLY, and that is a decision rather than a limit of the rule. A station room has no reader to name -
+    // "seen by forty people" is not a receipt - and no member list to check a caller against, which is the other half of what
+    // makes these paths short. No room ever has a receipts document, so these paths simply never exist for one.
+    //
+    // WRITTEN BY A CALLABLE, READ BY THE MEMBERS. The create is the server's, and so is every change of membership (a thread is
+    // opened with its receipts document already in place - functions/chat.js#chatReceiptsDoc - and adding or removing somebody
+    // rewrites the member list on it in the same call). What is left for a member is one field, and one key inside it.
+    // THE SCHEDULE'S SENTINEL: one document, `live/schedule`, holding a counter a trigger bumps whenever a shift is written.
+    // A member's screen watches it so it can be told its schedule window is stale without holding a listener on the window
+    // itself (utils/freshness.js decides what to do about a bump).
+    //
+    // IT NEEDED A BLOCK OF ITS OWN, and that is what the console was saying. With no `live` match anywhere in this file the
+    // read fell to the catch-all at the bottom, and the listener reported "Missing or insufficient permissions" - which reads
+    // like a sign-in problem rather than like a missing paragraph here. Anything a client WATCHES has to be named.
+    //
+    // READ BY ANY SIGNED-IN MEMBER, because it says nothing: it is a number. Written by NOBODY from a browser - the trigger
+    // that bumps it runs with the Admin SDK, which is not subject to this file.
+    match /live/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /chat_receipts/{conversationId} {
+      allow read: if signedIn()
+        && permission('can_use_chat')
+        && resource != null
+        && resource.data.get('member_ids', []).hasAny([uid()]);
+
+      // A member does not create or delete this: the conversation's own lifecycle owns it, from a callable that a browser cannot
+      // reach. `resource` being null is the difference between "not there yet" (which is a denial, correctly) and an error.
+      allow create, delete: if false;
+
+      // THE NESTED DIFF IS THE WHOLE CHECK, and it is the shape chat_inbox uses one level down: `affectedKeys()` on the map
+      // names the keys that actually changed, so a member recording their own place is allowed and a member overwriting
+      // somebody else's - or claiming the whole map - is refused. `get(..., {})` because that map starts empty.
+      //
+      // A TIME AND A NUMBER, deliberately NOT compared against the server's clock: a member's device can be a few seconds ahead
+      // of it, and a receipt refused for that is a receipt that silently never arrives. The worst a forged one can do is claim
+      // its own author has read further than they have, which is nobody's business but theirs.
+      allow update: if signedIn()
+        && permission('can_use_chat')
+        && resource.data.get('member_ids', []).hasAny([uid()])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read_at'])
+        && request.resource.data.get('read_at', {}).diff(resource.data.get('read_at', {})).affectedKeys().hasOnly([uid()])
+        && request.resource.data.read_at[uid()] is number;
+    }
+
+    // ONE MEMBER'S VIEW OF THE ROOMS THEY ARE IN: how many messages have been posted, when, and which was last.
+    //
+    // WRITTEN BY THE FAN-OUT AND READ BY ITS OWNER, which is what the two branches below are. `count` and the `last_*`
+    // fields are the trigger's; `read_count` and `muted` are the member's, and they are the only two a member may touch.
+    // A member who could write `count` could silence their own badge - or, on somebody else's row, light one.
+    match /chat_inbox/{memberId}/rooms/{conversationId} {
+      allow read: if signedIn() && uid() == memberId;
+
+      allow create: if signedIn()
+        && uid() == memberId
+        && request.resource.data.keys().hasOnly(['read_count', 'muted']);
+
+      allow update: if signedIn()
+        && uid() == memberId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read_count', 'muted']);
+
+      // A member does not delete their inbox: the room going away is what removes the row, and that is a trigger's job.
+      allow delete: if false;
     }
 
     // Everything not named above is denied, including the collections whose rules arrive with their client code

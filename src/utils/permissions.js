@@ -164,6 +164,15 @@ export const ADMIN_PERMISSIONS = [
     label: 'Configure forms',
     description: 'Create and edit printable form definitions: which blank PDF a form fills, which data it draws from, and where each value goes. Choose which roles and ranks may generate each one.',
   },
+  {
+    // THE ROOMS, not the messages: who may read and write in a room is the room's own AUDIENCE (the same
+    // everyone/role/rank/member choice an announcement carries), so this permission is about defining that shape
+    // rather than about who may take part in it.
+    key: 'can_manage_chat_rooms',
+    tab: 'chat',
+    label: 'Manage chat rooms',
+    description: 'Open Chat Rooms: add, edit, reorder and delete the station\'s rooms, and choose who may see each one. Deleting a room removes its messages with it. This does not give access to Chat itself - that is "Chat".',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -268,10 +277,142 @@ export const MEMBER_PERMISSIONS = [
     label: 'Generate forms',
     description: 'Open Reports & Forms and generate the printable PDFs shared with their role or rank.',
   },
+  {
+    // THE DOOR TO THE WHOLE MODULE, and the only permission the other five rest on. Without it Chat does not exist for
+    // a member: no panel, no launcher button, no unread badge, and the chat push fan-out skips them - which is why it is
+    // a permission rather than a station-wide setting. A station that wants a quiet station can leave it off for a role.
+    key: 'can_use_chat',
+    label: 'Chat',
+    description: 'Open Chat and take part in the conversations their role and rank can see. Without it Chat is hidden everywhere: no panel, no button, no badge, and no chat notifications.',
+  },
+  {
+    key: 'can_edit_own_chat_messages',
+    label: 'Edit their own chat messages',
+    description: 'Change the text of a message they posted, which is marked as edited so everybody can see it has changed. Requires "Chat".',
+    requires: 'can_use_chat',
+  },
+  {
+    key: 'can_delete_own_chat_messages',
+    label: 'Delete their own chat messages',
+    // NOTHING IS REALLY DELETED, and the description says so rather than leaving it to be discovered: a message that
+    // vanishes leaves the conversation around it reading like nonsense, and a station that needs a message gone needs
+    // the gap to be visible.
+    description: 'Remove their own message from the conversation, where it stays as "Deleted by author" rather than disappearing. Requires "Chat".',
+    requires: 'can_use_chat',
+  },
+  {
+    key: 'can_edit_others_chat_messages',
+    label: 'Edit other members\' chat messages',
+    description: 'Change the text of anybody\'s message, marked as edited. For the officer who corrects a wrong address in a call-out thread. Requires "Chat".',
+    requires: 'can_use_chat',
+  },
+  {
+    key: 'can_delete_others_chat_messages',
+    label: 'Delete other members\' chat messages',
+    description: 'Remove anybody\'s message from the conversation, where it stays as "Deleted by [name]" rather than disappearing - so a message removed by an officer says who removed it. Requires "Chat".',
+    requires: 'can_use_chat',
+  },
 ];
 
 // Every permission, for the Roles editor, in display order.
 export const ALL_PERMISSIONS = [...ADMIN_PERMISSIONS, ...MEMBER_PERMISSIONS];
+
+// THE GROUPS, because the form had forty checkboxes in two columns with nothing between them: a role editor looking for
+// "who may approve a shift" had to read every label to find it, twice, and the two lists gave no clue that the timeclock
+// and the schedule are different jobs.
+//
+// THE PERMISSION ARRAYS ARE UNTOUCHED. This is a second, separate statement about how they are ARRANGED - so the keys,
+// the dependencies and the tab mapping are exactly as they were, and the only thing that changed is the order a form
+// draws them in. The order WITHIN a group is the order of the keys written here, which is why they read like a story:
+// their own schedule, then offering, then the whole crew.
+//
+// A permission that names no group is not lost: it lands under "Other" and scripts/verify-permissions.mjs fails, so the
+// fallback is a safety net for a future edit rather than a place for a permission to live.
+export const ADMIN_PERMISSION_GROUPS = [
+  { label: 'People', keys: ['can_edit_users', 'can_edit_roles', 'can_edit_ranks'] },
+  {
+    label: 'Scheduling',
+    keys: [
+      'can_edit_schedule_templates',
+      'can_edit_assignments',
+      'can_edit_schedule',
+      'can_create_events',
+      'can_approve_shifts',
+      'can_edit_member_availability',
+      'can_edit_availability_windows',
+    ],
+  },
+  {
+    label: 'Records',
+    keys: [
+      'can_edit_timeclock',
+      'can_administer_trainings',
+      'can_manage_certifications',
+      'can_manage_certification_setup',
+      'can_manage_documents',
+    ],
+  },
+  { label: 'Communication', keys: ['can_make_announcements', 'can_manage_chat_rooms'] },
+  { label: 'Reports & forms', keys: ['can_configure_reports', 'can_configure_forms'] },
+  {
+    label: 'Station setup',
+    keys: ['can_edit_system_settings', 'can_edit_notification_settings', 'can_access_debug'],
+  },
+];
+
+export const MEMBER_PERMISSION_GROUPS = [
+  {
+    label: 'Their own schedule and hours',
+    keys: ['can_view_my_schedule', 'can_make_offers', 'can_view_full_schedule', 'can_edit_own_availability', 'can_use_timeclock'],
+  },
+  {
+    label: 'The crew and its records',
+    keys: [
+      'can_view_roster',
+      'can_view_reports',
+      'can_sign_trainings',
+      'can_edit_trainings',
+      'can_view_documents',
+      'can_verify_documents',
+      'can_add_assessment_scores',
+      'can_generate_forms',
+    ],
+  },
+  {
+    // The five chat permissions sit together, and the four below the door are the pair-of-pairs the whole design turns on:
+    // see the note on chatPermissionsFrom in utils/chat.js.
+    label: 'Chat',
+    keys: [
+      'can_use_chat',
+      'can_edit_own_chat_messages',
+      'can_delete_own_chat_messages',
+      'can_edit_others_chat_messages',
+      'can_delete_others_chat_messages',
+    ],
+  },
+];
+
+// One list of permissions, arranged under its headings.
+//
+// Empty groups are dropped, so a group the station has not filled in yet does not leave a bare heading in the form, and
+// anything the groups did not mention is collected under "Other" rather than vanishing from the screen - a permission
+// nobody can grant is worse than one in the wrong place.
+export const permissionsByGroup = (permissions, groups) => {
+  const list = Array.isArray(permissions) ? permissions : [];
+  const drawn = new Set();
+  const sections = (Array.isArray(groups) ? groups : []).map((group) => {
+    const members = (group.keys || [])
+      .map((key) => list.find((permission) => permission.key === key))
+      .filter(Boolean);
+    members.forEach((permission) => drawn.add(permission.key));
+    return { label: group.label, permissions: members };
+  });
+  const ungrouped = list.filter((permission) => !drawn.has(permission.key));
+  return [
+    ...sections.filter((section) => section.permissions.length > 0),
+    ...(ungrouped.length ? [{ label: 'Other', permissions: ungrouped }] : []),
+  ];
+};
 
 export const PERMISSION_KEYS = ALL_PERMISSIONS.map((permission) => permission.key);
 

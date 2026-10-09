@@ -488,6 +488,15 @@ export const adminBulkSaveCertification = async ({ records = [], updates = [], d
 export const saveMemberPrivateFields = ({ userId = '', fields = {} } = {}) =>
   routeWrite('SAVE_MEMBER_PRIVATE', { userId: String(userId || ''), fields: fields || {} });
 
+// The member's own profile picture LINK, which is stored on their public roster row rather than their private one - so it
+// is a different document and a different permission from the details above.
+//
+// NO USER ID PARAMETER, deliberately, where every call around it has one: the routing entry takes the session's uid and
+// ignores anything passed to it, because nobody changes somebody else's face. The bytes of the picture do not come
+// through here at all - they go straight from the browser to the bucket (services/avatarStorage.js), and this stores the
+// link the bucket handed back.
+export const saveMemberAvatarUrl = ({ url = '' } = {}) => routeWrite('SAVE_MEMBER_AVATAR', { url: String(url || '') });
+
 export const saveUserSettings = async (updatedSettings, token) =>
   dispatchRequest({
     action: 'UPDATE_USER_SETTINGS',
@@ -1263,3 +1272,81 @@ export const fetchRunnerLeaderboard = async (token) =>
 // called after every game without risking a personal best.
 export const saveRunnerScore = async (score, token) =>
   dispatchRequest({ action: 'SAVE_RUNNER_SCORE', token, score });
+
+// -------------------------------------------------------------------------------------------------------------
+// Chat
+// -------------------------------------------------------------------------------------------------------------
+// The rooms a member may see, and - for the rooms tab - every room. Both are readers: a room list is small and changes
+// when an officer changes it, so it is read when the panel opens rather than watched.
+export const fetchChatRooms = async (token) => dispatchRequest({ action: 'GET_CHAT_ROOMS', token });
+
+export const fetchAdminChatRooms = async (token) => dispatchRequest({ action: 'ADMIN_GET_CHAT_ROOMS', token });
+
+// One page of OLDER messages, walking backwards from the oldest one in hand. A read rather than a listener: it answers
+// one press on "load older" and then stops, and the newest window is the listener's job (services/liveReads#subscribeChat).
+export const fetchChatMessages = async ({ conversationId, before }, token) =>
+  dispatchRequest({ action: 'GET_CHAT_MESSAGES', token, conversationId, before });
+
+export const saveChatRoom = async (room, token) =>
+  dispatchRequest({ action: 'SAVE_CHAT_ROOM', token, payload: room });
+
+export const deleteChatRoom = async (id, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_CHAT_ROOM', token, id });
+
+// Sending, editing and removing a message: three callables, because the audience proof a message carries has to be
+// stamped by the server (see functions/chat.js) and only the server can say who wrote it and when.
+//
+// `gif` IS A PICTURE TO RIDE ON THE MESSAGE, and it is optional: `{ url, fallback_url, width, height, alt }`, chosen by the
+// picker (utils/chatGifs.js#gifAssetFor). It is checked SERVER-SIDE against the KLIPY host list before it is stored
+// (functions/chat.js#chatGifProblem), because a picture on a message is fetched by every member who scrolls past it.
+export const sendChatMessage = async ({ conversationId, body, gif }, token) =>
+  dispatchRequest({ action: 'SEND_CHAT_MESSAGE', token, conversation_id: conversationId, body, gif });
+
+export const editChatMessage = async ({ conversationId, messageId, body }, token) =>
+  dispatchRequest({
+    action: 'EDIT_CHAT_MESSAGE',
+    token,
+    conversation_id: conversationId,
+    message_id: messageId,
+    body,
+  });
+
+export const deleteChatMessage = async ({ conversationId, messageId }, token) =>
+  dispatchRequest({ action: 'DELETE_CHAT_MESSAGE', token, conversation_id: conversationId, message_id: messageId });
+
+// STARTING A PRIVATE CONVERSATION, and asking who one may be started with. Both are callables for the same reason: the
+// first needs other members' ROLES (which a member cannot read), and the second is that same question asked about the whole
+// directory. The opener is IDEMPOTENT - the id is derived from the members (functions/chat.js#chatThreadIdFor), so asking
+// twice, or from the other end, finds the conversation that already exists rather than making a second one.
+export const openChatThread = async ({ memberIds }, token) =>
+  dispatchRequest({ action: 'OPEN_CHAT_THREAD', token, member_ids: memberIds || [] });
+
+export const fetchChatPeople = async (token) => dispatchRequest({ action: 'LIST_CHAT_PEOPLE', token });
+
+// ADDING OR REMOVING PEOPLE, and leaving - which is a removal of yourself rather than a fourth action. A callable because the
+// three membership fields have to be written together, and because the people being added have to have their ROLES read (see
+// functions/index.js#updateChatParticipants).
+export const updateChatParticipants = async ({ conversationId, add, remove }, token) =>
+  dispatchRequest({
+    action: 'UPDATE_CHAT_PARTICIPANTS',
+    token,
+    conversation_id: conversationId,
+    add: add || [],
+    remove: remove || [],
+  });
+
+// REACTING TO A MESSAGE: one emoji, toggled on the message's own row. A callable - the messages collection refuses every client
+// write, because the audience proof that makes a listener provable travels on the message itself.
+export const reactToChatMessage = async ({ conversationId, messageId, emoji }, token) =>
+  dispatchRequest({
+    action: 'REACT_TO_CHAT_MESSAGE',
+    token,
+    conversation_id: conversationId,
+    message_id: messageId,
+    emoji,
+  });
+
+// The member's own read mark and mute switch. `readCount` is how many messages the room has ever held, as the inbox
+// knows it - see utils/chat.js#unreadCountFor for why the unread number is a subtraction rather than a stored count.
+export const setChatRead = async ({ conversationId, readCount, muted, readAt }, token) =>
+  dispatchRequest({ action: 'SET_CHAT_READ', token, conversation_id: conversationId, read_count: readCount, muted, read_at: readAt });

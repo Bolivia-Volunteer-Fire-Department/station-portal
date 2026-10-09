@@ -289,6 +289,34 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // Chat. The FIRST feature whose data arrives on listeners rather than on reads, which is why the read list here is so
+  // short: a room list is a one-shot read, and everything else - the badge and the open conversation - is a subscription
+  // (services/liveReads.js#subscribeChat).
+  //
+  // THE MESSAGES ARE CALLABLES and the rooms are direct writes, which is the split the rules force: a message carries the
+  // audience proof that makes a listener provable, and a proof a browser writes is a proof a browser can forge.
+  chat: {
+    requires: ['memberPayload'],
+    // A NAME THAT DOES NOT BEGIN WITH `GET_`. How an action travels is decided by its NAME
+    // (utils/readCoalescing#isReadAction: `^(?:ADMIN_)?GET_|^PING$`), not by which list it is in - so a callable called
+    // `GET_CHAT_PEOPLE` is offered to the Firestore readers, finds no reader, and fails with "Firestore did not answer",
+    // which names a backend for a problem that is a noun. `LIST_CHAT_PEOPLE` therefore sits in `reads` BELOW, beside the
+    // queries it belongs with, and travels as the callable it is.
+    writes: [
+      'SEND_CHAT_MESSAGE',
+      'EDIT_CHAT_MESSAGE',
+      'DELETE_CHAT_MESSAGE',
+      'OPEN_CHAT_THREAD',
+      'UPDATE_CHAT_PARTICIPANTS',
+      'REACT_TO_CHAT_MESSAGE',
+      'SAVE_CHAT_ROOM',
+      'ADMIN_DELETE_CHAT_ROOM',
+      'SET_CHAT_READ',
+    ],
+    reads: ['GET_CHAT_ROOMS', 'GET_CHAT_MESSAGES', 'ADMIN_GET_CHAT_ROOMS', 'LIST_CHAT_PEOPLE'],
+    switchReads: [],
+  },
+
   // Deleting a member: the one action that cannot be anything but a callable, because it closes a Firebase Auth account
   // and no client can do that. It also removes the documents that made somebody a member, and deliberately KEEPS their
   // records - clock entries, signatures, availability - which are the station's history rather than their profile.
@@ -655,6 +683,83 @@ const DISPATCH = {
   ADMIN_DELETE_CERTIFICATION_FILE: async (body) =>
     ok(await callable('deleteCertificationFile', { fileId: String(body.fileId || '') })),
 
+  // Chat. The three message actions are callables for the reason the rules cannot do the work themselves: a rule cannot
+  // read the message it is deciding about to ask whether the caller wrote it, and it cannot stamp an unforgeable author
+  // or time. Which of the four message permissions applies is decided inside the callable, in one place
+  // (functions/chat.js#chatPermissionForAction).
+  SEND_CHAT_MESSAGE: async (body) =>
+    // `gif` rides along untouched when the message has a picture on it: the callable checks it against the KLIPY host list
+    // before storing it (functions/chat.js#chatGifProblem), and `undefined` for a message without one is exactly what the
+    // check expects.
+    ok(await callable('sendChatMessage', { conversationId: body.conversation_id, body: body.body, gif: body.gif })),
+  EDIT_CHAT_MESSAGE: async (body) =>
+    ok(
+      await callable('editChatMessage', {
+        conversationId: body.conversation_id,
+        messageId: body.message_id,
+        body: body.body,
+      })
+    ),
+  DELETE_CHAT_MESSAGE: async (body) =>
+    ok(await callable('deleteChatMessage', { conversationId: body.conversation_id, messageId: body.message_id })),
+  // Starting a private conversation, or finding the one that already exists between the same people. A callable because the
+  // members named have to have their own roles read (functions/chat.js#chatThreadProblem), which is not something a browser
+  // may do. The response carries the CONVERSATION ID the caller should now open.
+  OPEN_CHAT_THREAD: async (body) => ok(await callable('openChatThread', { memberIds: body.member_ids || [] })),
+  // Adding or removing people from a private conversation, and leaving one (which is a removal of yourself). The response
+  // says what actually changed, so the caller knows whether to refresh - and so a screen acting on a stale list does not play
+  // its entry and exit tones for a membership that had already moved.
+  UPDATE_CHAT_PARTICIPANTS: async (body) =>
+    ok(
+      await callable('updateChatParticipants', {
+        conversationId: body.conversation_id,
+        add: body.add || [],
+        remove: body.remove || [],
+      })
+    ),
+  // Reacting to a message: one emoji, toggled onto the row. A callable for the same reason the message is - see the note above -
+  // and the response carries the updated row so the member sees their own tap land immediately.
+  REACT_TO_CHAT_MESSAGE: async (body) =>
+    ok(
+      await callable('reactToChatMessage', {
+        conversationId: body.conversation_id,
+        messageId: body.message_id,
+        emoji: body.emoji,
+      })
+    ),
+  // Who this member may message, for the picker: a callable that only reads, and a name that must not begin with `GET_`
+  // because that prefix is how the dispatcher decides something is a Firestore read (see the note on the chat feature).
+  // Neither spelling is a matter of taste - it is the difference between this working and "Firestore did not answer".
+  LIST_CHAT_PEOPLE: async () => ok(await callable('getChatPeople', {})),
+
+  // The rooms, written straight to Firestore behind `can_manage_chat_rooms` - there is nothing here a browser cannot be
+  // trusted with once the permission is checked, and the rules validate the fields.
+  SAVE_CHAT_ROOM: async (body) => {
+    const { saveChatRoom } = await writes();
+    return ok(await saveChatRoom(body.payload || {}));
+  },
+  ADMIN_DELETE_CHAT_ROOM: async (body) => {
+    const { deleteChatRoom } = await writes();
+    return ok(await deleteChatRoom(body.id));
+  },
+
+  // The member's own read mark and mute switch, on their own inbox row. The session's own id rather than one from the
+  // body: this is the one chat write that is always about the caller, and the rules agree.
+  SET_CHAT_READ: async (body, uid) => {
+    const { setChatRead } = await writes();
+    return ok(
+      await setChatRead({
+        userId: uid,
+        conversationId: body.conversation_id,
+        readCount: body.read_count,
+        // How far in TIME, for a private conversation's receipts - absent for a station room, which has no receipts document
+        // (see services/firestoreWrites.js#setChatRead).
+        readAt: body.read_at,
+        muted: body.muted,
+      })
+    );
+  },
+
   // Deleting a member. The callable does all of it - the documents, the devices and the Auth account - and answers with
   // the { success, message } shape the members tab already branches on. `id` is the sheet's field name, kept here
   // because that is what api.js sends.
@@ -683,6 +788,17 @@ const DISPATCH = {
   SAVE_MEMBER_PRIVATE: async (body, uid) => {
     const { saveMemberPrivateFields } = await writes();
     return ok(await saveMemberPrivateFields({ userId: body?.userId || uid, fields: body?.fields || {} }));
+  },
+
+  // A member's own profile picture, which lives on their PUBLIC roster row rather than their private one - so it is a
+  // different document, a different permission, and its own call. The picture's BYTES never come through here (they go
+  // straight from the browser to the bucket, services/avatarStorage.js); this writes the link the bucket handed back.
+  //
+  // THE SESSION'S OWN ROW, ALWAYS, WITH NO WAY TO NAME ANOTHER. The private call above lets an officer pass somebody
+  // else's id because officers edit members; nobody needs to change somebody else's face, so this one cannot express it.
+  SAVE_MEMBER_AVATAR: async (body, uid) => {
+    const { saveMemberAvatarUrl } = await writes();
+    return ok(await saveMemberAvatarUrl({ userId: uid, url: body?.url || '' }));
   },
 
   // Signing and verifying. EVERY IDENTITY COMES FROM THE SESSION, and the request only ever names the SUBJECT: `uid`

@@ -20,6 +20,9 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+// The welcome's own rules: per device, and only behind a sign-in. Imported for its PURE decision - the storage beside it is
+// guarded and does nothing in Node, which is what lets this harness load the module at all.
+import { shouldPlayIntro } from '../src/utils/firstVisit.js';
 // The pure rules. Imported from soundRules rather than uiSounds because uiSounds imports the mp3 files, which
 // plain Node cannot load - and because the decisions are the part worth exercising without a browser.
 import {
@@ -28,6 +31,7 @@ import {
   SOUND_VOLUME_MIN,
   SOUND_VOLUME_MAX,
   SOUND_VOLUME_STEP,
+  UNWIRED_SOUNDS,
   clampSoundVolume,
   soundVolumeFor,
   soundVolumeRows,
@@ -608,7 +612,26 @@ const assetFiles = readdirSync(assetDir)
   .sort();
 const assetNames = assetFiles.map((name) => name.replace(/\.mp3$/i, ''));
 
-check('every sound in the contract has a file, and every file has a name', assetNames, [...REQUIRED_SOUNDS].sort());
+check(
+  'every sound in the contract has a file, and every file has a name (or a stated reason)',
+  assetNames,
+  [...REQUIRED_SOUNDS, ...Object.keys(UNWIRED_SOUNDS)].sort()
+);
+// THE EXCEPTION LIST IS CHECKED AS HARD AS THE CONTRACT, so it can be a decision rather than a dumping ground: an entry has to
+// be a real file, has to say WHY, and cannot name something already wired - a name in both places is a contradiction rather
+// than an allowance, and each of those three failures looks exactly like a passing suite otherwise.
+const unwiredNames = Object.keys(UNWIRED_SOUNDS);
+checkIs('no sound is both wired and excused', unwiredNames.every((name) => !REQUIRED_SOUNDS.includes(name)));
+checkIs(
+  'every excused file says why it is there',
+  unwiredNames.every((name) => String(UNWIRED_SOUNDS[name] || '').trim().length > 20),
+  unwiredNames.filter((name) => String(UNWIRED_SOUNDS[name] || '').trim().length <= 20).join(', ')
+);
+checkIs(
+  'and nothing is excused for a file that is not in the tree',
+  unwiredNames.every((name) => assetNames.includes(name)),
+  unwiredNames.filter((name) => !assetNames.includes(name)).join(', ')
+);
 assetFiles.forEach((name) => {
   const bytes = readFileSync(path.join(assetDir, name));
   const looksLikeAudio =
@@ -910,6 +933,35 @@ const mutated = (file, remove) => readSource(file).split(remove).join('/* remove
   checkIs(`${label}: the check fails without it`, assertion(after) === false);
   checkIs(`${label}: and passes with it`, assertion(before) === true);
 });
+
+// ------------------------------------------------------------------------------------------------
+console.log('\n--- the welcome, once per device ---');
+// THE ONE SOUND IN THE APP NOBODY ASKED FOR, so its rules are the ones worth writing down: a real sign-in, an app that has
+// finished loading, and a device that has not heard it before.
+check('a fresh sign-in on a device that has not heard it', shouldPlayIntro({ signedInNow: true, ready: true }), true);
+check('the same device, a second time', shouldPlayIntro({ signedInNow: true, ready: true, heard: true }), false);
+// A RESTORED SESSION PLAYS NOTHING, and not only because a greeting that repeats is a noise: a browser allows a page to make a
+// sound shortly after somebody touched it, and a restored session has no click behind it.
+check('a session restored from a token has no gesture behind it', shouldPlayIntro({ signedInNow: false, ready: true }), false);
+check('while the boot screen is still up', shouldPlayIntro({ signedInNow: true, ready: false }), false);
+check('and asking with nothing at all', shouldPlayIntro({}), false);
+const firstVisitSource = readFileSync('src/utils/firstVisit.js', 'utf8');
+// `appSource` is already declared above (the App wiring this file checks), and reused here rather than declared again: a second
+// top-level `const` of the same name is a SyntaxError, which takes the WHOLE FILE down instead of one check - and a file that
+// does not parse reports nothing at all, which is how this reached a browser-shaped screen as "it's red" rather than as a
+// failing check.
+checkIs(
+  'the device is recorded BEFORE it answers, so two renders cannot both be told yes',
+  /setItem\(INTRO_KEY, '1'\);[\s\S]{0,40}return true;/.test(firstVisitSource)
+);
+checkIs('and the module says why it is per device rather than per member', /PER DEVICE, NOT PER MEMBER/.test(firstVisitSource));
+checkIs('the sign-in path is what flags the intro', /introAfterSignInRef\.current = true;/.test(appSource));
+checkIs(
+  'and the boot screen clearing is what plays it',
+  /if \(initialLoading \|\| !introAfterSignInRef\.current\) return;/.test(appSource)
+);
+checkIs('through the shared engine, like every other sound', /playSound\('intro_short'\)/.test(appSource));
+checkIs('and it has a level row like the rest', Object.prototype.hasOwnProperty.call(SOUND_VOLUME, 'intro_short'));
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

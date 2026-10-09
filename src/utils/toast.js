@@ -61,6 +61,16 @@ export const toast = Object.assign(plain, {
 // notification is drawn separately, and on some desktops is suppressed entirely), and it gets the notification
 // sound rather than a toast one - the member is being told something happened, not that something they did
 // worked.
+// A toast that makes NO sound, for a caller that plays its own.
+//
+// Chat is the caller: a message arriving in a conversation the member is not looking at plays `chat_notify`, and a toast
+// sound underneath it would be two noises for one message - the member would hear the app saying "toast!" and then the
+// chat saying "message". So chat asks for a quiet one and plays its own tone.
+export const quietToast = Object.assign(plain, {
+  info: (title, options) => sonnerToast.info(title, options),
+  message: (title, options) => sonnerToast.message(title, options),
+});
+
 export const notificationToast = (title, options) => {
   playSound('notification');
   return sonnerToast.message(title, options);

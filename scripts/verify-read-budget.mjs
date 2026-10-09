@@ -232,7 +232,10 @@ check('which the payload projects off in exactly three places', [...source.match
 // AND THE REFRESH READERS IN THREE, UP FROM TWO, because the roster is a read of its own again: the screens that LIST people
 // ask for it when they open (GET_ROSTER), so the action has the caller it never had. The runner leaderboard went the other way,
 // to a bounded query.
-check('and the refresh readers in three', [...readsSource.matchAll(/readUsersOnce\(\)/g)].length, 3);
+// CHAT IS THE FOURTH, and it is the same reason: `chatKeysFor` needs the caller's own role and rank to build their
+// audience keys, and it goes through the shared in-flight read rather than reading the directory a third way. The count is
+// pinned so that a fifth one - a read that is genuinely a duplicate - is visible here rather than in the bill.
+check('and the refresh readers in four', [...readsSource.matchAll(/readUsersOnce\(\)/g)].length, 4);
 // THE RULE THAT MAKES SHARING SAFE, asserted because it is one character away from being wrong: the entry is dropped
 // whether the read SUCCEEDS or FAILS. Releasing only on success would keep a failed read in place, and every later
 // caller in that window would be handed the same failure.
@@ -706,8 +709,13 @@ checkIs('timeclock by member then newest-first, for the clock history', hasIndex
 checkIs('schedule_offers by member then status, for the member’s offers', hasIndex('schedule_offers', ['user_id', 'status'], [null, 'ASCENDING']));
 checkIs('announcements by audience then in-force, for the live bound', hasIndex('announcements', ['audience_keys', 'live_until'], [null, 'ASCENDING']));
 checkIs('checklist items by document then audience, for the detail read', hasIndex('document_checklist_items', ['document_id', 'audience_keys'], [null, null]));
-// AND NOTHING ELSE. Five, and no index names a field nothing filters - so a re-add is caught rather than quietly paid for.
-check('and no more than the five a query needs', INDEXES.length, 5);
+// CHAT'S TWO, and both are the FILTER-THEN-ORDER shape the five above do not have: the audience filter matches on many
+// values (`array-contains-any`), so Firestore cannot merge single-field indexes, and the second field is what the query
+// orders by rather than another filter.
+checkIs('rooms by audience then the station\'s own order', hasIndex('chat_conversations', ['audience_keys', 'sort_order'], [null, 'ASCENDING']));
+checkIs('and a conversation\'s window by audience then newest-first', hasIndex('messages', ['audience_keys', 'created_at'], [null, 'DESCENDING']));
+// AND NOTHING ELSE. Seven, and no index names a field nothing filters - so a re-add is caught rather than quietly paid for.
+check('and no more than the seven a query needs', INDEXES.length, 7);
 const indexedFields = INDEXES.flatMap((index) => index.fields.map((field) => field.fieldPath));
 // ---------------------------------------------------------------------------
 // AND EVERY OTHER QUERY IN THE CODEBASE IS SERVED BY ONE OF THE FIVE.
@@ -727,6 +735,23 @@ const indexedFields = INDEXES.flatMap((index) => index.fields.map((field) => fie
 // It reads the two ways queries are written here - the chained admin API on the server, the modular `query(...)` form in
 // src/services - and it COUNTS EVERY FILTER CALL IT DID NOT READ, so a query style it cannot parse fails the suite
 // instead of passing quietly. That count is the difference between a scanner and a guess.
+// The collection a `collection(...)` call names, taken from its LAST argument.
+//
+// THE LAST ONE, NOT THE FIRST, and chat is why: a subcollection is addressed as a path -
+// `collection(db, 'chat_conversations', room, 'messages')` - where the name Firestore would index is the final segment,
+// and the earlier ones are parents that carry no filters of their own. Before this the scanner read such a call as
+// nameless, which is the safe direction (it reported the query as unserved rather than silently passing it) but also a
+// false alarm the moment a module used a subcollection.
+//
+// A name that is a variable is returned as that variable: firestorePayload's audience helpers take a collection as a
+// parameter, and its filters still have to be read.
+const collectionNameIn = (callText) => {
+  const literal = /'([A-Za-z_]+)'\s*\)\s*$/.exec(callText);
+  if (literal) return literal[1];
+  const variable = /([A-Za-z_$][\w$]*)\s*\)\s*$/.exec(callText);
+  return variable ? variable[1] : '';
+};
+
 const stripComments = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\w/])\/\/[^\n]*/g, '$1');
 // A filter call, chained (`.where(...)`) or modular (`where(...)`), which is the whole difference between the two APIs.
@@ -787,18 +812,31 @@ for (const file of QUERY_FILES) {
   let match;
   while ((match = modular.exec(source))) {
     const args = balancedFrom(source, match.index + match[0].length - 1);
-    const name = /collection\(\s*(?:[^,']*,\s*)?(?:(?:'([A-Za-z_]+)')|([A-Za-z_$][\w$]*))\s*\)/.exec(args.text);
+    // THE COLLECTION CALL IS READ WITH THE SAME BALANCE RULE AS EVERYTHING ELSE, because its own arguments contain
+    // parentheses: `collection(firestore(), 'schedule_offers')` is what half this codebase writes, and a `[^()]*`
+    // shortcut reads that as no collection at all - which reports a codebase full of served queries as unserved.
+    const callAt = args.text.search(/collection(?:Group)?\(/);
+    const name =
+      callAt === -1
+        ? ''
+        : collectionNameIn(
+            args.text.slice(callAt, balancedFrom(args.text, callAt + args.text.slice(callAt).indexOf('(')).end + 1)
+          );
     const filters = filterCallsIn(args.text);
     filters.forEach((call) => claimed.add(match.index + match[0].length + call.at));
     modularSpans.push({ start: match.index, end: args.end, filters });
-    scanned.push({ file, collection: name ? name[1] || name[2] : '', at: match.index, name: '', filters });
+    scanned.push({ file, collection: name, at: match.index, name: '', filters });
   }
-  const collections = /collection\(\s*(?:[^,']*,\s*)?(?:(?:'([A-Za-z_]+)')|([A-Za-z_$][\w$]*))\s*\)/g;
+  // A `collectionGroup` QUERY IS A COLLECTION QUERY HERE: it is the same indexing question, and the name that matters is
+  // the group - which is how the chat fan-out's cleanup finds every member's inbox row for a deleted room.
+  const collections = /collection(?:Group)?\(/g;
   while ((match = collections.exec(source))) {
     // one already read above as part of a `query(...)`, so walking it again would only add a half-read copy of it
     if (modularSpans.some((span) => match.index > span.start && match.index < span.end)) continue;
+    // The call's OWN end, so a nested `firestore()` in its arguments is stepped over rather than ending it early.
+    const call = balancedFrom(source, match.index + match[0].length - 1);
     const filters = [];
-    let cursor = match.index + match[0].length;
+    let cursor = call.end + 1;
     for (;;) {
       // STEP OVER WHATEVER SEPARATES THE FILTERS - a `.`, a `,`, and any whitespace or comments between them, which is
       // wider than it looks: a chain broken by a three-line comment leaves thirty characters of whitespace to cross. `;`
@@ -821,7 +859,7 @@ for (const file of QUERY_FILES) {
     // continuation actually uses. A collection named by a variable (firestorePayload's audience helpers take the collection
     // as a parameter) is recorded as that variable, so its filters are still read and its shape still judged.
     const owner = assignments.filter((entry) => entry.at < match.index).pop();
-    scanned.push({ file, collection: match[1] || match[2], at: match.index, name: owner ? owner.name : '', filters });
+    scanned.push({ file, collection: collectionNameIn(source.slice(match.index, call.end + 1)), at: match.index, name: owner ? owner.name : '', filters });
   }
   // THE TWO CONTINUATION SHAPES THIS CODEBASE USES, and both are load-bearing: a scope filter is added to a read that a
   // member and an officer share, either as `ids ? base.where('user_id', 'in', ids) : base` or by reassigning -
@@ -898,7 +936,10 @@ check('and the scan found queries that need an index at all', needing.length >= 
 
 check(
   'and no index names a field no query ever filters',
-  ['is_open', 'audience_roles', 'date_to', 'signed_at', 'end_date', 'created_at'].filter((field) => indexedFields.includes(field)),
+  // `created_at` was on this list until chat arrived: nothing ordered by it, so an index naming it was an index nobody was
+  // paying for. A conversation's window orders by it (newest first), which is exactly the change this list is for - a
+  // field stops being wasted the moment a query asks for it, and the list is where that is recorded.
+  ['is_open', 'audience_roles', 'date_to', 'signed_at', 'end_date'].filter((field) => indexedFields.includes(field)),
   []
 );
 

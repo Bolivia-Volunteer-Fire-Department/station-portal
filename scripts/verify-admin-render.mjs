@@ -1153,8 +1153,10 @@ check(
   String(runnerHtml).includes('CHECKING THE BOARD')
 );
 // THE BUTTON IS THE WAY IN. The URL is a game, so the one control that is not the game is in the HUD with the sound
-// switches, and this is what proves it is on screen without a click.
-check('and the button that opens it', String(runnerHtml).includes('🏆 BOARD'));
+// switches, and this is what proves it is on screen without a click. The label is asserted as it ships - it read
+// "🏆 BOARD" until the board grew a heading of its own, and a harness that pinned the old wording would have been
+// reporting the rename rather than a missing button.
+check('and the button that opens it', String(runnerHtml).includes('🏆 LEADERBOARD'));
 // THE DIALOG IS IN THE MARKUP EVEN WHILE IT IS SHUT - hidden with `visibility` rather than unmounted, which is exactly
 // what keeps the two checks above possible (a panel mounted on a click is a panel no server render can see) - and the
 // closed state is the one that must not be covered: an open class here would draw the backdrop over the game at launch.

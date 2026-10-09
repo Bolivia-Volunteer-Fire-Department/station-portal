@@ -23,7 +23,36 @@ export const REQUIRED_SOUNDS = [
   'toast_success',
   'toast_error',
   'toast_normal',
+  // CHAT'S SIX, and they are app sounds rather than a module's own: a message arriving is the same kind of event as a
+  // toast or a push, so they belong in the one engine - fetched once each, listed on the Debug page's mix sliders, and
+  // silenced by the member's own sound setting like everything else here. WHICH one a moment makes is a pure decision in
+  // utils/chatSounds.js; this list is only the contract that the files exist and the engine knows them.
+  //
+  // (The Firefighter Runner is the exception and keeps its own, because it is a game with its own volume, its own mute
+  // button and its own music - see the note at the top of utils/uiSounds.js.)
+  'chat_open',
+  'chat_close',
+  'chat_enter',
+  'chat_exit',
+  'chat_notify',
+  'chat_send',
+  // THE STATION'S WELCOME, played once per device as the boot screen clears after a sign-in. See utils/firstVisit.js for why
+  // it is per device and why it waits for a sign-in rather than a restored session.
+  'intro_short',
 ];
+
+// FILES THAT ARE IN THE TREE ON PURPOSE, WITHOUT A NAME IN THE CONTRACT ABOVE.
+//
+// The check in scripts/verify-sounds.mjs exists for one failure: a sound added to src/assets that nobody ever wired to a
+// name, which would sit there for ever, silent, and be mentioned nowhere. This list is how a deliberate one is told apart
+// from an accidental one - every entry has to say WHY, and the verifier refuses an entry that is empty, that names something
+// already in the contract, or whose file is not actually there. A name in both places is a contradiction rather than an
+// allowance, and that is checked rather than trusted.
+export const UNWIRED_SOUNDS = {
+  // Wanted, not built yet: the sound for a Firefighter Runner achievement. The idea is not settled - which achievements get
+  // one, and whether it competes with the leaderboard's own noises - so the file waits in the tree until it is.
+  achievement: 'a Firefighter Runner achievement tone, waiting on a decided design',
+};
 
 // Mix levels. A click fires on every single tap, so it sits well below the one-shot sounds - at the same level it
 // reads as noisy rather than responsive. Change them here, not at the call sites.
@@ -35,6 +64,24 @@ export const SOUND_VOLUME = {
   click_double: 0.25,
   sound_on: 0.4,
   sound_off: 0.4,
+  // CHAT, mixed by what each one is for rather than by how it sounds.
+  //
+  // `chat_notify` is the loudest of the six and the loudest thing in this table: it means "somebody is talking to you and
+  // you are not looking at it", which is the one chat sound that has to be heard over whatever else is going on.
+  // `chat_send` is the opposite case - it fires on every message in a conversation you ARE watching, so it sits down
+  // near the click, where a busy room reads as a busy room rather than as an alarm.
+  //
+  // `chat_open` and `chat_close` are navigation: quieter than a notification and quieter than the entry and exit tones,
+  // which are about people rather than about the screen you are on.
+  chat_notify: 0.6,
+  chat_send: 0.3,
+  chat_open: 0.35,
+  chat_close: 0.35,
+  chat_enter: 0.25,
+  chat_exit: 0.15,
+  // The welcome: louder than a click, quieter than a notification. It is the one sound in the app nobody asked for, so it
+  // should be heard without arriving as an alarm.
+  intro_short: 0.45,
   default: 0.4,
 };
 

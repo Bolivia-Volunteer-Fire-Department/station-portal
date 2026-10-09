@@ -9,13 +9,15 @@
 // because the app hands both to the same setters - a different key here would be a screen that empties on refresh,
 // which is the failure this whole module exists to avoid. scripts/verify-firestore-reads.mjs signs in and asks
 // through these, so the shapes are checked rather than hoped for.
-import { collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, endBefore, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFor, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, scheduleSetupFor, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
 // A window's date key, and the id-merge that makes two bounded queries answer as one list. Both are the app's own helpers
 // rather than service-local copies: the admin list merges the same way a screen does when it loads an older window.
 import { nextDateKey, toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
+// How many messages a chat window - and each page of 'load older' - holds: the same number the live listener windows to.
+import { CHAT_PAGE_SIZE, isChatThread } from '../utils/chat.js';
 // The certification decoration, shared with the payload so a sign-in and a refresh agree.
 import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
 import { mergeRowsById } from '../utils/savedRow.js';
@@ -411,8 +413,82 @@ export const certificationFilesForRecord = async (recordId) => {
   return { files: await rowsFor('certification_files', 'certification_id', wanted) };
 };
 
+// THE CHAT ROOMS A MEMBER MAY SEE, and every room, for the officer who manages them.
+//
+// The member's keys are derived from their own roster row HERE rather than accepted from the caller: the rules check a
+// room's audience against the same keys, so a client allowed to name its own could not ask for a room it is not in - but
+// there is no reason to hand it the chance, and the reader is the only place with the roster row in hand anyway.
+const chatKeysFor = async (uid) => {
+  const users = await readUsersOnce();
+  const me = users.find((row) => String(row.id) === String(uid)) || {};
+  return audienceKeysFor({
+    userId: uid,
+    roleId: String(me.role_id || ''),
+    rankId: String(me.rank_id || ''),
+  });
+};
+
+const chatRoomsFor = async (uid) => {
+  const keys = await chatKeysFor(uid);
+  if (!keys.length) return [];
+  // NO orderBy HERE, AND THAT IS NOT AN OVERSIGHT. A query with an orderBy SILENTLY DROPS every document that does not have
+  // that field - so ordering by `sort_order` (a room's, set by an officer) would hide every private conversation from the
+  // room list completely and without a single error, because a thread has no place in an officer's ordering.
+  //
+  // The order is the caller's job instead (utils/chat.js#sortChatRooms), which is the only place that can order both kinds
+  // together sensibly: rooms by the order an officer gave them, private conversations by when somebody last spoke.
+  const rows = await getDocs(
+    query(collection(firestore(), 'chat_conversations'), where('audience_keys', 'array-contains-any', keys))
+  );
+  return rows.docs.map((row) => ({ ...row.data(), id: row.id }));
+};
+
+// Every ROOM, for the rooms tab. Deliberately UNFILTERED and unfilterable: the tab exists to show an officer the rooms
+// they cannot see, which is the whole point of managing them, and the read is bounded by how many rooms the station has
+// rather than by how many messages they hold.
+//
+// PRIVATE CONVERSATIONS ARE NOT ROOMS and are left out: this tab edits and deletes what it lists, and a member's own
+// conversation with a colleague is not an administrator's row to edit. One filter here is cheaper - and safer - than a tab
+// that has to remember, everywhere it draws or saves a row, which kind it is looking at.
+const allChatRooms = async () => {
+  const rows = await getDocs(collection(firestore(), 'chat_conversations'));
+  return rows.docs.map((row) => ({ ...row.data(), id: row.id })).filter((room) => !isChatThread(room));
+};
+
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
+  // THE CHAT ROOMS THIS MEMBER MAY SEE, which is the ONE read the chat panel makes for itself: the messages and the
+  // unread counts arrive on listeners (see liveReads#subscribeChat), so a room list is the only thing a chat screen has
+  // to ask a one-shot read for - and it is asked when the rooms change rather than on every open.
+  //
+  // The query is the announcements query: the room's own audience keys, checked with array-contains-any against the
+  // caller's - the same key list the rules check with hasAny, so if this read works the listener works and vice versa.
+  // The keys are derived HERE from the caller's own roster row rather than posted by the client, because a client that
+  // could name its own keys could ask for rooms it is not in.
+  GET_CHAT_ROOMS: async (uid) => ({ chatRooms: await chatRoomsFor(uid) }),
+  // THE OLDER MESSAGES OF ONE CONVERSATION, for "load older". The window the panel draws is a listener (the newest
+  // CHAT_PAGE_SIZE); this walks backwards from the oldest row in hand, a page at a time, and is a READ rather than a
+  // second listener because it answers one press and then stops.
+  //
+  // A cursor that is not a timestamp is refused rather than ignored: `endBefore(undefined)` would silently re-read the
+  // newest page, and a "load older" that loads the same messages twice is worse than one that does nothing.
+  GET_CHAT_MESSAGES: async (_uid, body) => {
+    const conversationId = String((body && body.conversationId) || '').trim();
+    const before = body && body.before;
+    if (!conversationId || !before) return { messages: [] };
+    const rows = await getDocs(
+      query(
+        collection(firestore(), 'chat_conversations', conversationId, 'messages'),
+        orderBy('created_at', 'desc'),
+        endBefore(before),
+        limit(CHAT_PAGE_SIZE)
+      )
+    );
+    return { messages: rows.docs.map((row) => ({ ...row.data(), id: row.id })) };
+  },
+  // The administrator's view: every room, including the ones they are not in, because the rooms tab draws the whole
+  // list. The rules allow it on `can_manage_chat_rooms` alone - see the note on the conversations read in firestore.rules.
+  ADMIN_GET_CHAT_ROOMS: async () => ({ chatRooms: await allChatRooms() }),
   GET_MY_CERTIFICATION_FILES: (uid) => certificationFilesForMember(uid),
   ADMIN_GET_CERTIFICATION_FILES: (_uid, body) => certificationFilesForRecord(body && body.recordId),
   // The member's own clock history, optionally WINDOWED — and windowed is how the APP asks for it, because this is the one

@@ -39,7 +39,31 @@
         { "fieldPath": "document_id", "order": "ASCENDING" },
         { "fieldPath": "audience_keys", "arrayConfig": "CONTAINS" }
       ]
+    },
+    {
+      "collectionGroup": "chat_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "audience_keys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "sort_order", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "audience_keys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "rooms",
+      "fieldPath": "conversation_id",
+      "indexes": [
+        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+      ]
+    }
+  ]
 }

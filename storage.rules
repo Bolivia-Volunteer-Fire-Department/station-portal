@@ -156,6 +156,42 @@ service firebase.storage {
       allow delete: if permission('can_manage_certifications');
     }
 
+    // PROFILE PICTURES: avatars/{member uid}, one small image per member, replacing whatever was there before.
+    //
+    // READ BY EVERY SIGNED-IN MEMBER, and this is the one place in this bucket that is deliberately unlike the
+    // certifications above. It is a decision about people rather than about files: a station's chat draws a face
+    // beside every name, so the picture is already on every message everybody can read (the send callable stamps the
+    // URL onto the row). A rule that hid the FILE while a stamped URL on a readable message pointed at it would
+    // protect nothing and break the picture. What stays private is everything else about the member - this path holds
+    // one object, and the only thing that names it is a uid.
+    //
+    // WRITTEN BY ONE PERSON AND ONLY THEM. The uid is in the path, so a member's own upload is a string comparison
+    // rather than another document read. THERE IS NO OFFICER BRANCH HERE, unlike a certification scan: an officer may
+    // correct a record, but nobody needs to change somebody else's face.
+    match /avatars/{memberUid} {
+
+      // ABOUT A QUARTER OF A MEGABYTE, which is a GUARD RATHER THAN A TARGET. The browser downscales a photo to a few
+      // hundred pixels before it sends it (services/avatarStorage.js), so a real upload is 20-60 KB; the cap is here so
+      // that a bug, an old client, or somebody poking at the API directly cannot put a 3 MB phone photo behind a 20px
+      // circle. At this size a hundred members cost less than one certification scan.
+      //
+      // THREE TYPES, and `svg` is absent for the reason it is absent below: an SVG is a picture that can carry script,
+      // and these files are served from a domain the app trusts. WebP is allowed here and not on a scan because a
+      // phone's screenshot-to-profile-picture flow produces one.
+      function acceptableAvatar() {
+        return request.resource.size <= 512 * 1024
+          && request.resource.contentType.matches('image/jpeg|image/png|image/webp');
+      }
+
+      allow read: if signedIn();
+
+      // Create and update carry the checks; delete cannot, because on a DELETE `request.resource` is null and reading
+      // `.size` off it is an evaluation error rather than a false. A combined `allow write` would make removing your
+      // own picture impossible while appearing to allow it.
+      allow create, update: if signedIn() && uid() == memberUid && acceptableAvatar();
+      allow delete: if signedIn() && uid() == memberUid;
+    }
+
     // Everything else in this bucket is closed, which is the rule the console writes when a bucket is created in
     // Production mode. It is kept rather than loosened by the addition above: nothing else in the app needs a
     // file, and a bucket that only ever holds one kind of thing is a bucket whose rules can be read at a glance.

@@ -41,7 +41,10 @@ Modules are switched on by your **role**, not by you. If something you expect is
 This app was created by Matt Wills for the Bolivia Fire Department.
 
 ### Version 1.5x
-* Added Firebase Storage for Certification uploads
+* Added Firebase Storage for Certification uploads.
+* Fixed an issue with the Roster not showing everyone.
+* Added enhancements to the Firefighter Runner to make mobile play easier.
+* Added the Chat module.
 
 ### Version 1.4x
 * Every password field now has an **eye** on it, so you can check what you are typing on the login screen and anywhere else a password is entered.

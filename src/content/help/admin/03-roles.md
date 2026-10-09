@@ -19,6 +19,8 @@ Uncheck it and the boxes become editable again, so you can build up a role from 
 
 ## The permissions
 
+THE PERMISSIONS ARE GROUPED, and the headings are there because there are forty of them: **People**, **Scheduling**, **Records**, **Communication**, **Reports & forms** and **Station setup** on the administration side, and three on the member side — their own schedule and hours, the crew and its records, and **Chat**. The headings change nothing about what a permission does; they are how you find one.
+
 Each permission grants its own tab, or its own member-facing ability. None of them grant Administration as a whole.
 
 **People**

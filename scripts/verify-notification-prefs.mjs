@@ -27,44 +27,72 @@ const keys = (list) => list.map((type) => type.key);
 const OWN_OFFER_KEYS = ['notify_offer_approved', 'notify_offer_declined'];
 // Offered to everyone: an announcement can be aimed at any member, so no role gate applies.
 const EVERYONE_KEYS = ['notify_announcements'];
-const ALL_KEYS = ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS];
+// CHAT'S TWO, which are gated on a different permission: only a member whose role grants Chat is offered them, because only
+// such a member is ever sent a chat push (see utils/notificationPrefs.js). Being hidden is therefore not a courtesy - it is
+// the switch matching what the sender can actually do.
+const CHAT_KEYS = ['notify_chat_direct', 'notify_chat_rooms'];
+const ALL_KEYS = ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS, ...CHAT_KEYS];
 
 console.log('--- the catalog itself ---');
-check('four switches exist', NOTIFICATION_TYPES.length, 4);
+check('six switches exist', NOTIFICATION_TYPES.length, 6);
 check('exactly one is approver-only', NOTIFICATION_TYPES.filter((t) => t.approverOnly).map((t) => t.key), [
   'notify_new_offer'
 ]);
+check('exactly two are chat-only', NOTIFICATION_TYPES.filter((t) => t.chatOnly).map((t) => t.key).sort(), [...CHAT_KEYS].sort());
 check('every switch has a label and description', NOTIFICATION_TYPES.every((t) => t.label && t.description), true);
 check('the approver-only one is "New shift requests"', NOTIFICATION_TYPES.find((t) => t.approverOnly)?.label, 'New shift requests');
 // The station defaults card renders the station-facing wording, so every switch needs one.
 check('every switch has a station-facing label too', NOTIFICATION_TYPES.every((t) => t.stationLabel && t.stationDescription), true);
 check('the announcement switch says the app copy is unaffected', /still (appear|show)/i.test(NOTIFICATION_TYPES.find((t) => t.key === 'notify_announcements').stationDescription), true);
+// THE SAME PROMISE FOR CHAT: muting a push must not read as missing a message. Both chat switches say so on both sides -
+// the member's wording and the station's - because a member deciding whether to trust the switch reads the first, and an
+// officer setting the default reads the second.
+check(
+  'both chat switches say the message still arrives',
+  CHAT_KEYS.every((key) => {
+    const type = NOTIFICATION_TYPES.find((t) => t.key === key);
+    return /still/i.test(type.description) && /still/i.test(type.stationDescription);
+  }),
+  true
+);
 
 console.log('\n--- a role that CAN approve shifts sees everything ---');
-check('boolean true', keys(visibleNotificationTypes(true)), ALL_KEYS);
-check('the sheet string "TRUE"', keys(visibleNotificationTypes('TRUE')), ALL_KEYS);
-check('a padded/lowercase " true "', keys(visibleNotificationTypes(' true ')), ALL_KEYS);
+check('boolean true', keys(visibleNotificationTypes(true, true)), ALL_KEYS);
+check('the sheet string "TRUE"', keys(visibleNotificationTypes('TRUE', 'TRUE')), ALL_KEYS);
+check('a padded/lowercase " true "', keys(visibleNotificationTypes(' true ', ' true ')), ALL_KEYS);
+// The second argument defaults to TRUE on purpose - a caller not yet taught about it shows an extra switch rather than
+// hiding one - so a one-argument call keeps chaffing the way it always did.
+check('a one-argument call still shows the chat switches', keys(visibleNotificationTypes(true)), ALL_KEYS);
 
 console.log('\n--- everyone else does NOT see the approver-only switch ---');
-const WITHOUT_APPROVER = [...OWN_OFFER_KEYS, ...EVERYONE_KEYS];
-check('boolean false', keys(visibleNotificationTypes(false)), WITHOUT_APPROVER);
-check('undefined (role not loaded yet)', keys(visibleNotificationTypes(undefined)), WITHOUT_APPROVER);
-check('null', keys(visibleNotificationTypes(null)), WITHOUT_APPROVER);
-check('the sheet string "FALSE"', keys(visibleNotificationTypes('FALSE')), WITHOUT_APPROVER);
-check('an empty cell', keys(visibleNotificationTypes('')), WITHOUT_APPROVER);
-check('a numeric 0', keys(visibleNotificationTypes(0)), WITHOUT_APPROVER);
+const WITHOUT_APPROVER = [...OWN_OFFER_KEYS, ...EVERYONE_KEYS, ...CHAT_KEYS];
+check('boolean false', keys(visibleNotificationTypes(false, true)), WITHOUT_APPROVER);
+check('undefined (role not loaded yet)', keys(visibleNotificationTypes(undefined, true)), WITHOUT_APPROVER);
+check('null', keys(visibleNotificationTypes(null, true)), WITHOUT_APPROVER);
+check('the sheet string "FALSE"', keys(visibleNotificationTypes('FALSE', true)), WITHOUT_APPROVER);
+check('an empty cell', keys(visibleNotificationTypes('', true)), WITHOUT_APPROVER);
+check('a numeric 0', keys(visibleNotificationTypes(0, true)), WITHOUT_APPROVER);
 // The announcement switch is for everyone, including a member who cannot approve anything.
-check('a member who cannot approve still gets the announcement switch', keys(visibleNotificationTypes(false)).includes('notify_announcements'), true);
+check('a member who cannot approve still gets the announcement switch', keys(visibleNotificationTypes(false, true)).includes('notify_announcements'), true);
+
+console.log('\n--- a member who cannot use chat is not offered chat switches ---');
+const WITHOUT_CHAT = ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS];
+check('an approver without chat keeps their approver switch', keys(visibleNotificationTypes(true, false)), WITHOUT_CHAT);
+check('everyone else without chat', keys(visibleNotificationTypes(false, false)), [...OWN_OFFER_KEYS, ...EVERYONE_KEYS]);
+check('the sheet string "FALSE" reads as false here too', keys(visibleNotificationTypes(false, 'FALSE')), [...OWN_OFFER_KEYS, ...EVERYONE_KEYS]);
+// AND THE PERMISSIVE DEFAULT IS ASSERTED WHERE IT MATTERS: a caller that passes nothing gets the chat switches, which is the
+// direction that shows a member one switch too many rather than hiding one they were meant to have.
+check('calling with one argument cannot silently hide chat', keys(visibleNotificationTypes(false)).includes('notify_chat_direct'), true);
 
 console.log('\n--- the member\'s own offer switches are never hidden ---');
 [true, false, 'TRUE', 'FALSE', undefined, null, '', 0].forEach((value) => {
-  const shown = keys(visibleNotificationTypes(value));
+  const shown = keys(visibleNotificationTypes(value, value));
   check(`both own-offer switches shown for ${JSON.stringify(value)}`, OWN_OFFER_KEYS.every((k) => shown.includes(k)), true);
 });
 
 console.log('\n--- the filter does not mutate the catalog ---');
-visibleNotificationTypes(false);
-check('catalog still has four entries', NOTIFICATION_TYPES.length, 4);
+visibleNotificationTypes(false, false);
+check('catalog still has six entries', NOTIFICATION_TYPES.length, 6);
 
 // Every switch must be savable. This is the drift guard for a bug that shipped: the Announcements
 // switch was added to the catalog but not to the sender, so flipping it produced an empty

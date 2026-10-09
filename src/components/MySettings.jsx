@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck } from 'lucide-react';
+import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck, Camera, Trash2 } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
 import PasswordInput from './PasswordInput';
 import { soundsActiveFrom } from '../utils/uiSounds';
@@ -15,7 +15,9 @@ import {
   currentDeviceToken,
   deviceLabelFromUserAgent,
 } from '../utils/pushNotifications';
-import { saveMemberPrivateFields } from '../services/api';
+import { saveMemberPrivateFields, saveMemberAvatarUrl } from '../services/api';
+import { uploadAvatar, removeAvatar, storageConfigured } from '../services/avatarStorage';
+import { AVATAR_ACCEPT } from '../utils/avatars';
 import { MEMBER_PRIVATE_FIELDS } from '../utils/memberFields';
 
 function isTruthySetting(value) {
@@ -35,6 +37,8 @@ export default function UserSettings({
   // The signed-in member's own role row, for the read-only access summary below.
   currentRole,
   canApproveShifts = false,
+  // Whether this member's role grants Chat. The chat notification switches are hidden without it - see utils/notificationPrefs.js.
+  canUseChat = false,
   onSaveSettings,
   onFontScalePreview,
   onPasswordChange,
@@ -136,6 +140,8 @@ export default function UserSettings({
 
       {/* THEIR OWN DETAILS COME FIRST. This is the card people open this screen for, and it is the only one here that is
           about the member rather than about the app's behaviour. */}
+      <ProfilePictureCard currentUser={currentUser} />
+
       <PersonalInformationCard currentUser={currentUser} />
 
       {/* Settings Form */}
@@ -333,6 +339,7 @@ export default function UserSettings({
         userSettings={userSettings}
         systemSettings={systemSettings}
         canApproveShifts={canApproveShifts}
+        canUseChat={canUseChat}
         onSaveSettings={onSaveSettings}
         pushDeviceApi={pushDeviceApi}
       />
@@ -463,6 +470,7 @@ function NotificationsCard({
   userSettings = [],
   systemSettings = {},
   canApproveShifts = false,
+  canUseChat = false,
   onSaveSettings,
   pushDeviceApi,
 }) {
@@ -881,7 +889,7 @@ function NotificationsCard({
 
         {/* Per-type preferences */}
         <div>
-          {visibleNotificationTypes(canApproveShifts).map((type) => (
+          {visibleNotificationTypes(canApproveShifts, canUseChat).map((type) => (
             <div key={type.key}>
               <ToggleSwitch
                 label={type.label}
@@ -1058,6 +1066,159 @@ function AccessCard({ currentRole }) {
 //
 // It is not shown to other members either: the private half is readable by the member and by officers with the user
 // permission, and by nobody else.
+// A MEMBER'S OWN PROFILE PICTURE - the only place in the app that sets one. Everywhere else READS the link: the send
+// callable stamps `author_avatar_url` onto each message, so a conversation draws faces with no directory lookup at all,
+// and the roster carries it for the screens that show a member outside chat.
+//
+// THE FILE NEVER TOUCHES FIRESTORE. The browser downscales it and hands the bytes to the bucket
+// (services/avatarStorage.js), then this card stores the LINK that comes back on the member's roster row - two steps, and
+// the order matters, because a failure between them leaves a picture nothing points at, rather than a link pointing at
+// nothing.
+function ProfilePictureCard({ currentUser }) {
+  // THE PICTURE IS HELD HERE AS WELL AS IN THE ROW. The roster listener will carry the new link within a second or two,
+  // but a station's connection is not something to make somebody sit and watch: uploading and then seeing no change reads
+  // as a failure whether or not it was one.
+  const [url, setUrl] = useState(String(currentUser?.avatar_url || ''));
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [statusMessage, setStatusMessage] = useState(null);
+
+  const choose = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    setProgress(0);
+    setStatusMessage(null);
+    try {
+      const uploaded = await uploadAvatar({ userId: currentUser?.id, file, onProgress: setProgress });
+      const result = await saveMemberAvatarUrl({ url: uploaded.url });
+      if (!result?.success) throw new Error(result?.message || 'Could not save your picture.');
+      setUrl(uploaded.url);
+      setStatusMessage({ type: 'success', text: 'Picture saved.' });
+    } catch (failure) {
+      setStatusMessage({ type: 'error', text: failure.message || 'Could not upload that picture.' });
+    } finally {
+      setBusy(false);
+      setProgress(0);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setStatusMessage(null);
+    try {
+      // THE FILE FIRST, THEN THE ROW - the reverse of setting one, and for the same reason: the other order would leave
+      // the roster pointing at a picture that no longer exists, which is a broken image beside this member's name in
+      // every conversation in the station.
+      await removeAvatar(currentUser?.id);
+      const result = await saveMemberAvatarUrl({ url: '' });
+      if (!result?.success) throw new Error(result?.message || 'Could not remove your picture.');
+      setUrl('');
+      setStatusMessage({ type: 'success', text: 'Picture removed.' });
+    } catch (failure) {
+      setStatusMessage({ type: 'error', text: failure.message || 'Could not remove that picture.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Profile Picture</h2>
+      </div>
+      <div className="space-y-4 p-6">
+        {statusMessage && (
+          <div
+            className={`p-4 rounded-xl flex items-center gap-3 text-sm font-medium border ${statusMessage.type === 'success'
+                ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-400 dark:border-emerald-800/80'
+                : 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80'
+              }`}
+          >
+            {statusMessage.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 shrink-0 text-emerald-500 dark:text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-5 h-5 shrink-0 text-red-500 dark:text-red-400" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+        )}
+
+        {!storageConfigured() ? (
+          // A NOTE RATHER THAN A BUTTON THAT WOULD FAIL: an upload needs a bucket, so a station running without one is
+          // told so instead of being offered something that breaks at the first byte.
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Picture uploads are not set up for this station yet. Ask an administrator.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center gap-4">
+              {url ? (
+                // The SAME `alt=""` the chat uses, for the same reason: the words beside it already say whose picture
+                // this is. `onError` drops it rather than leaving a broken-image glyph on a settings page.
+                <img
+                  src={url}
+                  alt=""
+                  aria-hidden="true"
+                  onError={() => setUrl('')}
+                  className="h-16 w-16 shrink-0 rounded-full border border-slate-200 object-cover dark:border-slate-700"
+                />
+              ) : (
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-400 dark:border-slate-600">
+                  <Camera className="h-6 w-6" />
+                </div>
+              )}
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  Shown beside your name in chat. A square picture works best.
+                </p>
+                {/* WHAT THE PICKER OPENS ON IS PART OF THE LIMIT, not a courtesy: `accept` is a hint the browser honours,
+                    so offering "all files" invites a photo this app will refuse after the wait. */}
+                <p className="text-xs text-slate-500 dark:text-slate-400">JPEG, PNG or WebP, up to 512 KB.</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                className={`inline-flex cursor-pointer items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 ${busy ? 'pointer-events-none opacity-60' : ''
+                  }`}
+              >
+                <Camera className="h-4 w-4" />
+                {busy && progress > 0 ? `Uploading ${Math.round(progress * 100)}%` : url ? 'Change picture' : 'Upload picture'}
+                <input
+                  type="file"
+                  className="hidden"
+                  accept={AVATAR_ACCEPT}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    // The input is CLEARED after choosing, so picking the same file twice still fires a change - which
+                    // is exactly what somebody does after a failed upload they have since fixed.
+                    event.target.value = '';
+                    choose(file);
+                  }}
+                />
+              </label>
+
+              {url && (
+                <button
+                  type="button"
+                  onClick={remove}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function PersonalInformationCard({ currentUser }) {
   const initialValues = () =>
     Object.fromEntries(MEMBER_PRIVATE_FIELDS.map((key) => [key, currentUser?.[key] || '']));

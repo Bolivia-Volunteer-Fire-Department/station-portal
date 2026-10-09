@@ -14,6 +14,9 @@ export const PAGE_BAR_LABELS = {
   availability: 'Availability',
   training: 'Training',
   documents: 'Documents',
+  // Chat is a module AND a floating panel: the tab is the same component full-width, so a member who would rather have
+  // it in the page than over it can have it there.
+  chat: 'Chat',
   certifications: 'Certifications',
   // The tab id is still `reports`: ids are code identifiers, and this one is used by the router, the sidebar, the
   // prefetch and every harness that pins them. Only the words a member reads changed, when Forms moved in beside
@@ -51,6 +54,7 @@ export const ADMIN_BAR_LABELS = {
   'reports-config': 'Reports',
   'forms-config': 'Forms',
   notifications: 'Notifications',
+  chat: 'Chat Rooms',
   debug: 'Debug',
   help: 'Help',
 };

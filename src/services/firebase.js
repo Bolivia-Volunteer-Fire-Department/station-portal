@@ -22,6 +22,9 @@ import {
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
+// Realtime Database - presence and typing, and nothing else (see services/realtime.js). Imported and initialised exactly like
+// the others, so an unconfigured build behaves rather than throws.
+import { connectDatabaseEmulator, getDatabase } from 'firebase/database';
 import { connectStorageEmulator, getStorage } from 'firebase/storage';
 
 // `import.meta.env` is Vite's, so it is absent when a Node harness imports this module to check the wiring (see
@@ -41,16 +44,26 @@ const usingEmulator = env.VITE_FIREBASE_EMULATOR === '1' || Boolean(emulatorHost
 // config object is built at module load and a `const` declared after it would be in its temporal dead zone.
 const measurementId = String(env.VITE_FIREBASE_MEASUREMENT_ID || '').trim();
 
+// The project id, needed twice: on the app's own options, and in the emulator's database namespace below. Declared above
+// `config` for the same reason `measurementId` is - the object literal is built at module load, and a `const` declared after
+// it would be in its temporal dead zone.
+const projectId =
+  env.VITE_FIREBASE_PROJECT_ID ||
+  (usingEmulator ? String((typeof process !== 'undefined' && process.env.GCLOUD_PROJECT) || 'demo-station-portal') : undefined);
+
 const config = {
   apiKey: env.VITE_FIREBASE_API_KEY || (usingEmulator ? 'demo-api-key' : undefined),
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:
-    env.VITE_FIREBASE_PROJECT_ID ||
-    (usingEmulator ? String((typeof process !== 'undefined' && process.env.GCLOUD_PROJECT) || 'demo-station-portal') : undefined),
+  projectId,
   appId: env.VITE_FIREBASE_APP_ID || (usingEmulator ? 'demo-app-id' : undefined),
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   // Carried on the app's own options, which is where the SDK looks for it: `getAnalytics` reports nothing without one.
   measurementId: measurementId || undefined,
+  // WHERE THE REALTIME DATABASE IS, for presence and typing. Unlike the others it cannot be derived from the project id - the
+  // URL carries a region (`fire-clock-76723-default-rtdb.firebaseio.com`, or `.europe-west1.` and so on) - so it is a value
+  // like the storage bucket rather than something this file could work out. In the emulator it is a namespace and the port
+  // below is what matters.
+  databaseURL: env.VITE_FIREBASE_DATABASE_URL || (usingEmulator ? `http://127.0.0.1:9000?ns=${projectId}` : undefined),
 };
 
 // Whether there is anything to talk to. A build without the config is a build that has not moved yet.
@@ -188,6 +201,7 @@ let firestoreInstance = null;
 let functionsInstance = null;
 // The bucket, for the certification scans - see firebaseStorage below for why the name cannot be guessed.
 let storageInstance = null;
+let databaseInstance = null;
 
 export const firebaseAuth = () => {
   if (!authInstance) {
@@ -268,3 +282,23 @@ export const firebaseStorage = () => {
 // to say so before somebody chooses a file.
 export const storageConfigured = () =>
   Boolean(String(env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()) || usingEmulator;
+
+// THE REALTIME DATABASE, for the two things that are not rows: who is online, and who is typing (see services/realtime.js).
+//
+// EVERYTHING HERE IS OPTIONAL TO THE APP. Firestore is where the station's data lives; this database holds two facts that
+// expire, and a build without it is a build whose chat works exactly as it does now, minus a green dot - which is why
+// services/realtime.js turns every one of its own functions into a no-op when this is missing rather than throwing. The
+// value is VITE_FIREBASE_DATABASE_URL, which is the database's own URL from the console (it carries the region, so it
+// cannot be derived from the project id the way the others can).
+export const firebaseDatabase = () => {
+  if (!databaseInstance) {
+    databaseInstance = getDatabase(firebaseApp());
+    if (usingEmulator) connectDatabaseEmulator(databaseInstance, '127.0.0.1', 9000);
+  }
+  return databaseInstance;
+};
+
+// Whether presence and typing have anywhere to live. Asked by services/realtime.js before it does anything, and by the
+// verifier, which asserts the no-op path rather than only the happy one.
+export const realtimeConfigured = () =>
+  Boolean(String(env.VITE_FIREBASE_DATABASE_URL || '').trim()) || usingEmulator;

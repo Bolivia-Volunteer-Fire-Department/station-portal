@@ -23,7 +23,6 @@ import {
   CHIEF_DISPLAY_SIZE,
   CHIEF_FLAME_OFFSET_Y,
   FIREBALL_SHOT_BANDS,
-  FIREBALL_SPEED,
   chiefFrame,
   createLevel,
   startBoss,
@@ -301,7 +300,24 @@ checkIs(
   'and its own mp3 is played when one is fired',
   /fireballAudioRef\.current = new Audio\(fireballSound\)/.test(component) && /playSound\(fireballAudioRef\)/.test(component)
 );
-checkIs('the debug control is admin-only', /\{isAdmin && \([\s\S]{0,320}SKIP TO BOSS/.test(component));
+// THE CONTROL IS FOUND BY WHAT IT DOES, not by the words on it. This read "SKIP TO BOSS" and then "DEBUG BOSS", and both
+// times the harness reported trouble with a button nobody had touched: a label is free to change, and a check that pins
+// the wording is a check that fails on a rename. So the guard is read to its matching bracket, and the button inside it
+// has to be the one that SKIPS - which is the behaviour worth catching if it ever stops being inside the guard.
+const adminGuardBlock = (source) => {
+  const start = source.indexOf('{isAdmin && (');
+  if (start === -1) return '';
+  let depth = 0;
+  for (let position = source.indexOf('(', start); position < source.length; position += 1) {
+    if (source[position] === '(') depth += 1;
+    else if (source[position] === ')') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, position + 1);
+    }
+  }
+  return '';
+};
+checkIs('the debug control is admin-only', adminGuardBlock(component).includes('onClick={skipToBoss}'));
 checkIs(
   'and it skips with the module\u2019s own startBoss',
   /startBoss\(levelRef\.current, levelBounds\)/.test(component)

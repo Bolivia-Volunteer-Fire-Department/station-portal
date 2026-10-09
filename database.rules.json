@@ -1,0 +1,24 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "!newData.exists() || (newData.hasChildren(['at']) && newData.child('at').isNumber())",
+        "at": { ".validate": "newData.isNumber()" }
+      }
+    },
+    "typing": {
+      ".read": "auth != null",
+      "$conversationId": {
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "!newData.exists() || (newData.hasChildren(['at']) && newData.child('at').isNumber())",
+          "at": { ".validate": "newData.isNumber()" }
+        }
+      }
+    }
+  }
+}

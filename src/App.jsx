@@ -11,9 +11,13 @@ import {
   soundsActiveFrom,
   SOUNDS_SETTING_KEY,
   SOUNDS_DEFAULT,
+  playSound,
   // The Debug page's per-session sound levels. Reset here because a level belongs to the session that set it.
   resetSoundVolumes,
 } from './utils/uiSounds';
+// What this DEVICE has already been shown: the station's welcome, once, after a sign-in. Per device rather than per member,
+// and only behind a sign-in - see the note at the top of the module for both.
+import { takeIntroForThisDevice } from './utils/firstVisit';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from './utils/refreshWave';
 import {
   fetchInitialData,
@@ -47,6 +51,9 @@ import { firebaseConfigured } from './services/firebase';
 // The four small collections where a listener is cheaper than re-reading. See the module: the rule for which
 // collections qualify is written there rather than implied by the list.
 import { subscribeLive } from './services/liveReads';
+// The freshness decisions: what is stale, when coming back to the tab is worth a re-read, and whether a sentinel bump is a
+// change this session has not seen. See scripts/verify-freshness.mjs.
+import { sentinelChanged, shouldRefreshOnReturn } from './utils/freshness';
 
 import LoginScreen from './components/LoginScreen';
 import ReauthModal from './components/ReauthModal';
@@ -88,6 +95,10 @@ import {
   prefetchDeferredModules,
   prefetchableFor,
 } from './utils/deferredModules';
+// CHAT IS NOT DEFERRED, unlike every module above: it is mounted on every tab rather than behind one, so a chunk fetched
+// on opening a tab would be fetched at sign-in anyway - and it renders nothing at all without `can_use_chat`.
+import ChatHost from './components/Chat/ChatHost';
+import ScheduleFreshness from './components/ScheduleFreshness';
 import { pageBarLabel } from './utils/pageLabels';
 import CertificationNotice from './components/CertificationNotice';
 import {
@@ -365,6 +376,11 @@ export default function App() {
   const canSignTrainings = can('can_sign_trainings');
   const canEditTrainings = can('can_edit_trainings');
   const canViewRoster = isAdmin || can('can_view_roster');
+  // Chat. The one permission the whole module rests on: without it there is no launcher, no panel, no badge and no Chat
+  // tab, and the server agrees - the rules refuse the reads and the fan-out never writes such a member an inbox row. The
+  // four message flags and `can_manage_chat_rooms` are read where they are used (ChatHost makes one object of the six -
+  // see utils/chat.js#chatPermissionsFrom).
+  const canUseChat = can('can_use_chat');
 
   // Verifying checklists. A member permission rather than an administrative one: an officer confirming a new
   // member's truck checklist is not an administrator. The server re-checks it, so this flag only shapes what is
@@ -904,9 +920,42 @@ const getLoadingMessage = () => {
   // looked exactly like a month with nobody rostered - the board drew its template skeleton and said nothing. The
   // window is NOT recorded on failure either, so the next look asks again rather than believing it already has a
   // month it never received.
+  // WHAT THE SCHEDULE SENTINEL HAS TOLD THIS SESSION: the version it last saw, the window the screens last asked for, and when
+  // that window was last read.
+  //
+  // DECLARED HERE, ABOVE THE LOADER THAT WRITES IT, and that is not tidiness: a `const` referenced by a function defined above
+  // it throws on the first render ("cannot access before initialization"), which took the chat host down once already.
+  //
+  // `at` LIVES IN THE REF RATHER THAN ONLY IN STATE because the listeners below read it at the moment they fire - and a listener
+  // registered once that captured a state value would read whatever was true when it attached. The state is set at the same time
+  // for the other half: what a screen DRAWS has to cause a render, and what a handler DECIDES must not depend on one.
+  const scheduleSentinel = useRef({ version: null, from: '', to: '', at: 0 });
+  const [scheduleLoadedAt, setScheduleLoadedAt] = useState(0);
+  // The loader as of THIS render, for the listeners that were registered on an earlier one. A ref rather than a dependency
+  // array: `loadScheduleWindow` is rebuilt every render, so naming it as a dependency would re-register the listener every
+  // render for no benefit at all.
+  const scheduleReloadRef = useRef(null);
+
+  // THE MANUAL READ, for the Refresh button beside the freshness line. It asks for the same window the automatic re-reads do,
+  // through the same ref, so there is one place that knows what "the schedule on screen" means.
+  const refreshSchedule = () => {
+    const { from, to } = scheduleSentinel.current;
+    if (from || to) void scheduleReloadRef.current?.(from, to);
+  };
+
   const loadScheduleWindow = async (from, to) => {
+    scheduleReloadRef.current = loadScheduleWindow;
     try {
+      // WHAT THE SCREENS LAST ASKED FOR, remembered so the sentinel can read exactly that window again when the schedule
+      // changes underneath it. A ref rather than state: nothing draws this, and a handler that captured a window from an
+      // earlier render would re-read a month nobody is looking at.
+      scheduleSentinel.current.from = from;
+      scheduleSentinel.current.to = to;
       const data = await fetchScheduleWindow(from, to, authToken);
+      // THE WINDOW LANDED, which is the only moment "updated" means anything. Set after the await rather than before it: a read
+      // that is still in flight is not data on screen, and claiming otherwise is how a freshness line starts lying.
+      scheduleSentinel.current.at = Date.now();
+      setScheduleLoadedAt(scheduleSentinel.current.at);
       const rows = data && Array.isArray(data.schedule) ? data.schedule : [];
       setSchedule((prev) => replaceRowsInRange(prev, rows, from, to));
       // The window grows to cover what was just read, so the same month is never asked for twice.
@@ -938,6 +987,33 @@ const getLoadingMessage = () => {
   //
   // Each handler REPLACES its list rather than merging: a snapshot is the whole answer to its query, which is exactly what
   // these setters already store - the payload hands them the same shape.
+  // COMING BACK TO THE TAB IS A REASON TO LOOK AGAIN.
+  //
+  // Both halves are needed and each rules out a read the other would allow (utils/freshness.js#shouldRefreshOnReturn): away
+  // long enough for somebody else to have moved a shift, AND looking at data old enough to be worth re-reading. A flick of the
+  // tabs costs nothing, and so does a long absence spent looking at something that was read a moment ago.
+  //
+  // It reads the same window the sentinel does, for the same reason: `scheduleSentinel` remembers what the screens last asked
+  // for, so this cannot resurrect a month nobody is looking at. Registered ONCE, reading the loader through a ref - naming the
+  // loader as a dependency would re-register this listener on every render, for no benefit at all.
+  useEffect(() => {
+    const onVisibilityChanged = () => {
+      if (document.visibilityState !== 'visible') {
+        scheduleSentinel.current.hiddenAt = Date.now();
+        return;
+      }
+      const hiddenAt = scheduleSentinel.current.hiddenAt || 0;
+      scheduleSentinel.current.hiddenAt = 0;
+      const { from, to } = scheduleSentinel.current;
+      if (!from && !to) return;
+      const hiddenMs = hiddenAt ? Date.now() - hiddenAt : 0;
+      if (!shouldRefreshOnReturn({ hiddenMs, atMs: scheduleSentinel.current.at })) return;
+      void scheduleReloadRef.current?.(from, to);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChanged);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChanged);
+  }, []);
+
   useEffect(() => {
     const userId = currentUser?.id ? String(currentUser.id) : '';
     if (!userId || !firebaseConfigured()) return undefined;
@@ -947,6 +1023,23 @@ const getLoadingMessage = () => {
         onDuty: setOnDutyUsers,
         announcements: setAnnouncements,
         systemSettings: setSystemSettings,
+        // THE SCHEDULE CHANGED SOMEWHERE ELSE: read the window the screens are looking at again.
+        //
+        // `version` is a count bumped by a trigger (functions/index.js#onShiftWritten), so "different from what this session
+        // last saw" is the whole question and no clock has to be trusted. The observation is RECORDED EITHER WAY - the first
+        // look teaches this handler what 0 means, which is what keeps the first real bump (0 -> 1) from being swallowed as
+        // something it had already seen (see utils/freshness.js#sentinelChanged).
+        //
+        // And it re-reads rather than listening, which is the point of the whole arrangement: one document to watch, and the
+        // schedule itself stays a lazy, windowed read (see the note at the top of services/liveReads.js).
+        scheduleVersion: (row) => {
+          const version = Number((row && row.version) || 0);
+          const changed = sentinelChanged({ version, seen: scheduleSentinel.current.version });
+          scheduleSentinel.current.version = version;
+          if (!changed) return;
+          const { from, to } = scheduleSentinel.current;
+          if (from || to) void loadScheduleWindow(from, to);
+        },
       },
       // A listener that fails must not throw into a render: it is logged, the last data stays on screen, and the next
       // sign-in or refresh reads the collection the way it always did. Nothing here is load-bearing.
@@ -1732,6 +1825,11 @@ const getLoadingMessage = () => {
         await signInAlongside(username, password);
         setCurrentUser(result.user);
         applyToken(result.token);
+        // A REAL SIGN-IN HAPPENED, which is what the welcome waits for: the click that submitted this form is also what a
+        // browser requires before a page may make a sound (see utils/firstVisit.js). A session restored from a token never
+        // reaches this line, which is why the intro does not depend on the member being signed in - it depends on them having
+        // just done it.
+        introAfterSignInRef.current = true;
 
         // Only the first screen's data blocks the overlay now - see the note on
         // loadPostLoginData. Admin data loads via the authToken effect.
@@ -2215,6 +2313,19 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // THE STATION'S WELCOME, once per device.
+  //
+  // `intro_short.mp3` plays as the boot screen clears - the loading message going away is the moment the app is actually ready
+  // to be looked at - and only after a sign-in on this device (`takeIntroForThisDevice` records before it answers, so two
+  // renders in one frame cannot both be told yes). A member who is already signed in from a stored session hears nothing: no
+  // gesture, no sound, and a greeting that repeats is a noise anyway.
+  const introAfterSignInRef = useRef(false);
+  useEffect(() => {
+    if (initialLoading || !introAfterSignInRef.current) return;
+    if (!takeIntroForThisDevice()) return;
+    playSound('intro_short');
+  }, [initialLoading]);
+
   return (
     <>
       {/* THE SPLASH: the brand moment that plays first, while the app's data loads concurrently
@@ -2391,6 +2502,7 @@ const getLoadingMessage = () => {
             canViewReports={canViewReports}
             canGenerateForms={canGenerateForms}
             canViewRoster={canViewRoster}
+            canUseChat={canUseChat}
             ranks={ranks}
           />
 
@@ -2420,6 +2532,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'availability' && 'Availability'}
                 {activeTab === 'training' && 'Training'}
                 {activeTab === 'certifications' && 'Certifications'}
+                {activeTab === 'chat' && 'Chat'}
                 {activeTab === 'reports' && 'Reports & Forms'}
                 {activeTab === 'help' && 'Help'}
                 {activeTab === 'settings' && 'My Settings'}
@@ -2433,6 +2546,7 @@ const getLoadingMessage = () => {
                 {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
                 {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
                 {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
+                {activeTab === 'chat' && "The station's rooms, and your own line in them. It stays open over whatever else you are doing."}
                 {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
                 {activeTab === 'help' && 'Guides for using the portal. Administrators have their own set under Administration → System → Help.'}
                 {activeTab === 'settings' && 'Customize your personal account preferences.'}
@@ -2523,6 +2637,12 @@ const getLoadingMessage = () => {
               />
             )}
 
+            {/* HOW OLD THE SCHEDULE IS, and the read. A sibling of the calendar rather than a prop into it: the two screens
+                that draw a schedule (the calendar and the board) would each have to render it, and the condition below is
+                repeated for the same reason - a fragment would need a parent element that neither screen wants. */}
+            {activeTab === 'schedule' && canViewSchedule && (
+              <ScheduleFreshness atMs={scheduleLoadedAt} onRefresh={refreshSchedule} />
+            )}
             {activeTab === 'schedule' && canViewSchedule && (
               <ScheduleCalendar
                 currentUser={currentUser}
@@ -2645,6 +2765,7 @@ const getLoadingMessage = () => {
                 hideEventsByDefault={hideEventsByDefault}
                 onFontScalePreview={setFontScalePreview}
                 canApproveShifts={canApproveShifts}
+                canUseChat={canUseChat}
                 onSaveSettings={handleSaveUserSettings}
                 pushDeviceApi={pushDeviceApi}
                 onPasswordChange={handlePasswordChange}
@@ -2758,6 +2879,25 @@ const getLoadingMessage = () => {
               />
             )}
             </Suspense>
+
+            {/* CHAT, ON EVERY TAB. It is mounted here rather than inside one of the tab blocks because it is not a tab -
+                it is a panel over whatever the member is doing, so a message arriving while they are building a schedule
+                still reaches them. `fullScreen` is the one exception: the Chat module IS this component at full width,
+                which is why there is one implementation and not two. It renders nothing at all without `can_use_chat`. */}
+            <ChatHost
+              token={authToken}
+              currentUser={currentUser}
+              role={currentUserRole}
+              timeFormat={activeTimeFormat}
+              // The ranks, for the icon drawn before an author's name - the same array every other screen gets, looked up by
+              // the `rank_id` each message carries (functions/chat.js#chatMessageDoc). It costs nothing: `ranks` is already in
+              // hand here, and the icon is a lookup rather than a read (components/RankIcon).
+              ranks={ranks}
+              fullScreen={activeTab === 'chat'}
+              // The same device-offline answer the clock card uses, from the same state: chat refuses a send it cannot
+              // honour rather than showing a message that never leaves the box.
+              offline={offline}
+            />
           </main>
         </div>
       )}

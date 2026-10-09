@@ -18,6 +18,8 @@ import { firebaseFunctions, firestore } from './firebase.js';
 // gets the narrower set, an officer the wider one), and this function cannot see who is calling - so it refuses anything
 // that is not a member detail at all and lets the rules answer the rest.
 import { MEMBER_PRIVATE_ADMIN_FIELDS } from '../utils/memberFields.js';
+// The profile-picture limits, shared with the upload (services/avatarStorage.js) and the rule that stores the link.
+import { AVATAR_URL_MAX } from '../utils/avatars.js';
 import { rowsFor, rowsOf } from './firestorePayload.js';
 // The badge rule, shared with the repair script that rebuilds the index (scripts/normalize-certification-badges.mjs).
 import { badgeForRecord, badgeIndexFor, badgeToday } from '../utils/certificationBadges.js';
@@ -338,6 +340,86 @@ export const setPushDisabled = async ({ userId, disabled }) => {
 
   await setDoc(doc(firestore(), 'user_settings', target), { is_push_disabled: disabled === true }, { merge: true });
   return { userId: target, disabled: disabled === true, devicesForgotten: disabled ? rows.docs.length : 0 };
+};
+
+// -------------------------------------------------------------------------------------------------------------
+// CHAT
+// -------------------------------------------------------------------------------------------------------------
+// Three writers, and the split between them is the point: a room is an administrator's row written straight to
+// Firestore, while a MESSAGE cannot be written by a client at all (see functions/chat.js - the audience proof on a
+// message has to be unforgeable) so the three message actions are callables and appear here as `callable(...)` calls
+// elsewhere. What is left for the client is the room, and the member's own read mark.
+
+// A room, saved as a MERGE. The merge is not decoration: the form carries the name, the audience and the order, while
+// `last_at`, `last_preview` and `last_message_id` belong to the message callables and to the fan-out - a plain set would
+// wipe the room's activity every time an officer corrected a typo in its name.
+export const saveChatRoom = async ({ id, name, audience_keys, sort_order, archived }) => {
+  const fields = {
+    name: String(name || '').trim(),
+    audience_keys: (Array.isArray(audience_keys) ? audience_keys : []).map((key) => String(key || '').trim()).filter(Boolean),
+    sort_order: Number.isFinite(Number(sort_order)) ? Number(sort_order) : 999,
+    archived: archived === true,
+  };
+  if (!fields.name) throw new Error('A room needs a name.');
+  if (!fields.audience_keys.length) throw new Error('A room needs somebody who can see it.');
+
+  const target = String(id || '').trim();
+  const ref = target ? doc(firestore(), 'chat_conversations', target) : doc(collection(firestore(), 'chat_conversations'));
+  await setDoc(ref, fields, { merge: true });
+  return { id: ref.id, ...fields, saved: true };
+};
+
+// Deleting a room: the document only. Its messages and every member's inbox row are removed by the trigger that fires
+// on this delete (functions/index.js#onChatConversationDeleted), because a client cannot reach into other members'
+// documents - and a room whose messages outlived it would be invisible in the UI and billable forever.
+export const deleteChatRoom = async (id) => {
+  const target = String(id || '').trim();
+  if (!target) throw new Error('Which room?');
+  await deleteDoc(doc(firestore(), 'chat_conversations', target));
+  return { id: target, deleted: true };
+};
+
+// THE MEMBER'S OWN READ MARK - how far into a room's messages they have read - and their mute switch for it. Both live
+// on the member's own inbox row, which is the document the fan-out writes the count into, and the rules allow a member
+// to write THESE TWO FIELDS ON THEIR OWN ROW and nothing else.
+//
+// It is a read mark rather than a list of read messages on purpose: the unread number is the difference between the
+// room's count and this mark (utils/chat.js#unreadCountFor), so marking a room read is one small write and reading it
+// costs nothing at all.
+export const setChatRead = async ({ userId, conversationId, readCount, muted, readAt }) => {
+  const uid = String(userId || '').trim();
+  const room = String(conversationId || '').trim();
+  if (!uid || !room) throw new Error('Which room?');
+  const fields = {};
+  if (readCount !== undefined) fields.read_count = Math.max(0, Number(readCount) || 0);
+  if (muted !== undefined) fields.muted = muted === true;
+
+  if (Object.keys(fields).length) {
+    await setDoc(doc(firestore(), 'chat_inbox', uid, 'rooms', room), fields, { merge: true });
+  }
+
+  // AND THE CONVERSATION LEARNS HOW FAR THIS MEMBER HAS READ, so the sender's own screen can say a message was seen.
+  //
+  // IT GOES TO THE RECEIPTS DOCUMENT, not to the conversation, and that is the difference between a listener that fires a
+  // handful of times a day and one that fires on every message: the conversation carries the room list's own fields
+  // (`last_preview` and the rest), which the send callable rewrites on every message, so a screen watching IT for a receipt
+  // would be woken per message for something that changes when somebody reads. See functions/chat.js#chatReceiptsDoc.
+  //
+  // PRIVATE CONVERSATIONS ONLY, which is the caller's business rather than this function's: a station room has no reader to
+  // name, and no receipts document exists for one. The caller passes `readAt` only for a thread.
+  //
+  // `merge` and not an overwrite: every other entry in that map is somebody else's, and a write that replaced the map would
+  // quietly erase the receipts of everybody who had read before you. The rules enforce the same thing from the other side - one
+  // field, and only the caller's key inside it (see firestore.rules).
+  if (readAt !== undefined) {
+    await setDoc(
+      doc(firestore(), 'chat_receipts', room),
+      { read_at: { [uid]: Math.max(0, Number(readAt) || 0) } },
+      { merge: true }
+    );
+  }
+
+  return { userId: uid, id: room, ...fields };
 };
 
 // The member's own settings row: a time format, a theme, and which notifications they want.
@@ -978,6 +1060,23 @@ export const saveMemberPrivateFields = async ({ userId, fields = {} } = {}) => {
   const clean = Object.fromEntries(entries.map(([key, value]) => [key, String(value ?? '').trim()]));
   await setDoc(doc(firestore(), 'users_private', target), clean, { merge: true });
   return { userId: target, ...clean };
+};
+
+// A member's profile picture link, which lives on their PUBLIC roster row - a different document from the details above,
+// and a different permission. The rules allow a member to write this ONE FIELD on their own row and nothing else
+// (`affectedKeys().hasOnly(['avatar_url'])` in firestore.rules), which is why this takes no field list: a caller cannot
+// express "and also this other thing" through it.
+//
+// IT DELIBERATELY DOES NOT RE-CHECK THE LINK beyond the length. The rule is the thing that decides, and the shape check
+// lives in utils/avatars.js where the upload flow can use it BEFORE spending bandwidth. A second opinion here would be a
+// third place for the same answer to drift.
+export const saveMemberAvatarUrl = async ({ userId, url = '' } = {}) => {
+  const target = String(userId || '').trim();
+  if (!target) throw new Error('Which member is this picture for?');
+  const clean = String(url || '').trim();
+  if (clean.length > AVATAR_URL_MAX) throw new Error('That picture link is too long to store.');
+  await setDoc(doc(firestore(), 'users', target), { avatar_url: clean }, { merge: true });
+  return { userId: target, avatar_url: clean };
 };
 
 // A form definition: which blank, which source, and where each value goes.
