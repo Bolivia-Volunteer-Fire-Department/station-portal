@@ -463,7 +463,7 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
               {result.report.visualization === 'table' ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    <thead className="sticky top-0 z-10 bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700 dark:text-slate-400">
                       <tr>
                         {groupColumns.map((label, index) => (
                           <th key={`${label}-${index}`} className="px-3 py-2">{label}</th>

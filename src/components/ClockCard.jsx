@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogIn, LogOut, WifiOff } from 'lucide-react';
+import { Loader2, LogIn, LogOut, WifiOff } from 'lucide-react';
 import { OFFLINE_CLOCK_MESSAGE } from '../utils/connectivity';
 
 // `offline` disables the buttons AND says why, rather than leaving them live and refusing on the press: the refusal is
@@ -36,8 +36,8 @@ export default function ClockCard({ isClockedIn, loading, offline = false, onClo
               disabled={loading || offline}
               className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold py-3.5 px-8 rounded-xl transition shadow-lg shadow-emerald-600/20"
             >
-              <LogIn className="w-5 h-5" />
-              Clock In
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
+              {loading ? 'Clocking In...' : 'Clock In'}
             </button>
           ) : (
             <button
@@ -45,8 +45,8 @@ export default function ClockCard({ isClockedIn, loading, offline = false, onClo
               disabled={loading || offline}
               className="w-full md:w-auto flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold py-3.5 px-8 rounded-xl transition shadow-lg shadow-red-600/20"
             >
-              <LogOut className="w-5 h-5" />
-              Clock Out
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogOut className="w-5 h-5" />}
+              {loading ? 'Clocking Out...' : 'Clock Out'}
             </button>
           )}
         </div>

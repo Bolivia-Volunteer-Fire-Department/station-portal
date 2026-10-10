@@ -91,17 +91,33 @@ export default function RosterModule({
       <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
         <thead className="bg-slate-50 dark:bg-slate-800">
           <tr>
-            <th scope="col" className="sticky top-0 z-10 bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 dark:bg-slate-800">Name</th>
-            <th scope="col" className="sticky top-0 z-10 bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 dark:bg-slate-800">Rank</th>
+            <th scope="col" className="sticky top-0 z-10 bg-slate-50/95 px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 backdrop-blur-sm dark:bg-slate-800/95 dark:text-slate-400">Name</th>
+            <th scope="col" className="sticky top-0 z-10 bg-slate-50/95 px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 backdrop-blur-sm dark:bg-slate-800/95 dark:text-slate-400">Rank</th>
             {certificationTypes.map((type) => (
-              <th key={type.id} scope="col" className="sticky top-0 z-10 max-w-40 bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase text-slate-500 dark:bg-slate-800">
+              <th key={type.id} scope="col" className="sticky top-0 z-10 max-w-40 bg-slate-50/95 px-4 py-3 text-center text-xs font-semibold uppercase text-slate-500 backdrop-blur-sm dark:bg-slate-800/95 dark:text-slate-400">
                 <span className="block truncate" title={type.name}>{type.name}</span>
               </th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-          {members.length ? members.map((member) => {
+          {loading && !members.length ? (
+            Array.from({ length: 6 }).map((_, i) => (
+              <tr key={`skeleton-${i}`} className="animate-pulse">
+                <td className="px-4 py-3">
+                  <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700/70 rounded" />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="h-4 w-24 bg-slate-200 dark:bg-slate-700/70 rounded" />
+                </td>
+                {certificationTypes.map((type) => (
+                  <td key={type.id} className="px-4 py-3 text-center">
+                    <div className="mx-auto h-4 w-4 bg-slate-200 dark:bg-slate-700/70 rounded-full" />
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : members.length ? members.map((member) => {
             const rank = ranks.find((item) => String(item.id) === String(member.rank_id));
             const activeTypeIds = new Set(memberCertificationIds[member.id] || []);
             return (

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, CheckCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { stationLogoUrl } from '../utils/assets';
 import PasswordInput from './PasswordInput';
 
@@ -7,13 +7,22 @@ import PasswordInput from './PasswordInput';
 // has signed in, so it cannot be targeted at a role or a person, and it was the reason the app made a read without a
 // session at all. Anything that has to be read here belongs in this file, as a line of code somebody reviews - not in a
 // form. See utils/announcements#ANNOUNCEMENT_LOCATIONS.
-export default function LoginScreen({ onLogin, statusMessage, departmentName }) {
+export default function LoginScreen({ onLogin, statusMessage, departmentName, isLoading = false }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e) => {
+  const isBusy = submitting || isLoading;
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onLogin(username, password);
+    if (isBusy) return;
+    setSubmitting(true);
+    try {
+      await onLogin(username, password);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -28,7 +37,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Please login to continue</p>
         </div>
 
-        {statusMessage.text && (
+        {statusMessage?.text && (
           <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 ${
             statusMessage.type === 'error'
               ? 'bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/80 dark:border-red-800 dark:text-red-200'
@@ -48,8 +57,12 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={isBusy}
               required
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
             />
           </div>
 
@@ -60,20 +73,26 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName }) 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
+              disabled={isBusy}
               required
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full bg-red-600 hover:bg-red-500 text-white font-semibold py-3 px-4 rounded-xl transition shadow-lg shadow-red-600/20"
+            disabled={isBusy}
+            className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold py-3 px-4 rounded-xl transition shadow-lg shadow-red-600/20"
           >
-            Sign In
+            {isBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+            {isBusy ? 'Signing In...' : 'Sign In'}
           </button>
-          <span className="text-xs text-slate-500 dark:text-slate-400">v1.54</span>
         </form>
       </div>
+
+      <p className="mt-6 text-xs text-slate-400 dark:text-slate-500 text-center select-none tracking-wide">
+        v1.55
+      </p>
     </div> 
   );
 }

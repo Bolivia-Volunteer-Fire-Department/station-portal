@@ -729,7 +729,7 @@ export default function ScheduleCalendar({
               {weekdayLabels().map((label) => (
                 <div
                   key={label}
-                  className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400 py-1"
+                  className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 py-1.5"
                 >
                   {label}
                 </div>
@@ -744,9 +744,25 @@ export default function ScheduleCalendar({
             onAnimationEnd={onAnimationEnd}
           >
             {cells.map((day, i) => {
+              const isWeekStart = !dayView && i % 7 === 0;
+              const weekNumber = Math.floor(i / 7) + 1;
+              const weekHeader = isWeekStart ? (
+                <div
+                  key={`week-header-${weekNumber}`}
+                  className={`col-span-full text-left text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 px-1 ${
+                    weekNumber > 1 ? 'pt-3 pb-1 border-t border-slate-200 dark:border-slate-700/60 mt-1' : 'pt-1 pb-1'
+                  }`}
+                >
+                  Week {weekNumber}
+                </div>
+              ) : null;
+
               if (!day) {
                 return (
-                  <div key={`empty-${i}`} className="min-h-[76px] rounded-lg bg-slate-50/50 dark:bg-slate-900/40" />
+                  <React.Fragment key={`empty-${i}`}>
+                    {weekHeader}
+                    <div className="min-h-[76px] rounded-lg bg-slate-50/50 dark:bg-slate-900/40" />
+                  </React.Fragment>
                 );
               }
 
@@ -770,9 +786,10 @@ export default function ScheduleCalendar({
               );
 
               return (
-                <div
-                  key={key}
-                  title={
+                <React.Fragment key={key}>
+                  {weekHeader}
+                  <div
+                    title={
                     scheduled
                       ? `${hasFilled ? 'Scheduled' : 'Open'}: ${dayAssignments.map(describe).join(', ')}`
                       : undefined
@@ -782,6 +799,8 @@ export default function ScheduleCalendar({
                   // unchanged on purpose - the availability calendar's server-rendered harness splits its cells by a
                   // class of this shape (verify-admin-render), and a screen rendered with no window is in the month view.
                   className={`${dayView ? 'min-h-[60vh]' : 'min-h-[76px]'} rounded-lg flex flex-col items-stretch ${
+                  isToday ? 'ring-2 ring-red-500/80 dark:ring-red-400/80 ring-offset-1 dark:ring-offset-slate-900 ' : ''
+                }${
                   hasMine
                     ? 'bg-red-600/10 border border-red-300 dark:border-red-800'
                     : hasFilled
@@ -791,17 +810,28 @@ export default function ScheduleCalendar({
                         : 'bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/40'
                 }`}
               >
-                <span
-                  className={`leading-none px-1 ${dayView ? 'text-sm' : 'text-[11px]'} ${
-                    isToday ? 'text-red-600 font-bold' : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  {/* The day view has no weekday row above it (that row is the calendar's), so its one cell has to name
-                      its own weekday and date - a bare day number would be the only thing on the screen. */}
-                  {dayView
-                    ? day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
-                    : day.getDate()}
-                </span>
+                <div className="flex items-center justify-between p-1 pb-0.5">
+                  <span
+                    className={`leading-none flex items-center justify-center ${
+                      dayView ? 'text-sm font-semibold' : 'text-xs'
+                    } ${
+                      isToday
+                        ? 'bg-red-600 text-white rounded-full h-5 min-w-5 px-1 font-bold shadow-xs'
+                        : 'text-slate-700 dark:text-slate-300 font-semibold'
+                    }`}
+                  >
+                    {/* The day view has no weekday row above it (that row is the calendar's), so its one cell has to name
+                        its own weekday and date - a bare day number would be the only thing on the screen. */}
+                    {dayView
+                      ? day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+                      : day.getDate()}
+                  </span>
+                  {isToday && !dayView && (
+                    <span className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mr-0.5">
+                      Today
+                    </span>
+                  )}
+                </div>
 
                 {/* Chronological, with events placed among the shifts rather than above them all - see
                       utils/dayOrder. Events stay visually distinct (outlined, never offerable): the order decides
@@ -952,8 +982,9 @@ export default function ScheduleCalendar({
                     );
                   })}
                 </div>
-              );
-            })}
+              </React.Fragment>
+            );
+          })}
           </div>
         </div>
       </div>

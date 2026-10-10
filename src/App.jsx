@@ -60,6 +60,7 @@ import PasswordChangeModal from './components/PasswordChangeModal';
 import { mustChangePassword, MUST_CHANGE_PASSWORD_COLUMN } from './utils/passwordPolicy';
 import ClockBlockedModal from './components/ClockBlockedModal';
 import Sidebar from './components/Sidebar';
+import MobileBottomNav from './components/MobileBottomNav';
 import PixelBurst from './components/PixelBurst';
 import ClockCard from './components/ClockCard';
 import OnDutyCard from './components/OnDutyCard';
@@ -270,6 +271,7 @@ export default function App() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // Initial Boot Loading
   const [initialLoading, setInitialLoading] = useState(true);
@@ -2410,7 +2412,7 @@ const getLoadingMessage = () => {
           <span className="text-xl font-medium">{bootMessage}</span>
         </div>
       ) : !currentUser ? (
-        <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} />
+        <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} isLoading={globalLoading.active} />
       ) : (
         <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
           {/* The strip the iOS status bar sits on.
@@ -2509,7 +2511,7 @@ const getLoadingMessage = () => {
             // `md:flex md:flex-col` only on the Help screen, where the heading above the guide card has to be one of
             // the rows rather than something the card is stacked under - see boundedScreen above. Every other
             // tab is untouched: the page scrolls them.
-            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 page-enter ${
+            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 pb-20 sm:p-6 sm:pb-24 lg:p-8 lg:pb-8 page-enter ${
               boundedScreen ? 'md:flex md:flex-col' : ''
             } ${
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
@@ -2893,8 +2895,20 @@ const getLoadingMessage = () => {
               // The same device-offline answer the clock card uses, from the same state: chat refuses a send it cannot
               // honour rather than showing a message that never leaves the box.
               offline={offline}
+              onUnreadChange={setUnreadChatCount}
             />
           </main>
+
+          {/* Sticky mobile bottom navigation bar (< 768px) */}
+          <MobileBottomNav
+            activeTab={activeTab}
+            onSelectTab={handleSidebarNavigate}
+            onOpenMore={() => setIsSidebarOpen(true)}
+            canViewSchedule={canViewSchedule}
+            canUseChat={canUseChat}
+            canUseTimeclock={canUseTimeclock}
+            unreadChatCount={unreadChatCount}
+          />
         </div>
       )}
     </>

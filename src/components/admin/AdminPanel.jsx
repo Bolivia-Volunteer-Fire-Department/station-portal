@@ -325,9 +325,23 @@ export default function AdminPanel({
   // props, which reads as a station with no data rather than a read that has not come back yet.
   if (loading) {
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500 dark:text-slate-400">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading Administration…
+      <div className="space-y-6" role="status" aria-label="Loading Administration">
+        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Loading Administration…</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 space-y-3 shadow-sm"
+            >
+              <div className="h-6 w-36 bg-slate-200 dark:bg-slate-700/60 rounded-lg" />
+              <div className="h-4 w-full bg-slate-100 dark:bg-slate-700/40 rounded" />
+              <div className="h-4 w-3/4 bg-slate-100 dark:bg-slate-700/40 rounded" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

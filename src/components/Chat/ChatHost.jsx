@@ -43,7 +43,7 @@ import {
  * is what the permission means by "it is like the module does not exist", and the server agrees: the rules refuse the
  * reads, and the fan-out never writes such a member an inbox row to light in the first place.
  */
-export default function ChatHost({ token, currentUser, role, timeFormat = '12', fullScreen = false, offline = false, ranks = [] }) {
+export default function ChatHost({ token, currentUser, role, timeFormat = '12', fullScreen = false, offline = false, ranks = [], onUnreadChange }) {
   const flags = useMemo(() => chatPermissionsFrom(role), [role]);
   const userId = String(currentUser?.id || '');
   const roleId = String(currentUser?.role_id || '');
@@ -60,6 +60,11 @@ export default function ChatHost({ token, currentUser, role, timeFormat = '12', 
   // The badge, from the rooms the member can actually see: an inbox row whose room has been deleted is invisible here
   // rather than counted forever. A badge that depends on a trigger having run is a badge that can be wrong.
   const unread = useMemo(() => totalUnread(rooms.map((room) => inbox[room.id])), [rooms, inbox]);
+
+  useEffect(() => {
+    onUnreadChange?.(unread);
+  }, [unread, onUnreadChange]);
+
   // The inbox as it was last time this effect ran, so a badge GROWING can be told from a badge being read - and so which
   // room grew can be named in the tone and the toast.
   const lastInboxRef = useRef({});
@@ -549,7 +554,7 @@ export default function ChatHost({ token, currentUser, role, timeFormat = '12', 
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-label={open ? 'Close chat' : 'Open chat'}
-        className="fixed bottom-4 right-4 z-[54] flex h-12 w-12 items-center justify-center rounded-full bg-red-600 text-white shadow-xl transition hover:bg-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
+        className="fixed bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))] md:bottom-4 right-4 z-[54] flex h-12 w-12 items-center justify-center rounded-full bg-red-600 text-white shadow-xl transition hover:bg-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
       >
         {open ? <X className="h-5 w-5" /> : <MessageSquare className="h-5 w-5" />}
         {!open && unread > 0 && (

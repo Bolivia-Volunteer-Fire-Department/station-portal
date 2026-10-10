@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, CheckCheck, Clock, Film, Loader2, LogOut, Pencil, Plus, Search, Send, Smile, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, Check, CheckCheck, Clock, Film, Loader2, LogOut, Pencil, Plus, Search, Send, Smile, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import EmojiPicker from './EmojiPicker';
 import GifPicker from './GifPicker';
 import { CHAT_REACTION_EMOJI } from '../../utils/chatEmoji';
@@ -614,7 +614,11 @@ export default function ChatPanel({
   const [showGifs, setShowGifs] = useState(false);
   const [pendingGif, setPendingGif] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showNewBelow, setShowNewBelow] = useState(false);
   const bodyRef = useRef(null);
+  const textareaRef = useRef(null);
+  const prevMessagesLengthRef = useRef(messages.length);
+  const prevActiveRoomIdRef = useRef(activeRoomId);
   const activeRoom = useMemo(() => rooms.find((room) => room.id === activeRoomId) || null, [rooms, activeRoomId]);
   const mine = String(currentUser?.id || '');
   const problem = chatSendProblem({ body: draft, offline, hasGif: Boolean(pendingGif) });
@@ -722,11 +726,57 @@ export default function ChatPanel({
     }
   }, [picked, starting, pickingFor, activeRoomId, onChangeParticipants, onStartThread]);
 
+  // AUTO-EXPAND THE COMPOSER: dynamically sizes the textarea based on content scrollHeight, capped at 112px (max-h-28).
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
+    }
+  }, [draft]);
+
+  const handleBodyScroll = useCallback(() => {
+    const node = bodyRef.current;
+    if (!node) return;
+    const isNearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 40;
+    if (isNearBottom) {
+      setShowNewBelow(false);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const node = bodyRef.current;
+    if (node) {
+      node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+    }
+    setShowNewBelow(false);
+  }, []);
+
   // PARKED AT THE BOTTOM, where a conversation belongs. Keyed on the message list rather than on every render, so a
-  // member reading back through the history is not yanked forward each time somebody types.
+  // member reading back through the history is not yanked forward each time somebody types - instead, they get a
+  // "New messages below" indicator when scrolled up.
   useEffect(() => {
     const node = bodyRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
+    if (!node) return;
+
+    if (activeRoomId !== prevActiveRoomIdRef.current) {
+      prevActiveRoomIdRef.current = activeRoomId;
+      prevMessagesLengthRef.current = messages.length;
+      setShowNewBelow(false);
+      node.scrollTop = node.scrollHeight;
+      return;
+    }
+
+    const isNearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+    const isNewMessage = messages.length > prevMessagesLengthRef.current;
+    prevMessagesLengthRef.current = messages.length;
+
+    if (isNearBottom) {
+      node.scrollTop = node.scrollHeight;
+      setShowNewBelow(false);
+    } else if (isNewMessage) {
+      setShowNewBelow(true);
+    }
   }, [messages, activeRoomId]);
 
   const submit = useCallback(async () => {
@@ -1022,49 +1072,61 @@ export default function ChatPanel({
               </button>
             )}
           </header>
-          <div ref={bodyRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-            {hasOlder && (
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={onLoadOlder}
-                  disabled={loading}
-                  className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-                >
-                  {loading ? 'Loading…' : 'Load older messages'}
-                </button>
-              </div>
+          <div className="relative min-h-0 flex-1 flex flex-col">
+            <div ref={bodyRef} onScroll={handleBodyScroll} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+              {hasOlder && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={onLoadOlder}
+                    disabled={loading}
+                    className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    {loading ? 'Loading…' : 'Load older messages'}
+                  </button>
+                </div>
+              )}
+              {messages.length === 0 && !loading && (
+                <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                  Nothing here yet. Say something.
+                </p>
+              )}
+              <ul className="space-y-2">
+                {messages.map((message) => (
+                  <ChatBubble
+                    key={message.id}
+                    message={message}
+                    mine={message.author_id === mine}
+                    flags={flags}
+                    currentUser={currentUser}
+                    timeFormat={timeFormat}
+                    ranks={ranks}
+                    // THE RECEIPT, worked out here rather than in the bubble: it is a question about the CONVERSATION (who else is
+                    // in it) and the viewer as much as about the message, and the bubble is handed the answer instead of the three
+                    // things it would need to work it out. Only for your own messages, and only where a receipt means something -
+                    // `deliveryStateFor` returns nothing for anybody else's.
+                    delivery={
+                      message.author_id === mine && isChatThread(activeRoom)
+                        ? deliveryStateFor({ message, readAt, viewerId: mine, conversation: activeRoom })
+                        : ''
+                    }
+                    onEdit={startEdit}
+                    onDelete={(row) => onDelete?.(row)}
+                    onReact={onReact}
+                  />
+                ))}
+              </ul>
+            </div>
+            {showNewBelow && (
+              <button
+                type="button"
+                onClick={scrollToBottom}
+                className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full bg-slate-900/90 text-white px-3 py-1.5 text-xs font-semibold shadow-lg backdrop-blur-sm transition hover:bg-slate-800 dark:bg-white/95 dark:text-slate-900 dark:hover:bg-white animate-bounce"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+                <span>New messages below</span>
+              </button>
             )}
-            {messages.length === 0 && !loading && (
-              <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
-                Nothing here yet. Say something.
-              </p>
-            )}
-            <ul className="space-y-2">
-              {messages.map((message) => (
-                <ChatBubble
-                  key={message.id}
-                  message={message}
-                  mine={message.author_id === mine}
-                  flags={flags}
-                  currentUser={currentUser}
-                  timeFormat={timeFormat}
-                  ranks={ranks}
-                  // THE RECEIPT, worked out here rather than in the bubble: it is a question about the CONVERSATION (who else is
-                  // in it) and the viewer as much as about the message, and the bubble is handed the answer instead of the three
-                  // things it would need to work it out. Only for your own messages, and only where a receipt means something -
-                  // `deliveryStateFor` returns nothing for anybody else's.
-                  delivery={
-                    message.author_id === mine && isChatThread(activeRoom)
-                      ? deliveryStateFor({ message, readAt, viewerId: mine, conversation: activeRoom })
-                      : ''
-                  }
-                  onEdit={startEdit}
-                  onDelete={(row) => onDelete?.(row)}
-                  onReact={onReact}
-                />
-              ))}
-            </ul>
           </div>
 
           <div className="relative border-t border-slate-200 p-2 dark:border-slate-700">
@@ -1142,6 +1204,7 @@ export default function ChatPanel({
                 <Smile className="h-4 w-4" />
               </button>
               <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -1154,7 +1217,7 @@ export default function ChatPanel({
                 }}
                 rows={1}
                 placeholder={`Message ${activeRoom.name}`}
-                className="max-h-28 min-h-[2.5rem] flex-1 resize-y rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-red-400 focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                className="max-h-28 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-red-400 focus:outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-white"
               />
               <button
                 type="button"

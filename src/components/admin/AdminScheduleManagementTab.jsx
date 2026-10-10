@@ -2516,7 +2516,7 @@ export default function AdminScheduleManagementTab({
         {!dayView && (
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 grid grid-cols-7 gap-1">
             {weekdayLabels().map((d) => (
-              <div key={d} className="text-center text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
+              <div key={d} className="text-center text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                 {d}
               </div>
             ))}
@@ -2533,9 +2533,27 @@ export default function AdminScheduleManagementTab({
           className={`${dayView ? (spanDates.length > 1 ? 'p-2 grid grid-cols-2 gap-1' : 'p-2') : 'p-2 grid grid-cols-7 gap-1'} ${gridClass}`}
           onAnimationEnd={onAnimationEnd}
         >
-{daysOnBoard.map((day, i) => {
+          {daysOnBoard.map((day, i) => {
+            const isWeekStart = !dayView && i % 7 === 0;
+            const weekNumber = Math.floor(i / 7) + 1;
+            const weekHeader = isWeekStart ? (
+              <div
+                key={`week-header-${weekNumber}`}
+                className={`col-span-full text-left text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 px-1 ${
+                  weekNumber > 1 ? 'pt-3 pb-1 border-t border-slate-200 dark:border-slate-700/60 mt-1' : 'pt-1 pb-1'
+                }`}
+              >
+                Week {weekNumber}
+              </div>
+            ) : null;
+
             if (!day) {
-              return <div key={`blank-${i}`} className="min-h-[124px] rounded-lg bg-slate-50/50 dark:bg-slate-900/40" />;
+              return (
+                <React.Fragment key={`blank-${i}`}>
+                  {weekHeader}
+                  <div className="min-h-[124px] rounded-lg bg-slate-50/50 dark:bg-slate-900/40" />
+                </React.Fragment>
+              );
             }
             const dateKey = toDateKey(day);
             // THE SHAPE THIS CELL IS DRAWN IN. In the day view one day fills the card, so the cell is tall and its
@@ -2579,9 +2597,10 @@ export default function AdminScheduleManagementTab({
             );
 
             return (
-              <div
-                key={dateKey}
-                // A drop anywhere in the day is answered, even where there is no slot under the pointer: the cell
+              <React.Fragment key={dateKey}>
+                {weekHeader}
+                <div
+                  // A drop anywhere in the day is answered, even where there is no slot under the pointer: the cell
                 // is the last surface a pill can land on, and saying nothing there is what made the board look
                 // broken. See handleDayDrop.
                 onDragOver={(e) => e.preventDefault()}
@@ -2794,8 +2813,9 @@ export default function AdminScheduleManagementTab({
                   );
                 })}
               </div>
-            );
-          })}
+            </React.Fragment>
+          );
+        })}
         </div>
       </div>
 
