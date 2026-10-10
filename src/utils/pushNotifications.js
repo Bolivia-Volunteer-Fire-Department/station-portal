@@ -1,4 +1,4 @@
-// Push notifications for Station Portal.
+// Push notifications for StationSync.
 //
 // The Firebase web config lives in the `system_settings` sheet (key
 // `fcm_web_config`, a JSON blob) rather than in Vite env vars, so a station

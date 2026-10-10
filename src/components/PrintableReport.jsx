@@ -9,7 +9,7 @@ import ReportChart from './ReportChart';
 // The chart is drawn at a fixed size: the sheet is display:none on screen, where a responsive container would be zero wide.
 const PRINT_CHART_WIDTH = 680;
 
-export default function PrintableReport({ result, departmentName = '', onDone }) {
+export default function PrintableReport({ result, departmentName = '', logoUrl = '', onDone }) {
   useEffect(() => {
     const finish = () => onDone?.();
     window.addEventListener('afterprint', finish);
@@ -38,7 +38,7 @@ export default function PrintableReport({ result, departmentName = '', onDone })
   return createPortal(
     <div className="print-sheet text-black">
       <header className="flex items-center gap-4 border-b-2 border-black pb-3">
-        <img src={stationLogoUrl()} alt="" className="h-16 w-16 shrink-0" />
+        <img src={logoUrl || stationLogoUrl()} alt="" className="h-16 w-16 shrink-0 object-contain" />
         <div className="flex-1">
           <div className="text-xl font-bold leading-tight">{departmentName}</div>
           <div className="text-base font-semibold">{result.report.name}</div>

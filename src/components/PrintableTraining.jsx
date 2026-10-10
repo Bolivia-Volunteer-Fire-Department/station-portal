@@ -33,6 +33,7 @@ import {
 export default function PrintableTraining({
   mode = 'list',
   departmentName = '',
+  logoUrl = '',
   memberName = '',
   // mode="list": the filtered, sorted rows the report is showing, and the filters that produced them.
   rows = [],
@@ -97,7 +98,7 @@ export default function PrintableTraining({
     <div className="print-sheet text-black">
       {/* The station's own patch, then what this sheet is. */}
       <div className="flex items-center gap-4 border-b-2 border-black pb-3">
-        <img src={stationLogoUrl()} alt="" className="w-16 h-16 shrink-0" />
+        <img src={logoUrl || stationLogoUrl()} alt="" className="w-16 h-16 shrink-0 object-contain" />
         <div className="flex-1">
           <div className="text-xl font-bold leading-tight">{header.departmentName}</div>
           <div className="text-base font-semibold">{header.title}</div>

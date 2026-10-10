@@ -128,6 +128,7 @@ export const bossSayingsFrom = (systemSettings) => {
 export const PUBLIC_SETTING_KEYS = [
   'station_name',
   'department_name',
+  'department_logo_url',
   ...LOADING_MESSAGE_KEYS,
   'required_clock_latitude',
   'required_clock_longitude',

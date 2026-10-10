@@ -46,7 +46,7 @@ const datasetLabel = (report) =>
       ? 'Clocked vs scheduled'
       : 'Schedule';
 
-function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
+function ReportLauncher({ report, departmentName, departmentLogoUrl, knownMembers, onClose }) {
   const today = toDateKey(new Date());
   const initialRange = resolveReportRange(report.default_range, today);
   const [from, setFrom] = useState(initialRange.from);
@@ -527,13 +527,13 @@ function ReportLauncher({ report, departmentName, knownMembers, onClose }) {
         </form>
       </ViewportModal>
       {printOpen && result && (
-        <PrintableReport result={result} departmentName={departmentName} onDone={() => setPrintOpen(false)} />
+        <PrintableReport result={result} departmentName={departmentName} logoUrl={departmentLogoUrl} onDone={() => setPrintOpen(false)} />
       )}
     </>
   );
 }
 
-export default function ReportsModule({ departmentName = '', members = [] }) {
+export default function ReportsModule({ departmentName = '', departmentLogoUrl = '', members = [] }) {
   const [reports, setReports] = useState([]);
   const [launched, setLaunched] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -598,7 +598,15 @@ export default function ReportsModule({ departmentName = '', members = [] }) {
         )}
       </section>
 
-      {launched && <ReportLauncher report={launched} departmentName={departmentName} knownMembers={members} onClose={() => setLaunched(null)} />}
+      {launched && (
+        <ReportLauncher
+          report={launched}
+          departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
+          knownMembers={members}
+          onClose={() => setLaunched(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 ## Welcome
 
-Welcome to the **Station Portal**. This guide is for members: what each module is for, and when to use it. Every entry in the list on the left covers one module — start here, then jump to whichever one you need.
+Welcome to **StationSync**. This guide is for members: what each module is for, and when to use it. Every entry in the list on the left covers one module — start here, then jump to whichever one you need.
 
 ## The modules
 

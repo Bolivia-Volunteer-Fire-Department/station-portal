@@ -647,7 +647,7 @@ function NotificationsCard({
       }
 
       if (typeof registered?.devices === 'number') setDeviceTotal(registered.devices);
-      setStatusMessage({ type: 'success', text: 'This device will now receive Station Portal notifications.' });
+      setStatusMessage({ type: 'success', text: 'This device will now receive StationSync notifications.' });
     } catch (err) {
       console.error('Failed to enable notifications:', err);
       setStatusMessage({ type: 'error', text: err.message || 'Could not enable notifications on this device.' });

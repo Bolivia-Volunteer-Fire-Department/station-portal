@@ -204,6 +204,7 @@ export default function AdminPanel({
   onRowSaved,
   // Used only on the printed schedule sheet's header.
   departmentName = '',
+  departmentLogoUrl = '',
   hideEventsByDefault = false,
   colorblindRankLabels = false,
 }) {
@@ -474,6 +475,7 @@ export default function AdminPanel({
           setup={certificationSetup}
           records={certificationRecords}
           departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
           onDataChanged={onAdminDataChanged}
           onBadgesChanged={onBadgesChanged}
         />
@@ -556,6 +558,7 @@ export default function AdminPanel({
           timeFormat={timeFormat}
           // Used only on the printed sheet's header.
           departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
         />
       )}
 
@@ -701,6 +704,7 @@ export default function AdminPanel({
           users={nameRows}
           currentUserId={currentUserId}
           departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
           onDataChanged={onAdminDataChanged}
         />
       )}

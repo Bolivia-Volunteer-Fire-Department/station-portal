@@ -134,9 +134,9 @@ import {
   SESSION_ENDED_MESSAGE,
   unauthorizedIsStale,
 } from './utils/sessionTimeout';
-// The chief's lines for the runner's boss level, derived from the public system settings (see utils/systemSettings).
 import { bossSayingsFrom } from './utils/systemSettings';
-import { stationLogoUrl } from './utils/assets';
+import { departmentLogoUrl, stationLogoUrl, stationSyncOnTransUrl } from './utils/assets';
+import { updateRuntimePwaIcons } from './utils/pwaIcons';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
 import { normalizeEventList } from './utils/events';
@@ -564,6 +564,12 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   }, [activeTab, currentUser]);
 
   const departmentName = systemSettings.find((s) => String(s.key) === 'department_name')?.value || '';
+  const departmentLogo = departmentLogoUrl(systemSettings);
+
+  useEffect(() => {
+    const customLogo = systemSettings.find((s) => String(s.key) === 'department_logo_url')?.value;
+    updateRuntimePwaIcons(customLogo, departmentName);
+  }, [systemSettings, departmentName]);
 
   // Name lookup for the schedule calendar's "Show everyone" view. Admins hold
   // the full directory (a superset of the minimal roster members receive).
@@ -602,7 +608,7 @@ const getLoadingMessage = () => {
 
 // Reflect the department name in the browser tab title
   useEffect(() => {
-    document.title = departmentName ? `${departmentName} Station Portal` : 'Station Portal';
+    document.title = departmentName ? `${departmentName} StationSync` : 'StationSync';
   }, [departmentName]);
 
   // Dark mode: user_setting > system_setting > default (dark). Resolved in
@@ -667,7 +673,7 @@ const getLoadingMessage = () => {
       // service worker either way, and this is the in-app copy of it. It gets the NOTIFICATION sound rather
       // than a toast sound - the two mean different things, and a member who has just been told about a shift
       // offer should hear the same earcon on both channels.
-      notificationToast(message.title || 'Station Portal', { description: message.body || '' });
+      notificationToast(message.title || 'StationSync', { description: message.body || '' });
     };
 
     navigator.serviceWorker.addEventListener('message', handlePushMessage);
@@ -2412,9 +2418,15 @@ const getLoadingMessage = () => {
           <span className="text-xl font-medium">{bootMessage}</span>
         </div>
       ) : !currentUser ? (
-        <LoginScreen onLogin={handleLogin} statusMessage={statusMessage} departmentName={departmentName} isLoading={globalLoading.active} />
+        <LoginScreen
+          onLogin={handleLogin}
+          statusMessage={statusMessage}
+          departmentName={departmentName}
+          departmentLogoUrl={departmentLogo}
+          isLoading={globalLoading.active}
+        />
       ) : (
-        <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
+        <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden md:overscroll-y-contain pb-[env(safe-area-inset-bottom)] md:pb-0">
           {/* The strip the iOS status bar sits on.
           //
           // index.html asks for `black-translucent`, which paints the app UNDER the status bar - so the
@@ -2452,15 +2464,13 @@ const getLoadingMessage = () => {
           <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
             <div className="flex min-w-0 items-center gap-2">
               {/* The burst is placed off the anchor, so the anchor is the containing block. */}
-              <a href="#" className="relative inline-block" onClick={(e) => {
+              <a href="#" className="relative inline-flex items-center" onClick={(e) => {
                 e.preventDefault();
                 handleEasterEgg();
               }}>
-                <img src={stationLogoUrl()} alt="Bolivia Fire Department Logo" className="w-8 h-8" />
+                <img src={stationSyncOnTransUrl()} alt="StationSync" className="h-7 w-auto max-w-[145px] object-contain" />
                 <PixelBurst trigger={easterBurst} />
-                {/* <Shield className="w-7 h-7 text-red-500" /> */}
               </a>
-              <span className="font-bold text-lg text-slate-900 dark:text-white shrink-0">Station Portal</span>
               {/* The current page, once its own heading has scrolled away. `truncate` matters here: a
                   long label must not push the menu button off the screen. */}
               {showPageLabel && pageBarLabel(activeTab, adminSubTab) && (
@@ -2483,6 +2493,7 @@ const getLoadingMessage = () => {
           <Sidebar
             currentUser={currentUser}
             isClockedIn={isClockedIn}
+            departmentName={departmentName}
             announcements={announcements}
             announcementAudience={announcementAudience}
             activeTab={activeTab}
@@ -2511,7 +2522,7 @@ const getLoadingMessage = () => {
             // `md:flex md:flex-col` only on the Help screen, where the heading above the guide card has to be one of
             // the rows rather than something the card is stacked under - see boundedScreen above. Every other
             // tab is untouched: the page scrolls them.
-            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 pb-20 sm:p-6 sm:pb-24 lg:p-8 lg:pb-8 page-enter ${
+            className={`flex-1 min-w-0 md:h-screen md:overflow-y-auto overscroll-y-contain p-4 sm:p-6 lg:p-8 page-enter pb-20 sm:pb-24 lg:pb-8 ${
               boundedScreen ? 'md:flex md:flex-col' : ''
             } ${
               centeredContent ? `mx-auto w-full ${CONTENT_MAX_WIDTH}` : ''
@@ -2522,34 +2533,47 @@ const getLoadingMessage = () => {
                 On the Help screen it does NOT scroll (there is nothing to scroll) and must keep its height, or a
                 short window would squash the title instead of the guide: hence `md:shrink-0`. */}
             <div ref={pageHeadingRef} className="mb-8 md:shrink-0">
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-                {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
-                {activeTab === 'clock-history' && 'Clock History'}
-                {activeTab === 'roster' && 'Roster'}
-                {activeTab === 'schedule' && 'Schedule'}
-                {activeTab === 'availability' && 'Availability'}
-                {activeTab === 'training' && 'Training'}
-                {activeTab === 'certifications' && 'Certifications'}
-                {activeTab === 'chat' && 'Chat'}
-                {activeTab === 'reports' && 'Reports & Forms'}
-                {activeTab === 'help' && 'Help'}
-                {activeTab === 'settings' && 'My Settings'}
-                {activeTab === 'admin' && 'Administration'}
-              </h2>
-              <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-                {activeTab === 'dashboard' && 'Manage your hours and time tracking.'}
-                {activeTab === 'clock-history' && 'Review your previous clock-in entries, duration, and locations.'}
-                {activeTab === 'roster' && 'View active members, ranks, and current certifications.'}
-                {activeTab === 'schedule' && 'Review your assigned shifts, or switch on "Show everyone" to see the whole crew.'}
-                {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
-                {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
-                {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
-                {activeTab === 'chat' && "The station's rooms, and your own line in them. It stays open over whatever else you are doing."}
-                {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
-                {activeTab === 'help' && 'Guides for using the portal. Administrators have their own set under Administration → System → Help.'}
-                {activeTab === 'settings' && 'Customize your personal account preferences.'}
-                {activeTab === 'admin' && 'Manage members, roles, ranks, and system settings.'}
-              </p>
+              <div className="flex items-center gap-3">
+                {activeTab === 'dashboard' ? (
+                  <img
+                    src={departmentLogo || stationLogoUrl()}
+                    alt={departmentName ? `${departmentName} Logo` : 'Department Logo'}
+                    className="w-10 h-10 object-contain shrink-0"
+                  />
+                ) : null}
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                    {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
+                    {activeTab === 'clock-history' && 'Clock History'}
+                    {activeTab === 'roster' && 'Roster'}
+                    {activeTab === 'schedule' && 'Schedule'}
+                    {activeTab === 'availability' && 'Availability'}
+                    {activeTab === 'training' && 'Training'}
+                    {activeTab === 'certifications' && 'Certifications'}
+                    {activeTab === 'chat' && 'Chat'}
+                    {activeTab === 'reports' && 'Reports & Forms'}
+                    {activeTab === 'help' && 'Help'}
+                    {activeTab === 'settings' && 'My Settings'}
+                    {activeTab === 'admin' && 'Administration'}
+                  </h2>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
+                    {activeTab === 'dashboard' && (
+                      'Manage your hours and time tracking.'
+                    )}
+                    {activeTab === 'clock-history' && 'Review your previous clock-in entries, duration, and locations.'}
+                    {activeTab === 'roster' && 'View active members, ranks, and current certifications.'}
+                    {activeTab === 'schedule' && 'Review your assigned shifts, or switch on "Show everyone" to see the whole crew.'}
+                    {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
+                    {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
+                    {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
+                    {activeTab === 'chat' && "The station's rooms, and your own line in them. It stays open over whatever else you are doing."}
+                    {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
+                    {activeTab === 'help' && 'Guides for using StationSync. Administrators have their own set under Administration → System → Help.'}
+                    {activeTab === 'settings' && 'Customize your personal account preferences.'}
+                    {activeTab === 'admin' && 'Manage members, roles, ranks, and system settings.'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* One boundary for every deferred screen in the chain below (see utils/deferredModules.js). It adds
@@ -2668,6 +2692,7 @@ const getLoadingMessage = () => {
                 timeFormat={activeTimeFormat}
                 // Used only on the printed sheet's header.
                 departmentName={departmentName}
+                departmentLogoUrl={departmentLogo}
                 // Re-reads the member's offers after a submit so the pill flips
                 // to "pending approval" immediately.
                 onOfferSubmitted={() => refreshOffers(authToken)}
@@ -2741,11 +2766,16 @@ const getLoadingMessage = () => {
                 canViewReports={canViewReports}
                 canGenerateForms={canGenerateForms}
                 reportsScreen={
-                  <ReportsModule departmentName={departmentName} members={roster.length ? roster : users} />
+                  <ReportsModule
+                    departmentName={departmentName}
+                    departmentLogoUrl={departmentLogo}
+                    members={roster.length ? roster : users}
+                  />
                 }
                 formsScreen={
                   <FormsModule
                     departmentName={departmentName}
+                    departmentLogoUrl={departmentLogo}
                     currentUser={currentUser}
                     users={roster.length ? roster : users}
                     canPickMembers={can('can_administer_trainings')}
@@ -2855,6 +2885,8 @@ const getLoadingMessage = () => {
                 // Lets any admin tab show a saved row immediately instead of waiting for the
                 // background refresh wave to drain. One prop for every collection.
                 onRowSaved={applySavedRow}
+                departmentName={departmentName}
+                departmentLogoUrl={departmentLogo}
               />
             )}
 

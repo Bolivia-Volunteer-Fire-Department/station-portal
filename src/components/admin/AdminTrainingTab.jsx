@@ -38,6 +38,7 @@ export default function AdminTrainingTab({
   currentUserId = '',
   // For the printed sheet's header, like the schedule's: the station's own name on its own paper.
   departmentName = '',
+  departmentLogoUrl = '',
   onDataChanged,
 }) {
   const [editing, setEditing] = useState(null);
@@ -482,6 +483,7 @@ export default function AdminTrainingTab({
         <PrintableTraining
           mode={printing.mode}
           departmentName={departmentName}
+          logoUrl={departmentLogoUrl}
           memberName={printedByName}
           rows={rows}
           filters={filters}

@@ -23,6 +23,7 @@ import {
 export default function PrintableSchedule({
   mode = 'member',
   departmentName = '',
+  logoUrl = '',
   // The month being printed. Both are required: the sheet has no sensible default month, and a missing
   // one is a ReferenceError at render rather than at build, so the verifier asserts this contract.
   year,
@@ -81,7 +82,7 @@ export default function PrintableSchedule({
     <div className="print-sheet text-black">
       {/* Header: the station's own patch, then who and what this is. */}
       <div className="flex items-center gap-4 border-b-2 border-black pb-3">
-        <img src={stationLogoUrl()} alt="" className="w-16 h-16 shrink-0" />
+        <img src={logoUrl || stationLogoUrl()} alt="" className="w-16 h-16 shrink-0 object-contain" />
         <div className="flex-1">
           <div className="text-xl font-bold leading-tight">{header.departmentName}</div>
           <div className="text-base font-semibold">{header.title}</div>

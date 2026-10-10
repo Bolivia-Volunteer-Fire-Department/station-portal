@@ -7,7 +7,7 @@ import PasswordInput from './PasswordInput';
 // has signed in, so it cannot be targeted at a role or a person, and it was the reason the app made a read without a
 // session at all. Anything that has to be read here belongs in this file, as a line of code somebody reviews - not in a
 // form. See utils/announcements#ANNOUNCEMENT_LOCATIONS.
-export default function LoginScreen({ onLogin, statusMessage, departmentName, isLoading = false }) {
+export default function LoginScreen({ onLogin, statusMessage, departmentName, departmentLogoUrl, isLoading = false }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -30,7 +30,11 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName, is
       <div className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8">
         <div className="flex flex-col items-center mb-8">
           <div className="mb-3">
-            <img src={stationLogoUrl()} alt="Bolivia Fire Department Logo" className="w-20 h-20" />
+            <img
+              src={departmentLogoUrl || stationLogoUrl()}
+              alt={departmentName ? `${departmentName} Logo` : 'Department Logo'}
+              className="w-20 h-20 object-contain"
+            />
             {/* <Shield className="w-10 h-10 text-red-500" /> */}
           </div>
           <h1 className="text-2xl font-bold tracking-wide text-slate-900 dark:text-white">{departmentName || 'Station'}</h1>
@@ -91,7 +95,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName, is
       </div>
 
       <p className="mt-6 text-xs text-slate-400 dark:text-slate-500 text-center select-none tracking-wide">
-        v1.55
+        StationSync v1.56
       </p>
     </div> 
   );

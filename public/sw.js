@@ -1,4 +1,4 @@
-/* Station Portal service worker - push notifications only.
+/* StationSync service worker - push notifications only.
  *
  * Deliberately does NOT intercept fetches: the app is a Vite build with hashed
  * asset URLs, so an app-shell cache would have to be versioned on every deploy
@@ -46,7 +46,7 @@ self.addEventListener('push', (event) => {
   const notification = data.notification || {};
   const payload = data.data || data;
 
-  const title = notification.title || payload.title || 'Station Portal';
+  const title = notification.title || payload.title || 'StationSync';
   const body = notification.body || payload.body || payload.message || 'You have a new update.';
 
   // One notification per event+offer, so separate shifts stack up instead of

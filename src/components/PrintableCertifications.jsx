@@ -4,7 +4,7 @@ import '../print.css';
 import { stationLogoUrl } from '../utils/assets';
 import { certificationStateLabel } from '../utils/certifications';
 
-export default function PrintableCertifications({ rows = [], departmentName = '', onDone }) {
+export default function PrintableCertifications({ rows = [], departmentName = '', logoUrl = '', onDone }) {
   useEffect(() => {
     const finish = () => onDone?.();
     window.addEventListener('afterprint', finish);
@@ -20,7 +20,7 @@ export default function PrintableCertifications({ rows = [], departmentName = ''
   return createPortal(
     <div className="print-sheet text-black">
       <header className="flex items-center gap-4 border-b-2 border-black pb-3">
-        <img src={stationLogoUrl()} alt="" className="h-16 w-16 shrink-0" />
+        <img src={logoUrl || stationLogoUrl()} alt="" className="h-16 w-16 shrink-0 object-contain" />
         <div className="flex-1">
           <div className="text-xl font-bold leading-tight">{departmentName}</div>
           <div className="text-base font-semibold">Certification records</div>

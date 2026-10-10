@@ -114,7 +114,7 @@ const headMeta = (name) =>
   new RegExp(`<meta\\s+name="${name}"\\s+content="([^"]*)"`).exec(html)?.[1] ?? null;
 check('the standard app-capable meta is declared', headMeta('mobile-web-app-capable'), 'yes');
 check('and the apple-prefixed one is kept for iOS Safari', headMeta('apple-mobile-web-app-capable'), 'yes');
-check('the ios title is still declared', headMeta('apple-mobile-web-app-title'), 'BFD Station Portal');
+check('the ios title is still declared', headMeta('apple-mobile-web-app-title'), 'BFD StationSync');
 // The modern declaration, for browsers that read neither meta - and what installs the app on Android.
 let manifest = '';
 try {

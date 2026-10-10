@@ -70,6 +70,7 @@ export default function ScheduleCalendar({
   timeFormat = '12',
   // Used only on the printed sheet's header.
   departmentName = '',
+  departmentLogoUrl = '',
   onOfferSubmitted,
 }) {
   const now = new Date();
@@ -1098,6 +1099,7 @@ export default function ScheduleCalendar({
         <PrintableSchedule
           mode={showEveryone ? 'crew' : 'member'}
           departmentName={departmentName}
+          logoUrl={departmentLogoUrl}
           memberName={currentUser?.name || ''}
           year={viewDate.getFullYear()}
           month={viewDate.getMonth()}

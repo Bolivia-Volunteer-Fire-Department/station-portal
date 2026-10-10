@@ -1,14 +1,16 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare, X } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
-import { stationLogoUrl } from '../utils/assets';
+import { stationLogoUrl, stationSyncLoopsUrl, stationSyncOnTransUrl } from '../utils/assets';
+// stationLogoUrl() preserved for test contract or department fallback
 import PixelBurst from './PixelBurst';
 import AnnouncementList from './AnnouncementList';
 
 export default function Sidebar({
     currentUser,
     isClockedIn,
+    departmentName = '',
     activeTab,
     setActiveTab,
     isSidebarOpen,
@@ -59,20 +61,47 @@ export default function Sidebar({
                 the home indicator the same way the shell does - `pt-`/`pb-` with the safe-area insets,
                 which are 0 on any device without them and unused at md, where this is a static column. */}
             <aside className={`
-        fixed md:static md:h-dvh inset-y-0 left-0 z-30 w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-transform duration-200 ease-in-out pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0
+        fixed md:static md:h-dvh inset-y-0 left-0 z-30 w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-transform duration-200 ease-in-out pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0 overflow-hidden overscroll-y-contain
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
-                <div className="hidden md:flex items-center gap-3 p-6 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center justify-between p-5 md:p-6 border-b border-slate-200 dark:border-slate-700">
                     {/* The burst is placed off the anchor, so the anchor is the containing block. */}
-                    <a href="#" className="relative inline-block" onClick={(e) => {
-                        e.preventDefault();
-                        handleEasterEgg();
-                    }}>
-                        <img src={stationLogoUrl()} alt="Bolivia Fire Department Logo" className="w-8 h-8" />
+                    <a
+                        href="#"
+                        className="relative flex items-center gap-3 min-w-0 group"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            handleEasterEgg();
+                        }}
+                    >
+                        <img
+                            src={stationSyncLoopsUrl()}
+                            alt="StationSync"
+                            className="h-9 w-9 shrink-0 object-contain drop-shadow-sm transition-transform duration-200 group-hover:scale-105"
+                        />
+                        <div className="flex flex-col min-w-0 justify-center">
+                            {departmentName ? (
+                                <span
+                                    className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate max-w-[145px] leading-tight mb-0.5"
+                                    title={departmentName}
+                                >
+                                    {departmentName}
+                                </span>
+                            ) : null}
+                            <span className="text-xl font-extrabold tracking-tight leading-none text-slate-800 dark:text-white flex items-center">
+                                Station<span className="bg-gradient-to-r from-red-500 to-red-600 bg-clip-text text-transparent">Sync</span>
+                            </span>
+                        </div>
                         <PixelBurst trigger={easterBurst} />
-                        {/* <Shield className="w-8 h-8 text-red-500" /> */}
                     </a>
-                    <span className="font-bold text-xl text-slate-900 dark:text-white">Station Portal</span>
+                    <button
+                        type="button"
+                        onClick={() => setIsSidebarOpen(false)}
+                        className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                        aria-label="Close navigation menu"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
                 </div>
 
                 <div className="p-4 m-4 bg-slate-100 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/50 flex items-center gap-3">
@@ -103,7 +132,7 @@ export default function Sidebar({
                   />
                 </div>
 
-                <nav className="flex-1 min-h-0 overflow-y-auto px-4 space-y-1">
+                <nav className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 space-y-1">
                     <button
                         onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'dashboard' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'

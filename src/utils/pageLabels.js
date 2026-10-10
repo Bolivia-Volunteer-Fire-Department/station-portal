@@ -1,7 +1,7 @@
 // Short page labels for the mobile app bar.
 //
 // The bar appends the current page once the page's own heading has scrolled out of sight, so a reader
-// deep in a long table still knows where they are: "Station Portal — Administration".
+// deep in a long table still knows where they are: "StationSync — Administration".
 //
 // These are deliberately SHORTER than the page headings. The heading for the dashboard is
 // "Welcome, Matthew", which would not fit beside the app name on a phone, so the bar says "Dashboard".

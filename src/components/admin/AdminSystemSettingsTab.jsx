@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays, MessageSquare } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check } from 'lucide-react';
+import { stationLogoUrl } from '../../utils/assets';
+import { processUploadedLogo, generatePwaAssets, createZipArchive, downloadBlob } from '../../utils/pwaIcons';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
@@ -36,6 +38,7 @@ import ConfirmModal from '../ConfirmModal';
 // are curated too - ten of them, named rather than repeated here (see utils/systemSettings).
 const KNOWN_KEYS = [
   'department_name',
+  'department_logo_url',
   'time_format',
   'is_dark_mode',
   'is_sounds_active',
@@ -83,13 +86,50 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
 
 function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
   const [departmentName, setDepartmentName] = useState(getSettingValue(systemSettings, 'department_name', ''));
+  const [logoUrl, setLogoUrl] = useState(getSettingValue(systemSettings, 'department_logo_url', ''));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
+  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
+
+  // PWA Generation state
+  const [isGeneratingPwa, setIsGeneratingPwa] = useState(false);
+  const [generatedPwaFiles, setGeneratedPwaFiles] = useState(null);
+  const [pwaSuccess, setPwaSuccess] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     setDepartmentName(getSettingValue(systemSettings, 'department_name', ''));
+    setLogoUrl(getSettingValue(systemSettings, 'department_logo_url', ''));
   }, [systemSettings]);
+
+  const activeLogo = logoUrl || stationLogoUrl();
+  const isCustomLogo = Boolean(logoUrl && logoUrl.trim());
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsProcessingLogo(true);
+    setError(null);
+    try {
+      const dataUrl = await processUploadedLogo(file);
+      setLogoUrl(dataUrl);
+      setGeneratedPwaFiles(null);
+      setPwaSuccess(false);
+    } catch (err) {
+      setError(err?.message || 'Failed to process logo file.');
+    } finally {
+      setIsProcessingLogo(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleResetLogo = () => {
+    setLogoUrl('');
+    setGeneratedPwaFiles(null);
+    setPwaSuccess(false);
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -97,7 +137,13 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
     setError(null);
     setSaved(false);
     try {
-      const result = await adminSaveSystemSetting('department_name', departmentName, token);
+      const result = await adminSaveSystemSettings(
+        [
+          { key: 'department_name', value: departmentName },
+          { key: 'department_logo_url', value: logoUrl },
+        ],
+        token
+      );
       if (!result?.success) throw new Error(result?.message || 'Failed to save general settings.');
       void onDataChanged();
       setSaved(true);
@@ -108,16 +154,48 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
     }
   };
 
+  const handleGeneratePwa = async () => {
+    setIsGeneratingPwa(true);
+    setError(null);
+    try {
+      const files = await generatePwaAssets(activeLogo, { departmentName });
+      setGeneratedPwaFiles(files);
+      setPwaSuccess(true);
+    } catch (err) {
+      setError(err?.message || 'Failed to generate PWA assets from this logo.');
+    } finally {
+      setIsGeneratingPwa(false);
+    }
+  };
+
+  const handleDownloadZip = () => {
+    if (!generatedPwaFiles) return;
+    try {
+      const zipBlob = createZipArchive(generatedPwaFiles);
+      const safeName = (departmentName || 'station').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      downloadBlob(zipBlob, `${safeName}-pwa-icons.zip`);
+    } catch (err) {
+      setError(err?.message || 'Failed to create ZIP archive.');
+    }
+  };
+
+  const handleDownloadSingle = (file) => {
+    const blob = file.name.endsWith('.webmanifest')
+      ? new Blob([file.data], { type: 'application/manifest+json' })
+      : new Blob([file.data], { type: 'image/png' });
+    downloadBlob(blob, file.name.split('/').pop());
+  };
+
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-      <form onSubmit={handleSave} className="p-6 space-y-4">
+      <form onSubmit={handleSave} className="p-6 space-y-6">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
             <Building2 className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">General Settings</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Basic identity used across the app.</p>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">General Settings & Branding</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Department identity, emblem, and app branding used across the station.</p>
           </div>
         </div>
 
@@ -132,15 +210,152 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
           <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Department Name</label>
           <input
             type="text"
-            placeholder="e.g. Riverside Fire Department"
+            placeholder="e.g. Bolivia Volunteer Fire Department"
             value={departmentName}
             onChange={(e) => setDepartmentName(e.target.value)}
             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
           />
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">Shown on the login screen and browser tab title.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">Shown on the login screen, schedule printouts, and browser tab titles.</p>
         </div>
 
-        <div className="flex justify-end items-center gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/80 mt-2">
+        {/* Department Logo Upload */}
+        <div className="pt-2 border-t border-slate-200 dark:border-slate-700/80 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="block text-sm font-medium text-slate-900 dark:text-white">Department Emblem / Shield</label>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Replaces the shield patch on the login screen, timeclock header, and printable sheets.
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
+              isCustomLogo
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700'
+            }`}>
+              {isCustomLogo ? <Check className="w-3.5 h-3.5" /> : <Shield className="w-3.5 h-3.5" />}
+              {isCustomLogo ? 'Custom Logo Active' : 'Default Shield Active'}
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/60">
+            <div className="w-20 h-20 shrink-0 p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center overflow-hidden">
+              <img
+                src={activeLogo}
+                alt="Department Logo Preview"
+                className="max-w-full max-h-full object-contain"
+              />
+            </div>
+
+            <div className="flex-1 space-y-2 text-center sm:text-left">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={isProcessingLogo}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition shadow-sm disabled:opacity-50"
+                >
+                  {isProcessingLogo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                  {isCustomLogo ? 'Upload New Emblem' : 'Upload Department Emblem'}
+                </button>
+
+                {isCustomLogo && (
+                  <button
+                    type="button"
+                    onClick={handleResetLogo}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 border border-transparent hover:border-red-200 dark:hover:border-red-800 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Reset to Default Shield
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Recommended: Square PNG with transparency, WebP, or SVG. Auto-scaled for crisp rendering across retina and mobile screens.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* PWA Icon Pack Auto-Generator */}
+        <div className="pt-2 border-t border-slate-200 dark:border-slate-700/80 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-semibold text-slate-900 dark:text-white">PWA & App Icon Generator</h4>
+                <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950/80 dark:text-red-300">
+                  Auto-Gen
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Generates responsive favicons, Apple touch icons, Android home screen badges, and web app manifest from your logo.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={isGeneratingPwa}
+              onClick={handleGeneratePwa}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 transition disabled:opacity-50"
+            >
+              {isGeneratingPwa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-500" />}
+              Generate Icons
+            </button>
+          </div>
+
+          {generatedPwaFiles && (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/60 space-y-4 animate-fadeIn">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-500" />
+                  <span className="text-xs font-medium text-slate-900 dark:text-slate-100">
+                    Generated {generatedPwaFiles.length - 1} icon formats + Web App Manifest
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownloadZip}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-sm"
+                >
+                  <FileArchive className="w-3.5 h-3.5" />
+                  Download PWA Icon Pack (.zip)
+                </button>
+              </div>
+
+              {/* Icon thumbnails grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-1">
+                {generatedPwaFiles.filter((f) => f.dataUrl).map((f) => (
+                  <div
+                    key={f.name}
+                    className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-between gap-1.5 text-center group"
+                  >
+                    <div className="w-12 h-12 flex items-center justify-center p-1 rounded bg-slate-100 dark:bg-slate-900/80">
+                      <img src={f.dataUrl} alt={f.label} className="max-w-full max-h-full object-contain" />
+                    </div>
+                    <div className="w-full">
+                      <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 truncate">{f.label}</div>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadSingle(f)}
+                        className="mt-1 w-full text-[10px] text-slate-500 hover:text-red-500 flex items-center justify-center gap-0.5 py-0.5"
+                      >
+                        <Download className="w-2.5 h-2.5" /> Download
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end items-center gap-3 pt-3 border-t border-slate-200 dark:border-slate-700/80 mt-2">
           {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
           <button
             type="submit"

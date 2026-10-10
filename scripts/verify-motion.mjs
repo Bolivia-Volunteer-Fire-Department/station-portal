@@ -184,7 +184,7 @@ check(
   animationRules(css)
     .filter(({ declarations }) => !/var\(--motion-/.test(declarations))
     .map(({ selector }) => selector),
-  ['.animate-swapDwell', '.animate-swapPop', '.splash-logo-wrap', '.splash-shimmer::before']
+  ['.animate-swapDwell', '.animate-swapPop', '.splash-logo-wrap', '.splash-wordmark-wrap', '.splash-wordmark-text', '.splash-shimmer::before']
 );
 
 console.log('\n--- every animation honors prefers-reduced-motion ---');

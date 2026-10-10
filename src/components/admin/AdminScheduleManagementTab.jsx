@@ -206,6 +206,7 @@ export default function AdminScheduleManagementTab({
   timeFormat = '12',
   // Used only on the printed sheet's header.
   departmentName = '',
+  departmentLogoUrl = '',
 }) {
   const now = new Date();
 
@@ -2838,6 +2839,7 @@ export default function AdminScheduleManagementTab({
         <PrintableSchedule
           mode="admin"
           departmentName={departmentName}
+          logoUrl={departmentLogoUrl}
           year={year}
           month={month}
           // THE SAVED ROWS THIS BOARD HOLDS for the month on screen (`base`), not the shared array: the sheet prints the

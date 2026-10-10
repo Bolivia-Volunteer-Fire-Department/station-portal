@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "BFD Station Portal",
-  "short_name": "BFD Station Portal",
+  "name": "BFD StationSync",
+  "short_name": "BFD StationSync",
   "description": "Station timeclock, scheduling and shift offers for Bolivia NC Fire Department members.",
   "start_url": "./",
   "scope": "./",

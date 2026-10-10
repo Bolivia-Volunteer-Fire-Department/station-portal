@@ -237,7 +237,7 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 // `force` bypasses the mute gate for the sounds toggle's own feedback, which has to be heard on the way ON - the
 // one moment the member is listening for a result while sound is still switched off. It is a flag on this call
 // rather than a check at the call site because the state lives here.
-export const playSound = (name, { force = false } = {}) => {
+export const playSound = (name, { force = false, onPlay, onBlocked } = {}) => {
   if (!force && !soundsEnabled) return false;
   if (!SOUND_FILES[name]) return false;
 
@@ -250,8 +250,13 @@ export const playSound = (name, { force = false } = {}) => {
       const oneOff = new Audio(SOUND_FILES[name]);
       oneOff.volume = volumeFor(name);
       const started = oneOff.play();
-      if (started && typeof started.catch === 'function') started.catch(() => {});
-    } catch {
+      if (started && typeof started.then === 'function') {
+        started.then(() => onPlay?.()).catch((err) => onBlocked?.(err));
+      } else {
+        onPlay?.();
+      }
+    } catch (err) {
+      onBlocked?.(err);
       return false;
     }
     void primeSound(name);
@@ -266,8 +271,13 @@ export const playSound = (name, { force = false } = {}) => {
   try {
     audio.currentTime = 0;
     const started = audio.play();
-    if (started && typeof started.catch === 'function') started.catch(() => {});
-  } catch {
+    if (started && typeof started.then === 'function') {
+      started.then(() => onPlay?.()).catch((err) => onBlocked?.(err));
+    } else {
+      onPlay?.();
+    }
+  } catch (err) {
+    onBlocked?.(err);
     return false;
   }
   return true;

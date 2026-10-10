@@ -255,7 +255,7 @@ function CertificationFileField({ recordId, memberId, token }) {
 //     new period, which is what leaves the station a history instead of a single current answer.
 //   * the end date is DISABLED for a certification whose setup says it cannot be renewed. One-off achievements
 //     have no expiry, and the server blanks the field too, so the rule survives somebody editing the sheet.
-export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], departmentName = '', onDataChanged, onBadgesChanged }) {
+export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], departmentName = '', departmentLogoUrl = '', onDataChanged, onBadgesChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Whether the editor modal is open: "a new record" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
@@ -652,6 +652,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         <PrintableCertifications
           rows={printableRows}
           departmentName={departmentName}
+          logoUrl={departmentLogoUrl}
           onDone={() => setPrintOpen(false)}
         />
       )}
