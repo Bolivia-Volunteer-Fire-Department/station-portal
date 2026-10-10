@@ -156,6 +156,7 @@ export const PUBLIC_SETTING_KEYS = [
   ...BOSS_SAYING_KEYS,
   'is_dark_mode',
   'time_format',
+  'mobile_nav_modules',
 ];
 
 // Which document a setting belongs in: 'public' or 'private'.

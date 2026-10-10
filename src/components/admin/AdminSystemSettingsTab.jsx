@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone } from 'lucide-react';
 import { stationLogoUrl } from '../../utils/assets';
 import { processUploadedLogo, generatePwaAssets, createZipArchive, downloadBlob } from '../../utils/pwaIcons';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
@@ -30,6 +30,12 @@ import {
   bossSayingSavePlan,
   BOSS_SAYING_KEYS,
 } from '../../utils/systemSettings';
+import {
+  MOBILE_NAV_MODULES_KEY,
+  AVAILABLE_MOBILE_NAV_MODULES,
+  parseMobileNavModules,
+  formatMobileNavModules,
+} from '../../utils/mobileNav';
 import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
 import ConfirmModal from '../ConfirmModal';
@@ -59,6 +65,7 @@ const KNOWN_KEYS = [
   // loading messages: a card of five fields is a screen, and the generic value editor below it is for everything a
   // station adds by itself.
   ...BOSS_SAYING_KEYS,
+  MOBILE_NAV_MODULES_KEY,
 ];
 
 function isTruthySetting(value) {
@@ -76,6 +83,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <PayPeriodCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <MobileNavSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <BossSayingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -1275,6 +1283,145 @@ function DisplaySettingsCard({ token, systemSettings, onDataChanged }) {
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save Display Settings
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MobileNavSettingsCard({ token, systemSettings, onDataChanged }) {
+  const currentSetting = getSettingValue(systemSettings, MOBILE_NAV_MODULES_KEY, '');
+  const [selectedModules, setSelectedModules] = useState(() => parseMobileNavModules(currentSetting));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setSelectedModules(parseMobileNavModules(getSettingValue(systemSettings, MOBILE_NAV_MODULES_KEY, '')));
+  }, [systemSettings]);
+
+  const handleSlotChange = (slotIndex, newModuleId) => {
+    setSelectedModules((prev) => {
+      const next = [...prev];
+      const existingIndex = next.indexOf(newModuleId);
+      if (existingIndex !== -1 && existingIndex !== slotIndex) {
+        next[existingIndex] = next[slotIndex];
+      }
+      next[slotIndex] = newModuleId;
+      return next;
+    });
+    setSaved(false);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const formatted = formatMobileNavModules(selectedModules);
+      const result = await adminSaveSystemSetting(MOBILE_NAV_MODULES_KEY, formatted, token);
+      if (!result?.success) throw new Error(result?.message || 'Failed to save mobile navigation settings.');
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save mobile navigation settings.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <Smartphone className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Mobile Navigation Bar</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Choose the 3 primary action modules displayed on mobile devices (&lt; 768px). Remaining modules are placed inside the &quot;More&quot; menu.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* 3 Action Module Slots */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[0, 1, 2].map((slotIndex) => {
+            const currentModuleId = selectedModules[slotIndex] || '';
+            const slotMeta = AVAILABLE_MOBILE_NAV_MODULES.find((m) => m.id === currentModuleId);
+
+            return (
+              <div key={slotIndex} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/40 space-y-2">
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Button {slotIndex + 1}
+                </label>
+                <select
+                  value={currentModuleId}
+                  onChange={(e) => handleSlotChange(slotIndex, e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-medium rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                >
+                  {AVAILABLE_MOBILE_NAV_MODULES.map((mod) => (
+                    <option key={mod.id} value={mod.id}>
+                      {mod.label} ({mod.description})
+                    </option>
+                  ))}
+                </select>
+                {slotMeta && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {slotMeta.description}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Live Preview Box */}
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 p-4 bg-slate-100/60 dark:bg-slate-900/60 space-y-2">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+            <span>Mobile Bottom Bar Preview</span>
+            <span className="text-[11px] font-normal text-slate-400 dark:text-slate-500">Live preview (mobile viewport)</span>
+          </div>
+          <div className="max-w-sm mx-auto bg-white/95 dark:bg-slate-800/95 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-2 flex items-center justify-around shadow-sm">
+            {selectedModules.map((modId) => {
+              const meta = AVAILABLE_MOBILE_NAV_MODULES.find((m) => m.id === modId) || { label: modId };
+              return (
+                <div key={modId} className="flex flex-col items-center justify-center flex-1 py-1 text-slate-700 dark:text-slate-300">
+                  <div className="w-5 h-5 rounded-md bg-red-100 dark:bg-red-950/70 border border-red-300 dark:border-red-700/60 mb-1 flex items-center justify-center text-[10px] font-bold text-red-600 dark:text-red-400">
+                    {meta.label.charAt(0)}
+                  </div>
+                  <span className="text-[11px] font-medium truncate max-w-[65px]">{meta.label}</span>
+                </div>
+              );
+            })}
+            <div className="flex flex-col items-center justify-center flex-1 py-1 text-slate-500 dark:text-slate-400">
+              <div className="w-5 h-5 rounded-md bg-slate-200 dark:bg-slate-700 mb-1 flex items-center justify-center text-[10px] font-bold">
+                ≡
+              </div>
+              <span className="text-[11px] font-medium">More</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end items-center gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/80">
+          {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Mobile Navigation
           </button>
         </div>
       </form>

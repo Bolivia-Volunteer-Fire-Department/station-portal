@@ -1,5 +1,5 @@
 import React, { Suspense, useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Clock, Loader2, Menu, X } from 'lucide-react';
+import { Clock, Loader2 } from 'lucide-react';
 // Toasts come from our own wrapper, not from sonner: it plays the sound mapped to each toast kind and then
 // delegates, so every toast in the app is audible without its call site knowing about sounds. The Toaster host
 // itself is still sonner's.
@@ -61,6 +61,7 @@ import { mustChangePassword, MUST_CHANGE_PASSWORD_COLUMN } from './utils/passwor
 import ClockBlockedModal from './components/ClockBlockedModal';
 import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
+import { MOBILE_NAV_MODULES_KEY, parseMobileNavModules } from './utils/mobileNav';
 import PixelBurst from './components/PixelBurst';
 import ClockCard from './components/ClockCard';
 import OnDutyCard from './components/OnDutyCard';
@@ -565,6 +566,9 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
 
   const departmentName = systemSettings.find((s) => String(s.key) === 'department_name')?.value || '';
   const departmentLogo = departmentLogoUrl(systemSettings);
+  const mobileNavModules = parseMobileNavModules(
+    systemSettings.find((s) => String(s.key) === MOBILE_NAV_MODULES_KEY)?.value
+  );
 
   useEffect(() => {
     const customLogo = systemSettings.find((s) => String(s.key) === 'department_logo_url')?.value;
@@ -2464,30 +2468,32 @@ const getLoadingMessage = () => {
           <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
             <div className="flex min-w-0 items-center gap-2">
               {/* The burst is placed off the anchor, so the anchor is the containing block. */}
-              <a href="#" className="relative inline-flex items-center" onClick={(e) => {
+              <a href="#" className="relative inline-flex items-center shrink-0" onClick={(e) => {
                 e.preventDefault();
                 handleEasterEgg();
               }}>
-                <img src={stationSyncOnTransUrl()} alt="StationSync" className="h-7 w-auto max-w-[145px] object-contain" />
+                <img src={stationSyncOnTransUrl()} alt="StationSync" className="h-7 w-auto max-w-[130px] object-contain" />
                 <PixelBurst trigger={easterBurst} />
               </a>
-              {/* The current page, once its own heading has scrolled away. `truncate` matters here: a
-                  long label must not push the menu button off the screen. */}
-              {showPageLabel && pageBarLabel(activeTab, adminSubTab) && (
-                <>
-                  <span className="shrink-0 text-slate-300 dark:text-slate-600" aria-hidden="true">—</span>
-                  <span className="truncate text-sm font-medium text-slate-500 dark:text-slate-400">
-                    {pageBarLabel(activeTab, adminSubTab)}
+              {departmentName ? (
+                <div className="flex items-center min-w-0 border-l border-slate-200 dark:border-slate-700 pl-2">
+                  <span
+                    className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 truncate max-w-[140px]"
+                    title={departmentName}
+                  >
+                    {departmentName}
                   </span>
-                </>
-              )}
+                </div>
+              ) : null}
             </div>
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
-            >
-              {isSidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
+            {/* The current page, once its own heading has scrolled away. */}
+            {showPageLabel && pageBarLabel(activeTab, adminSubTab) && (
+              <div className="flex items-center min-w-0 pl-2 shrink-0">
+                <span className="truncate text-sm font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/60 px-2 py-1 rounded-lg border border-slate-200/60 dark:border-slate-600/50">
+                  {pageBarLabel(activeTab, adminSubTab)}
+                </span>
+              </div>
+            )}
           </header>
 
           <Sidebar
@@ -2885,7 +2891,6 @@ const getLoadingMessage = () => {
                 // Lets any admin tab show a saved row immediately instead of waiting for the
                 // background refresh wave to drain. One prop for every collection.
                 onRowSaved={applySavedRow}
-                departmentName={departmentName}
                 departmentLogoUrl={departmentLogo}
               />
             )}
@@ -2936,9 +2941,17 @@ const getLoadingMessage = () => {
             activeTab={activeTab}
             onSelectTab={handleSidebarNavigate}
             onOpenMore={() => setIsSidebarOpen(true)}
+            modules={mobileNavModules}
             canViewSchedule={canViewSchedule}
             canUseChat={canUseChat}
             canUseTimeclock={canUseTimeclock}
+            canEditAvailability={canEditOwnAvailability}
+            canViewRoster={canViewRoster}
+            canSignTrainings={canSignTrainings}
+            canViewDocuments={canViewDocuments}
+            canViewReports={canViewReports}
+            canGenerateForms={canGenerateForms}
+            canAdminister={canAdminister}
             unreadChatCount={unreadChatCount}
           />
         </div>
