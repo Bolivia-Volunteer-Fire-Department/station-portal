@@ -30,13 +30,13 @@ export default function MyAvailability({
     async (changes) => {
       try {
         const result = await setMyAvailability(changes, token);
-        if (result?.success) await onChanged?.(token);
+        if (result?.success) await onChanged?.(token, { from: loadedFrom, to: loadedTo });
         return result;
       } catch (err) {
         return { success: false, message: err?.message || 'Failed to save availability.' };
       }
     },
-    [token, onChanged]
+    [token, onChanged, loadedFrom, loadedTo]
   );
 
   return (

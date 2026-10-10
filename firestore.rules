@@ -401,9 +401,8 @@ service cloud.firestore {
         && request.resource.data.claims is map;
       allow update: if signedIn()
         && resource != null
-        && hasAvailabilityIdentity(docId, resource.data)
         && hasAvailabilityIdentity(docId, request.resource.data)
-        && request.resource.data.user_id == resource.data.user_id
+        && (resource.data.get('user_id', '') == '' || request.resource.data.user_id == resource.data.user_id)
         && (request.resource.data.user_id == uid() || permission('can_edit_member_availability'))
         && request.resource.data.claims is map;
       allow delete: if signedIn()

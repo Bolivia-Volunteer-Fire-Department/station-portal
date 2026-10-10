@@ -76,9 +76,12 @@ export const audienceRows = (name, keys) =>
 export const memberAvailabilityFor = async (uid, months) => {
   const ids = (Array.isArray(months) ? months : []).map((month) => availabilityMonthId(uid, month));
   if (!ids.length) return [];
-  const docs = await rowsOf(
-    query(collection(firestore(), 'availability_months'), where(documentId(), 'in', ids))
+  const snapshots = await Promise.all(
+    ids.map((id) => getDoc(doc(firestore(), 'availability_months', id)))
   );
+  const docs = snapshots
+    .filter((snap) => snap.exists())
+    .map((snap) => ({ ...snap.data(), id: snap.id }));
   return claimRowsFromMonths(docs);
 };
 

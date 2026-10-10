@@ -242,6 +242,7 @@ export const firestore = () => {
     // the in-memory cache: the same Firestore, with the same behaviour on the wire.
     firestoreInstance = initializeFirestore(firebaseApp(), {
       localCache: usingEmulator ? memoryLocalCache() : browserCache(),
+      experimentalAutoDetectLongPolling: true,
     });
     if (usingEmulator) connectFirestoreEmulator(firestoreInstance, '127.0.0.1', 8080);
   }

@@ -212,7 +212,13 @@ export default function AvailabilityCalendar({
         else working.delete(key);
       }
       const monthKey = toDateKey(new Date(year, month, 1)).slice(0, 7);
-      const result = await onSave({ month: monthKey, claims: claimsMapFromKeys(working) });
+      const monthWorking = new Set(
+        [...working].filter((key) => {
+          const day = key.split('|')[1];
+          return day && day.startsWith(monthKey);
+        })
+      );
+      const result = await onSave({ month: monthKey, claims: claimsMapFromKeys(monthWorking) });
       if (!result?.success) throw new Error(result?.message || 'Failed to save availability.');
       setOverrides(new Map());
       setMessage({ type: 'ok', text: `Saved ${changeCount} change${changeCount === 1 ? '' : 's'}.` });

@@ -1188,6 +1188,7 @@ export const routeWrite = async (action, body = {}) => {
   try {
     return await DISPATCH[action](body, uid);
   } catch (error) {
+    console.error(`[firestore] ${action} write failed:`, error);
     return failureFor(error);
   }
 };

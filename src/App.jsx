@@ -1457,6 +1457,40 @@ const getLoadingMessage = () => {
     }
   };
 
+  // EVERY member's claims for a range, for the officer screens. Loaded when one of those screens is open, so a member's
+  // session never pays for it.
+  const loadRosterAvailability = async (from, to) => {
+    try {
+      const data = await adminFetchAvailability(authToken, { from, to });
+      if (data && data.code === 'UNAUTHORIZED') {
+        sessionExpired(authToken);
+        return REFRESH_EXPIRED;
+      }
+      if (data && data.availability) {
+        const rows = Array.isArray(data.availability) ? data.availability : [];
+        const fromStr = String(from || '');
+        const toStr = String(to || '');
+        setRosterAvailability((prev) =>
+          fromStr && toStr
+            ? [
+                ...(prev || []).filter((row) => {
+                  const day = String(row?.date_from || '').slice(0, 10);
+                  return day < fromStr || day > toStr;
+                }),
+                ...rows,
+              ]
+            : rows
+        );
+      }
+      setRosterScope({ from: String(from || ''), to: String(to || '') });
+      if (data && data.availability_window) setRosterScope(data.availability_window);
+      return REFRESH_OK;
+    } catch (err) {
+      console.error('Failed to load the crew availability', err);
+      return REFRESH_FAILED;
+    }
+  };
+
   // The member's own claims, over a range. It REPLACES what the range covers and keeps what is outside it: a plain
   // merge would keep a row the server no longer has (an un-marked day), and a plain replace would drop months nobody
   // asked for. Naming no range replaces everything, which is what the refresh wave does.
@@ -1485,6 +1519,13 @@ const getLoadingMessage = () => {
         );
       }
       if (data && data.availability_window) setAvailabilityScope(data.availability_window);
+      if ((isAdmin || can('can_edit_member_availability')) && (scope.from || rosterScope?.from)) {
+        const rFrom = scope.from || rosterScope?.from;
+        const rTo = scope.to || rosterScope?.to;
+        if (rFrom && rTo) {
+          void loadRosterAvailability(rFrom, rTo);
+        }
+      }
       return REFRESH_OK;
     } catch (err) {
       console.error('Failed to update availability', err);
@@ -1743,25 +1784,6 @@ const getLoadingMessage = () => {
     const from = toDateKey(new Date(year, month, 1));
     const to = toDateKey(new Date(year, month + 1, 0));
     return refreshAvailability(authToken, { from, to });
-  };
-
-  // EVERY member's claims for a range, for the officer screens. Loaded when one of those screens is open, so a member's
-  // session never pays for it.
-  const loadRosterAvailability = async (from, to) => {
-    try {
-      const data = await adminFetchAvailability(authToken, { from, to });
-      if (data && data.code === 'UNAUTHORIZED') {
-        sessionExpired(authToken);
-        return REFRESH_EXPIRED;
-      }
-      if (data && data.availability) setRosterAvailability(data.availability);
-      setRosterScope({ from: String(from || ''), to: String(to || '') });
-      if (data && data.availability_window) setRosterScope(data.availability_window);
-      return REFRESH_OK;
-    } catch (err) {
-      console.error('Failed to load the crew availability', err);
-      return REFRESH_FAILED;
-    }
   };
 
   // Post-sign-in data load.
