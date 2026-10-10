@@ -8,7 +8,7 @@
 //   - What the rules can check, they check - a member may only open a shift for themselves. What they cannot (that
 //     the coordinates are honest) was never checked by the sheet version either: it validated what the browser sent,
 //     and so does this.
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseFunctions, firestore } from './firebase.js';
 // Which fields a browser may write on a member's PRIVATE record - see utils/memberFields, and the assertion in
@@ -121,9 +121,19 @@ export const saveAvailabilityMonth = async ({ userId, month, claims = {} }) => {
 // caller's own rows) and it costs one small query, with no index beyond `user_id`.
 export const makeOffer = async ({ userId, scheduleId, templateId, dateFrom, dateTo, assignmentId, slotKey }) => {
   const key = String(slotKey || '');
-  const mine = await rowsFor('schedule_offers', 'user_id', userId);
-  if (mine.some((row) => String(row.slot_key ?? '') === key && row.status === 'declined')) {
-    throw new Error('Your offer for this shift was declined, so you cannot offer for it again. Ask an officer to put you on it.');
+  if (key) {
+    const declined = await rowsOf(
+      query(
+        collection(firestore(), 'schedule_offers'),
+        where('user_id', '==', userId),
+        where('slot_key', '==', key),
+        where('status', '==', 'declined'),
+        limit(1)
+      )
+    );
+    if (declined.length > 0) {
+      throw new Error('Your offer for this shift was declined, so you cannot offer for it again. Ask an officer to put you on it.');
+    }
   }
 
   const created = doc(collection(firestore(), 'schedule_offers'));
@@ -618,11 +628,12 @@ export const verifyChecklistItem = async ({ verifierId, documentId, itemId, memb
     return { success: true, verified: 0, already_verified: true, signatures };
   }
 
-  await addDoc(
+  const newRow = signatureRow({ documentId, itemId: item, memberId: member, signerId: verifierId, role: 'verifier', revision: 0, at: stationTimestamp() });
+  const createdRef = await addDoc(
     collection(firestore(), 'document_signatures'),
-    signatureRow({ documentId, itemId: item, memberId: member, signerId: verifierId, role: 'verifier', revision: 0, at: stationTimestamp() })
+    newRow
   );
-  return { success: true, verified: 1, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
+  return { success: true, verified: 1, signatures: [...signatures, { ...newRow, id: createdRef.id }] };
 };
 
 // THE DOCUMENT'S OWN SIGNATURE, confirmed by somebody else - the same act as verifying a checklist item, one level up.
@@ -663,21 +674,22 @@ export const verifyDocumentSignature = async ({ verifierId, documentId, memberId
     return { success: true, verified: 0, already_verified: true, signatures };
   }
 
-  await addDoc(
+  const newRow = signatureRow({
+    documentId: document,
+    itemId: WHOLE_DOCUMENT_ITEM,
+    memberId: member,
+    signerId: verifierId,
+    role: 'verifier',
+    // A verification is not a signature OF a revision, exactly as on the item path: the member's row carries the
+    // revision it was signed against, and this one only records that somebody else looked.
+    revision: 0,
+    at: stationTimestamp(),
+  });
+  const createdRef = await addDoc(
     collection(firestore(), 'document_signatures'),
-    signatureRow({
-      documentId: document,
-      itemId: WHOLE_DOCUMENT_ITEM,
-      memberId: member,
-      signerId: verifierId,
-      role: 'verifier',
-      // A verification is not a signature OF a revision, exactly as on the item path: the member's row carries the
-      // revision it was signed against, and this one only records that somebody else looked.
-      revision: 0,
-      at: stationTimestamp(),
-    })
+    newRow
   );
-  return { success: true, verified: 1, signatures: await rowsFor('document_signatures', 'document_id', document) };
+  return { success: true, verified: 1, signatures: [...signatures, { ...newRow, id: createdRef.id }] };
 };
 
 // Everything that member has signed and nobody has verified, in ONE call: a verifier going down a list wants the list
@@ -698,14 +710,15 @@ export const verifyChecklistRemaining = async ({ verifierId, documentId, memberI
 
   const at = stationTimestamp();
   const batch = writeBatch(firestore());
+  const newRows = [];
   pending.forEach((row) => {
-    batch.set(
-      doc(collection(firestore(), 'document_signatures')),
-      signatureRow({ documentId, itemId: row.checklist_item_id, memberId: member, signerId: verifierId, role: 'verifier', revision: 0, at })
-    );
+    const ref = doc(collection(firestore(), 'document_signatures'));
+    const sig = signatureRow({ documentId, itemId: row.checklist_item_id, memberId: member, signerId: verifierId, role: 'verifier', revision: 0, at });
+    batch.set(ref, sig);
+    newRows.push({ ...sig, id: ref.id });
   });
   await batch.commit();
-  return { success: true, verified: pending.length, signatures: await rowsFor('document_signatures', 'document_id', documentId) };
+  return { success: true, verified: pending.length, signatures: [...signatures, ...newRows] };
 };
 
 // -----------------------------------------------------------------------------------------------------------
@@ -1018,6 +1031,7 @@ export const signTrainings = async ({ userId, trainingIds }) => {
   const batch = writeBatch(firestore());
   let added = 0;
   let skipped = 0;
+  const newSignatures = [];
 
   wanted.forEach((trainingId) => {
     if (!byId.has(trainingId)) {
@@ -1027,12 +1041,15 @@ export const signTrainings = async ({ userId, trainingIds }) => {
     if (signed.has(trainingId)) return;
     // `signed_at` is stamped here rather than left to the reader: a signature without a date cannot be ordered, and the
     // training report lists them in the order they were given.
-    batch.set(doc(collection(firestore(), 'training_signatures')), { training_id: trainingId, user_id: userId, signed_at: at });
+    const ref = doc(collection(firestore(), 'training_signatures'));
+    const sig = { training_id: trainingId, user_id: userId, signed_at: at };
+    batch.set(ref, sig);
+    newSignatures.push({ ...sig, id: ref.id });
     added += 1;
   });
 
   if (added) await batch.commit();
-  return { success: true, signed: added, skipped, signatures: await rowsFor('training_signatures', 'user_id', userId) };
+  return { success: true, signed: added, skipped, signatures: [...mine, ...newSignatures] };
 };
 
 // The only way a training signature is ever removed, behind its own permission rather than can_edit_trainings: removing
@@ -1158,17 +1175,28 @@ export const saveTimeclockEntry = async ({ id, userId, timeIn, timeOut }) => {
   await runTransaction(db, async (transaction) => {
     const entryRef = doc(db, 'timeclock', entryId);
     const onDutyRef = doc(db, 'on_duty', member);
-    // Both reads BEFORE any write: a transaction refuses a read after a write, and the on_duty decision needs what the
+    const userRef = doc(db, 'users', member);
+    // Reads BEFORE any write: a transaction refuses a read after a write, and the on_duty decision needs what the
     // entry looks like now.
-    const [existing, onDuty] = await Promise.all([transaction.get(entryRef), transaction.get(onDutyRef)]);
+    const [existing, onDuty, userDoc] = await Promise.all([
+      transaction.get(entryRef),
+      transaction.get(onDutyRef),
+      transaction.get(userRef),
+    ]);
     const previousTimeIn = existing.exists() ? String((existing.data() || {}).time_in || '') : '';
     const onDutyRow = onDuty.exists() ? onDuty.data() : null;
+    const userData = userDoc.exists() ? userDoc.data() : {};
 
     transaction.set(entryRef, fields, { merge: true });
 
     if (fields.time_out === '') {
       // Still open: on duty from this entry's time_in, whether it is new or corrected.
-      transaction.set(onDutyRef, { user_id: member, time_in: fields.time_in });
+      transaction.set(onDutyRef, {
+        user_id: member,
+        time_in: fields.time_in,
+        name: String(userData.name || '').trim(),
+        rank_id: String(userData.rank_id || '').trim(),
+      });
       return;
     }
     // Closed: off duty only if this was the entry they were on duty FROM. An officer tidying up an old entry must not
@@ -1316,43 +1344,89 @@ export { badgeForRecord };
 // IT RETURNS THE INDEX IT WROTE - the same `member id -> [{ id, name, icon }]` map the roster read hands the app, so a
 // caller can put it straight into the registry. What that reply shape is NOT is a summary of the rebuild: see the
 // return statement at the foot of this function for the day it was one, and what it cost.
-export const refreshCertificationBadges = async () => {
+export const refreshCertificationBadges = async (targetUserId = '') => {
   const db = firestore();
   const today = badgeToday();
+  const userId = String(targetUserId || '').trim();
+
+  const sameBadges = (a = [], b = []) => JSON.stringify(a) === JSON.stringify(b);
+
+  if (userId) {
+    const [types, userRecords, existing] = await Promise.all([
+      rowsOf(collection(db, 'certification_setup')),
+      rowsFor('certifications', 'user_id', userId),
+      rowsOf(collection(db, 'certification_badges')),
+    ]);
+
+    // If the badges collection is already populated, scope the rebuild to this member
+    if (existing.length > 0) {
+      const memberIndex = badgeIndexFor(userRecords, types, today);
+      const targetBadges = memberIndex[userId] || [];
+
+      const index = {};
+      existing.forEach((row) => {
+        const id = String(row.id);
+        if (id !== userId && Array.isArray(row.badges) && row.badges.length) {
+          index[id] = row.badges;
+        }
+      });
+      if (targetBadges.length) {
+        index[userId] = targetBadges;
+      }
+
+      const existingEntry = existing.find((row) => String(row.id) === userId);
+      const prevBadges = existingEntry?.badges || [];
+      if (!sameBadges(prevBadges, targetBadges)) {
+        if (targetBadges.length) {
+          await setDoc(doc(db, 'certification_badges', userId), { user_id: userId, badges: targetBadges }, { merge: true });
+        } else if (existingEntry) {
+          await deleteDoc(doc(db, 'certification_badges', userId));
+        }
+      }
+
+      return index;
+    }
+  }
+
+  // Full rebuild: read all records and types
   const [records, types] = await Promise.all([rowsOf(collection(db, 'certifications')), rowsOf(collection(db, 'certification_setup'))]);
 
   // The whole index, from the shared rule rather than from a loop of our own that could drift from the script's.
   const index = badgeIndexFor(records, types, today);
 
-  // A member whose last badge lapsed loses the document, rather than keeping an empty one: the roster draws whatever
-  // this returns, and an empty list and a missing document have to mean the same thing.
-  //
-  // WHICH IS ALSO WHY ONE REBUILD CAN EMPTY THE COLLECTION, and it is worth stating plainly because that is what has been
-  // happening to this station: if a run cannot see the records - a narrower role, a read refused, a `certifications`
-  // collection that was never migrated - the index comes out empty and every badge document is deleted. The badges are not
-  // corrupted, they are REMOVED, and they come back the moment a rebuild can see the records again. That is what
-  // scripts/normalize-certification-badges.mjs is for, and why it reports before it writes anything.
   const existing = await rowsOf(collection(db, 'certification_badges'));
-  const batch = writeBatch(db);
-  Object.entries(index).forEach(([userId, badges]) => {
-    batch.set(doc(db, 'certification_badges', userId), { user_id: userId, badges }, { merge: true });
+  const existingMap = new Map();
+  existing.forEach((row) => {
+    existingMap.set(String(row.id), row.badges || []);
   });
+
+  const batch = writeBatch(db);
+  let dirty = false;
+
+  Object.entries(index).forEach(([uid, badges]) => {
+    const prev = existingMap.get(uid);
+    if (!existingMap.has(uid) || !sameBadges(prev, badges)) {
+      batch.set(doc(db, 'certification_badges', uid), { user_id: uid, badges }, { merge: true });
+      dirty = true;
+    }
+  });
+
   existing
     .filter((row) => !index[String(row.id)])
-    .forEach((row) => batch.delete(doc(db, 'certification_badges', String(row.id))));
-  await batch.commit();
+    .forEach((row) => {
+      batch.delete(doc(db, 'certification_badges', String(row.id)));
+      dirty = true;
+    });
+
+  if (dirty) {
+    await batch.commit();
+  }
 
   // THE INDEX, AND NOTHING ELSE - one shape, so no caller can pick the wrong one.
-  //
-  // This used to return a SUMMARY of the rebuild (`{ members, cleared }`) while the caller needed the INDEX, and the
-  // route reply carried that summary under the name `badges`. App hands the reply straight to
-  // `setCertificationBadges`, which REPLACES the registry rather than merging it, so saving ONE certification replaced
-  // every member's icons with `{ members: 3, cleared: 0 }`: every name on every screen went bare - the Schedule
-  // module's pills, the board, the sidebar, the dashboard's on-duty card - for the rest of the session, because the
-  // roster that would refill the registry is read once and the summary looks exactly like an answer. The counts were
-  // never wrong, they were just not what the name said, and a reply cannot be checked by reading its caller.
   return index;
 };
+
+export const refreshCertificationBadgesForMember = async (userId) => refreshCertificationBadges(userId);
 
 // Settings are one document per SIDE - `settings/public` and `settings/private` - rather than one per key, because a
 // document is the unit of permission and a key's side has to be a fact rather than a judgement made at each call.

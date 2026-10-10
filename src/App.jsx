@@ -17,7 +17,7 @@ import {
 } from './utils/uiSounds';
 // What this DEVICE has already been shown: the station's welcome, once, after a sign-in. Per device rather than per member,
 // and only behind a sign-in - see the note at the top of the module for both.
-import { takeIntroForThisDevice } from './utils/firstVisit';
+import { welcomeIsOwed } from './utils/welcomeSound';
 import { runRefreshWave, REFRESH_OK, REFRESH_FAILED, REFRESH_EXPIRED } from './utils/refreshWave';
 import {
   fetchInitialData,
@@ -25,7 +25,6 @@ import {
   adminFetchBootstrap,
   fetchAdminSections,
   fetchAvailabilityWindows,
-  fetchEvents,
   fetchCertificationBadges,
   fetchRoster,
   fetchRosterModule,
@@ -1048,11 +1047,11 @@ const getLoadingMessage = () => {
     return stop;
   }, [currentUser?.id]);
 
-  // EVENTS, AND THEIR LISTENER, FOLLOW THE SCREEN RATHER THAN THE SESSION.
+  // EVENTS FOLLOW THE SCREEN RATHER THAN THE SESSION.
   //
   // They are drawn by the member's own calendar, the availability grid and the officer's board - and by nothing on the dashboard,
-  // which is the screen most sign-ins are here for. So both halves arrive when one of those opens: the READ first (a listener
-  // alone would show nothing until somebody else changed an event), then the listener to keep it fresh.
+  // which is the screen most sign-ins are here for. The live listener attaches when one of those screens opens: `subscribeLive`
+  // immediately fires its handler with the current snapshot and keeps it up to date on changes, avoiding any duplicate one-shot read.
   //
   // `subscribeLive` takes a SUBSET of handlers by design - "a handler that is not given is not subscribed to at all" - so this is
   // the same call as the sign-in one with a single handler in it, and it returns its own teardown. The dependency is the BOOLEAN,
@@ -1063,35 +1062,17 @@ const getLoadingMessage = () => {
   const onScheduleBoard = activeTab === 'admin' && adminSubTab === 'schedule';
   // ...and so does Administration > Member Availability, which draws the member's own month grid - events and all - from the
   // member picker.
-  //
-  // ITS ABSENCE HERE WAS A REGRESSION, and the fix is one clause. Until 1.12 this needed no listing at all: the sign-in
-  // payload carried the events, so EVERY officer had them from sign-in and this tab drew its month with them on it. 1.12
-  // took the events out of both payloads - correctly, they belong to the calendars, which read them when one is opened -
-  // and this gate is what replaced that. It listed the member's own schedule and availability screens and the officer's
-  // board, and forgot this one. So Administration > Member Availability drew a month with no events on it, silently, unless
-  // the officer had happened to open a MEMBER screen first. (The administration Events tab does not cover it either: that
-  // tab fetches its own list and keeps it, so opening it never made the difference either.)
   const onMemberAvailabilityTab = activeTab === 'admin' && adminSubTab === 'availability';
   const wantsEvents =
     activeTab === 'schedule' || activeTab === 'availability' || onScheduleBoard || onMemberAvailabilityTab;
   useEffect(() => {
     if (!authToken || !currentUser?.id || !wantsEvents) return;
-    let cancelled = false;
-    fetchEvents(authToken)
-      .then((data) => {
-        if (cancelled || !data || !Array.isArray(data.events)) return;
-        setEvents(normalizeEventList(data.events));
-      })
-      .catch((error) => console.error('[events] could not read the calendar entries', error));
     const stop = subscribeLive({
       userId: currentUser.id,
       handlers: { events: (rows) => setEvents(normalizeEventList(rows)) },
       onError: (error) => console.warn('[live] the events read could not be kept open:', error && error.message),
     });
-    return () => {
-      cancelled = true;
-      stop();
-    };
+    return stop;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, currentUser?.id, wantsEvents]);
 
@@ -1826,10 +1807,14 @@ const getLoadingMessage = () => {
         setCurrentUser(result.user);
         applyToken(result.token);
         // A REAL SIGN-IN HAPPENED, which is what the welcome waits for: the click that submitted this form is also what a
-        // browser requires before a page may make a sound (see utils/firstVisit.js). A session restored from a token never
-        // reaches this line, which is why the intro does not depend on the member being signed in - it depends on them having
-        // just done it.
-        introAfterSignInRef.current = true;
+        // browser requires before a page may make a sound (see utils/welcomeSound.js). A session restored from a token never
+        // reaches this line, and neither does the reauthentication modal - that one keeps a member who is already in the app,
+        // and a welcome chime in the middle of a shift is not what this is for.
+        //
+        // IT COUNTS RATHER THAN FLAGS, because the welcome plays on EVERY sign-in. Setting a boolean true when it is already
+        // true changes nothing in React, so signing out and back in would leave the effect unwoken and the second welcome
+        // silent - the same "nothing woke the effect" bug this had before, in a new costume.
+        setSignInCount((count) => count + 1);
 
         // Only the first screen's data blocks the overlay now - see the note on
         // loadPostLoginData. Admin data loads via the authToken effect.
@@ -2313,18 +2298,29 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // THE STATION'S WELCOME, once per device.
+  // THE STATION'S WELCOME, on every sign-in.
   //
-  // `intro_short.mp3` plays as the boot screen clears - the loading message going away is the moment the app is actually ready
-  // to be looked at - and only after a sign-in on this device (`takeIntroForThisDevice` records before it answers, so two
-  // renders in one frame cannot both be told yes). A member who is already signed in from a stored session hears nothing: no
-  // gesture, no sound, and a greeting that repeats is a noise anyway.
-  const introAfterSignInRef = useRef(false);
+  // `intro_short.mp3` plays as a sign-in lands, and it waits for the boot screen rather than talking over it. The rule itself
+  // lives in utils/welcomeSound.js, where a Node harness can ask it directly and the reasons are written down - including the
+  // one that cannot bend: a session restored from a token has no click behind it, so a browser would refuse the sound.
+  //
+  // IT COUNTS SIGN-INS RATHER THAN REMEMBERING A FLAG, and that is the whole of a bug this had for an afternoon. It signalled
+  // with a ref, and the effect was keyed on `[initialLoading]` alone - which flips once, on mount, and never again. Setting a
+  // ref does not wake an effect, so the effect ran while the ref was false, returned, and was never asked again: the sound was
+  // wired, the rule agreed, and the welcome never played for anybody. A ref is for remembering something across renders; a
+  // SIGNAL that something happened has to be state, because re-running the effect is the entire point.
+  //
+  // `welcomedSignInRef` is the other half, and it is doing the job a ref IS for: remembering, without re-rendering, which
+  // sign-in has already been welcomed. It is written BEFORE the sound plays, because React runs an effect twice on every mount
+  // under StrictMode (and again on every save under Fast Refresh) - and uiSounds hands each play its own voice, so a second
+  // play of the same sound is an audible echo rather than a restart.
+  const [signInCount, setSignInCount] = useState(0);
+  const welcomedSignInRef = useRef(0);
   useEffect(() => {
-    if (initialLoading || !introAfterSignInRef.current) return;
-    if (!takeIntroForThisDevice()) return;
+    if (!welcomeIsOwed({ signIns: signInCount, welcomed: welcomedSignInRef.current, ready: !initialLoading })) return;
+    welcomedSignInRef.current = signInCount;
     playSound('intro_short');
-  }, [initialLoading]);
+  }, [signInCount, initialLoading]);
 
   return (
     <>

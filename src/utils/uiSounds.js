@@ -39,7 +39,7 @@ import chatExitSound from '../assets/chat_exit.mp3';
 import chatNotifySound from '../assets/chat_notify.mp3';
 import chatOpenSound from '../assets/chat_open.mp3';
 import chatSendSound from '../assets/chat_send.mp3';
-// The station's welcome, played once per device after a sign-in - see utils/firstVisit.js.
+// The station's welcome, played after every sign-in - see utils/welcomeSound.js.
 import introShortSound from '../assets/intro_short.mp3';
 import {
   SOUNDS_DEFAULT,

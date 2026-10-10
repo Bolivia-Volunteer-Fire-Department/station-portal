@@ -20,9 +20,9 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-// The welcome's own rules: per device, and only behind a sign-in. Imported for its PURE decision - the storage beside it is
-// guarded and does nothing in Node, which is what lets this harness load the module at all.
-import { shouldPlayIntro } from '../src/utils/firstVisit.js';
+// The welcome's own rule, imported because it is PURE: the decision is the part that has to stay put as this file is edited, and
+// a Node harness can only ask about it if asking needs no browser, no audio and no storage.
+import { welcomeIsOwed } from '../src/utils/welcomeSound.js';
 // The pure rules. Imported from soundRules rather than uiSounds because uiSounds imports the mp3 files, which
 // plain Node cannot load - and because the decisions are the part worth exercising without a browser.
 import {
@@ -926,6 +926,29 @@ const mutated = (file, remove) => readSource(file).split(remove).join('/* remove
     remove: 'data-sound="none"',
     assertion: (source) => /data-sound="none"/.test(source),
   },
+  // THE WELCOME'S WIRING, and these mutations are the two bugs this sound has actually had. The first is the ORIGINAL one: the
+  // effect was keyed on `initialLoading` alone, which flips once, on mount, and never again, so nothing would ever wake it. The
+  // second is the one the move to "every sign-in" invites: signalling with a flag instead of a count, where the next sign-in
+  // sets true on something already true, changes nothing in React, and is swallowed without a sound. The third is idempotence:
+  // forget to record which sign-in was welcomed and a re-run plays a second overlapping copy.
+  {
+    label: 'the sign-in path counting, so a second sign-in is not swallowed',
+    file: 'src/App.jsx',
+    remove: 'setSignInCount((count) => count + 1);',
+    assertion: (source) => /setSignInCount\(\(count\) => count \+ 1\);/.test(source),
+  },
+  {
+    label: 'the welcome effect being keyed on that count',
+    file: 'src/App.jsx',
+    remove: 'signInCount, initialLoading',
+    assertion: (source) => /\}, \[signInCount, initialLoading\]\);/.test(source),
+  },
+  {
+    label: 'the welcomed sign-in being recorded before the sound plays',
+    file: 'src/App.jsx',
+    remove: 'welcomedSignInRef.current = signInCount;',
+    assertion: (source) => /welcomedSignInRef\.current = signInCount;/.test(source),
+  },
 ].forEach(({ label, file, remove, assertion }) => {
   const before = readSource(file);
   const after = mutated(file, remove);
@@ -935,31 +958,41 @@ const mutated = (file, remove) => readSource(file).split(remove).join('/* remove
 });
 
 // ------------------------------------------------------------------------------------------------
-console.log('\n--- the welcome, once per device ---');
-// THE ONE SOUND IN THE APP NOBODY ASKED FOR, so its rules are the ones worth writing down: a real sign-in, an app that has
-// finished loading, and a device that has not heard it before.
-check('a fresh sign-in on a device that has not heard it', shouldPlayIntro({ signedInNow: true, ready: true }), true);
-check('the same device, a second time', shouldPlayIntro({ signedInNow: true, ready: true, heard: true }), false);
-// A RESTORED SESSION PLAYS NOTHING, and not only because a greeting that repeats is a noise: a browser allows a page to make a
-// sound shortly after somebody touched it, and a restored session has no click behind it.
-check('a session restored from a token has no gesture behind it', shouldPlayIntro({ signedInNow: false, ready: true }), false);
-check('while the boot screen is still up', shouldPlayIntro({ signedInNow: true, ready: false }), false);
-check('and asking with nothing at all', shouldPlayIntro({}), false);
-const firstVisitSource = readFileSync('src/utils/firstVisit.js', 'utf8');
+console.log('\n--- the welcome, on every sign-in ---');
+// THE ONE SOUND IN THE APP NOBODY ASKED FOR, so its rules are the ones worth writing down: a sign-in, EVERY time, and an app
+// that has finished loading.
+check('the first sign-in of a page load', welcomeIsOwed({ signIns: 1, welcomed: 0, ready: true }), true);
+// THE RULE THIS WAS REWRITTEN FOR. The welcome used to play once per DEVICE, which meant the first person to sign in on the
+// station's tablet heard it and nobody ever heard it again - including them. A count rather than a flag is what makes this one
+// true, and a flag is what would quietly break it.
+check('a second sign-in, later in the same page load', welcomeIsOwed({ signIns: 2, welcomed: 1, ready: true }), true);
+check(
+  'the same sign-in asked twice, which is what React is allowed to do to an effect',
+  welcomeIsOwed({ signIns: 1, welcomed: 1, ready: true }),
+  false
+);
+// A RESTORED SESSION PLAYS NOTHING, and this is a fact about browsers rather than a preference: a page may only make a sound
+// shortly after somebody has touched it, and a token has no click behind it. A restored session therefore looks exactly like no
+// sign-in at all - which is why this counts sign-ins instead of asking whether somebody is signed in.
+check('a session restored from a token has no gesture behind it', welcomeIsOwed({ signIns: 0, welcomed: 0, ready: true }), false);
+check('while the boot screen is still up', welcomeIsOwed({ signIns: 1, welcomed: 0, ready: false }), false);
+check('and asking with nothing at all', welcomeIsOwed({}), false);
+const welcomeSource = readFileSync('src/utils/welcomeSound.js', 'utf8');
 // `appSource` is already declared above (the App wiring this file checks), and reused here rather than declared again: a second
 // top-level `const` of the same name is a SyntaxError, which takes the WHOLE FILE down instead of one check - and a file that
 // does not parse reports nothing at all, which is how this reached a browser-shaped screen as "it's red" rather than as a
 // failing check.
-checkIs(
-  'the device is recorded BEFORE it answers, so two renders cannot both be told yes',
-  /setItem\(INTRO_KEY, '1'\);[\s\S]{0,40}return true;/.test(firstVisitSource)
-);
-checkIs('and the module says why it is per device rather than per member', /PER DEVICE, NOT PER MEMBER/.test(firstVisitSource));
-checkIs('the sign-in path is what flags the intro', /introAfterSignInRef\.current = true;/.test(appSource));
-checkIs(
-  'and the boot screen clearing is what plays it',
-  /if \(initialLoading \|\| !introAfterSignInRef\.current\) return;/.test(appSource)
-);
+checkIs('and the module says it plays on every sign-in', /ON EVERY SIGN-IN/.test(welcomeSource));
+checkIs('and keeps the reason a restored session stays silent', /RESTORED from a token/.test(welcomeSource));
+// THE WIRING IS A PROPERTY, NOT A SHAPE, and this pair is the reason to say so out loud. The checks here used to assert the
+// SHAPE the code happened to have - a ref named on the sign-in and the effect that read it - and they passed for the whole life
+// of a bug in which the welcome could not play at all: the ref was set on sign-in, the effect was keyed on `[initialLoading]`,
+// and `initialLoading` flips ONCE, on mount, so nothing was ever asked again. A check that reads a ref and calls it wired is a
+// check that agrees with the author. What has to be true is that SOMETHING CAN WAKE THE EFFECT, and that the sign-in it wakes
+// for is a NEW one - both asserted below, each with a mutation that puts the bug back.
+checkIs('the sign-in path counts, so a second sign-in is not swallowed', /setSignInCount\(\(count\) => count \+ 1\);/.test(appSource));
+checkIs('and the effect that plays it is keyed on that count', /\}, \[signInCount, initialLoading\]\);/.test(appSource));
+checkIs('and it asks the module for the decision rather than deciding for itself', /welcomeIsOwed\(\{/.test(appSource));
 checkIs('through the shared engine, like every other sound', /playSound\('intro_short'\)/.test(appSource));
 checkIs('and it has a level row like the rest', Object.prototype.hasOwnProperty.call(SOUND_VOLUME, 'intro_short'));
 

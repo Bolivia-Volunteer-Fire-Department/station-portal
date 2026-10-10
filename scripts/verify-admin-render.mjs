@@ -313,7 +313,12 @@ const approverCard = accessCardFor(ROLES.approverOnly);
 check('renders for a single-tab role', typeof approverCard === 'string', approverCard.error && approverCard.error.message);
 // A role that can reach Administration but whose sheet lacks most permission columns
 // gets the sheet check - this is the case that used to fail silently.
-check('and flags the columns the roles sheet lacks', String(approverCard).includes('Roles sheet check'));
+//
+// ANCHORED TO THE SENTENCE, NOT THE HEADING. This check used to look for 'Roles sheet check', the heading this block had in
+// release 1.13; the heading was reworded to 'Roles check' in 1.522 and the check has been red ever since - reporting a broken
+// page for a block that still names every missing column, directly underneath the passing checks that read those same
+// columns out of it. A heading is copy, and copy gets improved; the sentence about columns is the thing being promised.
+check('and flags the columns the roles sheet lacks', String(approverCard).includes('The roles sheet has no column for'));
 check('naming a missing column', String(approverCard).includes('can_edit_ranks'));
 check('and says the is_admin column itself is missing', String(approverCard).includes('no is_admin column'));
 
@@ -326,7 +331,11 @@ check('renders for a member-only role', typeof memberAccessCard === 'string', me
 check('with their station modules listed', String(memberAccessCard).includes('Station modules'));
 // A member's card must not be turned into a list of admin columns their sheet has no
 // use for.
-check('and no administration noise', !String(memberAccessCard).includes('Roles sheet check'));
+//
+// THIS ONE COULD NOT FAIL. It asserted the absence of the same dead string as the check above, so it agreed with every version of
+// the page - including one that listed every admin column to a plain member, which is the mistake it was written to catch. It
+// reads the live sentence now, so it goes red if this block ever reaches a member's card.
+check('and no administration noise', !String(memberAccessCard).includes('The roles sheet has no column for'));
 
 // The Sound Effects switch is the one control in the app that carries the sound it is about to make as a
 // data-sound directive, which is how the delegated listener knows to play sound_on/sound_off instead of a click

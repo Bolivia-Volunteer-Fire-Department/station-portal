@@ -1113,10 +1113,12 @@ exports.clockIn = onCall(async (request) => {
 
   const entryRef = db.collection('timeclock').doc();
   const dutyRef = db.doc(`on_duty/${caller.uid}`);
+  const userRef = db.doc(`users/${caller.uid}`);
   const stamp = stationTimestamp();
   await db.runTransaction(async (transaction) => {
-    const duty = await transaction.get(dutyRef);
+    const [duty, user] = await Promise.all([transaction.get(dutyRef), transaction.get(userRef)]);
     if (duty.exists) throw new HttpsError('failed-precondition', 'already-clocked-in');
+    const userData = user.exists ? user.data() : {};
     transaction.create(entryRef, {
       user_id: caller.uid,
       time_in: stamp,
@@ -1125,7 +1127,12 @@ exports.clockIn = onCall(async (request) => {
       gps_lat: latitude,
       gps_lon: longitude,
     });
-    transaction.create(dutyRef, { user_id: caller.uid, time_in: stamp });
+    transaction.create(dutyRef, {
+      user_id: caller.uid,
+      time_in: stamp,
+      name: String(userData.name || '').trim(),
+      rank_id: String(userData.rank_id || '').trim(),
+    });
   });
 
   return { id: entryRef.id };
@@ -1171,6 +1178,28 @@ exports.clockOut = onCall(async (request) => {
 //
 // One writer per fact, as the design doc puts it: the board and an approved offer are the only things that write a
 // schedule row, and both of them live here.
+
+// THE SCHEDULE'S SENTINEL: one tiny document that changes whenever the schedule does, so a screen looking at a month can be
+// told it is out of date WITHOUT holding a listener on the month itself. See src/services/liveReads.js for the client's half
+// and src/utils/freshness.js for what it does about it.
+//
+// WHY EXPLICIT BUMPS RATHER THAN AN onDocumentWritten TRIGGER ON schedule/{scheduleId}:
+// A board save writes or deletes 30 to 100 schedule entries in a single batch/transaction. An onDocumentWritten trigger on
+// schedule/{scheduleId} would fire 30 to 100 times concurrently for a single save gesture, causing write contention on
+// live/schedule and 100 unnecessary trigger executions. Bumping explicitly in saveScheduleBoard and approveOffer bumps
+// the sentinel exactly once per save gesture.
+const SCHEDULE_SENTINEL_PATH = 'live/schedule';
+
+const bumpScheduleSentinel = async () => {
+  try {
+    await db
+      .doc(SCHEDULE_SENTINEL_PATH)
+      .set({ version: FieldValue.increment(1), at: FieldValue.serverTimestamp() }, { merge: true });
+  } catch (error) {
+    // A sentinel that fails must not take the schedule write with it: the shift is the record, the freshness note is a courtesy.
+    console.error(`[live] the schedule sentinel could not be bumped: ${(error && error.message) || error}`);
+  }
+};
 
 // The shape a schedule row is stored in, from an entry the board sent. A blank user_id is MEANINGFUL - it is what
 // marks an open shift - so it is trimmed and kept rather than treated as missing.
@@ -1303,6 +1332,8 @@ exports.saveScheduleBoard = onCall(async (request) => {
     return { ids: stamped, deleted: deleteIds.length };
   });
 
+  await bumpScheduleSentinel();
+
   await audit(
     caller.uid,
     'ADMIN_BULK_SAVE_SCHEDULE',
@@ -1336,6 +1367,8 @@ exports.approveOffer = onCall(async (request) => {
     }
     return { scheduleId: String(data.schedule_id || '') };
   });
+
+  await bumpScheduleSentinel();
 
   await audit(caller.uid, 'ADMIN_APPROVE_OFFER', `Approved an offer for shift ${result.scheduleId}`);
   return result;
@@ -1725,30 +1758,43 @@ const deliverPush = async ({ action, actor, recipients, preference, title, body,
   const unique = [...new Set((recipients || []).map(text).filter(Boolean))];
   if (!unique.length) return { recipients: 0, delivered: 0 };
 
+  // Query push_devices first: members without any registered device do not need their settings read,
+  // and if nobody has a device we can exit before reading settings/public or any user_settings.
+  // `in` takes up to thirty values, so the recipient list is chunked rather than assumed small.
+  const devicesByUser = new Map();
+  for (let index = 0; index < unique.length; index += 30) {
+    const chunk = unique.slice(index, index + 30);
+    const rows = await db.collection('push_devices').where('user_id', 'in', chunk).get();
+    rows.forEach((row) => {
+      const rowData = row.data() || {};
+      const token = text(rowData.token);
+      const userId = text(rowData.user_id);
+      if (token && userId) {
+        if (!devicesByUser.has(userId)) devicesByUser.set(userId, []);
+        devicesByUser.get(userId).push({ token, ref: row.ref });
+      }
+    });
+  }
+  if (!devicesByUser.size) return { recipients: unique.length, delivered: 0 };
+
   const station = await db.doc('settings/public').get();
   const stationDefault = (station.data() || {})[preference];
 
-  const settings = await Promise.all(unique.map((id) => db.doc(`user_settings/${id}`).get()));
+  // Only read user_settings for members who actually hold registered devices
+  const candidatesWithDevices = [...devicesByUser.keys()];
+  const settings = await Promise.all(candidatesWithDevices.map((id) => db.doc(`user_settings/${id}`).get()));
   const allowed = [];
+  const devices = [];
   settings.forEach((snapshot, index) => {
+    const userId = candidatesWithDevices[index];
     const row = snapshot.data() || {};
     // An administrator's switch outranks the member's own, and it is checked here as well as at the door: a device
     // registered before the switch was set would otherwise keep receiving.
     if (row.is_push_disabled === true) return;
     if (!notificationEnabled(row[preference], stationDefault)) return;
-    allowed.push(unique[index]);
+    allowed.push(userId);
+    devices.push(...(devicesByUser.get(userId) || []));
   });
-  if (!allowed.length) return { recipients: unique.length, delivered: 0 };
-
-  // `in` takes up to thirty values, so the recipient list is chunked rather than assumed small.
-  const devices = [];
-  for (let index = 0; index < allowed.length; index += 30) {
-    const rows = await db.collection('push_devices').where('user_id', 'in', allowed.slice(index, index + 30)).get();
-    rows.forEach((row) => {
-      const token = text((row.data() || {}).token);
-      if (token) devices.push({ token, ref: row.ref });
-    });
-  }
   if (!devices.length) return { recipients: unique.length, delivered: 0 };
 
   // Every value in an FCM data block has to be a STRING, and the service worker reads these to tag a notification per
@@ -1935,18 +1981,7 @@ const accountsForAudience = async (audienceKeys) => {
 //
 // THE PATH IS ALSO IN src/utils/freshness.js, and scripts/verify-freshness.mjs asserts the two agree - a server bumping one
 // document while clients watch another is a sentinel that never fires, which is a failure with no symptom at all.
-const SCHEDULE_SENTINEL_PATH = 'live/schedule';
-
-exports.onShiftWritten = onDocumentWritten('shifts/{shiftId}', async () => {
-  try {
-    await db
-      .doc(SCHEDULE_SENTINEL_PATH)
-      .set({ version: FieldValue.increment(1), at: FieldValue.serverTimestamp() }, { merge: true });
-  } catch (error) {
-    // A sentinel that fails must not take the schedule write with it: the shift is the record, the freshness note is a courtesy.
-    console.error(`[live] the schedule sentinel could not be bumped: ${(error && error.message) || error}`);
-  }
-});
+exports.onShiftWritten = onDocumentWritten('shifts/{shiftId}', async () => bumpScheduleSentinel());
 
 // AN ANNOUNCEMENT: whoever the audience names, by the same keys the rules check with hasAny - so an audience cannot mean
 // one thing to the rules and another thing to the push.
@@ -2439,6 +2474,19 @@ const chatRoles = async () => {
   return byId;
 };
 
+// Cached conversation metadata for push notifications: avoids reading chat_conversations/{id} on every single message.
+const CONVERSATION_TTL_MS = 5 * 60 * 1000;
+const chatConversationCache = new Map();
+
+const chatConversation = async (conversationId) => {
+  const cached = chatConversationCache.get(conversationId);
+  if (cached && Date.now() - cached.at < CONVERSATION_TTL_MS) return cached.data;
+  const conversationRow = await db.doc(`chat_conversations/${conversationId}`).get();
+  const data = conversationRow.exists ? { id: conversationId, ...conversationRow.data() } : { id: conversationId };
+  chatConversationCache.set(conversationId, { at: Date.now(), data });
+  return data;
+};
+
 const chatMayUseChat = (rolesById, row) => {
   const role = rolesById[String((row || {}).role_id || '')] || {};
   return isGranted(role.is_admin) || isGranted(role.can_use_chat);
@@ -2450,7 +2498,25 @@ exports.onChatMessageCreated = onDocumentCreated(
     try {
       const message = { ...((event.data && event.data.data()) || {}), id: event.params.messageId };
       const conversation = { id: event.params.conversationId };
-      const [directory, roles] = await Promise.all([chatDirectory(), chatRoles()]);
+
+      const explicitMembers = Array.isArray(message.member_ids) && message.member_ids.length > 0;
+      const isDirectOnly = explicitMembers && (!Array.isArray(message.audience_keys) || !message.audience_keys.length);
+
+      let directory;
+      const roles = await chatRoles();
+      if (isDirectOnly && Date.now() - chatDirectoryCache.at >= DIRECTORY_TTL_MS) {
+        // Narrowed to the conversation's explicit members: avoid scanning the entire directory for a 1-on-1 direct message
+        const explicitUids = message.member_ids.map(text).filter(Boolean);
+        const docs = await Promise.all(explicitUids.map((uid) => db.doc(`users/${uid}`).get()));
+        directory = docs.filter((snap) => snap.exists).map((snap) => ({
+          id: snap.id,
+          role_id: (snap.data() || {}).role_id,
+          rank_id: (snap.data() || {}).rank_id,
+        }));
+      } else {
+        directory = await chatDirectory();
+      }
+
       const byId = Object.fromEntries(directory.map((row) => [row.id, row]));
       const recipients = chatRecipientsFor({
         audienceKeys: message.audience_keys,
@@ -2462,15 +2528,18 @@ exports.onChatMessageCreated = onDocumentCreated(
       // sentence back into the conversation. It is their own row, cleared by their own read mark, so opening the room
       // settles it like any other - one rule instead of a special case.
       const fields = chatInboxFields({ conversation, message });
-      const batch = db.batch();
-      for (const uid of recipients) {
-        batch.set(
-          db.doc(`chat_inbox/${uid}/rooms/${conversation.id}`),
-          { ...fields, count: FieldValue.increment(1) },
-          { merge: true }
-        );
+      for (let i = 0; i < recipients.length; i += 450) {
+        const chunk = recipients.slice(i, i + 450);
+        const batch = db.batch();
+        for (const uid of chunk) {
+          batch.set(
+            db.doc(`chat_inbox/${uid}/rooms/${conversation.id}`),
+            { ...fields, count: FieldValue.increment(1) },
+            { merge: true }
+          );
+        }
+        await batch.commit();
       }
-      if (recipients.length) await batch.commit();
 
       // THE PUSH, which is where chat stops being purely in-app. Its audience is the inbox's list MINUS THE AUTHOR (who should
       // not have their phone buzz because they pressed Send - see chatPushRecipients), and its SWITCH is the member's own
@@ -2483,8 +2552,7 @@ exports.onChatMessageCreated = onDocumentCreated(
       // The conversation is read for two facts the message does not carry - its kind and its name - because "a private
       // conversation has no name of its own, so the notification leads with the author" is a rule about conversations
       // (functions/chat.js#chatPushSummary).
-      const conversationRow = await db.doc(`chat_conversations/${conversation.id}`).get();
-      const row = conversationRow.exists ? { id: conversation.id, ...conversationRow.data() } : conversation;
+      const row = await chatConversation(conversation.id);
       const summary = chatPushSummary({ conversation: row, message, preview: chatPreviewOf(message.body) });
       await deliverPush({
         action: 'CHAT_PUSHED',

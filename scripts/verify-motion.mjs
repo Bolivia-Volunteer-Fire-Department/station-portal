@@ -133,6 +133,24 @@ const linesWith = (files, needle) =>
 const offenders = (rows, predicate) =>
   rows.filter((row) => !predicate(row.text)).map(({ file, line }) => `${file}:${line}`);
 
+// A LONG OR CONDITIONAL ATTRIBUTE IS STILL ONE ATTRIBUTE, and this is the helper that made a correct popover look broken.
+// `linesWith` reads single lines, which is right for a backdrop (always written on one) and wrong for a className that is
+// wrapped or that picks its classes with a ternary: chat's emoji picker chooses its horizontal origin with
+// `align === 'left' ? '…origin-bottom-left' : '…origin-bottom-right'`, so BOTH origins sit on the line after
+// `animate-popoverIn` - the same element, the same edge it hangs from, and the check reported a popover with no origin at all.
+//
+// It is the same mistake as a fixed character window, in a different unit: a proxy for "on this element" that quietly means
+// "and this element is written on one line". So the text grows while the line leaves a quote or a template open, which ends
+// exactly where the attribute does, however somebody wrapped it - a line COUNT would have swallowed the next element and
+// reintroduced the same bug from the other side.
+const elementText = ({ file, line }) => {
+  const lines = sourceOf(file).split('\n');
+  const unbalanced = (value) => (value.match(/`/g) || []).length % 2 === 1 || (value.match(/"/g) || []).length % 2 === 1;
+  let text = (lines[line - 1] || '').trim();
+  for (let i = line; i < lines.length && unbalanced(text); i += 1) text += ` ${(lines[i] || '').trim()}`;
+  return { file, line, text };
+};
+
 console.log('\n--- the vocabularies, and how fast they are ---');
 const quick = motionValueMs(css, 'motion-quick');
 const base = motionValueMs(css, 'motion-base');
@@ -208,7 +226,7 @@ checkIs('the dark backdrops were found', backdrops.length >= 6, `${backdrops.len
 check('every backdrop fades rather than appearing', offenders(backdrops, (text) => text.includes('animate-fadeIn')), []);
 
 console.log('\n--- the popovers grow from what they hang off ---');
-const popovers = linesWith(componentFiles, 'animate-popoverIn');
+const popovers = linesWith(componentFiles, 'animate-popoverIn').map(elementText);
 checkIs('the popovers were found', popovers.length >= 5, `${popovers.length} found`);
 check('each one is positioned off its control', offenders(popovers, (text) => /\b(?:absolute|fixed)\b/.test(text)), []);
 // Without an origin the scale grows from the middle, which reads as the panel inflating out of nowhere rather
@@ -226,6 +244,21 @@ const growsFromItsAnchor = (text) => {
   return (origin[1] === 'bottom') === opensUpwards;
 };
 check('and each grows from the edge it is anchored to', offenders(popovers, growsFromItsAnchor), []);
+
+// THE RULE HAS TO BE ABLE TO FAIL, and the mutation section cannot prove this one: it re-runs rules against deliberately
+// broken COPIES OF FILES, and `elementText` reads its file from disk, so a copy is out of reach. (That helper is also the
+// reason to be careful here - it is what reads the element rather than one line, and an earlier version of it read the wrong
+// text and reported [] for every popover, which is exactly what a rule that never fails looks like.) These three lines are
+// the proof instead: no origin fails, the wrong edge fails, and the picker's own wrapped, conditional className - the case
+// whose line-only reading reported a correct popover as broken - passes.
+checkIs('the rule fails a popover with no origin at all', !growsFromItsAnchor('absolute top-full animate-popoverIn'));
+checkIs('and fails one that grows from the wrong edge', !growsFromItsAnchor('absolute bottom-full origin-top animate-popoverIn'));
+checkIs(
+  'while passing the wrapped, conditional picker that prompted it',
+  growsFromItsAnchor(
+    "className={`absolute bottom-full mb-2 animate-popoverIn ${align === 'left' ? 'left-0 origin-bottom-left' : 'right-0 origin-bottom-right'}`}"
+  )
+);
 
 console.log('\n--- the page transition, on elements that are new by construction ---');
 // The first attempt animated the CONTAINER and restarted it from JavaScript on every tab change, and it

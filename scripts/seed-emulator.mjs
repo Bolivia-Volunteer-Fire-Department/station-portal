@@ -358,7 +358,7 @@ export const seed = async () => {
   // --- u1 on duty: the open clock entry, and the on_duty document the same transaction writes ---
   await put('timeclock/c1', { user_id: 'u1', time_in: '2026-03-02 07:55', time_out: '', is_manual: false });
   await put('timeclock/c2', { user_id: 'u2', time_in: '2026-03-01 08:00', time_out: '2026-03-01 17:00', is_manual: false });
-  await put('on_duty/u1', { user_id: 'u1', time_in: '2026-03-02 07:55' });
+  await put('on_duty/u1', { user_id: 'u1', time_in: '2026-03-02 07:55', name: 'Jane Smith', rank_id: 'k1' });
 
   // --- the training and certification reference data, plus one member's own records ---
   await put('trainings/tr1', { title: 'SCBA Fit Test' });

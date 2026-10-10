@@ -276,6 +276,16 @@ export default function AdminDebugTab({ systemSettings = [] }) {
               ))}
             </div>
 
+            {/* THE WELCOME IS THE ONE SOUND ABOVE THAT CANNOT BE TESTED IN PLACE: `intro_short` plays on every sign-in, after the
+                form is submitted, so hearing it where it belongs means signing out and signing back in. Said out loud rather
+                than left to be discovered, because a sound that never plays because something is broken looks exactly like a
+                sound that never plays because the way to hear it is somewhere else. */}
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              <span className="font-medium text-slate-600 dark:text-slate-300">The welcome</span> is the one sound that cannot be
+              tested in place: <span className="font-mono">intro_short</span> plays on every sign-in, once the form is submitted.
+              To hear it where it belongs, sign out and sign back in &mdash; the button above plays the file itself.
+            </p>
+
             {/* The level sliders. Deliberately NOT saved anywhere: a level is a thing to try, so it lives in the
                 engine's memory for this session and is dropped when the session ends. */}
             <div className="mt-6 border-t border-slate-200 dark:border-slate-700 pt-4">

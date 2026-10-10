@@ -45,6 +45,14 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue with the Roster not showing everyone.
 * Added enhancements to the Firefighter Runner to make mobile play easier.
 * Added the Chat module.
+* Removed redundant fetchEvents one-shot read upon calendar tab mount; snapshot is already provided by subscribeLive.
+* Materialized name and rank_id directly onto on_duty/{uid} during clock-in; eliminated secondary per-member directory fetches.
+* Replaced unbounded scan with a targeted query.
+* Eliminated post-write re-queries in saveTrainingSignatures, verifyChecklistItem, verifyDocumentSignature, and verifyChecklistRemaining by assembling returned arrays locally.
+* Inverted lookup in deliverPush: queries push_devices first. If no candidate recipients hold registered devices, returns immediately with 0 reads. Only fetches settings/public and user_settings/{id} for members with registered devices.
+* Single-member certification edits query only that member's records instead of all department certifications.
+* Centralized bumpScheduleSentinel and invoked it explicitly once in saveScheduleBoard and approveOffer, avoiding trigger storms while keeping live/schedule accurate.
+* Added in-memory caching for conversation metadata, narrowed directory reads for direct messages, and ensured chunked batch writes.
 
 ### Version 1.4x
 * Every password field now has an **eye** on it, so you can check what you are typing on the login screen and anywhere else a password is entered.

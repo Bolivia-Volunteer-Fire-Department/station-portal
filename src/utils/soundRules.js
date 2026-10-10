@@ -36,8 +36,8 @@ export const REQUIRED_SOUNDS = [
   'chat_exit',
   'chat_notify',
   'chat_send',
-  // THE STATION'S WELCOME, played once per device as the boot screen clears after a sign-in. See utils/firstVisit.js for why
-  // it is per device and why it waits for a sign-in rather than a restored session.
+  // THE STATION'S WELCOME, played after every sign-in as the app becomes usable. See utils/welcomeSound.js for why it counts
+  // sign-ins rather than devices, and why a session restored from a token still hears nothing.
   'intro_short',
 ];
 

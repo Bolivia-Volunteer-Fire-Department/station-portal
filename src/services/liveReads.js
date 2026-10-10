@@ -54,13 +54,22 @@ const rowsFrom = (snapshot) => snapshot.docs.map((entry) => ({ ...entry.data(), 
 // one for a concurrent caller. The document id IS the member id here (`on_duty/{memberId}`), which is why the id is taken
 // from the document and `user_id` is normalized to match it.
 const onDutyFrom = async (snapshot) => {
-  // NAMES FOR THE PEOPLE ON DUTY, not for the whole directory: this fires on every clock-in and clock-out, so asking it for the
-  // crew list would have every member in the station read the roster each time somebody else arrived. See usersByIds.
+  // Names and rank IDs are materialized on `on_duty/{memberId}`, so the listener needs no secondary reads.
+  // For backward compatibility or partially seeded fixtures, missing fields fall back to `usersByIds`.
   const rows = rowsFrom(snapshot);
-  const byId = Object.fromEntries((await usersByIds(rows.map((row) => row.id))).map((user) => [user.id, user]));
+  const missing = rows.filter((r) => !r.name || r.rank_id === undefined);
+  let byId = {};
+  if (missing.length > 0) {
+    byId = Object.fromEntries((await usersByIds(missing.map((row) => row.id))).map((user) => [user.id, user]));
+  }
   return rows.map((row) => {
     const member = byId[row.id] || {};
-    return { ...row, name: member.name || '', rank_id: member.rank_id ?? '', user_id: row.id };
+    return {
+      ...row,
+      name: row.name || member.name || '',
+      rank_id: row.rank_id !== undefined && row.rank_id !== '' ? row.rank_id : (member.rank_id ?? ''),
+      user_id: row.id,
+    };
   });
 };
 

@@ -1142,9 +1142,28 @@ Object.entries(AUDIENCE_SAVES).forEach(([action, { collection, rankAndAbove, liv
 Object.entries(BADGE_REFRESHING_SAVES).forEach(([action, { collection, kind }]) => {
   DISPATCH[action] = async (body) => {
     const { saveDocument, deleteDocument, refreshCertificationBadges } = await writes();
+    let targetUserId = '';
+    if (collection === 'certifications') {
+      if (kind === 'delete') {
+        targetUserId = String(body.user_id || '').trim();
+        if (!targetUserId && body.id) {
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { firestore } = await import('./firebase.js');
+          const snap = await getDoc(doc(firestore(), 'certifications', String(body.id)));
+          if (snap.exists()) targetUserId = String(snap.data()?.user_id || '').trim();
+        }
+      } else {
+        targetUserId = String(body.user_id || '').trim();
+      }
+    }
     if (kind === 'delete') await deleteDocument({ collection, id: body.id });
     else await saveDocument({ collection, id: body.id, body });
-    return ok({ id: String(body.id || ''), badges: await refreshCertificationBadges() });
+    return ok({
+      id: String(body.id || ''),
+      badges: targetUserId
+        ? await refreshCertificationBadges(targetUserId)
+        : await refreshCertificationBadges(),
+    });
   };
 });
 
