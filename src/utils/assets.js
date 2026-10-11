@@ -12,9 +12,11 @@ const publicUrl = (filename) => encodeURI(`${import.meta.env.BASE_URL}${filename
 // The department patch, shown on the login screen, on the timeclock and on printed schedules.
 export const stationLogoUrl = () => publicUrl('Bolivia Fire Department Logo trans.svg');
 
-// StationSync brand logos.
-export const stationSyncLoopsUrl = () => publicUrl('StationSync_loops.png');
-export const stationSyncOnTransUrl = () => publicUrl('StationSync_onTrans.png');
+// StationSync brand logos. SVG, so they stay sharp at any size: both are drawn to the SAME viewBox as the PNGs they
+// replaced (2215x448 full lockup, 837x448 loops), so nothing on screen moves. The loops mark is also used as a CSS mask
+// for the splash shimmer (SplashScreen -> --splash-logo), which is the other reason a vector helps.
+export const stationSyncLoopsUrl = () => publicUrl('StationSync_loops.svg');
+export const stationSyncOnTransUrl = () => publicUrl('StationSync_full.svg');
 
 // Resolves the department logo: uses custom uploaded logo URL if configured, or falls back to the station shield.
 export const departmentLogoUrl = (systemSettingsOrCustomUrl) => {

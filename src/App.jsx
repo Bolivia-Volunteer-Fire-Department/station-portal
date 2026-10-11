@@ -136,7 +136,7 @@ import {
   unauthorizedIsStale,
 } from './utils/sessionTimeout';
 import { bossSayingsFrom } from './utils/systemSettings';
-import { departmentLogoUrl, stationLogoUrl, stationSyncOnTransUrl } from './utils/assets';
+import { departmentLogoUrl, stationLogoUrl, stationSyncLoopsUrl } from './utils/assets';
 import { updateRuntimePwaIcons } from './utils/pwaIcons';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
@@ -2490,11 +2490,17 @@ const getLoadingMessage = () => {
           <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
             <div className="flex min-w-0 items-center gap-2">
               {/* The burst is placed off the anchor, so the anchor is the containing block. */}
-              <a href="#" className="relative inline-flex items-center shrink-0" onClick={(e) => {
+              <a href="#" className="relative inline-flex items-center gap-2 shrink-0" onClick={(e) => {
                 e.preventDefault();
                 handleEasterEgg();
               }}>
-                <img src={stationSyncOnTransUrl()} alt="StationSync" className="h-7 w-auto max-w-[130px] object-contain" />
+                {/* The same lockup the desktop sidebar draws: the loops mark, then "Station" in the theme's text
+                    colour and "Sync" in the brand red. This used to be the full-logo image, whose wordmark is baked
+                    blue - so on a phone the name read blue while the sidebar's read white-on-dark plus red. */}
+                <img src={stationSyncLoopsUrl()} alt="StationSync" className="h-7 w-auto shrink-0 object-contain" />
+                <span className="text-lg font-extrabold tracking-tight leading-none text-slate-800 dark:text-white">
+                  Station<span className="bg-gradient-to-r from-red-500 to-red-600 bg-clip-text text-transparent">Sync</span>
+                </span>
                 <PixelBurst trigger={easterBurst} />
               </a>
               {departmentName ? (

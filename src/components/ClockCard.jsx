@@ -13,7 +13,7 @@ export default function ClockCard({ isClockedIn, loading, offline = false, onClo
           <div className="flex items-center gap-3">
             <span className={`h-3 w-3 rounded-full ${isClockedIn ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`} />
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-              Current Status: {isClockedIn ? 'On Duty (Clocked In)' : 'Off Duty (Clocked Out)'}
+              Current Status: <span className={`font-medium ${isClockedIn ? 'text-emerald-500' : 'text-slate-500 dark:text-slate-400'}`}>{isClockedIn ? 'On Duty' : 'Off Duty'}</span>
             </h3>
           </div>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">

@@ -68,6 +68,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * When scrolled up reading conversation backlog, newly arrived messages no longer abruptly yank the scroll position. Instead, a bouncing "New messages below ↓" chip appears at the bottom. Tapping it smoothly scrolls down and dismisses it.
 * The chat message textarea dynamically expands its height from single-line up to 112px as multiline messages are composed, and immediately resets to 1 row once sent.
 * Added week numbers to Schedule and Schedule Management to help separate the weeks in a more readable format.
+* **Rebranded** to *StationSync*!
 
 ### Version 1.4x
 * Every password field now has an **eye** on it, so you can check what you are typing on the login screen and anywhere else a password is entered.

@@ -335,13 +335,15 @@ column mapping the tools execute, and `verify:migration-map` holds it against th
 - **Motion.** One vocabulary in `src/index.css` (`--motion-quick` 110ms, `--motion-base` 160ms), a
   ~200ms budget, nothing loops, and every animated rule must appear in its
   `prefers-reduced-motion` block. `verify:motion` measures all three. The one deliberate exception
-  is the splash (`SplashScreen.jsx`): a brand moment played once per page load — the patch at 60% of
-  the viewport's height on the same canvas as the login screen, while the app's data loads
-  concurrently underneath — whose durations sit outside the vocabulary by design; still one-shot and
-  reduced-motion-aware, which is what the harness holds it to. The iOS launch images
-  (`public/splash/`, referenced from `index.html`) are that same frame as static PNGs, so an
-  installed app hands off seamlessly; regenerate them with `npm run make:splash` after changing the
-  splash's canvas or logo size (needs a Chromium-based browser). Dialogs render into
+  is the splash (`SplashScreen.jsx`): a brand moment played once per page load — the StationSync loops
+  emblem at `.splash-logo`'s `clamp(52px, 11vw, 84px)` with the wordmark sliding out from behind it,
+  on the same canvas as the login screen, while the app's data loads concurrently underneath — whose
+  durations sit outside the vocabulary by design; still one-shot and reduced-motion-aware, which is
+  what the harness holds it to. The iOS launch images (`public/splash/`, referenced from `index.html`)
+  are that frame as static PNGs — the emblem alone, centered, at the same size, each rendered at its
+  device's own CSS size and DPR — so an installed app hands off seamlessly; regenerate them with
+  `npm run make:splash` after changing the splash's canvas or logo size (needs a Chromium-based
+  browser). Dialogs render into
   `document.body` via `utils/viewportLayer` (fixed positioning against a transformed ancestor was
   clipping a calendar popup), and the dismiss animation is sequenced in `utils/motion` because CSS
   cannot animate an element the parent is about to unmount.
