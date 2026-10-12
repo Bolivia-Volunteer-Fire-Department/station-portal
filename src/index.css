@@ -675,3 +675,20 @@ html.dark .splash-shimmer::before {
     transform: none;
   }
 }
+
+/* Toast positioning: clear mobile notch, Dynamic Island, status bar, and bottom navigation */
+:root {
+  --mobile-offset-top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px));
+  --mobile-offset-bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+}
+
+[data-sonner-toaster] {
+  --mobile-offset-top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px));
+  --mobile-offset-bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+}
+
+@media (max-width: 600px) {
+  [data-sonner-toaster] {
+    top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
+  }
+}

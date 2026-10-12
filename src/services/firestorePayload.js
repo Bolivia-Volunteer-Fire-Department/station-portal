@@ -544,7 +544,7 @@ export const fetchMemberPayload = async (account, stationRows = null) => {
   // WHO IS ON DUTY, WITH NAMES - and this is the ONLY directory read a sign-in costs: one document per person currently on
   // shift, rather than the whole crew. The rows come from `on_duty` (the same transaction that opens and closes a clock entry
   // writes them), so the ids are not known until that read lands - hence a second, tiny wave rather than a field in the first.
-  const onDutyMembers = await usersByIds(onDutyRows.map((row) => row.user_id));
+  const onDutyMembers = await usersByIds(onDutyRows.map((row) => row.user_id || row.id));
   const memberById = (userId) => onDutyMembers.find((user) => user.id === String(userId)) || {};
 
   // The certifications' state and days are derived at read time (they would go stale if stored), with the type
@@ -565,8 +565,15 @@ export const fetchMemberPayload = async (account, stationRows = null) => {
     // for whichever of them is on screen. See readStationRows.
     // Who is on duty, in the same three columns - which is what the dashboard draws, and the only names a sign-in needs.
     onDuty: onDutyRows.map((row) => {
-      const member = memberById(row.user_id);
-      return { id: String(row.user_id), name: member.name, rank_id: member.rank_id };
+      const memberId = String(row.id || row.user_id || '').trim();
+      const member = memberById(memberId);
+      return {
+        id: memberId,
+        user_id: memberId,
+        name: row.name || member.name || '',
+        rank_id: row.rank_id !== undefined && row.rank_id !== '' ? row.rank_id : (member.rank_id ?? ''),
+        time_in: row.time_in || '',
+      };
     }),
     // THE SCHEDULE IS NOT HERE, deliberately: it is the collection that grows without limit, and no screen in front of a
     // member at sign-in draws one. `App#loadScheduleWindow` fetches the month a calendar or the board is looking at, and

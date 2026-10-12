@@ -1070,6 +1070,28 @@ const getLoadingMessage = () => {
     return stop;
   }, [currentUser?.id]);
 
+  // When network reconnects (or when a backgrounded tab returns to visible on a mobile browser),
+  // re-sync the on-duty roster so a member's device catches up if the station's internet dropped.
+  useEffect(() => {
+    if (!currentUser?.id || !authToken) return undefined;
+    const resyncOnDuty = () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine && tokenRef.current) {
+        void refreshOnDuty(tokenRef.current);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        resyncOnDuty();
+      }
+    };
+    window.addEventListener('online', resyncOnDuty);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('online', resyncOnDuty);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [currentUser?.id, authToken]);
+
   // EVENTS FOLLOW THE SCREEN RATHER THAN THE SESSION.
   //
   // They are drawn by the member's own calendar, the availability grid and the officer's board - and by nothing on the dashboard,
@@ -2146,8 +2168,24 @@ const getLoadingMessage = () => {
           clockLocationNotice({ allowed: false, code: OUT_OF_RANGE_CODE, message: result.message })
         );
       } else {
-        setStatusMessage({ type: 'error', text: result.message || 'Action failed.' });
-        toast.error(result.message || 'Action failed.');
+        const msg = String(result?.message || '');
+        if (/already clocked in/i.test(msg)) {
+          // The server confirmed the user is already on duty, but local state was out of sync (e.g. dropped network connection).
+          // Immediately reconcile state to On Duty so the member is not trapped, and refresh logs/duty roster.
+          applyClockOutcome(true);
+          toast.info('You are already clocked in. Updated status to On Duty.');
+          void refreshLogs(token);
+          void refreshOnDuty(token);
+        } else if (/not clocked in|already clocked out|already closed/i.test(msg)) {
+          // Symmetrically, server confirmed user is not clocked in. Reconcile to Off Duty.
+          applyClockOutcome(false);
+          toast.info('You are already clocked out. Updated status to Off Duty.');
+          void refreshLogs(token);
+          void refreshOnDuty(token);
+        } else {
+          setStatusMessage({ type: 'error', text: result.message || 'Action failed.' });
+          toast.error(result.message || 'Action failed.');
+        }
       }
     } catch {
       setStatusMessage({ type: 'error', text: 'Network error submitting shift update.' });
@@ -2387,7 +2425,17 @@ const getLoadingMessage = () => {
       {/* Toast host. Until now `toast()` was imported by the pending-approvals
           tab but never rendered anywhere, so those approve/decline confirmations
           never appeared; this also renders in-app push notifications. */}
-      <Toaster theme={isDarkMode ? 'dark' : 'light'} position="top-right" richColors closeButton />
+      <Toaster
+        theme={isDarkMode ? 'dark' : 'light'}
+        position="top-right"
+        richColors
+        closeButton
+        offset="max(16px, calc(env(safe-area-inset-top, 0px) + 12px))"
+        mobileOffset={{
+          top: 'max(16px, calc(env(safe-area-inset-top, 0px) + 12px))',
+          bottom: 'max(16px, calc(env(safe-area-inset-bottom, 0px) + 80px))',
+        }}
+      />
 
       {/* Idle timeout warning. Shown only in the final minute, so it reads as a warning rather than
           as a permanent fixture. "Stay signed in" pushes the server window out as well as resetting

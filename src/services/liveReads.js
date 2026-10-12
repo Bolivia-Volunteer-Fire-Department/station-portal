@@ -60,7 +60,11 @@ const onDutyFrom = async (snapshot) => {
   const missing = rows.filter((r) => !r.name || r.rank_id === undefined);
   let byId = {};
   if (missing.length > 0) {
-    byId = Object.fromEntries((await usersByIds(missing.map((row) => row.id))).map((user) => [user.id, user]));
+    try {
+      byId = Object.fromEntries((await usersByIds(missing.map((row) => row.id))).map((user) => [user.id, user]));
+    } catch (err) {
+      console.warn('[liveReads] failed to backfill users for on_duty listener:', err);
+    }
   }
   return rows.map((row) => {
     const member = byId[row.id] || {};
