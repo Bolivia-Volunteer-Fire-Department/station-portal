@@ -508,6 +508,131 @@ service cloud.firestore {
       allow delete: if permission('can_configure_forms');
     }
 
+    // THE DISTRICT MAP: one drawing, kept as SVG TEXT, readable by anyone the station has given `can_view_map`.
+    //
+    // IT IS DELIBERATELY NOT IN THE BUCKET, and that is the whole reason for this shape. storage.rules refuses
+    // `image/svg+xml` - an SVG is a picture that can carry script, and the bucket is served from a domain the app trusts -
+    // so rather than loosen that, the drawing is kept as text HERE and drawn only through an `<img>` (Leaflet's
+    // imageOverlay), and a browser does not run script inside an image. So the document is never markup anywhere in the
+    // app, whatever an officer uploads.
+    //
+    // READ GATED ON THE PERMISSION, not on `signedIn()` alone. Seeing the station's boundary is a member-facing ability a
+    // department may withhold, so the flag that hides the tab refuses the read as well - the same arrangement as
+    // `can_view_documents`, where the server refuses every action a role without the permission could ask for.
+    //
+    // WRITE BELONGS TO THE SETTINGS TAB, because the upload is a card on it. DELETE carries no checks, for the reason the
+    // certification rules state: on a DELETE `request.resource` is null, so reading `.size()` off it is an evaluation
+    // error rather than a false, and a combined `allow write` would make removing a map impossible while appearing to
+    // allow it.
+    //
+    // THE CAP IS A BACKSTOP, NOT THE TARGET: the browser checks the same number first and can explain it in words
+    // (utils/mapLayer), where this refuses a crafted request. Rules count CHARACTERS, so a drawing of non-ASCII street
+    // names could pass here and be refused by the browser's byte count - which is the right way round, because the browser
+    // is where somebody can be told why. scripts/verify-district-map.mjs pins this literal to the constant so the two
+    // cannot drift.
+    match /map_layers/{layerId} {
+      allow read: if signedIn() && permission('can_view_map');
+      allow create, update: if permission('can_edit_system_settings')
+        && request.resource.data.get('svg', '').size() > 0
+        && request.resource.data.get('svg', '').size() < 921600;
+      allow delete: if permission('can_edit_system_settings');
+    }
+
+    // THE DISTRICT BOUNDARY: one polygon, in latitude and longitude, copied out of a county's own service (or out of a file
+    // an officer exported) and kept as the station's own - so the map reads nobody else's server afterwards, and works with
+    // no signal.
+    //
+    // READ GATED ON `can_view_map`, the flag that opens the tab; WRITTEN by `can_edit_map`, which is a permission for
+    // MAINTAINING the map rather than for configuring the station. The drawing above is written by `can_edit_system_settings`
+    // and this is not, deliberately: the drawing is a settings-shaped upload on the settings tab, while the boundary and the
+    // pins are the map's own content, and a station may want a lieutenant keeping those current without handing over System
+    // Settings.
+    //
+    // WHAT THE RULE CAN AND CANNOT CHECK. It cannot read inside the geometry - the coordinates are TEXT, because Firestore
+    // refuses an array that contains an array and GeoJSON coordinates are arrays of arrays - so the range checks on every
+    // latitude live in the browser (utils/districtMap) and in the writer, which refuse before the bytes leave. What the rule
+    // insists on is the shape the reader and the screen depend on, and that the document is small enough to store at all: a
+    // boundary that was, say, half written would draw nothing, and one over the cap is refused by the database with a message
+    // nobody can act on.
+    // THE LANDMARK TYPES: what a pin on this station's map can BE - a name, an icon and a color each. One document, like the
+    // boundary, and the same permission on both ends.
+    //
+    // WHAT THE RULES CAN AND CANNOT CHECK HERE. They can check the SHAPE of the list - that it is a list, that it is not empty,
+    // and that it is not longer than the legend may be - and they cannot check what is inside each entry, because rules have no
+    // loops. That is not a hole somebody walks through: the screen runs the same checks the writer does (utils/mapTypes), and
+    // what a stranger could write with a hand-made request is a type list that draws badly. So the numbers below are the two
+    // that MATTER - a list, and a bounded one - and the rest is enforced where it can be explained in words.
+    //
+    // THE DOCUMENT ID IS FIXED, for the same reason the boundary's is: there is one set of types per station, and an id of the
+    // caller's choosing would be a document nothing reads.
+    match /map_types/{typeDocId} {
+      allow read: if signedIn() && permission('can_view_map');
+      allow create, update: if permission('can_edit_map')
+        && typeDocId == 'station'
+        && request.resource.data.get('types', null) is list
+        && request.resource.data.types.size() > 0
+        && request.resource.data.types.size() <= 24;
+      allow delete: if permission('can_edit_map');
+    }
+
+    match /map_boundaries/{boundaryId} {
+      allow read: if signedIn() && permission('can_view_map');
+      allow create, update: if permission('can_edit_map')
+        && request.resource.data.get('geojson', '') is string
+        && request.resource.data.get('geojson', '').size() > 2
+        && request.resource.data.get('geojson', '').size() < 921600
+        && request.resource.data.get('points', 0) >= 3
+        && request.resource.data.get('bounds', null) is map;
+      allow delete: if permission('can_edit_map');
+    }
+
+    // THE LANDMARKS: the pins on that boundary. A pin is four facts - a name, a kind, a position and a note - and the fields
+    // are named here because the position is the one that can be wrong in a way that LOOKS right: a pin with a bad latitude
+    // draws beautifully in the wrong country, and nobody notices until somebody is sent to it.
+    //
+    // ZERO IS A LEGAL LATITUDE, so the bounds are a range rather than a truthiness test: `lat != 0` would refuse a pin on the
+    // equator, and a missing field filled with a default of zero would ACCEPT a pin that has no position at all. `hasAll`
+    // first, then the range - which together mean "this pin has been placed somewhere real".
+    match /map_landmarks/{landmarkId} {
+      allow read: if signedIn() && permission('can_view_map');
+      allow create, update: if permission('can_edit_map')
+        && request.resource.data.keys().hasAll(['label', 'kind', 'lat', 'lng', 'note'])
+        && request.resource.data.label is string
+        && request.resource.data.label.size() > 0
+        && request.resource.data.label.size() <= 60
+        && request.resource.data.lat is number
+        && request.resource.data.lat >= -90
+        && request.resource.data.lat <= 90
+        && request.resource.data.lng is number
+        && request.resource.data.lng >= -180
+        && request.resource.data.lng <= 180
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 280;
+      allow delete: if permission('can_edit_map');
+    }
+
+    // THE MAP BACKGROUND: the roads and the waterways the district is drawn over - the county's own geometry, clipped to the
+    // district and generalised by the county before it is stored, so the map draws them with no network and no third party in
+    // the path (see utils/districtMap for why a tile layer was rejected).
+    //
+    // THE DOCUMENT ID IS THE LAYER, so a rule that only checked the permission would let a typo write a sixth document called
+    // `road` that nothing reads and nothing draws - a silent failure with the shape of a successful fetch. The five ids that
+    // exist are named - the county's roads and waterways, the FEMA flood zones, the fire districts around this one, and the
+    // major roads out there - and
+    // the shape is checked the way the boundary's is: geometry as text, non-empty, inside the size a document can hold, with
+    // the box the screen needs to know it is real.
+    match /map_backdrops/{layerId} {
+      allow read: if signedIn() && permission('can_view_map');
+      allow create, update: if permission('can_edit_map')
+        && layerId in ['roads', 'water', 'flood', 'districts', 'neighbourRoads']
+        && request.resource.data.get('geojson', '') is string
+        && request.resource.data.get('geojson', '').size() > 2
+        && request.resource.data.get('geojson', '').size() < 921600
+        && request.resource.data.get('features', 0) >= 1
+        && request.resource.data.get('bounds', null) is map;
+      allow delete: if permission('can_edit_map');
+    }
+
     // The training list is everyone's; the signatures differ by permission. The permission is a fact about the
     // READER, which is why the rule reads the role document rather than the row.
     match /trainings/{trainingId} {

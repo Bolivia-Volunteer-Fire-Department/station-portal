@@ -361,6 +361,36 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // The district map: one drawing, and nothing else.
+  //
+  // CLIENT AND DATABASE ONLY, like `forms` above and for the same reason - a drawing is text, it is checked by PURE client
+  // code (utils/mapLayer) that the admin card and the writer both call, the writer re-checks it, and the rules are what
+  // decide who may read it and who may replace it. There is no callable because there is nothing here a browser must not
+  // be trusted with that the permissions and the size cap do not already enforce.
+  //
+  // A MEMBER read and an OFFICER write, in one feature rather than two: `can_view_map` opens the tab AND the reads, and the
+  // writes are `can_edit_system_settings` for the uploaded drawing - which lives on the System Settings tab - and
+  // `can_edit_map` for the boundary and the landmarks, which are the map's own content rather than configuration. A feature
+  // is a unit of the move, not of the menu.
+  districtMap: {
+    requires: ['memberPayload'],
+    writes: [
+      // The uploaded drawing, and the real map: the boundary polygon and the pins.
+      'ADMIN_SAVE_MAP_LAYER',
+      'ADMIN_DELETE_MAP_LAYER',
+      'ADMIN_SAVE_MAP_BOUNDARY',
+      'ADMIN_DELETE_MAP_BOUNDARY',
+      'ADMIN_SAVE_MAP_LANDMARK',
+      'ADMIN_DELETE_MAP_LANDMARK',
+      'ADMIN_SAVE_MAP_BACKDROP',
+      'ADMIN_DELETE_MAP_BACKDROP',
+      // The station's own landmark types (a name, an icon and a colour each) - what the pins on the map can be.
+      'ADMIN_SAVE_MAP_TYPES',
+    ],
+    reads: ['GET_MAP_LAYER', 'GET_MAP_BOUNDARY', 'GET_MAP_LANDMARKS', 'GET_MAP_BACKDROPS', 'GET_MAP_TYPES'],
+    switchReads: [],
+  },
+
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
   // The officer-only reads the tabs make for themselves. The admin payload already carries most of what these tabs
   // show, and these are the three that are still fetched separately - all of them reading a WHOLE collection, which
@@ -596,6 +626,76 @@ const DISPATCH = {
   DELETE_FORM_TEMPLATE: async (body) => {
     const { deleteFormTemplate } = await writes();
     return ok(await deleteFormTemplate({ id: body?.id || body?.formId }));
+  },
+
+  // The district map: one document, written straight from the browser. No callable, for the same reason the form
+  // definitions above have none - the drawing is checked by the same pure function the admin card checks it with, the
+  // writer re-checks it, and the rule names the permission that owns the collection.
+  ADMIN_SAVE_MAP_LAYER: async (body, uid) => {
+    const { saveMapLayer } = await writes();
+    return ok(await saveMapLayer({ svg: body?.svg, authorId: uid }));
+  },
+
+  ADMIN_DELETE_MAP_LAYER: async () => {
+    const { deleteMapLayer } = await writes();
+    return ok(await deleteMapLayer());
+  },
+
+  // The district boundary and the pins: the same shape of write as the drawing above - straight from the browser, validated
+  // by the pure functions the card and the screen already validated with, gated by `can_edit_map` in the rules.
+  //
+  // THE BOUNDARY'S GEOMETRY ARRIVES WHOLE (a GeoJSON feature from the county, or from a file an officer exported), so this
+  // passes it through untouched rather than picking fields apart: `boundaryDocument` is what decides which of it is stored.
+  ADMIN_SAVE_MAP_BOUNDARY: async (body, uid) => {
+    const { saveMapBoundary } = await writes();
+    const request = body?.request || body || {};
+    return ok(await saveMapBoundary({ geojson: request.geojson, meta: request.meta || {}, authorId: uid }));
+  },
+
+  ADMIN_DELETE_MAP_BOUNDARY: async () => {
+    const { deleteMapBoundary } = await writes();
+    return ok(await deleteMapBoundary());
+  },
+
+  ADMIN_SAVE_MAP_LANDMARK: async (body, uid) => {
+    const { saveMapLandmark } = await writes();
+    const request = body?.request || body || {};
+    return ok(await saveMapLandmark({ id: request.id || '', fields: request.fields || {}, authorId: uid }));
+  },
+
+  ADMIN_DELETE_MAP_LANDMARK: async (body) => {
+    const { deleteMapLandmark } = await writes();
+    return ok(await deleteMapLandmark({ id: body?.id || body?.landmarkId }));
+  },
+
+  // The map background: the roads and the waterways, fetched from the county (clipped and generalised there) or uploaded as a
+  // file, and stored as the station's own geometry so the map draws them with no network.
+  ADMIN_SAVE_MAP_BACKDROP: async (body, uid) => {
+    const { saveMapBackdrop } = await writes();
+    const request = body?.request || body || {};
+    return ok(
+      await saveMapBackdrop({
+        layer: request.layer,
+        geojson: request.geojson,
+        meta: request.meta || {},
+        authorId: uid,
+      })
+    );
+  },
+
+  ADMIN_DELETE_MAP_BACKDROP: async (body) => {
+    const { deleteMapBackdrop } = await writes();
+    return ok(await deleteMapBackdrop({ layer: body?.layer }));
+  },
+
+  // The station's own landmark types (a name, an icon and a colour each): the list the pins can be. Written WHOLE, because the
+  // list is the thing - the writer re-checks it with the same pure function the card checked it with (utils/mapTypes), and the
+  // admin menu reorganisation left this name routed in the table but without the entry that answers it - which is why the save
+  // threw "DISPATCH[action] is not a function" instead of saving.
+  ADMIN_SAVE_MAP_TYPES: async (body, uid) => {
+    const { saveMapTypes } = await writes();
+    const request = body?.request || body || {};
+    return ok(await saveMapTypes({ types: request.types, authorId: uid }));
   },
 
   // CLOCK OUT needs the open entry's id, which the sheet backend found for itself. The Firestore side reads the

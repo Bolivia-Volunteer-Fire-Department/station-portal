@@ -98,8 +98,15 @@ export const ADMIN_PERMISSIONS = [
   {
     key: 'can_edit_system_settings',
     tab: 'system',
+    // THE MAP'S OWN SCREEN RIDES ON THIS PERMISSION (System → Map Settings). The boundary, the county's roads and waterways,
+    // and the uploaded drawing were cards inside System Settings; they moved to a screen of their own, and `moreTabs` is how a
+    // permission reaches a second screen of the same responsibility - the mechanism the availability windows already use. So
+    // the move changes where somebody looks and nothing about who may look: the same role that maintained those cards keeps
+    // them. (The boundary and the background are WRITTEN with `can_edit_map`, which is the switch about the map's content - an
+    // officer without it sees those cards and is refused by the server, exactly as they were from the settings tab.)
+    moreTabs: ['map'],
     label: 'Manage system settings',
-    description: 'Change station-wide settings, including the loading messages and defaults.',
+    description: 'Change station-wide settings, including the loading messages and defaults, and the district map\'s own screen (System → Map Settings): the boundary, the county\'s roads and waterways, and the uploaded drawing.',
   },
   {
     key: 'can_edit_notification_settings',
@@ -278,6 +285,43 @@ export const MEMBER_PERMISSIONS = [
     description: 'Open Reports & Forms and generate the printable PDFs shared with their role or rank.',
   },
   {
+    // THE DOOR TO THE DISTRICT MAP, and one of the few permissions a station is likely to want OFF for some roles - which
+    // is why it exists at all rather than the tab being open to everybody like Help. It gates the TAB, the READ (the rule
+    // is what actually refuses), and the boundary drawing itself.
+    //
+    // A MEMBER permission rather than an administration one: reading where the district runs is information, and the
+    // upload is where the management is - that half is `can_edit_system_settings`, because the upload card is about the
+    // station's configuration and sits on the screen that permission opens (System → Map Settings).
+    //
+    // NOTE FOR A STATION ADDING THIS LATER: a role document written before this key existed has no column for it, which
+    // reads as NOT granted - so the map is hidden until an administrator switches it on in Roles. That is the intended
+    // behaviour (the station asked for it), and it is the opposite of the accident recorded above `can_view_documents`,
+    // where a missing column hid a member's OWN paperwork from them.
+    key: 'can_view_map',
+    label: 'View the district map',
+    description:
+      'Open the District Map: the district boundary, the landmarks pinned on it, and the department\'s drawing if one is uploaded.',
+  },
+  {
+    // MAINTAINING THE MAP, which is a different job from seeing it. An officer who knows where the hydrants are is not
+    // necessarily an administrator, and a station may well want a lieutenant keeping the pins up to date without handing
+    // over System Settings - so this is its own switch rather than a corner of one.
+    //
+    // It covers the pins and the boundary: both are the map's content, and a station that has the one usually has the
+    // other. `requires` makes the dependency explicit in the Roles form, because a switch that edits a map nobody may look
+    // at is a switch nobody can use.
+    //
+    // IT ALSO OPENS THE MAP'S OWN SCREEN (Administration → System → Map Settings), which is where the boundary and the
+    // county's roads and waterways are set. That is not a second job bolted on: the boundary is what every pin is drawn
+    // against, and an officer who maintains the map without being able to set the shape of it would be maintaining half a
+    // map. Reaching that screen needs no administrator rights - see utils/permissions#roleHasAdministration.
+    key: 'can_edit_map',
+    label: 'Maintain the district map',
+    description:
+      'Draw on the district map: add and move landmarks, set the district boundary (from the county\'s data, or from a GeoJSON file exported out of a GIS system), and fetch the roads and waterways the map is drawn over. Opens System → Map Settings. Requires "View the district map".',
+    requires: 'can_view_map',
+  },
+  {
     // THE DOOR TO THE WHOLE MODULE, and the only permission the other five rest on. Without it Chat does not exist for
     // a member: no panel, no launcher button, no unread badge, and the chat push fan-out skips them - which is why it is
     // a permission rather than a station-wide setting. A station that wants a quiet station can leave it off for a role.
@@ -377,6 +421,14 @@ export const MEMBER_PERMISSION_GROUPS = [
       'can_add_assessment_scores',
       'can_generate_forms',
     ],
+  },
+  {
+    // ONE PERMISSION UNDER ITS OWN HEADING, because it belongs to none of the others: it is not a member's own records and
+    // not the crew's - it is the ground the station covers. A single-entry group is honest here rather than an entry filed
+    // under a heading that would not be true of it, and it sits ABOVE Chat deliberately: the Roles form draws these in
+    // order, and scripts/verify-permissions asserts that Chat is last.
+    label: 'The district',
+    keys: ['can_view_map', 'can_edit_map'],
   },
   {
     // The five chat permissions sit together, and the four below the door are the pair-of-pairs the whole design turns on:
@@ -502,7 +554,7 @@ export const roleAllowsTab = (role, tabId) => {
 
   if (permissionGranted(role, MASTER_PERMISSION_KEY)) return true;
 
-  // Documents is the one tab two permissions open, and deliberately so. `can_manage_documents` is the obvious
+  // Documents is one tab two permissions open, and deliberately so. `can_manage_documents` is the obvious
   // one; `can_verify_documents` needs it as well, because that is where a verifier goes to confirm another
   // member's signed items - the officer checking a new member's truck checklist should not have to be able to
   // edit the checklist to confirm it was done.
@@ -517,15 +569,39 @@ export const roleAllowsTab = (role, tabId) => {
     return permissionGranted(role, 'can_verify_documents');
   }
 
+  // THE MAP'S OWN SCREEN IS THE OTHER TAB TWO PERMISSIONS OPEN, and the two are not the same SIZE of job:
+  //
+  //   * `can_edit_map` - "Maintain the district map" - is the map's own switch: the pins and lines drawn on it, the boundary
+  //     the whole screen is fitted to, and the county's roads and waterways. That is the content of the map, and it is the
+  //     permission a lieutenant keeping the hydrants current is given. It is a MEMBER permission rather than an admin one
+  //     (it also gates drawing on the member's own map screen), which is why the walk in `allowedAdminTabs` cannot find it
+  //     and has to be told about it.
+  //   * `can_edit_system_settings` - the station's configuration - holds the uploaded DRAWING, which is the one card here that
+  //     is not geometry at all, and which is why this screen still opens for a settings officer.
+  //
+  // So the tab opens for either, and WHICH CARDS ARE ON IT follows the permission the save needs: see AdminMapSettingsTab,
+  // which shows a map maintainer the two cards they can act on and says who can upload the drawing, and a settings officer
+  // the reverse. No card is ever shown to somebody whose save the server would refuse without telling them why.
+  if (tabId === 'map') {
+    if (permissionGranted(role, 'can_edit_map')) return true;
+    return permissionGranted(role, direct.key);
+  }
+
   return permissionGranted(role, direct.key);
 };
 
 // Whether the role may open the Administration module at all: any single admin
 // permission is enough, so a role can be given one tab without being an
 // administrator.
+//
+// THE MAP'S SWITCH IS THE ONE MEMBER PERMISSION THAT COUNTS. Everything else here is a tab of its own; `can_edit_map` is not -
+// it is also what lets an officer draw pins on the map itself - so it is named rather than found in the list above. Without
+// this, a lieutenant given the map and nothing else could edit the pins and never reach the screen that sets the boundary they
+// are drawn against.
 export const roleHasAdministration = (role) => {
   if (!role) return false;
   if (permissionGranted(role, MASTER_PERMISSION_KEY)) return true;
+  if (permissionGranted(role, 'can_edit_map')) return true;
   return ADMIN_PERMISSIONS.some((permission) => permissionGranted(role, permission.key));
 };
 
@@ -533,12 +609,18 @@ export const roleHasAdministration = (role) => {
 //
 // Permission-driven tabs come first so a role's default tab is always one it was actually
 // granted; the permissionless ones (Help) trail behind and can never become the landing tab.
-export const allowedAdminTabs = (role) => [
-  ...ADMIN_PERMISSIONS.flatMap((permission) =>
+//
+// THE MAP TAB CAN ARRIVE FROM TWO PLACES, and only one of them is in the walk below: `can_edit_system_settings` carries it in
+// `moreTabs`, while `can_edit_map` is a member permission that the walk never sees. So it is added after the walk rather than
+// left to which list a key happens to live in - and BEFORE the permissionless tabs, because a map-only officer has to land on
+// the map rather than on Help.
+export const allowedAdminTabs = (role) => {
+  const tabs = ADMIN_PERMISSIONS.flatMap((permission) =>
     roleAllowsTab(role, permission.tab) ? [permission.tab, ...(permission.moreTabs || [])] : []
-  ),
-  ...ADMIN_PERMISSIONLESS_TABS.filter((tab) => roleAllowsTab(role, tab)),
-];
+  ).filter((tab, index, list) => list.indexOf(tab) === index);
+  if (roleAllowsTab(role, 'map') && !tabs.includes('map')) tabs.push('map');
+  return [...tabs, ...ADMIN_PERMISSIONLESS_TABS.filter((tab) => roleAllowsTab(role, tab))];
+};
 
 // Whether a permission checkbox is locked on because is_admin is ticked.
 export const permissionLockedByAdmin = (role, key) =>

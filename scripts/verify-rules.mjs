@@ -30,6 +30,9 @@ import {
 import { getFirestore } from 'firebase/firestore';
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, PROJECT, seed } from './seed-emulator.mjs';
+// The district map's cap, imported rather than written out: firestore.rules cannot import it, so the number lives in two
+// places by necessity - and a case here that measured a DIFFERENT number would prove the wrong thing.
+import { MAP_LAYER_MAX_BYTES } from '../src/utils/mapLayer.js';
 
 // The SDK logs every refused write to the console, which would bury the checks below in noise. The refusals are
 // the point of this file, and each one is reported by name instead.
@@ -61,6 +64,15 @@ const write = (label, allowed, ...args) => {
     (error) => checkIs(label, !allowed && error.code === 'permission-denied', `threw ${error.code}`)
   );
 };
+
+// A removal, which needs its own unlike `write`: on a DELETE there is no incoming document, so a rule that measures
+// `request.resource` is an evaluation error here rather than a false - and the difference between those two is the whole
+// reason firestore.rules splits create/update from delete.
+const remove = (label, allowed, target) =>
+  deleteDoc(target).then(
+    () => checkIs(label, allowed, allowed ? '' : 'the delete was allowed'),
+    (error) => checkIs(label, !allowed && error.code === 'permission-denied', `threw ${error.code}`)
+  );
 
 // An `owner` app is not needed anywhere below: the seed does the privileged writes over REST, so every check here
 // goes through the same door the browser uses.
@@ -749,6 +761,174 @@ const main = async () => {
     )
   );
   checkIs('and asks for its own forms as ONE provable query', myForms.size === 1, `${myForms.size} form(s)`);
+
+  // --- the district map: one document, and THE PERMISSION IS THE WHOLE OF ITS ACCESS ------------------
+  //
+  // This is the only station document in the app whose READ is gated on a permission that most roles will not have, so the
+  // pair worth proving is the one no click-through can show: a member who is perfectly legitimate and simply lacks the flag
+  // is refused, and granting the flag - and nothing else - is what changes it. The write is the settings tab's permission,
+  // which the member never holds, so the read that opens and the write that stays shut are asserted together.
+  console.log('\n--- the district map ---');
+  const mapDoc = doc(db, 'map_layers', 'district');
+  await asUser('u1'); // the administrator: is_admin implies can_edit_system_settings AND can_view_map
+  await setDoc(mapDoc, { svg: '<svg viewBox="0 0 10 10"><rect/></svg>', width: 10, height: 10, view_box: '0 0 10 10' });
+  await read('an officer with the settings permission reads the drawing', true, mapDoc);
+  // The ceiling. Refused at ONE BYTE over, so a cap that drifted upward in either file is caught here rather than by an
+  // officer whose drawing silently will not save.
+  await write('but a drawing over the cap is refused', false, mapDoc, {
+    svg: 'x'.repeat(MAP_LAYER_MAX_BYTES + 1),
+  });
+  await read('and the refusal left the stored drawing alone', true, mapDoc);
+
+  await asUser('u2'); // the firefighter: signed in, and holding neither permission
+  await read('a member without the flag is refused the drawing', false, mapDoc);
+  await write('and cannot write one either', false, mapDoc, { svg: '<svg viewBox="0 0 1 1"/>' });
+  await remove('nor take the station map down', false, mapDoc);
+
+  // Granted the flag and NOTHING else. The role is put back exactly as it was found afterwards, so no case below reads a
+  // role it did not expect - which is what the form-definition section above does for the same reason.
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r2'), { can_view_map: true }, { merge: true });
+  await asUser('u2');
+  await read('granted the flag, the same member reads it', true, mapDoc);
+  await write('and still cannot write it, because the upload is a settings act', false, mapDoc, {
+    svg: '<svg viewBox="0 0 1 1"/>',
+  });
+
+  // --- the map background drawn under the boundary: two documents whose ids ARE the layers -----------
+  //
+  // HERE, where the member holds `can_view_map` and NOT yet `can_edit_map`: the case worth proving for any collection is the
+  // one in between - somebody who may look at the map and may not change it - and the rest of this section grants the editing
+  // flag, after which the same write is meant to succeed.
+  //
+  // It is also the one collection where the rule has to name what may exist. Without that, a typo writes a third document
+  // called `road` that nothing reads and nothing draws: a silent no-op wearing the shape of a successful fetch.
+  console.log('\n--- the map background ---');
+  const roadsDoc = doc(db, 'map_backdrops', 'roads');
+  const BACKDROP_FIELDS = {
+    geojson:
+      '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[-78.2,34.05],[-78.09,34.05]]}}]}',
+    features: 1,
+    points: 2,
+    bounds: { south: 34.05, west: -78.2, north: 34.05, east: -78.09 },
+  };
+  await asUser('u1');
+  await setDoc(roadsDoc, BACKDROP_FIELDS);
+  await read('an officer reads the roads', true, roadsDoc);
+  await remove('and can take them down again', true, roadsDoc);
+  await setDoc(roadsDoc, BACKDROP_FIELDS);
+  await write('a THIRD layer is refused, because the id IS the layer', false, doc(db, 'map_backdrops', 'road'), BACKDROP_FIELDS);
+  // ...AND THE THREE LAYERS ADDED LATER ARE ALLOWED, which is the other half of naming the ids: a rule that forgot one would be
+  // a fetch that reported success and stored nothing.
+  await write('the flood zones may be stored under their own id', true, doc(db, 'map_backdrops', 'flood'), BACKDROP_FIELDS);
+  await write('and the districts around this one too', true, doc(db, 'map_backdrops', 'districts'), BACKDROP_FIELDS);
+  await write('and the major roads out in the neighbouring districts too', true, doc(db, 'map_backdrops', 'neighbourRoads'), BACKDROP_FIELDS);
+  await write('and a background with nothing in it is refused', false, roadsDoc, { ...BACKDROP_FIELDS, geojson: '{}' });
+
+  await asUser('u2');
+  await read('a member with the view flag reads them', true, roadsDoc);
+  await write('and cannot write them', false, roadsDoc, BACKDROP_FIELDS);
+
+  // --- the landmark types ------------------------------------------------------------------------------
+  //
+  // What a pin on the map can be. Same pair of permissions as the boundary and the pins, and the ONE thing worth asserting about
+  // a collection whose contents the rules cannot inspect: that the SHAPE is checked - a list, not empty, not longer than a legend
+  // holds - and that the document id is the fixed one, so a second type list cannot be invented under a name nothing reads.
+  console.log('\n--- the landmark types ---');
+  const typesDoc = doc(db, 'map_types', 'station');
+  const TYPE_FIELDS = { types: [{ key: 'hydrant', label: 'Hydrant', icon: 'droplet', color: '#dc2626' }], count: 1 };
+
+  await asUser('u1');
+  await setDoc(typesDoc, TYPE_FIELDS);
+  await read('an officer reads the types', true, typesDoc);
+  await remove('and can put the built-in eight back', true, typesDoc);
+  await setDoc(typesDoc, TYPE_FIELDS);
+  await write('a SECOND type list is refused, because the id is fixed', false, doc(db, 'map_types', 'ours'), TYPE_FIELDS);
+  await write('an empty list is refused', false, typesDoc, { types: [], count: 0 });
+  await write(
+    'and a legend nobody could read is refused',
+    false,
+    typesDoc,
+    { types: new Array(25).fill({ key: 'x', label: 'X', icon: 'flag', color: '#dc2626' }), count: 25 }
+  );
+  await write('while the list itself is not inspected, because rules have no loops', true, typesDoc, {
+    types: [{ key: 'anything', label: 'Anything at all', icon: 'not-a-real-icon', color: 'chartreuse' }],
+    count: 1,
+  });
+
+  await asUser('u2');
+  await read('a member with the view flag reads the types', true, typesDoc);
+  await write('and cannot change what a pin means', false, typesDoc, TYPE_FIELDS);
+
+  // --- the real map: the boundary polygon and the pins ------------------------------------------------
+  //
+  // The boundary and the pins answer to `can_edit_map` rather than to the settings permission, and they are read by anybody
+  // with `can_view_map`. Both halves are asserted against the same member at the same moment, because the interesting case
+  // is the one in BETWEEN: a member who may look at the map and may not change it.
+  console.log('\n--- the real map: the boundary and the pins ---');
+  const boundaryDoc = doc(db, 'map_boundaries', 'district');
+  const pinDoc = doc(db, 'map_landmarks', 'pin-hydrant-12');
+  const BOUNDARY_FIELDS = {
+    geojson: '{"type":"Polygon","coordinates":[[[-78.2,34.0],[-78.1,34.0],[-78.1,34.1]]]}',
+    geometry_type: 'Polygon',
+    points: 3,
+    bounds: { south: 34, west: -78.2, north: 34.1, east: -78.1 },
+  };
+  const PIN_FIELDS = { label: 'Hydrant 12', kind: 'hydrant', lat: 34.0471, lng: -78.1234, note: 'beside the shed' };
+
+  await asUser('u1');
+  await setDoc(boundaryDoc, BOUNDARY_FIELDS);
+  await setDoc(pinDoc, PIN_FIELDS);
+  await read('an officer reads the district boundary', true, boundaryDoc);
+  await read('and the pins on it', true, pinDoc);
+
+  await asUser('u2');
+  await read('a member granted the view flag reads the boundary', true, boundaryDoc);
+  await read('and the pins', true, pinDoc);
+  await write('but does not write either of them', false, boundaryDoc, BOUNDARY_FIELDS);
+  await write('no, not the pins either', false, pinDoc, PIN_FIELDS);
+
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r2'), { can_edit_map: true }, { merge: true });
+  await asUser('u2');
+  await write('granted the editing flag, the same member sets the boundary', true, boundaryDoc, BOUNDARY_FIELDS);
+  await write('and adds a pin', true, pinDoc, PIN_FIELDS);
+  await remove('and can take a pin down again', true, pinDoc);
+
+  // THE FIELDS AND THE POSITION. A pin whose latitude is missing, or off the planet, is refused here as well as in the
+  // browser: it is the one fault that draws a pin beautifully in the wrong country. Zero is a legal latitude, so the check
+  // is a range - and `lat: 0` with no longitude would pass a truthiness test while placing nothing anywhere.
+  await write('a pin with no label is refused', false, pinDoc, { ...PIN_FIELDS, label: '' });
+  await write('a pin with no position is refused', false, pinDoc, { label: 'Nowhere', kind: 'other', note: '' });
+  await write('a pin off the planet is refused', false, pinDoc, { ...PIN_FIELDS, lat: 95 });
+  await write('and a note nobody will read is refused', false, pinDoc, { ...PIN_FIELDS, note: 'x'.repeat(281) });
+  await write('while a pin on the equator is fine, because zero is a place', true, pinDoc, {
+    ...PIN_FIELDS,
+    lat: 0,
+    lng: 0,
+  });
+  await remove('(cleaning up that one)', true, pinDoc);
+
+  // The boundary's own shape: the rule cannot read inside the geometry, so what it insists on is what the screen needs.
+  await write('a boundary with nothing in it is refused', false, boundaryDoc, { ...BOUNDARY_FIELDS, geojson: '{}' });
+  await write('a boundary with no box is refused, because the map fits its view to one', false, boundaryDoc, {
+    geojson: BOUNDARY_FIELDS.geojson,
+    geometry_type: 'Polygon',
+    points: 3,
+  });
+  await write('and a boundary that is not a polygon at all is refused', false, boundaryDoc, { points: 3, bounds: BOUNDARY_FIELDS.bounds });
+
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r2'), { can_view_map: false }, { merge: true });
+  await setDoc(doc(db, 'roles', 'r2'), { can_edit_map: false }, { merge: true });
+  await deleteDoc(mapDoc);
+  await deleteDoc(boundaryDoc);
+  await deleteDoc(roadsDoc);
+  await remove('and no pin is left behind for a later case', true, pinDoc);
+
+  await asUser('u1');
+  await setDoc(doc(db, 'roles', 'r2'), { can_view_map: false }, { merge: true });
+  await deleteDoc(mapDoc);
 
   // --- the FEMA student id: the ONE key a browser may write on the private half -----------------
   //

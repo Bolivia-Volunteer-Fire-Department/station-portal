@@ -14,6 +14,11 @@
  * and one member, with the second member's rows present precisely so that "you may not read somebody else's row"
  * is a claim with something to fail on.
  */
+// The boundary fixture below is built by the same function a save uses, so the demo station's placeholder cannot be a shape
+// the app would refuse - the import is the point rather than a convenience.
+import { MAP_BACKDROP_FIELDS, MAP_BACKDROP_LAYERS, MAP_BACKDROP_STYLE, backdropDocument, boundaryDocument } from '../src/utils/districtMap.js';
+import { DEFAULT_MAP_TYPES, MAP_TYPES_DOC_ID, mapTypesDocument } from '../src/utils/mapTypes.js';
+
 export const PROJECT = process.env.GCLOUD_PROJECT || 'demo-station-portal';
 const FIRESTORE = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/documents`;
 const AUTH = `http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts`;
@@ -66,6 +71,7 @@ const roleRow = (description, isAdmin, granted = []) => ({
   is_admin: isAdmin,
   ...Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, granted.includes(flag)])),
 });
+
 export const DEMO_ACCOUNTS = [
   {
     uid: 'u1',
@@ -117,7 +123,12 @@ export const DEMO_ACCOUNTS = [
 const docValue = (value) => {
   if (typeof value === 'string') return { stringValue: value };
   if (typeof value === 'boolean') return { booleanValue: value };
-  if (typeof value === 'number') return { integerValue: String(value) };
+  // A NUMBER IS TWO KINDS TO THIS API, and getting it wrong is a 400 with no clue in it: a whole number is `integerValue`,
+  // anything else is `doubleValue`, and they are written in different shapes. The first fixture to need this was the district
+  // boundary, whose `bounds` are latitudes and longitudes - and a latitude is very rarely a whole number.
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
   if (Array.isArray(value)) return { arrayValue: { values: value.map(docValue) } };
   // A nested object, which the badge index needs: member id -> the icons to draw. Recursed rather than specially
   // cased, so a shape deeper than this one still works if a fixture ever needs it.
@@ -128,6 +139,148 @@ const docValue = (value) => {
   }
   throw new Error(`The seed cannot write a ${typeof value}: ${JSON.stringify(value)}`);
 };
+
+// THE PLACEHOLDER DISTRICT DRAWING, exported so scripts/verify-district-map can put it through the SAME validator an
+// officer's upload goes through - a fixture that stopped being a drawing the app would accept would otherwise be noticed
+// only by a developer staring at an empty map.
+//
+// It is deliberately plain and deliberately labelled: a demo station showing a convincing boundary is a demo station
+// somebody believes. Nothing here is geography - it is a shape with a river through it.
+export const DEMO_DISTRICT_WIDTH = 1200;
+export const DEMO_DISTRICT_HEIGHT = 800;
+
+// A SMALL SQUARE near Bolivia, North Carolina - deliberately NOT the county's boundary for this district. The real one is
+// 2,245 points and belongs to the county, and one press of "Look up" in System Settings fetches it (services/countyGis.js).
+// This exists so the map screen, its pins and its offline copy have something to draw in the demo station, and it is built
+// by the SAME function a save uses - so a fixture that stopped being a boundary the app would accept cannot sit here looking
+// convincing. Labelled as a demo in the document itself for the same reason.
+export const DEMO_BOUNDARY_GEOJSON = {
+  type: 'Polygon',
+  coordinates: [
+    [
+      [-78.2, 34.0],
+      [-78.09, 34.0],
+      [-78.09, 34.1],
+      [-78.2, 34.1],
+      [-78.2, 34.0],
+    ],
+  ],
+};
+export const DEMO_BOUNDARY_META = {
+  label: 'DEMO DISTRICT (not a county boundary)',
+  zone: 'demo',
+  source: 'Seeded placeholder — press "Look up" in System Settings for the real beat',
+};
+
+// SYNTHETIC BACKGROUND LAYERS, for the same reason as the boundary above and clearly not the real thing: the county's own
+// layers are fetched by pressing Fetch in System Settings, and these exist so the map's background, its chips and its offline
+// copy have something to draw in the demo station. Lines and shapes, because that is what the real layers are - and a stream
+// and a pond together, because the water layer is both merged on the way in; one area inside the district and one outside it,
+// because that is what the flood zones and the neighbouring districts look like from here.
+export const DEMO_BACKDROP_GEOJSON = {
+  roads: {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { NAME: 'DEMO HWY 1', FULLNAME: 'DEMO HWY 1', FIRELEFT: 'Bolivia FD', FIRERIGHT: 'Bolivia FD' },
+        geometry: { type: 'LineString', coordinates: [[-78.2, 34.05], [-78.09, 34.05]] },
+      },
+      {
+        type: 'Feature',
+        properties: { NAME: 'DEMO ROAD 2', FULLNAME: 'DEMO ROAD 2', FIRELEFT: 'Bolivia FD', FIRERIGHT: 'Bolivia FD' },
+        geometry: { type: 'LineString', coordinates: [[-78.15, 34.0], [-78.15, 34.1]] },
+      },
+      {
+        // One road with a DISTRICT LINE down it, so the demo shows both halves of what a tap says: the name, and the two
+        // departments covering its two sides.
+        type: 'Feature',
+        properties: { NAME: 'DEMO LINE RD', FULLNAME: 'DEMO LINE RD', FIRELEFT: 'Bolivia FD', FIRERIGHT: 'DEMO NEIGHBOUR FD' },
+        geometry: { type: 'LineString', coordinates: [[-78.2, 34.0], [-78.09, 34.1]] },
+      },
+      {
+        // A road OUTSIDE the demo boundary, which is the shape the band is for: the roads layer reaches a kilometre past the
+        // district line, so the demo has to have something out there or the band looks like it did nothing.
+        type: 'Feature',
+        properties: { NAME: 'DEMO OUTER RD', FULLNAME: 'DEMO OUTER RD', FIRELEFT: 'DEMO NEIGHBOUR FD', FIRERIGHT: 'DEMO NEIGHBOUR FD' },
+        geometry: { type: 'LineString', coordinates: [[-78.26, 34.02], [-78.22, 34.12]] },
+      },
+    ],
+  },
+  water: {
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[-78.19, 34.08], [-78.14, 34.06], [-78.1, 34.07]] } },
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[[-78.13, 34.02], [-78.11, 34.02], [-78.11, 34.035], [-78.13, 34.035], [-78.13, 34.02]]],
+        },
+      },
+    ],
+  },
+  // TWO ZONES, one on each side of the district line: what the FEMA layer is a wash of, and what its tap says.
+  flood: {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { ZONE_LID_VALUE: 'AE', ZONESUB_LID_VALUE: '' },
+        geometry: { type: 'Polygon', coordinates: [[[-78.19, 34.065], [-78.16, 34.065], [-78.16, 34.09], [-78.19, 34.09], [-78.19, 34.065]]] },
+      },
+      {
+        type: 'Feature',
+        properties: { ZONE_LID_VALUE: '0.2 PCT ANNUAL CHANCE FLOOD HAZARD', ZONESUB_LID_VALUE: '' },
+        geometry: { type: 'Polygon', coordinates: [[[-78.14, 34.0], [-78.1, 34.0], [-78.1, 34.03], [-78.14, 34.03], [-78.14, 34.0]]] },
+      },
+    ],
+  },
+  // ONE NEIGHBOUR, sitting to the west of the demo boundary so the dashed outline, its faint fill and its name in the middle
+  // are all visible against ground the station does not cover.
+  districts: {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { AgencyID: 'DEMO NEIGHBOUR FIRE DEPARTMENT', DisplayName: 'DEMO NEIGHBOUR FD BEAT 1', Zone: '1' },
+        geometry: { type: 'Polygon', coordinates: [[[-78.28, 34.0], [-78.21, 34.0], [-78.21, 34.14], [-78.28, 34.14], [-78.28, 34.0]]] },
+      },
+    ],
+  },
+  neighbourRoads: {
+    type: 'FeatureCollection',
+    features: [
+      // A major road running out into the neighbouring district, so the demo shows the "nearby roads" layer drawing faint lines
+      // past the boundary. It carries a name (NAME/FULLNAME) - the only attributes this layer keeps - so a tap on it still says
+      // what it is called.
+      {
+        type: 'Feature',
+        properties: { NAME: 'DEMO ARTERIAL RD', FULLNAME: 'DEMO ARTERIAL RD' },
+        geometry: { type: 'LineString', coordinates: [[-78.28, 34.07], [-78.15, 34.07]] },
+      },
+      {
+        type: 'Feature',
+        properties: { NAME: 'DEMO NEIGHBOUR HWY', FULLNAME: 'DEMO NEIGHBOUR HWY' },
+        geometry: { type: 'LineString', coordinates: [[-78.3, 34.02], [-78.3, 34.12]] },
+      },
+    ],
+  },
+};
+
+export const DEMO_DISTRICT_SVG = [
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">',
+  '<rect x="0" y="0" width="1200" height="800" fill="#f8fafc"/>',
+  '<path d="M120 620 L240 300 L520 150 L880 210 L1080 480 L900 690 L420 720 Z" fill="#fee2e2" fill-opacity="0.55" stroke="#b91c1c" stroke-width="6"/>',
+  '<path d="M60 480 C300 430 520 520 760 470 C920 435 1040 460 1160 430" fill="none" stroke="#93c5fd" stroke-width="14" stroke-linecap="round"/>',
+  '<line x1="200" y1="180" x2="980" y2="660" stroke="#94a3b8" stroke-width="8" stroke-dasharray="28 18"/>',
+  '<circle cx="520" cy="430" r="18" fill="#b91c1c"/>',
+  '<text x="560" y="428" font-family="sans-serif" font-size="34" fill="#0f172a">DEMO STATION</text>',
+  '<text x="120" y="95" font-family="sans-serif" font-size="44" font-weight="bold" fill="#0f172a">DEMO DISTRICT OUTLINE</text>',
+  '<text x="120" y="145" font-family="sans-serif" font-size="26" fill="#475569">Placeholder - upload the real drawing in Administration &gt; System &gt; District Map</text>',
+  '</svg>',
+].join('');
 
 export const put = async (path, data) => {
   const fields = Object.fromEntries(Object.entries(data).map(([key, value]) => [key, docValue(value)]));
@@ -222,6 +375,86 @@ export const seed = async () => {
   // --- the configuration the login screen reads before anyone has signed in ---
   await put('settings/public', { department_name: 'Bolivia Volunteer Fire Department' });
   await put('settings/private', { clock_location_radius_m: 250 });
+
+  // --- THE DISTRICT MAP -----------------------------------------------------------------------------------
+  //
+  // THE APP SHIPS WITH NO MAP, and this is not one: only a department has a boundary, so the real drawing arrives through
+  // Administration → System → District Map. This is a PLACEHOLDER so the map screen is not an empty state in the demo
+  // station, and it is exported rather than inlined so scripts/verify-district-map can put it through the SAME validator
+  // an officer's upload goes through - the fixture and the tests cannot drift apart, which is the same promise
+  // verify-rules makes about this seed: `npm run emulators:seed`.
+  await put('map_layers/district', {
+    svg: DEMO_DISTRICT_SVG,
+    width: DEMO_DISTRICT_WIDTH,
+    height: DEMO_DISTRICT_HEIGHT,
+    view_box: `0 0 ${DEMO_DISTRICT_WIDTH} ${DEMO_DISTRICT_HEIGHT}`,
+    created_at: '2026-01-01 08:00:00',
+    created_by: 'seed',
+    updated_at: '2026-01-01 08:00:00',
+    updated_by: 'seed',
+  });
+
+  // --- THE REAL MAP: the boundary and two pins -----------------------------------------------------
+  //
+  // The document is built by the same `boundaryDocument` a save uses (utils/districtMap, imported above), so the fixture is
+  // the shape the app would write rather than a hand-made object that merely looks like one. The pins are two ordinary rows.
+  await put('map_boundaries/district', {
+    ...boundaryDocument(DEMO_BOUNDARY_GEOJSON, DEMO_BOUNDARY_META),
+    updated_at: '2026-01-01 08:00:00',
+    saved_by: 'seed',
+  });
+  await put('map_landmarks/hydrant-demo', {
+    label: 'Hydrant 12 (demo)',
+    kind: 'hydrant',
+    lat: 34.02,
+    lng: -78.14,
+    note: 'A seeded pin, so the map has something on it',
+    created_at: '2026-01-01 08:00:00',
+    created_by: 'seed',
+    updated_at: '2026-01-01 08:00:00',
+    updated_by: 'seed',
+  });
+  await put('map_landmarks/ramp-demo', {
+    label: 'Boat ramp (demo)',
+    kind: 'ramp',
+    lat: 34.06,
+    lng: -78.19,
+    note: '',
+    created_at: '2026-01-01 08:00:00',
+    created_by: 'seed',
+    updated_at: '2026-01-01 08:00:00',
+    updated_by: 'seed',
+  });
+
+  // THE LANDMARK TYPES, seeded from the app's own built-in eight so the demo station's legend is editable straight away. One
+  // type is added and renamed, because a list that is exactly the default proves nothing about whether the station's own list
+  // is what the map draws.
+  await put(`map_types/${MAP_TYPES_DOC_ID}`, {
+    ...mapTypesDocument(
+      [
+        ...DEFAULT_MAP_TYPES.filter((type) => type.key !== 'water'),
+        { key: 'water', label: 'Dry hydrant', icon: 'droplets', color: '#0d9488' },
+      ],
+      { author: 'seed' }
+    ),
+    updated_at: '2026-01-01 08:00:00',
+  });
+
+  // ...and the background layers, built by the same function a save uses, so the demo station's map looks like a map. The
+  // FIELDS are named per layer there too, for the same reason: the roads keep their names and their beats, the flood zones
+  // keep which zone they are, the districts keep their names, and the water keeps nothing.
+  for (const layer of MAP_BACKDROP_LAYERS) {
+    await put(`map_backdrops/${layer}`, {
+      ...backdropDocument(DEMO_BACKDROP_GEOJSON[layer], {
+        layer,
+        label: `${MAP_BACKDROP_STYLE[layer].label} (demo)`,
+        source: 'Seeded placeholder — press Fetch in System Settings for the county\'s own',
+        fields: MAP_BACKDROP_FIELDS[layer],
+      }),
+      updated_at: '2026-01-01 08:00:00',
+      saved_by: 'seed',
+    });
+  }
 
 
   // --- reference data for the schedule, with the private halves the member must never see ---
@@ -601,7 +834,7 @@ export const seed = async () => {
     slot_key: '2026-03-09|a1',
   });
   // THE ONE THAT PROVES THE FILTER IS A FILTER, and the one that proves it is not too tight. `of2` was approved, which fills
-  // its shift: the slot is no longer open, so there is no pill for a calendar to colour and the row is not read any more -
+  // its shift: the slot is no longer open, so there is no pill for a calendar to color and the row is not read any more -
   // it is the history the read stopped carrying. `of3` was DECLINED, and that one must still arrive, because a declined
   // shift is CLOSED to that member and the pill has to say so: without the row the slot would simply look open again and
   // they would try to re-offer a shift the officer has already turned them down for (makeOffer refuses that write, but the

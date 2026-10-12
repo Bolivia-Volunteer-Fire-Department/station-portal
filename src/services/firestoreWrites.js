@@ -28,6 +28,27 @@ import { normalizeFormDefinition } from '../utils/formDefinition.js';
 // exists as far as a member is concerned, and two implementations of that would drift.
 import { visibleDocumentFor } from './firestoreReads.js';
 import { settingSide } from '../utils/systemSettings.js';
+// The district map's refusals and normalisation, shared with the admin card that validates a chosen file: one definition
+// of "a drawing this app can store", used by the screen, by the write, and by the rule that caps it.
+import { MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID, mapLayerFields, mapSvgProblem } from '../utils/mapLayer.js';
+// The station's own landmark types, and the checks the save below runs - the same ones the card runs before it calls.
+import { MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID, mapTypesDocument, mapTypesProblem } from '../utils/mapTypes.js';
+// The real map's two collections: the boundary polygon and the pins. Their validation and normalisation live in
+// utils/districtMap.js, shared with the card that fetches a boundary and the screen that draws one.
+import {
+  MAP_BOUNDARY_COLLECTION,
+  MAP_BOUNDARY_DOC_ID,
+  MAP_BACKDROP_COLLECTION,
+  MAP_BACKDROP_FIELDS,
+  MAP_BACKDROP_LAYERS,
+  MAP_LANDMARK_COLLECTION,
+  backdropDocument,
+  backdropProblem,
+  boundaryDocument,
+  boundaryProblem,
+  landmarkFields,
+  landmarkProblem,
+} from '../utils/districtMap.js';
 // The signing rule, the SAME function the member's screen draws its button from: one rule, one home, so a tab left open
 // while the window was changed cannot write a signature the screen would now refuse.
 //
@@ -1133,6 +1154,163 @@ export const deleteFormTemplate = async ({ id } = {}) => {
   await deleteDoc(doc(firestore(), 'form_templates', wanted));
   return { id: wanted };
 };
+
+// THE DISTRICT MAP: one drawing, saved by an officer, kept as SVG TEXT in a document of its own.
+//
+// WHY TEXT RATHER THAN A FILE, and why nothing here rewrites it: both answers are in utils/mapLayer, which is also where
+// the refusals live - the admin screen validates a chosen file with the same function, so what the screen promised and
+// what lands here cannot drift apart. What this adds is the LAST check before the bytes leave the browser: without it an
+// over-large drawing would be refused by Firestore with a message about document size, in a card that had just told the
+// officer the file was fine.
+//
+// `created_by` and `created_at` are stamped once and kept across an edit, so replacing the drawing does not lose who
+// first surveyed it - the same pair, and the same reason, as a form definition.
+export const saveMapLayer = async ({ svg, authorId = '' } = {}) => {
+  const text = String(svg ?? '');
+  const problem = mapSvgProblem(text);
+  if (problem) throw new Error(problem);
+
+  const fields = mapLayerFields(text);
+  const reference = doc(firestore(), MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID);
+  const previous = await getDoc(reference);
+  await setDoc(
+    reference,
+    {
+      ...fields,
+      created_at: previous.exists()
+        ? String(previous.get('created_at') || '') || stationTimestamp()
+        : stationTimestamp(),
+      created_by: previous.exists() ? String(previous.get('created_by') || '') : String(authorId || ''),
+      updated_at: stationTimestamp(),
+      updated_by: String(authorId || ''),
+    },
+    { merge: true }
+  );
+  return { id: MAP_LAYER_DOC_ID };
+};
+
+// The map taken down. The rules decide who may (the same permission that let them save it), and nothing refers to a
+// drawing by id, so there is no second document to tidy: the map screen goes back to saying a station has not drawn one
+// yet.
+export const deleteMapLayer = async () => {
+  await deleteDoc(doc(firestore(), MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID));
+  return { id: MAP_LAYER_DOC_ID };
+};
+
+// THE DISTRICT BOUNDARY: the real one, in latitude and longitude - copied out of a county's own service, or out of a file
+// an officer exported, and stored as the station's own so the map needs nobody's server afterwards (utils/districtMap).
+//
+// The geometry is written as TEXT because Firestore refuses an array that contains an array, and GeoJSON coordinates are
+// arrays of arrays - which is a database rule rather than a preference, and the reason this is a document rather than a
+// setting.
+export const saveMapBoundary = async ({ geojson, meta = {}, authorId = '' } = {}) => {
+  const problem = boundaryProblem(geojson);
+  if (problem) throw new Error(problem);
+
+  const fields = boundaryDocument(geojson, meta);
+  const reference = doc(firestore(), MAP_BOUNDARY_COLLECTION, MAP_BOUNDARY_DOC_ID);
+  await setDoc(
+    reference,
+    { ...fields, saved_by: String(authorId || ''), updated_at: stationTimestamp() },
+    { merge: true }
+  );
+  return { id: MAP_BOUNDARY_DOC_ID, points: fields.points };
+};
+
+export const deleteMapBoundary = async () => {
+  await deleteDoc(doc(firestore(), MAP_BOUNDARY_COLLECTION, MAP_BOUNDARY_DOC_ID));
+  return { id: MAP_BOUNDARY_DOC_ID };
+};
+
+// A LANDMARK: a name, a kind, a position and a note. Small enough that there is nothing to hide - but the position is
+// checked here as well as on the screen, because a pin with a wrong latitude is drawn somewhere else entirely and looks
+// perfectly fine doing it.
+//
+// `created_at` and `created_by` are stamped once and kept across an edit, so correct a pin's spelling does not lose who
+// first walked out and placed it.
+export const saveMapLandmark = async ({ id = '', fields = {}, authorId = '' } = {}) => {
+  const problem = landmarkProblem(fields);
+  if (problem) throw new Error(problem);
+
+  const normal = landmarkFields(fields);
+  const reference = String(id || '').trim()
+    ? doc(firestore(), MAP_LANDMARK_COLLECTION, String(id).trim())
+    : doc(collection(firestore(), MAP_LANDMARK_COLLECTION));
+  const previous = await getDoc(reference);
+  await setDoc(
+    reference,
+    {
+      ...normal,
+      created_at: previous.exists()
+        ? String(previous.get('created_at') || '') || stationTimestamp()
+        : stationTimestamp(),
+      created_by: previous.exists() ? String(previous.get('created_by') || '') : String(authorId || ''),
+      updated_at: stationTimestamp(),
+      updated_by: String(authorId || ''),
+    },
+    { merge: true }
+  );
+  return { id: reference.id };
+};
+
+export const deleteMapLandmark = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which landmark?');
+  await deleteDoc(doc(firestore(), MAP_LANDMARK_COLLECTION, wanted));
+  return { id: wanted };
+};
+
+// THE STATION'S LANDMARK TYPES: what its pins can be - a name, an icon and a colour each. Written WHOLE rather than row by row,
+// because the list is the thing: a type added while another is being renamed has to arrive as one list, or two saves race and
+// the loser's edit is silently gone. utils/mapTypes holds the checks, and the screen uses the same ones.
+export const saveMapTypes = async ({ types, authorId = '' } = {}) => {
+  const problem = mapTypesProblem(types);
+  if (problem) throw new Error(problem);
+  const document = mapTypesDocument(types, { author: authorId });
+  await setDoc(
+    doc(firestore(), MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID),
+    { ...document, updated_at: stationTimestamp() },
+    { merge: true }
+  );
+  return { count: document.count, types: document.types };
+};
+
+// A MAP BACKGROUND - roads or waterways - stored as the station's own geometry. Same argument as the boundary (utils/districtMap
+// has it in full): a copy in the station's records is what lets the map draw with no network, and a tile layer from somebody
+// else's server is the thing this deliberately is not.
+//
+// THE LAYER IS CHECKED, because the document id IS the layer: a typo would write a third document called "road", which would
+// then be read by nothing and drawn by nothing - a silent no-op that looks like the fetch failed.
+export const saveMapBackdrop = async ({ layer, geojson, meta = {}, authorId = '' } = {}) => {
+  const wanted = String(layer || '').trim();
+  if (!MAP_BACKDROP_LAYERS.includes(wanted)) {
+    throw new Error(`There is no map background called "${layer}".`);
+  }
+  // The fields this layer keeps are THE APP'S DECISION rather than the caller's, so that a card (or a script) cannot write a
+  // road layer with no names in it by forgetting an argument.
+  const fields = MAP_BACKDROP_FIELDS[wanted] || [];
+  const problem = backdropProblem(geojson, fields);
+  if (problem) throw new Error(problem);
+
+  const document = backdropDocument(geojson, { ...meta, layer: wanted, fields });
+  await setDoc(
+    doc(firestore(), MAP_BACKDROP_COLLECTION, wanted),
+    { ...document, saved_by: String(authorId || ''), updated_at: stationTimestamp() },
+    { merge: true }
+  );
+  return { id: wanted, features: document.features };
+};
+
+export const deleteMapBackdrop = async ({ layer } = {}) => {
+  const wanted = String(layer || '').trim();
+  if (!MAP_BACKDROP_LAYERS.includes(wanted)) {
+    throw new Error(`There is no map background called "${layer}".`);
+  }
+  await deleteDoc(doc(firestore(), MAP_BACKDROP_COLLECTION, wanted));
+  return { id: wanted };
+};
+
+
 
 // The officer's clock management: correcting a member's entry, or removing one.
 //

@@ -28,6 +28,22 @@ import { assessmentScoreId, isAssessment as isAssessmentDocument } from '../util
 // The tab gate for `can_edit_timeclock`, so the reader can tell an officer's read from a member's. The RULES are what
 // actually decide - see managesWholeTimeclock below - but the client has to know which query to send.
 import { roleAllowsTab } from '../utils/permissions.js';
+// The district map's one document, named here rather than spelled out at the read below: the collection id and the
+// fixed document id are shared with the write and with firestore.rules (see utils/mapLayer).
+import { MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID } from '../utils/mapLayer.js';
+// The real map's two collections, named here rather than spelled out at the reads below: the ids are shared with the writes
+// and with firestore.rules (see utils/districtMap).
+import {
+  MAP_BOUNDARY_COLLECTION,
+  MAP_BOUNDARY_DOC_ID,
+  MAP_BACKDROP_COLLECTION,
+  MAP_BACKDROP_LAYERS,
+  MAP_LANDMARK_COLLECTION,
+  MAP_LANDMARK_LIMIT,
+} from '../utils/districtMap.js';
+// The station's own landmark types - the collection, the one fixed document id, and the parser the screen uses to decide what a
+// stored document means (see utils/mapTypes).
+import { MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID } from '../utils/mapTypes.js';
 
 // The roster the calendar used to ask for separately (`GET_ROSTER`, now retired) is a projection of `users` that the sign-in
 // payload already carries - see the note where the route used to be listed, in firestoreRouting.js. Nothing in the app asks
@@ -1106,6 +1122,65 @@ export const READERS = {
       rowsFor('training_signatures', 'user_id', subject),
     ]);
     return { trainings, signatures };
+  },
+
+  // THE DISTRICT MAP: one document, read when the Map screen opens and not before.
+  //
+  // IT IS NOT A SETTING, which is why it is not in `settings/public`: that document is read on EVERY sign-in, and a
+  // drawing of a few hundred kilobytes would ride along with every member's payload to be paid for by the screens that
+  // never draw a map. This is one read, on the one screen that wants it - and the screen keeps a copy on the device, so a
+  // member with no network still sees the map (utils/mapLayer).
+  //
+  // `null` rather than an empty shape when nothing has been uploaded: a station that has not drawn a boundary yet is a
+  // state the screen names in words, not a fault, and the two should not arrive looking the same on screen.
+  //
+  // WHO MAY READ IT IS THE RULES' ANSWER - `can_view_map`, the same permission that opens the tab - not this read's. The
+  // reader asks, and a role without the flag is refused by firestore.rules.
+  GET_MAP_LAYER: async () => {
+    const snapshot = await getDoc(doc(firestore(), MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID));
+    return { mapLayer: snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null };
+  },
+
+  // THE DISTRICT BOUNDARY: the real one, in latitude and longitude, copied from the county when an officer fetched it. One
+  // document, read when the Map screen opens, exactly like the drawing above - and `null` when a station has not set one
+  // yet, because that is a state the screen names in words.
+  GET_MAP_BOUNDARY: async () => {
+    const snapshot = await getDoc(doc(firestore(), MAP_BOUNDARY_COLLECTION, MAP_BOUNDARY_DOC_ID));
+    return { mapBoundary: snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null };
+  },
+
+  // THE LANDMARK TYPES: what this station's pins can be - a name, an icon and a colour each, edited on Map Settings. One
+  // document, read when the map opens, and `types` is absent when a station has never edited them - which the screen reads as
+  // "use the built-in eight" (utils/mapTypes#mapTypesView) rather than as an error.
+  GET_MAP_TYPES: async () => {
+    const snapshot = await getDoc(doc(firestore(), MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID));
+    return { mapTypes: snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null };
+  },
+
+  // THE LANDMARKS: every pin the station has, read in ONE query rather than per viewport. Unlike the schedule - which is
+  // read a month at a time because it grows without limit - the whole set IS what the screen is for: a district map shows
+  // every hydrant at once, and a map that fetched pins as they scrolled into view would be a map that could not tell a
+  // member what is out there until they went looking.
+  //
+  // The limit is a guard, not a page (utils/districtMap): a station that somehow grew past it is told the list is capped
+  // rather than quietly shown half its own map.
+  GET_MAP_LANDMARKS: async () => {
+    const rows = await getDocs(query(collection(firestore(), MAP_LANDMARK_COLLECTION), limit(MAP_LANDMARK_LIMIT)));
+    return { mapLandmarks: rows.docs.map((row) => ({ id: row.id, ...row.data() })) };
+  },
+
+  // THE MAP BACKGROUND: every layer, read together in ONE action. The map wants them all at once, so an action per layer would
+  // be several round trips for a question nobody asks separately - and each is a small document by construction, because the
+  // county generalises the geometry before it ever reaches the station (services/countyGis).
+  GET_MAP_BACKDROPS: async () => {
+    const read = async (layer) => {
+      const snapshot = await getDoc(doc(firestore(), MAP_BACKDROP_COLLECTION, layer));
+      return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
+    };
+    // Driven by MAP_BACKDROP_LAYERS rather than naming them, so a layer added there is read from here by itself: a layer that
+    // is stored but never read is a layer that silently never appears on the map.
+    const rows = await Promise.all(MAP_BACKDROP_LAYERS.map(read));
+    return { backdrops: Object.fromEntries(MAP_BACKDROP_LAYERS.map((layer, index) => [layer, rows[index]])) };
   },
 
 // The pre-login payload: what the loading and login screens need before anybody has signed in.

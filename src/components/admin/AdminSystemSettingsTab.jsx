@@ -1,8 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, Map as MapIcon, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone } from 'lucide-react';
 import { stationLogoUrl } from '../../utils/assets';
 import { processUploadedLogo, generatePwaAssets, createZipArchive, downloadBlob } from '../../utils/pwaIcons';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
+// The district map's boundary, background and drawing cards used to live in this file - between the department name and the
+// clock rounding. They are the ground the station covers rather than station configuration, so they are on their own screen now
+// (AdminMapSettingsTab, reached from System → Map Settings), and everything they need - the county's service, the boundary and
+// background utilities, the drawing's own checks - moved with them.
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
@@ -72,12 +76,40 @@ function isTruthySetting(value) {
   return value === true || String(value).trim().toUpperCase() === 'TRUE';
 }
 
-export default function AdminSystemSettingsTab({ token, systemSettings, onDataChanged }) {
+// A LINE RATHER THAN A CARD, because there is nothing left to configure here: it is the door to the map's own screen, left in
+// place so that somebody who comes looking for the boundary where it has been for months is told where it went rather than
+// concluding it is gone. It is a real button rather than a sentence, because the person reading it wants to go there.
+function MapSettingsPointer({ onOpenMapSettings }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
+      <MapIcon className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
+      <span className="font-medium text-slate-900 dark:text-white">The district map has its own screen.</span>
+      {typeof onOpenMapSettings === 'function' ? (
+        <button
+          type="button"
+          onClick={onOpenMapSettings}
+          className="font-medium text-red-600 underline underline-offset-2 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300"
+        >
+          Open Map Settings
+        </button>
+      ) : (
+        <span className="font-medium">Map Settings</span>
+      )}
+      <span>for the boundary, the roads and waterways, and the uploaded drawing.</span>
+    </div>
+  );
+}
+
+export default function AdminSystemSettingsTab({ token, systemSettings, onDataChanged, onOpenMapSettings }) {
   // Capped and centerd: this is a stack of setting cards rather than a table, so full width on a wide
   // monitor would leave the labels and their controls far apart. See utils/contentWidth.
   return (
     <CenteredContent className="space-y-6">
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      {/* THE DISTRICT MAP HAS ITS OWN SCREEN. The boundary, the county's roads and waterways, and the department's uploaded
+          drawing were three cards here - they are the ground the station covers rather than settings, so they moved to
+          System → Map Settings (AdminMapSettingsTab), and this line is so somebody who looks here finds where they went. */}
+      <MapSettingsPointer onOpenMapSettings={onOpenMapSettings} />
       <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -390,6 +422,7 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
  * "Use my current location" exists because typing a latitude and longitude by hand is the most error-prone part of this,
  * and the person configuring it is usually standing at the station.
  */
+
 function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
   const [latitude, setLatitude] = useState(getSettingValue(systemSettings, 'required_clock_latitude', ''));
   const [longitude, setLongitude] = useState(getSettingValue(systemSettings, 'required_clock_longitude', ''));

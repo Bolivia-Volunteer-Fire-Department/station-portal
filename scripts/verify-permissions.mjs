@@ -90,7 +90,10 @@ check(
 // THE COUNTS ARE PINNED so that adding a permission makes somebody choose a heading for it, which is the moment the
 // grouping is worth re-reading. Both lists are drawn whole: nothing may be lost between the array and the form.
 check('the admin list is drawn whole, under six headings', [adminSections.length, adminSections.reduce((n, s) => n + s.permissions.length, 0)], [6, ADMIN_PERMISSIONS.length]);
-check('and the member list under three', [memberSections.length, memberSections.reduce((n, s) => n + s.permissions.length, 0)], [3, MEMBER_PERMISSIONS.length]);
+// FOUR since the district map brought a heading of its own: "The district" is not the crew's records and not the
+// member's own schedule, and filing it under either would be a heading that is not true of it.
+check('and the member list under four', [memberSections.length, memberSections.reduce((n, s) => n + s.permissions.length, 0)], [4, MEMBER_PERMISSIONS.length]);
+check('the district has a heading to itself, holding both of its permissions', memberSections[memberSections.length - 2].permissions.map((permission) => permission.key), ['can_view_map', 'can_edit_map']);
 check('the headings are in the order they were written', adminSections.map((s) => s.label), ['People', 'Scheduling', 'Records', 'Communication', 'Reports & forms', 'Station setup']);
 check('and the chat permissions share one', memberSections[memberSections.length - 1].label, 'Chat');
 check('with the door first', memberSections[memberSections.length - 1].permissions[0].key, 'can_use_chat');
@@ -192,8 +195,8 @@ check('and it grants no Administration access on its own', roleHasAdministration
 check('View roster alone does not open Administration', roleHasAdministration({ can_view_roster: true }), false);
 check('and does not add a phantom Administration tab', allowedAdminTabs({ can_view_roster: true }), []);
 
-// The Documents TAB is the one place two permissions open the same thing, which is the whole reason a verifier can
-// reach the Administration module at all.
+// The Documents TAB is one of TWO places two permissions open the same thing, which is the whole reason a verifier can
+// reach the Administration module at all. (The other is the map's own screen - see the district-map section below.)
 console.log('\n--- the documents tab opens for either permission ---');
 check('a manager opens it', roleAllowsTab({ can_view_documents: true, can_manage_documents: true }, 'documents'), true);
 check('a verifier opens it', roleAllowsTab({ can_view_documents: true, can_verify_documents: true }, 'documents'), true);
@@ -305,6 +308,39 @@ check('a further offer after a decision does', shouldFocusApprovals(1, 2, ALL_TA
 check('nothing pending does not', shouldFocusApprovals(0, 0, ALL_TABS), false);
 check('a role with the tab is still moved', shouldFocusApprovals(0, 3, approverTabs), true);
 check('a role without any tabs is never moved', shouldFocusApprovals(0, 3, []), false);
+
+console.log('\n--- the map screen opens for either permission ---');
+// THE SECOND TAB TWO PERMISSIONS OPEN, and the two are a different size of job: `can_edit_map` is the map's own switch - the
+// pins and lines, the boundary, the county's roads and waterways - and it is a MEMBER permission, because it also gates
+// drawing on the member's own map. `can_edit_system_settings` holds the uploaded drawing. Before this, an officer with the map
+// permission could draw pins and could not reach the screen that sets the boundary they are drawn against.
+check('a map maintainer opens it', roleAllowsTab({ can_view_map: true, can_edit_map: true }, 'map'), true);
+check('a settings officer opens it', roleAllowsTab({ can_edit_system_settings: true }, 'map'), true);
+check('and a member who may only look does not', roleAllowsTab({ can_view_map: true }, 'map'), false);
+check(
+  'the map permission also opens the Administration module itself',
+  roleHasAdministration({ can_view_map: true, can_edit_map: true }),
+  true
+);
+check(
+  'and a map-only officer lands on the map, not on Help',
+  allowedAdminTabs({ can_view_map: true, can_edit_map: true }),
+  ['map', ...ADMIN_PERMISSIONLESS_TABS]
+);
+check(
+  'while it is NOT a way into the station-wide settings',
+  roleAllowsTab({ can_view_map: true, can_edit_map: true }, 'system'),
+  false
+);
+check('a member permission that is not the map still opens nothing', roleHasAdministration({ can_view_documents: true }), false);
+// The list a settings officer gets does not change shape: the map tab rides behind System Settings, so the tab they land on
+// stays the one they landed on before.
+check(
+  'and a settings officer keeps System Settings as the tab they land on',
+  allowedAdminTabs({ can_edit_system_settings: true }),
+  ['system', 'map', ...ADMIN_PERMISSIONLESS_TABS]
+);
+check('an unknown tab is still refused for a map maintainer', roleAllowsTab({ can_edit_map: true }, 'mapp'), false);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

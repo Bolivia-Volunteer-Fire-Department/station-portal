@@ -133,6 +133,33 @@ const tabs = fs
   .filter((file) => file.startsWith('Admin') && file.endsWith('.jsx'))
   .sort();
 
+// THE TABS THAT REFRESH ON THE DEVICE INSTEAD, and the proof each one has to show for it.
+//
+// The rule above is about a screen that kept showing the old value after a save. The map's settings do not have that failure
+// available to them: the boundary, the background and the drawing are NOT in the app's refresh wave - there is no section for
+// them in App#sectionsForTab, because they are read when the member's map screen opens rather than on every sign-in (see
+// utils/districtMap). An `onDataChanged` call here would re-read nothing at all.
+//
+// What keeps that screen honest instead is the DEVICE CACHE: the same copy the member's map reads when it opens without a
+// signal. So an exempt file has to actually write it - the check below reads each one's own call, which is why this is a rule
+// with evidence rather than a list of forgiven names.
+const DEVICE_REFRESH_FILES = {
+  'AdminMapSettingsTab.jsx': ['cacheBoundary(', 'cacheBackdrops(', 'cacheMapLayer('],
+};
+check(
+  'the map settings tab is the only tab claimed to refresh on the device',
+  Object.keys(DEVICE_REFRESH_FILES).length === 1 && Object.keys(DEVICE_REFRESH_FILES).every((file) => tabs.includes(file)),
+  Object.keys(DEVICE_REFRESH_FILES).join(', ')
+);
+for (const [file, evidence] of Object.entries(DEVICE_REFRESH_FILES)) {
+  const source = read(`src/components/admin/${file}`);
+  check(
+    `${file} refreshes the device cache after saving`,
+    evidence.filter((call) => source.includes(call)).length === evidence.length,
+    `missing: ${evidence.filter((call) => !source.includes(call)).join(', ')}`
+  );
+}
+
 let writingTabs = 0;
 for (const file of tabs) {
   const source = read(`src/components/admin/${file}`);
@@ -141,6 +168,12 @@ for (const file of tabs) {
 
   writingTabs++;
   const refreshers = REFRESH_PROPS.filter((prop) => source.includes(prop));
+  // A file that refreshes on the device is checked by the loop above instead, and is not asked for a callback that would
+  // re-read nothing.
+  if (DEVICE_REFRESH_FILES[file] && !refreshers.length) {
+    console.log(`     ${file} -> the device cache (${DEVICE_REFRESH_FILES[file].join(', ')})`);
+    continue;
+  }
   check(
     `${file} refreshes after saving`,
     refreshers.length > 0,

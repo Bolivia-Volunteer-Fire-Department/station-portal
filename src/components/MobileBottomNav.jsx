@@ -10,6 +10,7 @@ import {
   BarChart3,
   History,
   BookOpen,
+  Map as MapIcon,
   Settings,
   ShieldCheck,
   Menu,
@@ -24,6 +25,7 @@ const MODULE_META = {
   roster: { label: 'Roster', icon: Users },
   training: { label: 'Trainings', icon: GraduationCap },
   documents: { label: 'Documents', icon: BookText },
+  'district-map': { label: 'Map', icon: MapIcon },
   reports: { label: 'Reports', icon: BarChart3 },
   'clock-history': { label: 'History', icon: History },
   help: { label: 'Help', icon: BookOpen },
@@ -45,6 +47,7 @@ export default function MobileBottomNav({
   canViewDocuments = false,
   canViewReports = false,
   canGenerateForms = false,
+  canViewMap = false,
   canAdminister = false,
   unreadChatCount = 0,
 }) {
@@ -67,6 +70,8 @@ export default function MobileBottomNav({
         return Boolean(canViewDocuments);
       case 'reports':
         return Boolean(canViewReports || canGenerateForms);
+      case 'district-map':
+        return Boolean(canViewMap);
       case 'admin':
         return Boolean(canAdminister);
       case 'help':

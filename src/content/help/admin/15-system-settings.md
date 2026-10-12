@@ -1,5 +1,7 @@
 *System → System Settings* holds the station-wide configuration. **Clock Settings**, **Session Timeout**, the **Training Signing Window** and the **Pay Period** are the cards with real consequences for members; the rest are cosmetic or one-off values.
 
+The **District Map** is NOT on this screen any more. Its boundary, the county's roads and waterways, and the uploaded drawing are the ground the station covers rather than station configuration, so they have their own screen: *System → Map Settings*. This screen keeps a line pointing at it. They have their own guide: *Administration → System → Help → District map*.
+
 > [!IMPORTANT]
 > You must have the **Manage system settings** role permission to edit system settings.
 

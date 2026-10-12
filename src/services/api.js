@@ -235,6 +235,48 @@ export const fetchAdminFormTemplates = async () => {
 export const saveFormTemplate = (request) => routeWrite('SAVE_FORM_TEMPLATE', request || {});
 export const deleteFormTemplate = (formId) => routeWrite('DELETE_FORM_TEMPLATE', { id: String(formId || '') });
 
+// THE DISTRICT MAP: the department's drawn boundary, which is one document.
+//
+// One read, made by the map screen when it opens - and it answers `{ mapLayer: null }` when a station has not drawn one,
+// because "nothing uploaded yet" is a state the screen names in words rather than a fault. The two writes belong to the
+// permission that owns the System Settings tab the upload lives on. See utils/mapLayer for why the drawing is stored as
+// text in a document of its own rather than as a file in the bucket.
+export const fetchMapLayer = () => dispatchRequest({ action: 'GET_MAP_LAYER' });
+export const adminSaveMapLayer = (svg, token) =>
+  routeWrite('ADMIN_SAVE_MAP_LAYER', { svg: String(svg || ''), token });
+export const adminDeleteMapLayer = (token) => routeWrite('ADMIN_DELETE_MAP_LAYER', { token });
+
+// THE REAL MAP: the district boundary in latitude and longitude, and the landmarks pinned on it.
+//
+// TWO SMALL READS when the Map screen opens - a boundary polygon of about fifty kilobytes and a handful of pins - and both
+// answer `null`/`[]` when a station has not set them up, because that is a state the screen names in words rather than a
+// fault. The writes belong to `can_edit_map`, which firestore.rules checks.
+export const fetchMapBoundary = () => dispatchRequest({ action: 'GET_MAP_BOUNDARY' });
+export const fetchMapLandmarks = () => dispatchRequest({ action: 'GET_MAP_LANDMARKS' });
+export const adminSaveMapBoundary = ({ geojson, meta } = {}, token) =>
+  routeWrite('ADMIN_SAVE_MAP_BOUNDARY', { request: { geojson, meta }, token });
+export const adminDeleteMapBoundary = (token) => routeWrite('ADMIN_DELETE_MAP_BOUNDARY', { token });
+export const adminSaveMapLandmark = ({ id = '', fields = {} } = {}, token) =>
+  routeWrite('ADMIN_SAVE_MAP_LANDMARK', { request: { id, fields }, token });
+export const adminDeleteMapLandmark = (id, token) =>
+  routeWrite('ADMIN_DELETE_MAP_LANDMARK', { id: String(id || ''), token });
+
+// THE MAP BACKGROUND: the roads and the waterways, in one read (the map always wants both) and two writes.
+//
+// Both layers are small by construction - the county clips and generalises them before they are stored - so this is two
+// document reads on the screen that draws them, and nothing at all for a member who never opens the map.
+export const fetchMapBackdrops = () => dispatchRequest({ action: 'GET_MAP_BACKDROPS' });
+export const adminSaveMapBackdrop = ({ layer, geojson, meta } = {}, token) =>
+  routeWrite('ADMIN_SAVE_MAP_BACKDROP', { request: { layer, geojson, meta }, token });
+export const adminDeleteMapBackdrop = (layer, token) =>
+  routeWrite('ADMIN_DELETE_MAP_BACKDROP', { layer: String(layer || ''), token });
+
+// THE STATION'S OWN LANDMARK TYPES - a name, an icon and a color each - read when the map opens like everything else on it, and
+// written whole by the card on Map Settings.
+export const fetchMapTypes = () => dispatchRequest({ action: 'GET_MAP_TYPES' });
+export const adminSaveMapTypes = ({ types } = {}, token) =>
+  routeWrite('ADMIN_SAVE_MAP_TYPES', { request: { types }, token });
+
 // One member's training - the catalogue and their signatures - which is what a training-based form is filled from.
 export const fetchMemberTraining = async (userId) => {
   const response = await routeRead('GET_MEMBER_TRAINING', { userId: String(userId || '') });

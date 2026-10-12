@@ -24,6 +24,9 @@ const loaders = {
   DocumentsModule: () => import('../components/DocumentsModule'),
   TrainingModule: () => import('../components/TrainingModule'),
   CertificationsModule: () => import('../components/CertificationsModule'),
+  // The district map. Deferred like the rest, and it drags Leaflet (about 40 kB gzipped) with it - which is precisely the
+  // download a member without `can_view_map` should never pay for, so the prefetch below gates it on that flag.
+  DistrictMap: () => import('../components/DistrictMap'),
   // The merged Reports & Forms screen, and its two halves. The wrapper is deliberately TINY - it holds the switcher and
   // decides which half to show - and the halves stay separate chunks: merging them would hand the charting library
   // (recharts, most of the Reports half) to a member who only holds `can_generate_forms`, which is the download the
@@ -50,6 +53,7 @@ export const MyAvailability = lazy(loaders.MyAvailability);
 export const DocumentsModule = lazy(loaders.DocumentsModule);
 export const TrainingModule = lazy(loaders.TrainingModule);
 export const CertificationsModule = lazy(loaders.CertificationsModule);
+export const DistrictMap = lazy(loaders.DistrictMap);
 export const ReportsAndFormsModule = lazy(loaders.ReportsAndFormsModule);
 // App imports these to build the elements it hands the wrapper; only the half that is CHOSEN is ever rendered, so only
 // that half's chunk is fetched. They are loaders all the same, so the prefetch walks them by this one list.
@@ -79,11 +83,15 @@ export const prefetchableFor = ({
   canGenerateForms = false,
   canAdminister = false,
   canViewRoster = false,
+  // The district map is the one screen here that carries a MAP LIBRARY, so warming it for a member whose role cannot open
+  // it would download Leaflet for a tab that is not in their sidebar. Gated like every other gated screen.
+  canViewMap = false,
 } = {}) => {
   const keys = ['CertificationsModule', 'UserSettings', 'HelpGuides'];
   if (canUseTimeclock) keys.push('MyClockHistory');
   if (canViewSchedule) keys.push('ScheduleCalendar');
-    if (canViewRoster) keys.push('RosterModule');
+  if (canViewMap) keys.push('DistrictMap');
+  if (canViewRoster) keys.push('RosterModule');
   if (canEditOwnAvailability) keys.push('MyAvailability');
   if (canViewDocuments) keys.push('DocumentsModule');
   if (canSignTrainings) keys.push('TrainingModule');

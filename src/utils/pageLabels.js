@@ -14,6 +14,7 @@ export const PAGE_BAR_LABELS = {
   availability: 'Availability',
   training: 'Training',
   documents: 'Documents',
+  'district-map': 'District Map',
   // Chat is a module AND a floating panel: the tab is the same component full-width, so a member who would rather have
   // it in the page than over it can have it there.
   chat: 'Chat',
@@ -50,6 +51,9 @@ export const ADMIN_BAR_LABELS = {
   announcements: 'Announcements',
   training: 'Training',
   documents: 'Documents',
+  // The map's own screen, which the boundary, the background and the drawing moved to. Shorter than the navigation label
+  // ("Map Settings" against the same words) only because the bar already prefixes "Admin: " and a phone has no room to spare.
+  map: 'Map Settings',
   system: 'Settings',
   'reports-config': 'Reports',
   'forms-config': 'Forms',

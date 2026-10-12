@@ -16,7 +16,7 @@ That line is worth knowing about, because it tells apart two things that look al
 | **Scheduling** | Schedule Templates, Assignments, Schedule Management, Member Availability, Pending Approvals |
 | **Timeclock** | Clock Management |
 | **Training** | Training Report |
-| **System** | System Settings, Notifications, System Log, Help |
+| **System** | Map Settings, System Settings, Notifications, System Log, Help |
 
 ## Two people saving at once
 

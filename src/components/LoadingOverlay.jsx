@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Shield } from 'lucide-react';
 import { renderInViewport } from '../utils/viewportLayer';
+import StationSyncSpinner from './StationSyncSpinner';
 
 // How long a wait has to last before this overlay is worth showing at all.
 //
@@ -47,11 +47,8 @@ export default function LoadingOverlay({ isLoading, message = 'Communicating wit
           {/* Pulsing Outer Glow */}
           <div className="absolute inset-0 rounded-full bg-red-600/20 blur-xl animate-pulse" />
           
-          {/* Animated Spinner */}
-          <Loader2 className="w-12 h-12 text-red-500 animate-spin relative z-10" />
-          
-          {/* Subtle Center Icon */}
-          <Shield className="w-5 h-5 text-slate-400 absolute z-10" />
+          {/* StationSync Branded Spinner */}
+          <StationSyncSpinner size="lg" variant="spin" className="relative z-10" />
         </div>
 
         <h4 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">Please Wait</h4>

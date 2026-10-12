@@ -79,6 +79,7 @@ import {
 import {
   AdminPanel,
   CertificationsModule,
+  DistrictMap,
   DocumentsModule,
   FirefighterRunner,
   HelpGuides,
@@ -397,6 +398,14 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   // server refuses every documents action, which is where the rule actually lives. The other two documents
   // permissions both require this one (see utils/permissions).
   const canViewDocuments = can('can_view_documents');
+  // The district map, which is the one module here a station is likely to withhold from some roles: a boundary drawing is
+  // not everybody's business. It gates the tab, the sidebar entry and the prefetch, and firestore.rules gates the READ -
+  // so a role without it cannot fetch the drawing by hand either.
+  const canViewMap = can('can_view_map');
+  // MAINTAINING the map - the boundary and the landmarks - which is a different job from looking at it, and the one the
+  // roles form calls "Maintain the district map". It rests on the view permission, which is why the screen still gates on
+  // that as well.
+  const canEditMap = can('can_edit_map');
   const canViewReports = can('can_view_reports');
   const canGenerateForms = can('can_generate_forms');
 
@@ -460,6 +469,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
         canGenerateForms,
         canAdminister,
         canViewRoster,
+        canViewMap,
       }).join(','),
     [
       canUseTimeclock,
@@ -471,6 +481,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
       canGenerateForms,
       canAdminister,
       canViewRoster,
+      canViewMap,
     ]
   );
 
@@ -1127,7 +1138,7 @@ const getLoadingMessage = () => {
   useEffect(() => {
     if (!authToken || activeTab !== 'admin') return;
     // WHICH SECTIONS A TAB DRAWS, which is the whole of this arrangement: the board draws a schedule, so it needs the templates
-    // the pills are built from, the assignments that colour and order them, and the offers still waiting (its slot flags read
+    // the pills are built from, the assignments that color and order them, and the offers still waiting (its slot flags read
     // those); two tabs exist for one of those rows each, and each also wants the assignments a template is filtered by; the
     // approvals queue is the offers table; the clock table labels each entry with the shift it belonged to.
     //
@@ -1887,13 +1898,15 @@ const getLoadingMessage = () => {
                 ? canSignTrainings
                 : activeTab === 'documents'
                   ? canViewDocuments
-                  : activeTab === 'roster'
-                    ? canViewRoster
-                    : activeTab === 'reports'
-                      // Reports and Forms share one tab id now, so this is the same OR the sidebar and the prefetch
-                      // use. Holding only `can_generate_forms` still opens the screen - it shows the Forms half.
-                      ? canViewReports || canGenerateForms
-                  : true; // the dashboard, help, settings and the easter egg are always open
+                  : activeTab === 'district-map'
+                    ? canViewMap
+                    : activeTab === 'roster'
+                      ? canViewRoster
+                      : activeTab === 'reports'
+                        // Reports and Forms share one tab id now, so this is the same OR the sidebar and the prefetch
+                        // use. Holding only `can_generate_forms` still opens the screen - it shows the Forms half.
+                        ? canViewReports || canGenerateForms
+                        : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
     activeTab,
@@ -1904,6 +1917,7 @@ const getLoadingMessage = () => {
     canUseTimeclock,
     canSignTrainings,
     canViewDocuments,
+    canViewMap,
     canViewRoster,
     canViewReports,
     canGenerateForms,
@@ -2465,7 +2479,7 @@ const getLoadingMessage = () => {
           //
           // `fixed` rather than part of the app bar, because the bar is sticky: the moment the page
           // scrolls, the bar slides up under this area, and a strip that had scrolled away would leave
-          // white clock text on a white bar in the light theme. `z-20` clears the bar (z-10) and stays
+          // white clock text on a white bar in the light theme. `z-20` clears the bar (z-[19]) and stays
           // under the sidebar's backdrop (z-20) and drawer (z-30), so opening the menu still dims it.
           //
           // It is 0-height wherever there is no inset - every browser tab, every notchless phone, and a
@@ -2485,9 +2499,12 @@ const getLoadingMessage = () => {
               there). Both resolve to 0 on a device with no inset, and both are dropped at md, where the
               sidebar takes the full height and there is no bottom edge left to clear. */}
           {/* Sticky on mobile so the app name and the menu button are always reachable; the page title
-              below scrolls with the content, as it should. `z-10` keeps it BELOW the sidebar's z-20
-              backdrop and z-30 drawer, so opening the menu dims the whole page including this bar. */}
-          <header ref={topBarRef} className="md:hidden sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
+              below scrolls with the content, as it should. `z-[19]` keeps it just BELOW the status strip and
+              the sidebar's backdrop (z-20) and drawer (z-30), so opening the menu dims the whole page
+              including this bar - and just ABOVE the admin sub-menu bar (z-[15]), which is what keeps that
+              menu sliding under this bar rather than over it. The whole ladder is written out on that bar,
+              in AdminPanel.jsx, because it is only ever wrong as a whole. */}
+          <header ref={topBarRef} className="md:hidden sticky top-0 z-[19] flex items-center justify-between bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]">
             <div className="flex min-w-0 items-center gap-2">
               {/* The burst is placed off the anchor, so the anchor is the containing block. */}
               <a href="#" className="relative inline-flex items-center gap-2 shrink-0" onClick={(e) => {
@@ -2495,7 +2512,7 @@ const getLoadingMessage = () => {
                 handleEasterEgg();
               }}>
                 {/* The same lockup the desktop sidebar draws: the loops mark, then "Station" in the theme's text
-                    colour and "Sync" in the brand red. This used to be the full-logo image, whose wordmark is baked
+                    color and "Sync" in the brand red. This used to be the full-logo image, whose wordmark is baked
                     blue - so on a phone the name read blue while the sidebar's read white-on-dark plus red. */}
                 <img src={stationSyncLoopsUrl()} alt="StationSync" className="h-7 w-auto shrink-0 object-contain" />
                 <span className="text-lg font-extrabold tracking-tight leading-none text-slate-800 dark:text-white">
@@ -2542,6 +2559,7 @@ const getLoadingMessage = () => {
             canUseTimeclock={canUseTimeclock}
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
+            canViewMap={canViewMap}
             canViewReports={canViewReports}
             canGenerateForms={canGenerateForms}
             canViewRoster={canViewRoster}
@@ -2584,6 +2602,7 @@ const getLoadingMessage = () => {
                     {activeTab === 'availability' && 'Availability'}
                     {activeTab === 'training' && 'Training'}
                     {activeTab === 'certifications' && 'Certifications'}
+                    {activeTab === 'district-map' && 'District Map'}
                     {activeTab === 'chat' && 'Chat'}
                     {activeTab === 'reports' && 'Reports & Forms'}
                     {activeTab === 'help' && 'Help'}
@@ -2600,6 +2619,7 @@ const getLoadingMessage = () => {
                     {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
                     {activeTab === 'training' && 'Sign off the trainings you attended. Administrators can see who has signed each one.'}
                     {activeTab === 'certifications' && 'The certifications the station has recorded for you, with their dates and where each one stands.'}
+                    {activeTab === 'district-map' && 'The department\'s boundary drawing. Drag to move, pinch or scroll to zoom.'}
                     {activeTab === 'chat' && "The station's rooms, and your own line in them. It stays open over whatever else you are doing."}
                     {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
                     {activeTab === 'help' && 'Guides for using StationSync. Administrators have their own set under Administration → System → Help.'}
@@ -2792,6 +2812,13 @@ const getLoadingMessage = () => {
               <CertificationsModule token={authToken} />
             )}
 
+            {/* The district map. Gated on can_view_map, which is also what firestore.rules checks on the read - so the
+                tab, the sidebar entry and the data all answer to the same flag. The token is passed for the same reason
+                every other module takes it: a new session is a new read. */}
+            {activeTab === 'district-map' && canViewMap && (
+              <DistrictMap token={authToken} canEdit={canEditMap} isDarkMode={isDarkMode} />
+            )}
+
             {/* Reports and Forms are one module behind one sidebar entry. Both screens are built here but only the one
                 the member is looking at is RENDERED, which is what keeps each half its own chunk: an unrendered element
                 is a description, not a fetch. See ReportsAndFormsModule for why. */}
@@ -2977,6 +3004,7 @@ const getLoadingMessage = () => {
             canViewRoster={canViewRoster}
             canSignTrainings={canSignTrainings}
             canViewDocuments={canViewDocuments}
+            canViewMap={canViewMap}
             canViewReports={canViewReports}
             canGenerateForms={canGenerateForms}
             canAdminister={canAdminister}

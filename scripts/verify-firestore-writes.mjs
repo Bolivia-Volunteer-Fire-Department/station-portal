@@ -39,6 +39,9 @@ import { describeShiftOffer } from '../src/utils/shiftOfferRow.js';
 import { checklistProgress } from '../src/utils/checklists.js';
 import { syntheticEmail } from '../src/services/firebaseAuth.js';
 import { settingSide } from '../src/utils/systemSettings.js';
+// The district map's fixed document id, shared with the writer and the rule rather than spelled out here: a harness that
+// guessed a path would pass while the app wrote somewhere else.
+import { MAP_LAYER_DOC_ID } from '../src/utils/mapLayer.js';
 import { CLOCK_ROUNDING_KEY } from '../src/utils/clockRounding.js';
 import { OFFLINE_CLOCK_MESSAGE } from '../src/utils/connectivity.js';
 import { rankFieldsFromForm } from '../src/utils/ranks.js';
@@ -1720,6 +1723,51 @@ const main = async () => {
   // saves through a callable that wrote an audit row first, off by default; the app's audits are Cloud Logging lines
   // now (`audit` in functions/index.js), and the functions that need one always write it. So there is no setting to
   // read and no row to assert - see the note by the board's section above for what that costs this harness.
+
+  // --- the district map: one document, and the two things about the writer a screen cannot show --------
+  //
+  // The member's map screen and the officer's card both make the drawing look plausible whatever happened, so what is
+  // asserted here is what they cannot tell you: that a REFUSED drawing never reaches the document, and that the FIRST
+  // upload stamp survives a replacement - which is what makes "drawn by" mean who drew it rather than who last touched it.
+  console.log('\n--- the district map ---');
+  const MAP_LAYER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300"/></svg>';
+  // The SEED SHIPS A PLACEHOLDER, so the case clears it first: what is being asserted below is the FIRST-UPLOAD stamp, and
+  // a date left by the fixture would prove the preserve-a-stamp path against somebody else's stamp rather than one this
+  // case wrote.
+  check('the case starts from no map at all', await routeWrite('ADMIN_DELETE_MAP_LAYER', {}), { success: true, id: MAP_LAYER_DOC_ID });
+  check('an officer saves a drawing', await routeWrite('ADMIN_SAVE_MAP_LAYER', { svg: MAP_LAYER_SVG }), {
+    success: true,
+    id: MAP_LAYER_DOC_ID,
+  });
+  const mapLayerDoc = await getDoc(doc(db, 'map_layers', MAP_LAYER_DOC_ID));
+  check(
+    'and it is stored as TEXT with its measurements worked out for the map',
+    [mapLayerDoc.get('svg'), mapLayerDoc.get('width'), mapLayerDoc.get('height'), mapLayerDoc.get('view_box')],
+    [MAP_LAYER_SVG, 400, 300, '0 0 400 300']
+  );
+  checkIs(
+    'stamped in station time, the format every other row uses',
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(mapLayerDoc.get('updated_at') || '')),
+    String(mapLayerDoc.get('updated_at'))
+  );
+  const mapLayerFirstUpload = mapLayerDoc.get('created_at');
+
+  check('a replacement saves too', (await routeWrite('ADMIN_SAVE_MAP_LAYER', { svg: '<svg viewBox="0 0 10 10"><rect/></svg>' })).success, true);
+  const mapLayerRedrawn = await getDoc(doc(db, 'map_layers', MAP_LAYER_DOC_ID));
+  check('and the FIRST upload stamp is kept, so the date is when the district was drawn', mapLayerRedrawn.get('created_at'), mapLayerFirstUpload);
+  check('while the drawing itself is the new one', mapLayerRedrawn.get('view_box'), '0 0 10 10');
+
+  // The refusal is the browser's half of the check-and-cap story; firestore.rules has the other half, and
+  // scripts/verify-rules proves that one by writing past the ceiling.
+  const mapLayerRefusal = await routeWrite('ADMIN_SAVE_MAP_LAYER', {
+    svg: '<svg viewBox="0 0 10 10"><script>alert(1)</script></svg>',
+  });
+  checkIs('a drawing carrying a script is refused', mapLayerRefusal.success === false, JSON.stringify(mapLayerRefusal));
+  checkIs('with a reason an officer can act on, rather than a Firestore message', /contains a script/.test(mapLayerRefusal.message || ''), JSON.stringify(mapLayerRefusal));
+  check('and the stored drawing is left exactly as it was', (await getDoc(doc(db, 'map_layers', MAP_LAYER_DOC_ID))).get('view_box'), '0 0 10 10');
+
+  check('an officer removes it', await routeWrite('ADMIN_DELETE_MAP_LAYER', {}), { success: true, id: MAP_LAYER_DOC_ID });
+  check('leaving nothing behind for the member to see', (await getDoc(doc(db, 'map_layers', MAP_LAYER_DOC_ID))).exists(), false);
 
   checkIs('every case ran', cases >= 30, `only ${cases} cases: a section has stopped running`);
 };

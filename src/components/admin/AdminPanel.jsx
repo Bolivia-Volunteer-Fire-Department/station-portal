@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -9,6 +9,10 @@ import AdminAvailabilityTab from './AdminAvailabilityTab';
 import AdminAvailabilityWindowsTab from './AdminAvailabilityWindowsTab';
 import AdminScheduleManagementTab from './AdminScheduleManagementTab';
 import AdminSystemSettingsTab from './AdminSystemSettingsTab';
+// The map's own settings - the boundary, the county's roads and waterways, and the uploaded drawing - which used to be three
+// cards inside System Settings. They are the ground the station covers rather than system configuration, so they have their own
+// screen; System Settings keeps a line pointing at it.
+import AdminMapSettingsTab from './AdminMapSettingsTab';
 import AdminClockManagementTab from './AdminClockManagementTab';
 import AdminPendingApprovalsTab from './AdminPendingApprovalsTab';
 import AdminNotificationsTab from './AdminNotificationsTab';
@@ -42,9 +46,9 @@ export const ADMIN_NAV_CATEGORIES = [
     icon: Users,
     items: [
       { id: 'users', label: 'Members', icon: User },
-      { id: 'roles', label: 'Roles', icon: ShieldCheck },
-      { id: 'ranks', label: 'Ranks', icon: Award },
       { id: 'certifications', label: 'Certifications', icon: BadgeCheck },
+      { id: 'roles', label: 'Role Setup', icon: ShieldCheck },
+      { id: 'ranks', label: 'Rank Setup', icon: Award },
       { id: 'certification-setup', label: 'Certification Setup', icon: ClipboardCheck },
     ],
   },
@@ -53,33 +57,24 @@ export const ADMIN_NAV_CATEGORIES = [
     label: 'Scheduling',
     icon: CalendarDays,
     items: [
-      // The Shifts tab (editing the `shifts` sheet) is intentionally NOT wired up:
-      // shift definitions are edited directly in the spreadsheet for now. The
-      // component is still at ./AdminShiftsTab.jsx, so bringing the tab back is a
-      // matter of restoring this entry, its render block below, and the import.
-      { id: 'templates', label: 'Schedule Templates', icon: CalendarCog },
-      { id: 'assignments', label: 'Assignments', icon: ListTodo },
-      { id: 'schedule', label: 'Schedule Management', icon: CalendarCheck },
-      // Events sits directly under Schedule Management because it is configured the same way, and its
-      // entries appear on every calendar alongside the shifts.
-      { id: 'events', label: 'Events', icon: CalendarPlus },
-      // Member Availability sits here rather than under Timeclock: it answers "who can work
-      // which shift", the same question as the rest of this group.
-      { id: 'availability', label: 'Member Availability', icon: Clock },
-      // The windows members choose from, in the same group and under the same permission: the patterns are the options
-      // list, and Member Availability is where the claims against them are read and corrected.
-      { id: 'availability-windows', label: 'Availability Windows', icon: Repeat },
-      { id: 'approvals', label: 'Pending Approvals', icon: AlertCircle },
-    ],
-  },
-  {
-    id: 'catTimeclock',
-    label: 'Timeclock',
-    icon: CalendarClock,
-    items: [
       { id: 'clock', label: 'Clock Management', icon: CalendarClock },
+      { id: 'schedule', label: 'Schedule Management', icon: CalendarCheck },
+      { id: 'events', label: 'Events', icon: CalendarPlus },
+      { id: 'availability', label: 'Member Availability', icon: Clock },
+      { id: 'approvals', label: 'Pending Approvals', icon: AlertCircle },
+      { id: 'templates', label: 'Shift Template Setup', icon: CalendarCog },
+      { id: 'assignments', label: 'Assignment Setup', icon: ListTodo },
+      { id: 'availability-windows', label: 'Availability Window Setup', icon: Repeat },
     ],
   },
+  // {
+  //   id: 'catTimeclock',
+  //   label: 'Timeclock',
+  //   icon: CalendarClock,
+  //   items: [
+  //     { id: 'clock', label: 'Clock Management', icon: CalendarClock },
+  //   ],
+  // },
   {
     // Renamed from Training to Content when Announcements arrived alongside the Training report.
     id: 'catContent',
@@ -89,6 +84,8 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
       { id: 'documents', label: 'Documents', icon: BookText },
       { id: 'training', label: 'Training', icon: GraduationCap },
+      { id: 'chat', label: 'Chat Setup', icon: MessagesSquare },
+      { id: 'map', label: 'Map Setup', icon: MapIcon },
     ],
   },
   {
@@ -96,25 +93,28 @@ export const ADMIN_NAV_CATEGORIES = [
     label: 'Reports',
     icon: BarChart3,
     items: [
-      { id: 'reports-config', label: 'Reports Configuration', icon: BarChart3 },
-      { id: 'forms-config', label: 'Forms', icon: FileText },
+      { id: 'reports-config', label: 'Report Setup', icon: BarChart3 },
+      { id: 'forms-config', label: 'Form Setup', icon: FileText },
     ],
   },
-  {
-    // Chat Rooms sits in its own group rather than under People, because it is not about people: it is the station's
-    // conversation structure, and an officer given this permission is not thereby given a seat in any room (see
-    // utils/chat.js#chatPermissionsFrom). Nothing else lives here yet, and that is fine - a group of one is clearer than
-    // a tab filed under a heading that does not describe it.
-    id: 'catChat',
-    label: 'Communication',
-    icon: MessagesSquare,
-    items: [{ id: 'chat', label: 'Chat Rooms', icon: MessagesSquare }],
-  },
+  // {
+  //   // Chat Rooms sits in its own group rather than under People, because it is not about people: it is the station's
+  //   // conversation structure, and an officer given this permission is not thereby given a seat in any room (see
+  //   // utils/chat.js#chatPermissionsFrom). Nothing else lives here yet, and that is fine - a group of one is clearer than
+  //   // a tab filed under a heading that does not describe it.
+  //   id: 'catChat',
+  //   label: 'Communication',
+  //   icon: MessagesSquare,
+  //   items: [{ id: 'chat', label: 'Chat Rooms', icon: MessagesSquare }],
+  // },
   {
     id: 'catSystem',
     label: 'System',
     icon: Settings2,
     items: [
+      // THE MAP'S OWN SETTINGS, first in the group because it is the only one about the place rather than about the app: the
+      // district boundary, the county's roads and waterways, and the department's uploaded drawing. These were three cards in
+      // the middle of System Settings until the map grew into a feature of its own - see AdminMapSettingsTab.
       { id: 'system', label: 'System Settings', icon: Settings2 },
       { id: 'notifications', label: 'Notifications', icon: Bell },
       // Debug fires the app's own toasts, dialogs and sounds from buttons. Like the audit log it is not part of the
@@ -383,12 +383,29 @@ export default function AdminPanel({
           Your role does not include access to any Administration tabs.
         </p>
       )}
-      {/* `z-[5]` keeps the tab bar and its dropdown UNDER the sticky app bar (z-10) on a phone, while
-          still floating above the page content below it. It was `z-20`, which put the sub-menu - and the
-          overflow menus hanging off it - on top of the sticky header as the page scrolled. The dropdown
-          inside it keeps its own z-30; that is scoped to this element's stacking context, so it still
-          clears the content it opens over. */}
-      <div ref={barRef} className="relative z-[5] flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700 pb-2">
+      {/* THE TAB BAR AND ITS DROPDOWN, AND THE ONE THING THIS z-INDEX HAS TO DO: sit between the page content and the
+          phone's app bar.
+
+          A dropdown hangs DOWN over the content, so it has to paint above it - and the content here is not the plain flow it
+          looks like: every table in this module has a `sticky top-0 z-10` header inside its own scroll box, and the sticky
+          header of the box an admin screen has open sits exactly where the menu opens. At `z-[5]` the menu was BELOW those
+          headers, so a category's rows disappeared behind a table's header strip - the Admin appearance of a menu with items
+          missing from the middle.
+
+          So the ladder, in one place, because it is only ever wrong as a whole:
+
+            content (including those sticky table headers)   z-10
+            this bar and its dropdown                        z-15   <- here
+            the phone's sticky app bar                       z-19
+            the status strip, the drawer's backdrop, the bottom nav   z-20
+            the drawer itself                                z-30
+            dialogs and overlays                             z-40 and up
+
+          The dropdown inside this element keeps its own z-30, which is SCOPED to the stacking context this z-15 creates: it
+          is a layer order within this bar, not a claim about the page. That is what keeps the menu under the app bar as the
+          page scrolls (the bug this file's comment used to record) while letting it clear the content it opens over - and
+          `scripts/verify-admin-render` reads both ends of that from the classes rather than trusting the comment. */}
+      <div ref={barRef} className="relative z-[15] flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700 pb-2">
         {visibleCategories.map(({ id, label, icon: CatIcon, items }) => {
           const isOpen = openCategory === id;
           const isActive = categoryHasActive(items);
@@ -614,6 +631,24 @@ export default function AdminPanel({
           token={token}
           systemSettings={systemSettings}
           onDataChanged={onDataChanged}
+          // The tabs this role may use are decided here, so the pointer from System Settings to the map's own screen is told
+          // rather than calculating it again: the two tabs share one permission, so if this screen is open, that one is too.
+          onOpenMapSettings={() => onSelectTab('map')}
+        />
+      )}
+
+      {/* The map's own settings: the boundary the background is clipped to, the county's roads and waterways, and the uploaded
+          drawing. Gated on the same permission as System Settings by the nav (utils/permissions#moreTabs), and it reads nothing
+          from the refresh wave: each card reads its own document when it mounts, exactly as it did from the settings tab.
+
+          TWO PERMISSIONS OPEN THIS SCREEN and they do different jobs, so the flags are handed down and each card follows the
+          permission its save needs - see utils/permissions#roleAllowsTab and AdminMapSettingsTab. */}
+      {activeSubTab === 'map' && (
+        <AdminMapSettingsTab
+          token={token}
+          systemSettings={systemSettings}
+          canEditMap={permissionGranted(currentRole, 'can_edit_map')}
+          canEditSystemSettings={permissionGranted(currentRole, 'can_edit_system_settings')}
         />
       )}
 

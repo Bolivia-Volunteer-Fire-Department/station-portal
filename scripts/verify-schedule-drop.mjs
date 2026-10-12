@@ -495,6 +495,10 @@ checkIs('reduced motion keeps the meaning of the blink', /@media \(prefers-reduc
 console.log('\n--- and the blocks cannot cover the navigation ---');
 const templatesTab = readFileSync('src/components/admin/AdminScheduleTemplatesTab.jsx', 'utf8');
 const adminPanel = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
+// ...and the two ends of the ladder the nav bar sits in: the phone's app bar above it, and the content's own sticky table
+// headers below it. Both read from the files rather than written here as numbers.
+const appShell = readFileSync('src/App.jsx', 'utf8');
+const tableHeaderZ = Number(/sticky top-0 z-(\d+)/.exec(readFileSync('src/components/admin/AdminUsersTab.jsx', 'utf8'))?.[1]);
 // Scan CODE, not prose. This file explains the stacking in a long comment that names `zIndex: 10`, and matching that would
 // let the check pass while the real value had been deleted - which it did, on the first run of these checks.
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -514,9 +518,20 @@ checkIs(
   Number.isFinite(blockZ) && blockZ > 0 && blockZ < 40,
   `block z-index ${blockZ} - large values mean the containment was dropped to chase the symptom`
 );
-// The reverse direction still has to hold, and it is why the nav bar is z-5 rather than z-20: the sticky app bar is z-10,
-// and a menu above THAT was a separate bug this same file's comment records.
-checkIs('while the nav bar still sits under the sticky app bar', Number(navBarZ) < 10, `nav bar ${navBarZ}`);
+// The reverse direction still has to hold, and it is why the nav bar is a bracket value rather than a page-level claim: the
+// sticky app bar is above it, and a menu above THAT was a separate bug this same file's comment records. Read as a COMPARISON
+// against the app bar's own number rather than against a literal, because the real invariant is the ORDER of the two - and two
+// literals is how this pair drifted apart in the first place (the bar sat at z-5 under a z-10 app bar, and the content's sticky
+// table headers were z-10 as well, so a category menu opened over a table had its middle rows painted out by a header strip).
+const appBarZ = /md:hidden sticky top-0 z-\[(\d+)\]/.exec(appShell)?.[1] || /md:hidden sticky top-0 z-(\d+)/.exec(appShell)?.[1];
+checkIs('the app bar\'s z-index was found', Boolean(appBarZ), 'no mobile app bar in App.jsx');
+checkIs('while the nav bar still sits under the sticky app bar', Number(navBarZ) < Number(appBarZ), `nav bar z-${navBarZ} vs app bar z-${appBarZ}`);
+checkIs(
+  'and above the sticky table headers it opens over',
+  Number(navBarZ) > Number(tableHeaderZ),
+  `nav bar z-${navBarZ} vs a sticky table header z-${tableHeaderZ} - the menu would be painted out by a table`
+);
+checkIs('with the app bar in turn under the status strip and the drawer', Number(appBarZ) < 20, `app bar z-${appBarZ}`);
 // The raw inline z-index is kept, deliberately: it is what lifts a block above the hour lines and the day-column borders it
 // overlaps. Dropping it would sink the blocks behind the grid lines, so the value is asserted as well as the containment -
 // and read from the stripped source, so deleting it really does fail here.
@@ -527,12 +542,16 @@ checkIs(
 );
 // ...and there is no second raw z-index, since one would need the same containment treatment and there is no reason for
 // it to exist. Counted over the whole components tree rather than just this file, so a new one elsewhere is caught too.
+//
+// A PROPERTY, NOT A LEAFLET OPTION: `zIndexOffset` (the map orders its own markers within a pane with it) is not a stacking
+// claim about the page, and counting it would fail an unrelated screen for using Leaflet correctly. Hence the word boundaries -
+// `zIndex: 10` is still caught, `zIndexOffset: 1000` is not.
 const rawZIndexFiles = readdirSync('src/components', { recursive: true })
   .filter((f) => /\.(jsx|js)$/.test(String(f)))
   .flatMap((f) => {
     // Stripped first, for the same reason as above: these files carry comments about this very z-index, and counting
     // those would report a second one that does not exist and miss a real one that does.
-    const n = (stripComments(readFileSync(join('src/components', String(f)), 'utf8')).match(/zIndex/g) || []).length;
+    const n = (stripComments(readFileSync(join('src/components', String(f)), 'utf8')).match(/\bzIndex\b/g) || []).length;
     return n ? [`${f} (${n})`] : [];
   });
 // `check`, not `checkIs`: this is an EQUALITY against a known list, and passing it to checkIs would test the truthiness

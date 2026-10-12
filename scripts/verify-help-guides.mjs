@@ -413,6 +413,9 @@ const requiredMemberModules = [
   'my-settings',
   'help',
   'documents',
+  // The district map: its boundary drawing is uploaded by an officer, but the module is a member's own screen - so it is
+  // documented for the member it is for, like every other entry in this list.
+  'district-map',
   'firefighter-runner',
 ];
 const undocumentedModules = requiredMemberModules.filter((module) => !memberSlugs.includes(module));

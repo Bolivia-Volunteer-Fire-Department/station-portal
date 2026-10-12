@@ -78,8 +78,10 @@ checkEqual('it lives under System', debugCategory && debugCategory.label, 'Syste
 checkEqual('labeled Debug', debugCategory && debugCategory.items.find((item) => item.id === 'debug').label, 'Debug');
 checkEqual('with a bar label for the app bar', adminBarLabel('debug'), 'Debug');
 checkEqual(
-  'and System is still the last group before Help',
+  'and System is still the last group, with Help inside it',
   ADMIN_NAV_CATEGORIES.find((c) => c.id === 'catSystem').items.map((item) => item.id),
+  // Map Setup moved OUT of this group when the admin menu was reorganised: it now sits in Content beside the other things the
+  // station writes (its announcements, documents and training) - see AdminPanel. System holds the app's own switches.
   ['system', 'notifications', 'debug', 'help']
 );
 

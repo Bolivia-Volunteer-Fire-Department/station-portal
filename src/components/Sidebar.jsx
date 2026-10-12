@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare, X } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare, Map as MapIcon, X } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CertificationBadges from './CertificationBadges';
 import { stationLogoUrl, stationSyncLoopsUrl, stationSyncOnTransUrl } from '../utils/assets';
@@ -23,6 +23,7 @@ export default function Sidebar({
     canUseTimeclock,
     canSignTrainings,
     canViewDocuments,
+    canViewMap = false,
     canViewReports = false,
     canGenerateForms = false,
     canViewRoster = false,
@@ -253,6 +254,23 @@ export default function Sidebar({
                     >
                         <BookText className="w-5 h-5" />
                         <span>Documents</span>
+                    </button>
+                    )}
+
+                    {/* The District Map: the department's own boundary drawing. Gated on can_view_map, which is the
+                        permission a station is most likely to withhold from some roles - it hides the tab, the screen's
+                        read (the rule is what refuses), and the drawing itself. Which map appears is the same document
+                        for everybody; there is nothing per-member about it. */}
+                    {canViewMap && (
+                    <button
+                        onClick={() => { setActiveTab('district-map'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeTab === 'district-map'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                    >
+                        <MapIcon className="w-5 h-5" />
+                        <span>District Map</span>
                     </button>
                     )}
 

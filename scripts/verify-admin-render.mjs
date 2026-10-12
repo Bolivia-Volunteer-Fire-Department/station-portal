@@ -33,6 +33,10 @@ import HelpGuides from '../src/components/HelpGuides.jsx';
 import Markdown from '../src/components/Markdown.jsx';
 import { hasGuideContent, helpGuides } from '../src/utils/helpGuides.js';
 import AdminSystemSettingsTab from '../src/components/admin/AdminSystemSettingsTab.jsx';
+// The map's own screen, which the boundary, the background and the drawing moved to. Rendered below rather than merely read as
+// source, because the move is exactly the kind of change that parses and builds while rendering the cards in the wrong order or
+// not at all.
+import AdminMapSettingsTab from '../src/components/admin/AdminMapSettingsTab.jsx';
 // The separate roster module is rendered below with focused fixtures.
 import AdminUsersTab from '../src/components/admin/AdminUsersTab.jsx';
 import RosterModule from '../src/components/RosterModule.jsx';
@@ -156,7 +160,7 @@ for (const [name, role] of Object.entries(ROLES)) {
     check('and no tab panel is rendered on the menu', !panelHtml.includes('Username</th>'));
   }
   if (name === 'administrator') {
-    check('an administrator sees every category', ['People', 'Scheduling', 'Timeclock', 'System'].every((label) => panelHtml.includes(label)));
+    check('an administrator sees every category', ['People', 'Scheduling', 'Content', 'Reports', 'System'].every((label) => panelHtml.includes(label)));
   }
   if (name === 'memberOnly' || name === 'nothing') {
     check(`a ${name} role sees no administration panels`, !panelHtml.includes('Username</th>'));
@@ -880,8 +884,8 @@ const rosterWithEvent = (events) =>
 const eventHtml = rosterWithEvent(oneEvent);
 
 check('an event on a day is named in that day\'s heading', /Drill night/.test(eventHtml));
-// The coloured dot, so a pale event colour cannot swallow the date - the reason the original used a dot rather than a chip.
-check('and carries its colour', /#2563eb/.test(eventHtml));
+// The coloured dot, so a pale event color cannot swallow the date - the reason the original used a dot rather than a chip.
+check('and carries its color', /#2563eb/.test(eventHtml));
 // The list's actual job is untouched: the window and WHO claimed it are still there.
 check('with the window and its claimants still drawn', /Tuesday night/.test(eventHtml) && /Bo Jones/.test(eventHtml));
 check('and the month counts its events', /1 event this month/.test(eventHtml));
@@ -1392,8 +1396,14 @@ const categoryOf = (tabId) => {
 };
 
 check('Member Availability is under Scheduling', categoryOf('availability'), 'Scheduling');
-check('and no longer under Timeclock', categoryOf('clock'), 'Timeclock');
-check('Clock Management is alone in Timeclock', ADMIN_NAV_CATEGORIES.find((c) => c.id === 'catTimeclock').items.length, 1);
+// Clock Management moved into Scheduling when the Timeclock category was retired - one category holding one tab read as a
+// heading rather than a group - so both of these pin the move from either direction.
+check('and Clock Management moved with it', categoryOf('clock'), 'Scheduling');
+check(
+  'with no Timeclock category left behind',
+  !ADMIN_NAV_CATEGORIES.some((c) => c.id === 'catTimeclock'),
+  'the retired category is still in the nav'
+);
 check('Help is under System', categoryOf('help'), 'System');
 check(
   'every nav tab id is unique',
@@ -1407,21 +1417,21 @@ check(
 // passes on any arrangement, which is why this one is spelled out item by item.
 const schedulingOrder = (ADMIN_NAV_CATEGORIES.find((c) => c.id === 'catScheduling') || { items: [] }).items;
 check(
-  'Scheduling opens on Schedule Management and Pending Approvals',
+  'Scheduling opens on Clock Management and Schedule Management',
   schedulingOrder.slice(0, 2).map((item) => item.id),
-  ['schedule', 'approvals']
+  ['clock', 'schedule']
 );
 check(
-  'then availability, events, templates and the windows',
+  'then events, availability, approvals and templates',
   schedulingOrder.slice(2, 6).map((item) => item.id),
-  ['availability', 'events', 'templates', 'availability-windows']
+  ['events', 'availability', 'approvals', 'templates']
 );
 // ...and nothing was dropped or duplicated in the move. A reorder that quietly loses a tab would still satisfy the two
 // checks above, because they only look at the first six.
 check(
   'and reordering lost no tab',
   schedulingOrder.map((item) => item.id),
-  ['schedule', 'approvals', 'availability', 'events', 'templates', 'availability-windows', 'assignments']
+  ['clock', 'schedule', 'events', 'availability', 'approvals', 'templates', 'assignments', 'availability-windows']
 );
 // The retired Shifts tab stays out of the nav.
 check('the retired Shifts tab is still absent', categoryOf('shifts') === null);
@@ -1828,11 +1838,11 @@ check('the rank name is available as a tooltip', /title="Member 1 — Driver\/Op
 // wraps it (and any certification icons) in its own spans, so these look for the name INSIDE the colored span
 // rather than requiring the span to contain nothing else - the contract is where the color lands, not that the
 // name is the only thing there.
-// The colour lands on the CHIP, and the rank's icon is drawn with it. The icon deliberately has no colour of its own:
+// The color lands on the CHIP, and the rank's icon is drawn with it. The icon deliberately has no color of its own:
 // it inherits the chip's, so the two can never disagree.
 check('the name carries the rank color', /style="[^"]*color:#227dc3[^"]*"[\s\S]{0,900}Member 1/.test(String(roster)), true);
 check('and the rank icon is drawn with it', /lucide-truck/.test(String(roster)), true);
-check('the icon sets no colour of its own, so it cannot drift from the chip', !/<svg[^>]*style="color:/.test(String(roster)), true);
+check('the icon sets no color of its own, so it cannot drift from the chip', !/<svg[^>]*style="color:/.test(String(roster)), true);
 check('and exactly those two, not more', (String(roster).match(/color:#227dc3/g) || []).length, 2);
 check('a second member gets their own color', /style="[^"]*color:#c3223b[^"]*"[\s\S]{0,900}Member 2/.test(String(roster)), true);
 
@@ -1863,7 +1873,7 @@ const heldRoster = rosterView({
   ],
 });
 check(
-  'a member already on a shift is filled in with that shift’s colour, with nobody having clicked',
+  'a member already on a shift is filled in with that shift’s color, with nobody having clicked',
   /style="background-color:#0f766e;border-color:#0f766e;color:#ffffff"/.test(chipFor(heldRoster, 'Member 1')),
   chipFor(heldRoster, 'Member 1').slice(0, 240)
 );
@@ -1886,7 +1896,7 @@ check(
 //     into a spread of the helper's result is exactly the tidy-up that would reintroduce it.
 //   * THE MONTH'S SHIFTS WERE READ ON THE FIRST NAME CLICK rather than when the tab opened, because the only thing that
 //     needed them was a menu most visits never open. THE CHIPS CHANGED THAT: a name that already holds a shift is filled
-//     in with that shift's colour (see the check below), so the list DRAWS the month and the read belongs with the paint.
+//     in with that shift's color (see the check below), so the list DRAWS the month and the read belongs with the paint.
 //     What is pinned here is that the read stays the tab's own WINDOWED one - asked for once a month, and skipped
 //     entirely when App already holds the month - rather than that it waits for a click.
 const availabilityPickerSource = readFileSync('src/components/admin/AdminAvailabilityTab.jsx', 'utf8');
@@ -1912,14 +1922,14 @@ check(
     !/useEffect\([\s\S]{0,300}?onNeedSchedule/.test(availabilityPickerSource),
   true
 );
-// A MEMBER WHO HAS BEEN GIVEN A SHIFT IS FILLED IN, with that shift's ASSIGNMENT colour, so the same member reads the same
-// way here as on the board. The colour is the assignment's, not the rank's - a filled chip is about the SHIFT.
+// A MEMBER WHO HAS BEEN GIVEN A SHIFT IS FILLED IN, with that shift's ASSIGNMENT color, so the same member reads the same
+// way here as on the board. The color is the assignment's, not the rank's - a filled chip is about the SHIFT.
 //
 // IT IS THE CHOICE IN HAND FIRST, THEN THE SHIFT ALREADY HELD, and that second half is the point of the view: an officer
 // opening this list is asking "who is spoken for?", and a chip that filled in only for a draft would answer that with
 // silence until every name had been clicked.
 check(
-  'a member given a shift is filled in with that shift’s assignment colour',
+  'a member given a shift is filled in with that shift’s assignment color',
   /const chosen = pending \? pending\.place : held/.test(availabilityPickerSource) &&
     /const assignedColor = chosen \? assignmentColor\(/.test(availabilityPickerSource) &&
     /backgroundColor: assignedColor, borderColor: assignedColor, color: '#ffffff'/.test(availabilityPickerSource),
@@ -2006,7 +2016,9 @@ const backdropZ = /fixed inset-0 bg-black\/60 z-(\d+)/.exec(sidebarSource);
 // `md:h-dvh` here: the drawer's height unit is the visible viewport (see verify-app-shell), and the
 // pinned order below is about the CLASS LIST this pattern identifies, not about that unit.
 const drawerZ = /fixed md:static md:h-dvh inset-y-0 left-0 z-(\d+)/.exec(sidebarSource);
-const headerZ = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(headerClass);
+// Both z-index shapes count: the ladder uses a BRACKET value for the app bar (z-[19]), because it has to sit between the
+// content's sticky headers and the status strip, and a bare number here would read as "none" and quietly fail the checks below.
+const headerZ = /(?:^|\s)z-\[?(\d+)\]?(?:\s|$)/.exec(headerClass);
 check('the sidebar backdrop z-index was found', (backdropZ ? backdropZ[1] : null) === '20', true);
 check('the drawer z-index was found', (drawerZ ? drawerZ[1] : null) === '30', true);
 check(
@@ -2030,7 +2042,17 @@ check(
   Boolean(subMenuZ && headerZ) && Number(subMenuZ[1]) < Number(headerZ[1]),
   `sub-menu z-${subMenuZ ? subMenuZ[1] : 'none'} vs bar z-${headerZ ? headerZ[1] : 'none'}`
 );
-check('while still floating above the page content', Number(subMenuZ && subMenuZ[1]) > 0, true);
+// ...AND ABOVE THE CONTENT IT OPENS OVER, which is the half that was asserted as "any positive number" and was therefore
+// worthless: the bar was z-[5] while every table in this module has a `sticky top-0 z-10` header, so a category menu opened
+// over a table had its middle rows painted out by that header. The number to beat is read from a real table header rather
+// than written here, so moving the content's z-index fails this instead of silently re-opening the bug.
+const tableHeaderZ = /sticky top-0 z-(\d+)/.exec(readFileSync('src/components/admin/AdminUsersTab.jsx', 'utf8'));
+check('the content\'s sticky table headers were found', !!tableHeaderZ, 'no sticky table header in the users tab');
+check(
+  'while the sub-menu floats above everything it opens over, sticky table headers included',
+  Boolean(subMenuZ && tableHeaderZ) && Number(subMenuZ[1]) > Number(tableHeaderZ[1]),
+  `sub-menu z-${subMenuZ ? subMenuZ[1] : 'none'} vs a sticky table header z-${tableHeaderZ ? tableHeaderZ[1] : 'none'}`
+);
 
 // --- the page name appended to the app bar ------------------------------------------------------
 console.log('\n--- the app bar names the page once its heading scrolls away ---');
@@ -2212,6 +2234,9 @@ check('and passes extra classes through', centeredHtml.includes('space-y-6'), tr
 
 const adminCenteredTabs = [
   ['src/components/admin/AdminSystemSettingsTab.jsx', 'System Settings'],
+  // The map's own screen, which the boundary, the background and the drawing moved to. A stack of cards like System Settings,
+  // and capped for the same reason: full width would leave each card's labels and its controls far apart.
+  ['src/components/admin/AdminMapSettingsTab.jsx', 'Map Settings'],
   ['src/components/admin/AdminNotificationsTab.jsx', 'Notifications'],
 ];
 for (const [path, name] of adminCenteredTabs) {
@@ -2223,6 +2248,76 @@ for (const [path, name] of adminCenteredTabs) {
   check(`${name} imports it`, /import CenteredContent from '\.\.\/CenteredContent'/.test(source), true);
   check(`${name} sets no max-width of its own`, !/\bmax-w-(2xl|3xl|4xl|5xl|6xl|7xl)\b/.test(source), true);
 }
+
+// THE MAP'S OWN SCREEN, RENDERED. The boundary, the background and the drawing used to be cards in System Settings; they are a
+// screen of their own now, and the ORDER is the part worth pinning: the background is clipped to the boundary, so drawing the
+// background card first would offer a fetch that cannot run yet. Nothing about that fails a build.
+//
+// It takes TWO permissions rather than one - `can_edit_map` for the boundary and the background, `can_edit_system_settings` for
+// the drawing - so it is rendered three ways below, because "the card is missing" is exactly the bug a permission gate can
+// introduce silently.
+const mapTabView = (props) => renderToString(React.createElement(AdminMapSettingsTab, { token: 't', systemSettings: {}, ...props }));
+const headingsOf = (html) => [...String(html).matchAll(/<h3[^>]*>([^<]+)</g)].map((match) => match[1].trim());
+
+const mapBothPermissions = headingsOf(mapTabView({ canEditMap: true, canEditSystemSettings: true }));
+check('the map settings screen renders its cards', mapBothPermissions.length >= 4, JSON.stringify(mapBothPermissions));
+check(
+  'boundary, then the background clipped to it, then the legend, then the drawing',
+  mapBothPermissions.slice(0, 4).join('|') === 'District boundary|Map background|Landmark types|District Map',
+  JSON.stringify(mapBothPermissions)
+);
+check('and it carries no card the settings tab kept', !/Clock Settings|Session Timeout/.test(mapTabView({ canEditMap: true, canEditSystemSettings: true })), true);
+
+// A MAP LIEUTENANT: the two cards their permission covers, and a sentence about the drawing rather than a save button the
+// server would refuse. This is the case the whole permission exists for, so it is the one that must not be got wrong.
+const mapLieutenant = mapTabView({ canEditMap: true });
+const lieutenantHeadings = headingsOf(mapLieutenant);
+check(
+  'a map maintainer gets the boundary, the background and the legend, and nothing else',
+  lieutenantHeadings.join('|') === 'District boundary|Map background|Landmark types',
+  JSON.stringify(lieutenantHeadings)
+);
+check('and NOT the drawing card', !lieutenantHeadings.includes('District Map'), JSON.stringify(lieutenantHeadings));
+check(
+  'instead being told which permission the drawing needs',
+  visibleText(mapLieutenant).includes('Manage system settings') && visibleText(mapLieutenant).includes('permission'),
+  true
+);
+
+// A SETTINGS OFFICER, the other way round: the drawing, and a sentence about the map's geometry.
+const mapSettingsOnly = mapTabView({ canEditSystemSettings: true });
+check(
+  'a settings officer gets the drawing card and only that',
+  headingsOf(mapSettingsOnly).join('|') === 'District Map',
+  JSON.stringify(headingsOf(mapSettingsOnly))
+);
+check(
+  'and is told the boundary needs the map permission',
+  visibleText(mapSettingsOnly).includes('Maintain the district map'),
+  true
+);
+check(
+  'while neither permission shows no card at all, only what each one needs',
+  headingsOf(mapTabView({})).length === 0 && visibleText(mapTabView({})).includes('Maintain the district map'),
+  JSON.stringify(headingsOf(mapTabView({})))
+);
+
+// ...AND THE SETTINGS TAB POINTS AT IT, with a working button when it is given one and plain words when it is not (the
+// harness and any other caller that renders the tab without navigation must not break on a missing callback).
+const pointerWithButton = renderToString(
+  React.createElement(AdminSystemSettingsTab, { token: 't', systemSettings: [], onDataChanged: () => {}, onOpenMapSettings: () => {} })
+);
+check('System Settings says where the map went', visibleText(pointerWithButton).includes('The district map has its own screen'), true);
+check('and offers to open it', visibleText(pointerWithButton).includes('Open Map Settings'), true);
+check('while still holding the settings it kept', visibleText(pointerWithButton).includes('Clock Settings'), true);
+const pointerWithoutButton = renderToString(
+  React.createElement(AdminSystemSettingsTab, { token: 't', systemSettings: [], onDataChanged: () => {} })
+);
+check(
+  'and renders without a navigation callback rather than throwing on it',
+  typeof pointerWithoutButton === 'string' && visibleText(pointerWithoutButton).includes('Map Settings'),
+  typeof pointerWithoutButton === 'string' ? 'the line is missing' : pointerWithoutButton.error?.message
+);
 
 // Member Availability: BOTH views fill the content frame - the All Members list is a board with the no-availability
 // card beside it, and the member grid is a grid - so neither is wrapped and neither names a max-width.

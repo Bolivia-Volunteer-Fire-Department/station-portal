@@ -43,7 +43,8 @@ Each permission grants its own tab, or its own member-facing ability. None of th
 
 **System**
 
-- **Manage system settings** — *System → System Settings*.
+- **Manage system settings** — *System → System Settings*, and the drawing card on *System → Map Settings*.
+- **Maintain the district map** — *System → Map Settings* by itself, without any other administrator permission: the boundary, the county's roads and waterways, and the landmarks drawn on the member's own *District map*. Requires *View the district map*.
 - **Manage notification settings** — *System → Notifications*. Without *Manage system settings*, this role may write only the notification keys, so it cannot be used to change unrelated settings, and the Firebase credential card stays administrator-only.
 - **View the system log** — *System → System Log*. Read-only, but it names members and records failed sign-ins, so grant it deliberately rather than by default. The tab loads only when it is opened, so it costs nothing to someone who never looks.
 
