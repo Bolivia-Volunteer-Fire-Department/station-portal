@@ -338,7 +338,7 @@ check('a member permission that is not the map still opens nothing', roleHasAdmi
 check(
   'and a settings officer keeps System Settings as the tab they land on',
   allowedAdminTabs({ can_edit_system_settings: true }),
-  ['system', 'map', ...ADMIN_PERMISSIONLESS_TABS]
+  ['system', 'map', 'navigation', ...ADMIN_PERMISSIONLESS_TABS]
 );
 check('an unknown tab is still refused for a map maintainer', roleAllowsTab({ can_edit_map: true }, 'mapp'), false);
 

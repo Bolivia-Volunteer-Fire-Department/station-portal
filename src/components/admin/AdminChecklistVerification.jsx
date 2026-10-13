@@ -22,18 +22,7 @@ const labelClass = 'block text-sm font-medium text-slate-600 dark:text-slate-300
 const fieldClass =
   'w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
 
-// Verifying a member's checklist from the Administration module.
-//
-// The Documents module has a verification panel too, but it sits on whichever checklist the verifier happens to be
-// reading. This is the other direction, and the one a company officer actually needs: pick the CHECKLIST, then the
-// MEMBER, and confirm what they signed, item by item. It answers "who is waiting on me", which a panel scoped to
-// one open document cannot.
-//
-// It lives on the Documents tab rather than in a tab of its own so the permission that opens it can stay a MEMBER
-// permission: the officer checking a new member's truck checklist should not have to be able to edit that
-// checklist, and should not have to become an administrator to confirm it was done. Nothing here decides who may
-// verify - the server refuses self-verification and re-checks the permission on every action, and this screen
-// simply does not offer what would fail.
+// Verification panel: review and confirm checklist items or documents signed by members.
 function AdminChecklistVerification({ token, documents = [], users = [], currentUserId = '', timeFormat = '12' }) {
   const [requestedListId, setRequestedListId] = useState('');
   const [items, setItems] = useState([]);
@@ -42,19 +31,12 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
   const [error, setError] = useState('');
   const [openMemberId, setOpenMemberId] = useState('');
   const [verifyingItemId, setVerifyingItemId] = useState('');
-  // The member whose DOCUMENT signature is being confirmed, which is a different question from the item above: one row
-  // for a whole document rather than one row per line. Kept apart so the two spinners cannot be read for each other.
   const [verifyingMemberId, setVerifyingMemberId] = useState('');
   const [verifyingAll, setVerifyingAll] = useState(false);
   const [confirmingAll, setConfirmingAll] = useState(false);
-  // Which member's already-verified items are expanded. Collapsed by default: the panel is a to-do list, and the
-  // work is what is still outstanding - the record is what you open when somebody asks about it.
   const [showingVerifiedFor, setShowingVerifiedFor] = useState('');
 
-  // WHAT CAN BE CONFIRMED HERE: the checklists, whose items are confirmed one by one, and the documents whose author has
-  // asked for the signature itself to be confirmed. Two shapes of one job, which is why they share this panel and the
-  // permission that opens it - and `documentRequiresVerification` is the single rule that decides the second, so a
-  // document whose requirement has since been turned off drops out of here along with everything else.
+  // Documents or checklists eligible for verification.
   const verifiable = useMemo(
     () =>
       (Array.isArray(documents) ? documents : []).filter(
@@ -63,8 +45,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [documents]
   );
 
-  // One that has since been deleted is not a choice, and an empty picker with nothing selected would make the screen
-  // look broken, so the first one is opened.
+  // Pick the requested document or default to the first one available.
   const activeListId = useMemo(() => {
     if (requestedListId && verifiable.some((row) => row.id === requestedListId)) return requestedListId;
     return verifiable.length > 0 ? verifiable[0].id : '';
@@ -75,10 +56,8 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [verifiable, activeListId]
   );
 
-  // WHICH OF THE TWO JOBS THIS IS. A checklist is confirmed line by line; anything else that got this far is confirmed
-  // once, against the signature the member gave, and the two are drawn differently because they ask different things.
+  // Check whether the active document is a checklist.
   const isChecklistTarget = String(activeDocument?.doc_type || '').trim().toLowerCase() === 'checklist';
-
 
   const loadSignatures = useCallback(
     async (documentId) => {
@@ -107,17 +86,13 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [token]
   );
 
-  // Reloaded whenever the chosen checklist changes, and never kept across one: every name in this list was read
-  // against the document that was selected at the time.
+  // Reload signatures when the chosen document changes.
   useEffect(() => {
     setOpenMemberId('');
     loadSignatures(activeListId);
   }, [activeListId, loadSignatures]);
 
-  // ONE LIST, whichever kind of confirmation is being done: the members with something outstanding on this document.
-  // The item arithmetic reads the checklist's lines; the document one reads the signature rows themselves, because a
-  // whole-document signature has no line to hang off. Both leave out the verifier's own - the server refuses
-  // self-verification, so offering it would be offering a button that always fails.
+  // Find members waiting for verification on this document.
   const waiting = useMemo(
     () =>
       isChecklistTarget
@@ -126,21 +101,11 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [isChecklistTarget, activeDocument, items, signatures, currentUserId]
   );
 
-  // Why the list can be empty, worked out from the same data the list is built from. "Nothing is waiting to be
-  // verified" is true and useless: it reads as broken to somebody who has just watched a member tick boxes, and
-  // the honest answers are different problems with different fixes.
-  //
-  //   * the checklist has no items yet - nothing to sign, nothing to confirm;
-  //   * nobody has signed anything - the member has not saved their ticks;
-  //   * everything signed is the VIEWER's own, and the server refuses self-verification, so it is filtered out by
-  //     design. This is the one that looks like a bug and is not, which is why it says so;
-  //   * everything signed has already been confirmed.
+  // Determine why the queue is empty so we can show a helpful explanation.
   const emptyReason = useMemo(() => {
     if (isChecklistTarget && items.length === 0) return 'no-items';
 
     const wantedVerifier = String(currentUserId || '').trim();
-    // The rows that could have been confirmed: a checklist's ticked ITEMS, or - on a document - the signatures
-    // themselves, which carry no item (see WHOLE_DOCUMENT_ITEM in utils/documents).
     const signed = isChecklistTarget
       ? signatures.filter(
           (signature) =>
@@ -161,8 +126,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [items, signatures, openMemberId]
   );
 
-  // Every verification reloads from the server's own answer rather than from what was clicked, so the rows and the
-  // counts can never disagree with the sheet.
+  // Verify an individual checklist item.
   const handleVerifyItem = async (itemId) => {
     if (!activeListId || !openMemberId || verifyingItemId) return;
 
@@ -201,9 +165,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     }
   };
 
-  // Confirming a DOCUMENT's signature rather than an item of a checklist: the same act, once for the whole document,
-  // and reloaded from the server's answer for the same reason - the rows and the counts must never be this screen's
-  // guess about what happened.
+  // Verify a whole-document signature.
   const handleVerifyDocument = async (memberId) => {
     if (!activeListId || verifyingMemberId) return;
 
@@ -220,14 +182,13 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     }
   };
 
-  // A member's name from the users this panel already holds. The shared label helpers are used so an id with no
-  // matching user reads the way it does everywhere else, rather than as a raw id.
+  // Look up user display name by ID.
   const memberName = (userId) => {
     const user = users.find((row) => String(row.id) === String(userId));
     return user ? userLabel(user) : unnamedLabel(userId);
   };
 
-  // The signature row behind one item of the open member's checklist: the source of the date shown beside it.
+  // Look up the signature for a specific checklist item.
   const signatureFor = (itemId) =>
     signatures.find(
       (signature) => signature.checklist_item_id === itemId && signature.user_id === openMemberId
@@ -459,9 +420,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
 
                       {openMemberQueue.verified > 0 && (
                         <div className="mt-2">
-                          {/* The record, for when somebody asks "who checked this, and when?". The outstanding list
-                              above is the WORK; this is what has already been signed off, item by item, with the
-                              verifier and the date on each one. */}
+                          {/* List of items that have already been signed off. */}
                           <button
                             type="button"
                             onClick={() =>

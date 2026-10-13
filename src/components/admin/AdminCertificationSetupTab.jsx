@@ -7,8 +7,7 @@ import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import { recordHeading } from '../../utils/displayLabel';
 
-// The text fields, in the order they read: the name first, then the two numbers. `warn_days_before` blank is
-// meaningful (no warnings at all), so it is a text-ish number field rather than a defaulted one.
+// Text fields for configuring a certification type.
 const TEXT_FIELDS = [
   { key: 'name', label: 'Name', type: 'text', placeholder: 'EMT, Paramedic, EVOC, Instructor 1…' },
   {
@@ -20,8 +19,7 @@ const TEXT_FIELDS = [
   { key: 'sort_order', label: 'Sort order', type: 'number', placeholder: 'Lower first' },
 ];
 
-// The two switches, and why each one matters - written out rather than left to the label, because both are
-// rules rather than preferences.
+// Toggle switches for certification behaviors and display options.
 const SWITCHES = [
   {
     key: 'is_renewable',
@@ -56,29 +54,16 @@ const EMPTY_FORM = {
   show_on_roster: false,
 };
 
-// Certification Setup: what the station tracks, and what should happen when one runs out.
-//
-// Every decision on this screen is one of the four that make the rest of the feature work:
-//
-//   * the icon, which is also what appears beside a member's name when "Display icon next to user name" is on;
-//   * whether it can be RENEWED. Unticked means it has no end date - the Certifications tab disables that field,
-//     and the server blanks it - so a one-off achievement cannot be given an expiry by accident.
-//   * how many days before the end to warn the member. BLANK means do not warn, which is not the same as zero:
-//     it is how the station says "we track this, but nobody needs nagging about it".
-//   * whether it shows beside the name at all, and only while the certification is current.
+// Certification Setup tab: manage the types of certifications the station tracks.
 export default function AdminCertificationSetupTab({ token, setup = [], onDataChanged, onBadgesChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
-  // Whether the editor modal is open: "a new type" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  // Opening and closing are two different acts, which is the bug that made a second edit impossible: `startNew`
-  // OPENS the editor (the New button calls it), so it could not also be the close handler. Closing it did nothing
-  // to `editorOpen`, the dismissal animation hid the panel anyway, and the next Edit changed the form data with
-  // nothing on screen to show for it.
+  // Close the editor modal and reset the form.
   const closeEditor = () => {
     setFormData(EMPTY_FORM);
     setError(null);
@@ -122,17 +107,9 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         setError(response?.message || 'Could not save this certification.');
         return;
       }
-      // Saved, so the editor closes - the same close the Cancel path uses, which is what makes "the modal closes
-      // when the save lands" true rather than nearly true.
       closeEditor();
-      // Toggling "show as badge" changes the icons beside EVERY name on screen, and the server rebuilds the index for
-      // exactly this reason and returns it with the reply. Handing it up makes the badges update as the officer watches,
-      // instead of only after the next sign-in - and costs no extra read, because the answer was already paid for.
+      // Update badge icons across the app immediately.
       onBadgesChanged?.(response.badges);
-      // Not awaited: the save is already confirmed, and the refresh is a background reload. Awaiting it would
-      // hold the button for the whole request when nothing depends on the answer. It IS told, though - written
-      // as `void` so this call is greppable, which is how verify-refresh-wiring checks that every saving screen
-      // still asks for its refresh.
       void onDataChanged?.('certificationSetup');
     } catch (err) {
       setError(err.message || 'Could not save this certification.');
@@ -150,8 +127,6 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
     setError(null);
     try {
       const response = await adminDeleteCertificationSetup(target.id, token);
-      // A refusal here is expected rather than exceptional: member records that still point at this
-      // certification have to be removed first, and the message says how many there are.
       if (!response?.success) {
         setError(response?.message || 'Could not delete this certification.');
         return;
@@ -206,9 +181,6 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
 
           <label className="block">
             <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Icon</span>
-            {/* Was a dropdown of icon NAMES; now a grid of the icons themselves, which is the only way to tell
-                "life-buoy" from "life-buoy-ring". The picker also carries the number/roman-numeral entry, so the
-                hint that used to sit under the select lives in its footer now. */}
             <IconPicker
               value={formData.icon}
               onChange={(icon) => setFormData({ ...formData, icon })}
@@ -238,7 +210,7 @@ export default function AdminCertificationSetupTab({ token, setup = [], onDataCh
         </ViewportModal>
       )}
 
-      {/* The list, with the New button where somebody looks for another one. */}
+      {/* List of certification types with add button. */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <Award className="h-4 w-4 shrink-0 text-red-500" />

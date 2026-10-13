@@ -1025,7 +1025,7 @@ checkIs(
 check(
   'a settings officer lands on System Settings, with the map tab beside it',
   allowedAdminTabs({ can_edit_system_settings: true }),
-  ['system', 'map', 'help']
+  ['system', 'map', 'navigation', 'help']
 );
 check('and a role without it cannot open the map screen at all', roleAllowsTab({ can_manage_documents: true }, 'map'), false);
 

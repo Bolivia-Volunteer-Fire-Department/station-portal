@@ -55,6 +55,7 @@ export const ADMIN_BAR_LABELS = {
   // ("Map Settings" against the same words) only because the bar already prefixes "Admin: " and a phone has no room to spare.
   map: 'Map Settings',
   system: 'Settings',
+  navigation: 'Navigation',
   'reports-config': 'Reports',
   'forms-config': 'Forms',
   notifications: 'Notifications',

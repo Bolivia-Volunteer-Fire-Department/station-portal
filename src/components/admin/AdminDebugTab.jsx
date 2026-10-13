@@ -18,40 +18,9 @@ import ReauthModal from '../ReauthModal';
 import PasswordChangeModal from '../PasswordChangeModal';
 import ClockBlockedModal from '../ClockBlockedModal';
 
-// The Debug page (System ▸ Debug).
-//
-// What it is for: the app's feedback layers - toasts, modals, sounds - are the parts nobody can check on demand.
-// A member reports "I saved it and nothing happened", and the only way to see it is to save something again; a
-// session has to expire before the re-authentication prompt can be looked at; a clock refusal has to be earned by
-// standing in the wrong place. This page fires each of them from a button instead, so a station can be walked
-// through what it should see and hear in a minute.
-//
-// Three rules keep it safe to leave on a production station:
-//
-//   - NOTHING HERE WRITES. No button on this page calls a backend action, so no button can change a row. The two
-//     modals that normally submit (the forced password change, the re-authentication prompt) are previews: their
-//     own buttons close the preview and send nothing, which is what their handlers below do.
-//   - THE CATALOGE IS NOT A SECOND COPY. The toast buttons come from TOAST_SOUNDS and the sound buttons from
-//     SOUND_FILES, so a kind or a file added anywhere else in the app appears here by itself. A hand-written list
-//     would be out of date the first time somebody added a toast, and wrong in the worst way - a preview page that
-//     quietly stops previewing something.
-//   - THE PREVIEWS ARE THE REAL COMPONENTS. Every modal below is the app's own component, opened with the props
-//     the app passes it, and the clock refusals are run through the same location rules the clock buttons use
-//     (evaluateClockLocation, then clockLocationNotice). A mock-up would prove nothing about what the member sees.
-//
-// What it deliberately does NOT preview: the modals that only mean anything with real data behind them (the
-// schedule item details and the offer-to-fill prompt). They need a shift, a date and an assignment, so opening
-// them here would mean inventing a fake shift and showing a station something that is not in its schedule. They
-// are checked where they are used instead.
+// System Debug Tab: lets administrators preview app sounds, alerts, and modal popups on demand without changing any real data.
 
-
-// Where the page's data lives: utils/debugPage. The preview list, the clock refusals (run through the real
-// location rules, so their wording and numbers are the ones the clock produces) and the toast wording are all
-// there, because they are pure decisions worth testing without a browser - and because a component file that also
-// exports constants turns Fast Refresh off for the whole module.
-
-// The icons the toast buttons carry, by kind. Looked up from the kind rather than written beside each button, so the
-// order and the verbs cannot drift apart.
+// Map each toast type to its icon.
 const TOAST_ICONS = {
   success: CheckCircle2,
   error: XCircle,
@@ -61,18 +30,14 @@ const TOAST_ICONS = {
   loading: Loader2,
 };
 
-// The page itself.
-//
-// Every preview is state, and only one is open at a time: two dialogs stacked on each other is a state the app
-// never shows, and it is the app's real states this page exists to show.
+// Main debug tab component.
 export default function AdminDebugTab({ systemSettings = [] }) {
   const [preview, setPreview] = useState(null);
   const [longMessages, setLongMessages] = useState(false);
-  // The level of every sound, read back from the engine after each change rather than computed here: the sliders
-  // then cannot show a level other than the one that will be played.
+  // Track volume level for each sound.
   const [volumeRows, setVolumeRows] = useState(() => soundVolumeRows());
 
-  // The overlay clears itself, like the real one: it is a preloader, not a dialog waiting to be dismissed.
+  // Close the loading overlay preview after a brief timeout.
   useEffect(() => {
     if (preview !== 'overlay') return undefined;
     const timer = setTimeout(() => setPreview(null), OVERLAY_PREVIEW_MS);
@@ -83,11 +48,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
   const loadingMessage = debugLoadingMessage(systemSettings);
   const notices = clockNoticePreviews();
 
-  // One toast, through the app's own wrapper - so the sound that comes out is the one a member would hear for that
-  // kind, which is half of what this page is for.
-  //
-  // Loading is the exception: it reports progress and is then replaced by its own outcome, because a loading toast
-  // that never resolves is not a state the app is ever in.
+  // Trigger a test toast alert.
   const fireToast = (kind) => {
     const message = debugToastMessage(kind, { long: longMessages });
     const options = { description: 'Fired from Administration ▸ System ▸ Debug.' };
@@ -102,8 +63,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
     toast[kind](message, options);
   };
 
-  // Levels. Applied to the engine as the slider moves - the app genuinely plays at the next level straight away -
-  // and then read straight back, so the row can only ever show what the engine holds.
+  // Update sound volume and refresh current state.
   const applyVolume = (name, value) => {
     setSoundVolume(name, value);
     setVolumeRows(soundVolumeRows());
@@ -116,8 +76,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
 
   return (
     <div className="space-y-6">
-      {/* What this page is, and the two limits on it: it writes nothing, and it previews the app's real
-          components rather than mock-ups. */}
+      {/* Overview card */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6">
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 shrink-0">
@@ -137,8 +96,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
         </div>
       </div>
 
-      {/* Toasts. The kinds are read off TOAST_SOUNDS rather than listed here, so a kind added to the wrapper
-          turns up as a button without anybody remembering to add one. */}
+      {/* Toast alert buttons */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6">
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 shrink-0">
@@ -203,8 +161,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
         </div>
       </div>
 
-      {/* Dialogs and overlays. The buttons come from DEBUG_PREVIEWS and the rendering below is driven by the same
-          list, so a preview cannot be listed here without working. */}
+      {/* Dialogs and modal previews */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6">
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 shrink-0">
@@ -240,15 +197,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
         </div>
       </div>
 
-      {/* Sounds. Every file the app ships, played through the engine, so an earcon can be checked by ear without
-          waiting for the event that triggers it.
-
-          `data-sound="none"` is what makes this a test rather than a guess: the delegated listener silences the
-          press itself, so the only thing heard is the sample. Without it, pressing "click_double" would play a
-          click first and leave you wondering which of the two you were hearing.
-
-          `force` plays past the mute gate on purpose - the point of the button is to hear a sound on a station
-          whose sounds have been switched off. */}
+      {/* Sound effect previews */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6">
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 shrink-0">
@@ -276,18 +225,14 @@ export default function AdminDebugTab({ systemSettings = [] }) {
               ))}
             </div>
 
-            {/* THE WELCOME IS THE ONE SOUND ABOVE THAT CANNOT BE TESTED IN PLACE: `intro_short` plays on every sign-in, after the
-                form is submitted, so hearing it where it belongs means signing out and signing back in. Said out loud rather
-                than left to be discovered, because a sound that never plays because something is broken looks exactly like a
-                sound that never plays because the way to hear it is somewhere else. */}
+            {/* Note about login sound */}
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
               <span className="font-medium text-slate-600 dark:text-slate-300">The welcome</span> is the one sound that cannot be
               tested in place: <span className="font-mono">intro_short</span> plays on every sign-in, once the form is submitted.
               To hear it where it belongs, sign out and sign back in &mdash; the button above plays the file itself.
             </p>
 
-            {/* The level sliders. Deliberately NOT saved anywhere: a level is a thing to try, so it lives in the
-                engine's memory for this session and is dropped when the session ends. */}
+            {/* Sound volume sliders (session only, not saved) */}
             <div className="mt-6 border-t border-slate-200 dark:border-slate-700 pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -319,14 +264,10 @@ export default function AdminDebugTab({ systemSettings = [] }) {
                       max="1"
                       step={SOUND_VOLUME_STEP}
                       value={row.volume}
-                      // Silent itself, like the sound buttons: the press must not play a click at the level being
-                      // judged. The sample plays on release instead - see the handlers below.
                       data-sound="none"
                       aria-label={`Volume for ${row.name}`}
                       onChange={(event) => applyVolume(row.name, event.target.value)}
-                      // On RELEASE, not on every move: a slider that made noise continuously while being dragged
-                      // would be unusable, and one that made none would be a guess. This covers a mouse, a finger
-                      // and the arrow keys.
+                      // Play sound sample when user releases the slider
                       onPointerUp={() => playSound(row.name, { force: true })}
                       onKeyUp={() => playSound(row.name, { force: true })}
                       className="h-2 w-40 accent-red-600"
@@ -355,8 +296,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
         </div>
       </div>
 
-      {/* The previews. Each one is the app's own component with the props the app gives it - see the header. The
-          overlay is last because it is the only one that covers the page rather than sitting on top of it. */}
+      {/* Modal and overlay previews */}
 
       {preview === 'confirm-danger' && (
         <ConfirmModal
@@ -419,8 +359,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
       {preview === 'reauth' && (
         <ReauthModal
           reason={{ action: 'ADMIN_SAVE_USER', ageSeconds: 61, tokenTail: 'AB12CD' }}
-          // A preview cannot verify a password - there is no session behind it. Refusing, with the reason, is the
-          // honest answer: it is also the error state a member sees when the credentials they typed are wrong.
+          // Preview only: simulate a cancelled or rejected password check
           onReauth={async () => ({
             success: false,
             message: 'This is a preview: no password is checked here. Close it with the button below.',
@@ -431,7 +370,7 @@ export default function AdminDebugTab({ systemSettings = [] }) {
 
       {preview === 'password-change' && (
         <PasswordChangeModal
-          // The same: a preview cannot change a password, and must not look as if it had.
+          // Preview only: simulate a rejection without modifying passwords
           onPasswordChange={async () => ({
             success: false,
             message: 'This is a preview: no password is changed here. Close it with the button below.',

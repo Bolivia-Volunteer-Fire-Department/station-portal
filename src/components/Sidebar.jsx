@@ -6,6 +6,14 @@ import { stationLogoUrl, stationSyncLoopsUrl, stationSyncOnTransUrl } from '../u
 // stationLogoUrl() preserved for test contract or department fallback
 import PixelBurst from './PixelBurst';
 import AnnouncementList from './AnnouncementList';
+import {
+    SIDEBAR_NAV_ORDER_KEY,
+    SIDEBAR_NAV_ICONS_KEY,
+    parseSidebarNavOrder,
+    parseSidebarNavIcons,
+    getSidebarModuleIcon,
+} from '../utils/sidebarNav';
+import { getSettingValue } from '../utils/systemSettings';
 
 export default function Sidebar({
     currentUser,
@@ -32,10 +40,10 @@ export default function Sidebar({
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
     announcementAudience = {},
+    systemSettings = [],
 }) {
     const [easterEggCount, setEasterEggCount] = React.useState(0);
-    // Every press fires the pixel burst, whether or not that press is also counting towards the
-    // easter egg (the sixth does not increment, and the burst must not skip it).
+    // Trigger pixel effect when clicking the logo.
     const [easterBurst, setEasterBurst] = React.useState(0);
     const handleEasterEgg = () => {
         setEasterBurst((n) => n + 1);
@@ -69,6 +77,240 @@ export default function Sidebar({
     };
 
     const currentUserRank = ranks.find((r) => String(r.id) === String(currentUser?.rank_id));
+
+    const sidebarNavIcons = React.useMemo(() => {
+        const raw = getSettingValue(systemSettings, SIDEBAR_NAV_ICONS_KEY, '');
+        return parseSidebarNavIcons(raw);
+    }, [systemSettings]);
+
+    const sidebarNavOrder = React.useMemo(() => {
+        const raw = getSettingValue(systemSettings, SIDEBAR_NAV_ORDER_KEY, '');
+        return parseSidebarNavOrder(raw);
+    }, [systemSettings]);
+
+    const renderNavButton = (moduleId) => {
+        const NavIcon = getSidebarModuleIcon(moduleId, sidebarNavIcons);
+        switch (moduleId) {
+            case 'dashboard':
+                return (
+                    <button
+                        key="dashboard"
+                        onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'dashboard' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Timeclock' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Timeclock</span>
+                    </button>
+                );
+            case 'clock-history':
+                return canUseTimeclock ? (
+                    <button
+                        key="clock-history"
+                        onClick={() => {
+                            setActiveTab('clock-history');
+                            setIsSidebarOpen(false);
+                        }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'clock-history'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Clock History' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Clock History</span>
+                    </button>
+                ) : null;
+            case 'chat':
+                return canUseChat ? (
+                    <button
+                        key="chat"
+                        onClick={() => { setActiveTab('chat'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'chat'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Chat' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Chat</span>
+                    </button>
+                ) : null;
+            case 'roster':
+                return canViewRoster ? (
+                    <button
+                        key="roster"
+                        onClick={() => { setActiveTab('roster'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'roster'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Roster' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Roster</span>
+                    </button>
+                ) : null;
+            case 'schedule':
+                return canViewSchedule ? (
+                    <button
+                        key="schedule"
+                        onClick={() => { setActiveTab('schedule'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'schedule'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Schedule' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Schedule</span>
+                    </button>
+                ) : null;
+            case 'availability':
+                return canEditAvailability ? (
+                    <button
+                        key="availability"
+                        onClick={() => { setActiveTab('availability'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'availability'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Availability' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Availability</span>
+                    </button>
+                ) : null;
+            case 'training':
+                return canSignTrainings ? (
+                    <button
+                        key="training"
+                        onClick={() => { setActiveTab('training'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'training'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Training' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Training</span>
+                    </button>
+                ) : null;
+            case 'certifications':
+                return (
+                    <button
+                        key="certifications"
+                        onClick={() => { setActiveTab('certifications'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'certifications'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Certifications' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Certifications</span>
+                        <span className={isCollapsed ? 'md:hidden' : 'inline-flex'}>
+                            <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5" iconClassName="text-current opacity-80" />
+                        </span>
+                    </button>
+                );
+            case 'documents':
+                return (
+                    <React.Fragment key="documents">
+                        {canViewDocuments && (
+                            <button
+                                onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }}
+                                className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'documents'
+                                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                                    }`}
+                                title={isCollapsed ? 'Documents' : undefined}
+                            >
+                                <NavIcon className="w-5 h-5 shrink-0" />
+                                <span className={isCollapsed ? 'md:hidden' : ''}>Documents</span>
+                            </button>
+                        )}
+                    </React.Fragment>
+                );
+            case 'district-map':
+                return (
+                    <React.Fragment key="district-map">
+                        {canViewMap && (
+                            <button
+                                onClick={() => { setActiveTab('district-map'); setIsSidebarOpen(false); }}
+                                className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'district-map'
+                                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                                    }`}
+                                title={isCollapsed ? 'District Map' : undefined}
+                            >
+                                <NavIcon className="w-5 h-5 shrink-0" />
+                                <span className={isCollapsed ? 'md:hidden' : ''}>District Map</span>
+                            </button>
+                        )}
+                    </React.Fragment>
+                );
+            case 'reports':
+                return (canViewReports || canGenerateForms) ? (
+                    <button
+                        key="reports"
+                        onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'reports'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Reports & Forms' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Reports &amp; Forms</span>
+                    </button>
+                ) : null;
+            case 'help':
+                return (
+                    <button
+                        key="help"
+                        onClick={() => { setActiveTab('help'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'help'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Help' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Help</span>
+                    </button>
+                );
+            case 'settings':
+                return (
+                    <button
+                        key="settings"
+                        onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'settings' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'My Settings' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>My Settings</span>
+                    </button>
+                );
+            case 'admin':
+                return canAdminister ? (
+                    <button
+                        key="admin"
+                        onClick={() => { setActiveTab('admin'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'admin' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Administration' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Administration</span>
+                    </button>
+                ) : null;
+            default:
+                return null;
+        }
+    };
     return (
         <>
             {isSidebarOpen && (
@@ -78,15 +320,12 @@ export default function Sidebar({
                 />
             )}
 
-            {/* The drawer is a full-height window of its own on a phone, so it clears the status bar and
-                the home indicator the same way the shell does - `pt-`/`pb-` with the safe-area insets,
-                which are 0 on any device without them and unused at md, where this is a static column. */}
+            {/* Mobile drawer accounts for device safe-area insets (notch and home indicator). */}
             <aside className={`
         fixed md:static md:h-dvh inset-y-0 left-0 z-30 ${isCollapsed ? 'w-64 md:w-20' : 'w-64'} bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-200 ease-in-out pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0 overflow-hidden overscroll-y-contain
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
                 <div className={`flex items-center ${isCollapsed ? 'justify-between md:justify-center p-5 md:p-4' : 'justify-between p-5 md:p-6'} border-b border-slate-200 dark:border-slate-700`}>
-                    {/* The burst is placed off the anchor, so the anchor is the containing block. */}
                     <a
                         href="#"
                         className={`relative flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center' : 'gap-3'} min-w-0 group`}
@@ -155,8 +394,7 @@ export default function Sidebar({
                     </div>
                 </div>
 
-                {/* The member's announcements: below the name card, above the menu. Compact, because the
-                    sidebar is narrow. */}
+                {/* Sidebar announcements displayed between the user card and navigation. */}
                 <div className={isCollapsed ? 'px-4 pb-2 md:px-2' : 'px-4 pb-2'}>
                   <AnnouncementList
                     announcements={announcements}
@@ -168,219 +406,14 @@ export default function Sidebar({
                 </div>
 
                 <nav className={`flex-1 min-h-0 overflow-y-auto overscroll-y-contain ${isCollapsed ? 'px-4 md:px-2 space-y-1' : 'px-4 space-y-1'}`}>
-                    <button
-                        onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'dashboard' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Timeclock' : undefined}
-                    >
-                        <LayoutDashboard className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Timeclock</span>
-                    </button>
-
-                    {canUseTimeclock && (
-                    <button
-                        onClick={() => {
-                            setActiveTab('clock-history');
-                            setIsSidebarOpen(false);
-                        }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'clock-history'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Clock History' : undefined}
-                    >
-                        <History className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Clock History</span>
-                    </button>
-                    )}
-
-                    {canUseChat && (
-                    <button
-                        onClick={() => { setActiveTab('chat'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'chat'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Chat' : undefined}
-                    >
-                        <MessagesSquare className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Chat</span>
-                    </button>)}
-
-                    {canViewRoster && (
-                    <button
-                        onClick={() => { setActiveTab('roster'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'roster'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Roster' : undefined}
-                    >
-                        <Users className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Roster</span>
-                    </button>)}
-
-                    {canViewSchedule && (
-                    <button
-                        onClick={() => { setActiveTab('schedule'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'schedule'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Schedule' : undefined}
-                    >
-                        <CalendarDays className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Schedule</span>
-                    </button>
-                    )}
-
-                    {canEditAvailability && (
-                    <button
-                        onClick={() => { setActiveTab('availability'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'availability'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Availability' : undefined}
-                    >
-                        <Clock className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Availability</span>
-                    </button>
-                    )}
-
-                    {/* Training is gated on can_sign_trainings: a role without it does not
-                        see the module at all, which is what that permission means. */}
-                    {canSignTrainings && (
-                    <button
-                        onClick={() => { setActiveTab('training'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'training'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Training' : undefined}
-                    >
-                        <GraduationCap className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Training</span>
-                    </button>
-                    )}
-
-                    {/* My Certifications: the member's own records, shown to everyone rather than gated on a
-                        permission - it is their own paperwork, and a permission whose column did not exist yet
-                        would hide it from the very people it is about. See the note in utils/permissions. */}
-                    <button
-                        onClick={() => { setActiveTab('certifications'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'certifications'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Certifications' : undefined}
-                    >
-                        <BadgeCheck className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Certifications</span>
-                        <span className={isCollapsed ? 'md:hidden' : 'inline-flex'}>
-                            <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5" iconClassName="text-current opacity-80" />
-                        </span>
-                    </button>
-
-                    {/* Documents is gated on can_view_documents - the permission that means "may read documents at
-                        all". Which documents are INSIDE the module is still decided by the server (published, live
-                        on today's date, and at or above the member's rank); this only decides whether the module is
-                        offered. The other two documents permissions both require this one, so a role that manages or
-                        verifies documents always has it. */}
-                    {canViewDocuments && (
-                    <button
-                        onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'documents'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Documents' : undefined}
-                    >
-                        <BookText className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Documents</span>
-                    </button>
-                    )}
-
-                    {/* The District Map: the department's own boundary drawing. Gated on can_view_map, which is the
-                        permission a station is most likely to withhold from some roles - it hides the tab, the screen's
-                        read (the rule is what refuses), and the drawing itself. Which map appears is the same document
-                        for everybody; there is nothing per-member about it. */}
-                    {canViewMap && (
-                    <button
-                        onClick={() => { setActiveTab('district-map'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'district-map'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'District Map' : undefined}
-                    >
-                        <MapIcon className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>District Map</span>
-                    </button>
-                    )}
-
-                    {/* Reports and Forms are ONE entry now, gated on EITHER permission, because the module behind it
-                        shows whichever half the member holds (see ReportsAndFormsModule). Testing one flag alone here
-                        would hide the whole entry from a member who holds only the other. WHICH reports and forms appear
-                        inside is still decided by each definition's own audience, proved on the server against the
-                        member's role and rank - this only decides whether the screen is offered at all. */}
-                    {(canViewReports || canGenerateForms) && (
-                    <button
-                        onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'reports'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Reports & Forms' : undefined}
-                    >
-                        <BarChart3 className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Reports &amp; Forms</span>
-                    </button>
-                    )}
-
-                    {/* Help is open to everyone, like My Settings - no permission gates
-                        it, and the guides it lists are the member-facing ones. */}
-                    <button
-                        onClick={() => { setActiveTab('help'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'help'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'Help' : undefined}
-                    >
-                        <BookOpen className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Help</span>
-                    </button>
-
-                    <button
-                        onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'settings' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'My Settings' : undefined}
-                    >
-                        <Settings className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>My Settings</span>
-                    </button>
-
-                    {canAdminister && (
-                        <button
-                            onClick={() => { setActiveTab('admin'); setIsSidebarOpen(false); }}
-                            className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'admin' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
-                                }`}
-                            title={isCollapsed ? 'Administration' : undefined}
-                        >
-                            <ShieldCheck className="w-5 h-5 shrink-0" />
-                            <span className={isCollapsed ? 'md:hidden' : ''}>Administration</span>
-                        </button>
-                    )}
+                    {sidebarNavOrder.map(renderNavButton)}
                 </nav>
 
                 <div className={`p-4 border-t border-slate-200 dark:border-slate-700 ${isCollapsed ? 'md:p-2' : ''}`}>
                     <div className={`flex items-center gap-2 ${isCollapsed ? 'flex-row md:flex-col' : 'flex-row'}`}>
                         <button
                             onClick={onLogout}
-                            className={`w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700/50 hover:bg-red-600 text-slate-600 dark:text-slate-300 hover:text-white font-medium py-2.5 px-3 rounded-xl transition ${
+                            className={`w-full flex items-center justify-center gap-2 bg-red-100 dark:bg-red-700/50 hover:bg-red-600 text-slate-600 dark:text-slate-300 hover:text-white font-medium py-2.5 px-3 rounded-xl transition ${
                                 isCollapsed ? 'md:px-0' : 'flex-1'
                             }`}
                             title="Sign Out"

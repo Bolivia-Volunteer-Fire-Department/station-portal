@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminRolesTab from './AdminRolesTab';
 import AdminRanksTab from './AdminRanksTab';
@@ -9,14 +9,11 @@ import AdminAvailabilityTab from './AdminAvailabilityTab';
 import AdminAvailabilityWindowsTab from './AdminAvailabilityWindowsTab';
 import AdminScheduleManagementTab from './AdminScheduleManagementTab';
 import AdminSystemSettingsTab from './AdminSystemSettingsTab';
-// The map's own settings - the boundary, the county's roads and waterways, and the uploaded drawing - which used to be three
-// cards inside System Settings. They are the ground the station covers rather than system configuration, so they have their own
-// screen; System Settings keeps a line pointing at it.
+import AdminNavigationSetupTab from './AdminNavigationSetupTab';
 import AdminMapSettingsTab from './AdminMapSettingsTab';
 import AdminClockManagementTab from './AdminClockManagementTab';
 import AdminPendingApprovalsTab from './AdminPendingApprovalsTab';
 import AdminNotificationsTab from './AdminNotificationsTab';
-// The Audit Log tab was removed: the station's audit trail is Cloud Logging now (see `audit` in functions/index.js).
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
 import AdminTrainingTab from './AdminTrainingTab';
@@ -67,16 +64,7 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'availability-windows', label: 'Availability Window Setup', icon: Repeat },
     ],
   },
-  // {
-  //   id: 'catTimeclock',
-  //   label: 'Timeclock',
-  //   icon: CalendarClock,
-  //   items: [
-  //     { id: 'clock', label: 'Clock Management', icon: CalendarClock },
-  //   ],
-  // },
   {
-    // Renamed from Training to Content when Announcements arrived alongside the Training report.
     id: 'catContent',
     label: 'Content',
     icon: Book,
@@ -116,6 +104,7 @@ export const ADMIN_NAV_CATEGORIES = [
       // district boundary, the county's roads and waterways, and the department's uploaded drawing. These were three cards in
       // the middle of System Settings until the map grew into a feature of its own - see AdminMapSettingsTab.
       { id: 'system', label: 'System Settings', icon: Settings2 },
+      { id: 'navigation', label: 'Navigation Setup', icon: Compass },
       { id: 'notifications', label: 'Notifications', icon: Bell },
       // Debug fires the app's own toasts, dialogs and sounds from buttons. Like the audit log it is not part of the
       // refresh wave, and unlike the log it fetches nothing at all - see AdminDebugTab.
@@ -634,6 +623,15 @@ export default function AdminPanel({
           // The tabs this role may use are decided here, so the pointer from System Settings to the map's own screen is told
           // rather than calculating it again: the two tabs share one permission, so if this screen is open, that one is too.
           onOpenMapSettings={() => onSelectTab('map')}
+          onOpenNavigationSetup={() => onSelectTab('navigation')}
+        />
+      )}
+
+      {activeSubTab === 'navigation' && (
+        <AdminNavigationSetupTab
+          token={token}
+          systemSettings={systemSettings}
+          onDataChanged={onDataChanged}
         />
       )}
 

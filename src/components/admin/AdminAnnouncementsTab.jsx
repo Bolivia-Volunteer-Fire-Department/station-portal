@@ -44,7 +44,7 @@ const EMPTY_FORM = {
   is_dismissable: false,
 };
 
-// Read once per render so every row is judged against the same day.
+// Today's date string for checking active announcements.
 const todayKey = toDateKey(new Date());
 
 const dateLabel = (key) => {
@@ -54,8 +54,7 @@ const dateLabel = (key) => {
   return `${months[month - 1]} ${day}, ${year}`;
 };
 
-// A Date N months back - the floor of the list's window. Local, because it is about this list's paging rather than about
-// dates in general.
+// Helper to calculate a date N months in the past.
 const monthsAgo = (months) => {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
@@ -70,35 +69,21 @@ export default function AdminAnnouncementsTab({
 }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  // The row whose delete is being confirmed in the modal below.
+  // The announcement waiting for delete confirmation.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState(null);
 
-  // The administrator's list, fetched from ADMIN_GET_ANNOUNCEMENTS.
-  //
-  // It cannot come from the prop the app uses for the sidebar and dashboard: that list is filtered by
-  // audience (utils/announcements), so an administrator would only ever see the announcements aimed at
-  // themselves and could not manage the rest. This action returns every row regardless of targeting.
-  //
-  // Fetched on mount rather than from the shared refresh wave - this tab is mounted only while it is
-  // open, so the request happens when an administrator actually looks at it.
-  //
-  // AND IT IS A WINDOW, because this is the read that grows: a station accumulates notices for years, and managing them
-  // means looking at the recent ones. The window is a FLOOR, not a range - the reader unions the recent rows with every
-  // row still in force, so a notice with no end date cannot fall out of sight however old it is - and pressing "Show
-  // older" moves the floor back a year at a time, growing the list rather than replacing it.
+  // List of announcements for admin management.
   const [windowMonths, setWindowMonths] = useState(12);
-  // A string, rebuilt each render but equal to the last one for the whole day - so it is a stable dependency below, and the
-  // list refetches when "Show older" moves it rather than on every keystroke of a form.
+  // Earliest date for announcements shown in the list.
   const windowFrom = toDateKey(monthsAgo(windowMonths));
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
+  // Loads announcements starting from a specific date.
   const loadRows = useCallback(
-    // The window is a REQUIRED argument rather than a default: a default would read render-scoped state inside the callback,
-    // which is what the React Compiler refuses to memoize. The effect below re-runs on the floor instead.
     async (from) => {
       const result = await adminFetchAnnouncements(token, { from });
       if (!result?.success) throw new Error(result?.message || 'Failed to load announcements.');
@@ -126,59 +111,50 @@ export default function AdminAnnouncementsTab({
     return () => {
       canceled = true;
     };
-    // The window floor is here rather than inside the callback: a new floor is a new read, and that is exactly what the
-    // effect is for. "Show older" only moves the floor.
+    // Refetch announcements whenever the date filter changes.
   }, [loadRows, windowFrom]);
 
-  // Re-reads the list after a write. The shared onDataChanged covers the member-facing lists, which are
-  // audience-filtered, so it cannot refresh this one.
+  // Reloads announcements after saving or deleting.
   const reload = async () => {
     try {
       setRows(await loadRows(windowFrom));
       setLoadError(null);
     } catch (err) {
-      // The write already succeeded - report only that the list could not be re-read.
+      // Show error if reloading the list fails.
       setLoadError(err.message || 'Saved, but the list could not be reloaded.');
     }
   };
 
-  // Moves the window floor back a year. The effect above re-runs on its own - `loadRows` changes with the floor - so there
-  // is no second fetch here, and the list grows rather than being replaced.
+  // Show announcements from another year back.
   const showOlder = () => setWindowMonths((months) => months + 12);
 
-  // ANNOUNCEMENTS SAVED BEFORE THE `live_until` COLUMN EXISTED, said out loud rather than left to a console warning. The
-  // member-facing reads bound by that column, so a row without one is fetched by neither the payload nor the live listener:
-  // visible here, invisible to the crew. Opening and saving it from this form stamps it.
+  // Announcements missing an end date marker.
   const unstamped = rows.filter((row) => !String(row.live_until || '').trim());
 
   const isEditing = !!formData.id;
-  // Collapsed by default to save screen space, matching the Training form. Clicking Edit on a row
-  // opens it - otherwise Edit would look like it did nothing - and a successful save closes it again,
-  // which doubles as confirmation that the save went through.
+  // Controls whether the create/edit modal is open.
   const [formOpen, setFormOpen] = useState(false);
   const resetForm = () => setFormData(EMPTY_FORM);
   const setField = (key, value) => setFormData((previous) => ({ ...previous, [key]: value }));
 
-  // The audience as the shared rule sees it, so the form and the backend agree.
+  // Target audience based on current form fields.
   const audience = { roleId: formData.role_id, rankId: formData.rank_id, userId: formData.user_id };
   const reachesSomeone = announcementReachesSomeone(audience, users);
   const locationsChosen = ANNOUNCEMENT_LOCATIONS.filter((place) => formData[place.key]).length;
 
   const handleEdit = (announcement) => {
     setError(null);
-    // Open the card, or the click would appear to do nothing.
+    // Open the editor form.
     setFormOpen(true);
     const window = announcementDateWindow(announcement);
     setFormData({
       id: announcement.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
+      // Version tracker to prevent saving over newer changes.
       row_version: announcement.row_version,
       title: String(announcement.title ?? ''),
       message: String(announcement.message ?? ''),
       effective_date: window.from,
       end_date: window.to,
-      // `is_visible_on_login` is NOT read here any more, so editing an old announcement drops the legacy column rather than
-      // carrying a flag that no screen consults. See utils/announcements#ANNOUNCEMENT_LOCATIONS for why it went.
       is_visible_on_dashboard: announcementFlag(announcement.is_visible_on_dashboard),
       is_visible_on_sidebar: announcementFlag(announcement.is_visible_on_sidebar),
       role_id: String(announcement.role_id ?? '').trim(),
@@ -196,8 +172,7 @@ export default function AdminAnnouncementsTab({
     setSaving(true);
     setError(null);
     try {
-      // The same rules the backend enforces, checked here so a bad announcement is caught before a round
-      // trip. The audience check needs the directory, which only the client has in this shape.
+      // Validate form inputs before saving.
       const validationError = announcementValidation(formData);
       if (validationError) throw new Error(validationError);
       if (!reachesSomeone) {
@@ -205,8 +180,7 @@ export default function AdminAnnouncementsTab({
       }
       const result = await adminSaveAnnouncement(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save the announcement.');
-      // Members' lists first (so a push-disabled member sees it immediately), then this tab's own
-      // full list, which the shared refresh deliberately does not cover.
+      // Notify the app and reload the announcement list.
       void onDataChanged?.();
       await reload();
       resetForm();
@@ -218,8 +192,7 @@ export default function AdminAnnouncementsTab({
     }
   };
 
-  // The announcement awaiting confirmation. The row that was clicked is held here while the modal below asks, and
-  // the delete runs only if it is confirmed.
+  // Ask for confirmation before deleting.
   const handleDelete = (announcement) => setPendingDelete(announcement);
 
   const confirmDelete = async () => {
@@ -250,9 +223,7 @@ export default function AdminAnnouncementsTab({
 
   return (
     <div className="space-y-6">
-      {/* The editor, in the viewport modal every New card in this module now uses. `formOpen` is unchanged: it was
-          the collapse state, and "the form is showing" is the same question asked of a different shell - so the
-          state, both callers and the cancel path all keep working without being touched. */}
+      {/* Announcement create and edit modal. */}
       {formOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Announcement', formData.title) : 'New announcement'}
@@ -480,8 +451,7 @@ export default function AdminAnnouncementsTab({
         </ViewportModal>
       )}
 
-      {/* Said before the list, because these rows are the ones with a problem rather than a curiosity: they are managed
-          here and read by nobody. Saving one from this form stamps the marker the member-facing reads filter on. */}
+      {/* Warning for older announcements missing an end date marker. */}
       {unstamped.length > 0 && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           <strong>
@@ -498,7 +468,6 @@ export default function AdminAnnouncementsTab({
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             Announcements ({rows.length})
-            {/* What the list holds, so a short list reads as a window rather than as data that went missing. */}
             <span className="ml-2 font-normal text-xs text-slate-500 dark:text-slate-400">
               from {windowFrom}, plus everything still in force
             </span>
@@ -575,8 +544,6 @@ export default function AdminAnnouncementsTab({
                             ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300'
                             : 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400'
                       }`}>
-                        {/* "Showing now" and nowhere to show it would be a lie, and the one that matters: the officer reading
-                            this list is here to work out why members cannot see an announcement. */}
                         {live && showsNowhere ? 'Nowhere to show' : live ? 'Showing now' : 'Not showing'}
                       </span>
                       {announcementFlag(announcement.is_send_push_notification) && (
@@ -594,8 +561,7 @@ export default function AdminAnnouncementsTab({
                       {window.from ? dateLabel(window.from) : 'No start'}
                       {window.to ? ` to ${dateLabel(window.to)}` : ' onwards'}
                     </p>
-                    {/* Who wrote it. Administrative-only: the resolved label is computed here and never
-                        passed to the member-facing callouts. Blank for a row that predates the column. */}
+                    {/* Show author if available. */}
                     {announcementAuthorLabel(announcement, users) && (
                       <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                         <UserRound className="w-3 h-3 shrink-0" />
@@ -629,8 +595,7 @@ export default function AdminAnnouncementsTab({
         )}
       </div>
 
-      {/* The confirmation replaces a native dialog: styled, heard (ConfirmModal plays the tone), and able to say
-          what is being deleted rather than asking a generic question. */}
+      {/* Delete confirmation dialog. */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete announcement"

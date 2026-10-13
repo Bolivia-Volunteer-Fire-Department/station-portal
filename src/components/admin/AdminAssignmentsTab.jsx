@@ -17,7 +17,7 @@ import IconPicker from '../IconPicker';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 
-// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+// Form ID used by modal buttons to submit the form.
 const ASSIGNMENT_FORM_ID = 'assignment-editor-form';
 import { recordHeading } from '../../utils/displayLabel';
 
@@ -31,7 +31,7 @@ const EMPTY_FORM = {
   end_date: '',
 };
 
-// Read once per render so every row is judged against the same day.
+// Today's date string for checking assignment date ranges.
 const todayKeyValue = toDateKey(new Date());
 
 export default function AdminAssignmentsTab({
@@ -39,17 +39,17 @@ export default function AdminAssignmentsTab({
   assignments = [],
   ranks = [],
   users = [],
-  // Used only for the warning that a new end date will stop these templates drawing shifts.
+  // Templates checked to warn if ending an assignment affects them.
   scheduleTemplates = [],
   onDataChanged,
   onRowSaved,
 }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
-  // Whether the editor modal is open: "a new assignment" and "no editor" are both `formData.id === ''`.
+  // Controls whether the add/edit modal is open.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
+  // Assignment waiting for delete confirmation.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
@@ -59,15 +59,13 @@ export default function AdminAssignmentsTab({
     setEditorOpen(false);
   };
 
-  // Minimum-rank choices derived from the ranks sheet (highest order first).
+  // List of available ranks sorted by rank order.
   const rankChoices = minRankChoices(ranks);
   const ranksMissingOrder = ranks.filter(
     (r) => !Number.isFinite(parseInt(r.rank_order, 10))
   );
 
-  // The color this assignment currently renders with: the stored one when set,
-  // otherwise the automatic color derived from its id. Seeds the color picker
-  // (which only accepts a hex value) and shows admins what "blank" resolves to.
+  // Automatic color used if no custom color is set.
   const autoColor = assignmentColor(formData.id, assignments);
 
   const handleEdit = (assignment) => {
@@ -75,19 +73,16 @@ export default function AdminAssignmentsTab({
     setError(null);
     setFormData({
       id: assignment.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
+      // Version tracker to prevent saving over newer changes.
       row_version: assignment.row_version,
       description: assignment.description || '',
       rank_order_required:
         assignment.rank_order_required === undefined || assignment.rank_order_required === null
           ? ''
           : String(assignment.rank_order_required),
-      // Blank means "keep the automatic color", which is the state every
-      // assignment starts in - the picker still shows the derived color.
       color: parseHexColor(assignment.color) || '',
       icon: String(assignment.icon ?? '').trim(),
-      // An <input type="date"> takes yyyy-MM-dd, so the sheet's date cell is normalized here just as
-      // the comparison does - an assignment edited and re-saved must not shift by a day.
+      // Format dates as yyyy-mm-dd for the date inputs.
       effective_date: assignmentDateKey(assignment.effective_date),
       end_date: assignmentDateKey(assignment.end_date),
     });
@@ -98,12 +93,12 @@ export default function AdminAssignmentsTab({
     setSaving(true);
     setError(null);
     try {
-      // The same rule the backend enforces, checked here so a bad pair is caught before a round trip.
+      // Validate start and end dates before saving.
       const dateError = assignmentDateError(formData.effective_date, formData.end_date);
       if (dateError) throw new Error(dateError);
       const result = await adminSaveAssignment(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save assignment.');
-      // Straight onto the table; the refresh wave lands on its own time.
+      // Update the table right away.
       onRowSaved?.('assignments', formData);
       void onDataChanged('assignments');
       resetForm();
@@ -114,8 +109,7 @@ export default function AdminAssignmentsTab({
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  // Open delete confirmation modal.
   const handleDelete = (assignment) => setPendingDelete(assignment);
 
   const confirmDelete = async () => {
@@ -138,7 +132,7 @@ export default function AdminAssignmentsTab({
 
   return (
     <div className="space-y-6">
-      {/* The editor, in the viewport modal every New card in this module now uses. */}
+      {/* Add or edit assignment modal. */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Assignment', formData.description) : 'New assignment'}
@@ -196,9 +190,6 @@ export default function AdminAssignmentsTab({
               )}
             </div>
 
-            {/* Color used for this assignment everywhere it is drawn. Left blank,
-                the automatic color derived from the id is kept - so existing
-                assignments look unchanged until an admin picks something. */}
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Color</label>
               <div className="flex items-center gap-2">
@@ -239,9 +230,6 @@ export default function AdminAssignmentsTab({
               </div>
             </div>
 
-            {/* Icon drawn with this assignment wherever it appears, chosen from the
-                same curated lucide set the ranks sheet uses. Optional: blank means no
-                icon, which is how every existing assignment already renders. */}
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Icon</label>
               <div className="flex items-end gap-2">
@@ -266,8 +254,6 @@ export default function AdminAssignmentsTab({
               </p>
             </div>
 
-            {/* Optional window. Both blank keeps the assignment in force indefinitely, which is how
-                every assignment behaved before these columns existed. */}
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 Effective Date <span className="font-normal text-slate-400">(required)</span>
@@ -305,8 +291,7 @@ export default function AdminAssignmentsTab({
               are inclusive, and the effective date is required so every assignment says when it came into use.
             </div>
 
-            {/* The one consequence an administrator could otherwise miss: retiring an assignment
-                silently stops every template that uses it from drawing shifts. */}
+            {/* Warn if ending this assignment impacts existing schedule templates. */}
             {formData.end_date && templatesAffectedByEndDate(formData.id, scheduleTemplates) > 0 && (
               <div className="md:col-span-3">
                 <div className="p-3 rounded-xl flex items-start gap-2 text-sm bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800/60">
@@ -327,7 +312,6 @@ export default function AdminAssignmentsTab({
         </ViewportModal>
       )}
 
-      {/* The list, with New assignment where somebody looks for another one. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <Badge className="h-4 w-4 shrink-0 text-red-500" />
@@ -391,8 +375,7 @@ export default function AdminAssignmentsTab({
                       const lifecycle = assignmentLifecycle(assignment, todayKeyValue);
                       const label = assignmentDateLabel(assignment);
                       if (!label) {
-                        // Created before the effective date was required. It still works (a blank cell
-                        // means no restriction), so this nudges rather than blocks.
+                        // Warning for older assignments without a start date.
                         return (
                           <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800/60">
                             ⚠ No start date
@@ -452,8 +435,7 @@ export default function AdminAssignmentsTab({
         </div>
       </div>
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {/* Delete confirmation dialog. */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete assignment"

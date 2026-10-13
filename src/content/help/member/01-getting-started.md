@@ -45,6 +45,8 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue where the app would desync with Firestore when encountering intermittent connectivity issues. Added a self-healing mechanism to auto-resync.
 * Repositioned toasts to avoid camera notches/iPhone's *Dynamic Island*.
 * Added a button to collapse the sidebar on larger screens.
+* Added a Navigation Setup tab.
+* Simplified codebase comments.
 
 ### Version 1.5x
 * Added **Firebase Storage** for Certification uploads.

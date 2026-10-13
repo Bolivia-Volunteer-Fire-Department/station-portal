@@ -82,7 +82,7 @@ checkEqual(
   ADMIN_NAV_CATEGORIES.find((c) => c.id === 'catSystem').items.map((item) => item.id),
   // Map Setup moved OUT of this group when the admin menu was reorganised: it now sits in Content beside the other things the
   // station writes (its announcements, documents and training) - see AdminPanel. System holds the app's own switches.
-  ['system', 'notifications', 'debug', 'help']
+  ['system', 'navigation', 'notifications', 'debug', 'help']
 );
 
 const panelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');

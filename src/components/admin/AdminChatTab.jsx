@@ -6,17 +6,7 @@ import { sortChatRooms } from '../../utils/chat';
 import { unnamedLabel, userLabel } from '../../utils/displayLabel';
 import { audienceKeysFor } from '../../services/firestorePayload';
 
-/**
- * CHAT ROOMS: the station's rooms, who may see each one, and their order.
- *
- * A ROOM'S AUDIENCE IS THE SAME THREE FIELDS AN ANNOUNCEMENT CARRIES - everyone, a role, a rank, or a member - turned
- * into the key list the rules check with `audienceKeysFor`, the shared helper the announcements composer already uses.
- * That is deliberate rather than convenient: the rules and the client's query match on those same keys, so a room
- * configured here cannot mean one thing to the database and another to the list a member sees.
- *
- * WHAT IS NOT HERE: reading or writing anybody's messages. This tab is the shape of the station's chat, and an officer
- * with only this permission has no seat in any room it creates (see utils/chat.js#chatPermissionsFrom).
- */
+// Manage chat rooms, their visibility audience, and display order.
 const EMPTY_FORM = {
   id: '',
   name: '',
@@ -54,7 +44,7 @@ export default function AdminChatTab({ token, roles = [], ranks = [], users = []
     load();
   }, [load]);
 
-  // The audience as the shared rule reads it, so the form and the backend agree about who a room reaches.
+  // The audience settings for who can see this chat room.
   const audience = useMemo(
     () => ({
       userId: form?.everyone ? '' : form?.user_id || '',
@@ -79,9 +69,7 @@ export default function AdminChatTab({ token, roles = [], ranks = [], users = []
         },
         token
       );
-      // The row is applied locally so the list is right at once, and the refresh is STARTED rather than awaited: the
-      // save has already happened, and a tab that waits on the refresh wave holds the button over a write that landed
-      // (see verify:refresh-wiring).
+      // Update local state and notify parent about the saved room.
       onRowSaved?.('chat_conversations', saved);
       onDataChanged?.();
       setForm(null);
@@ -106,9 +94,7 @@ export default function AdminChatTab({ token, roles = [], ranks = [], users = []
     }
   }, [pendingDelete, token, onDataChanged]);
 
-  // Which names a room's keys stand for, for the table. A key whose role, rank or member has since been deleted is shown
-  // as the shared "unnamed" wording rather than as the id - a row of hex in an officer's table is a row they cannot act on,
-  // and this file's other tables already answer that question the same way (see utils/displayLabel).
+  // Build a friendly text label describing who has access to this room.
   const audienceLabel = (room) => {
     const keys = Array.isArray(room.audience_keys) ? room.audience_keys : [];
     if (keys.includes('*')) return 'Everyone';

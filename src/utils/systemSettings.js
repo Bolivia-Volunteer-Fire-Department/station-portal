@@ -157,6 +157,8 @@ export const PUBLIC_SETTING_KEYS = [
   'is_dark_mode',
   'time_format',
   'mobile_nav_modules',
+  'sidebar_nav_order',
+  'sidebar_nav_icons',
 ];
 
 // Which document a setting belongs in: 'public' or 'private'.

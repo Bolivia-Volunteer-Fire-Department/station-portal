@@ -28,8 +28,7 @@ import {
   certificationStateBadge,
   certificationCountdown,
 } from '../../utils/certifications';
-// The page arithmetic shared with the events list and the system log, so three tables cannot disagree about what
-// "page 3 of 7" means or about what happens when a list shrinks under the page you are on.
+// Pagination helpers shared across tables.
 import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
 
 const EMPTY_FORM = {
@@ -41,8 +40,7 @@ const EMPTY_FORM = {
   notes: '',
 };
 
-// One field style, so the four inputs and two selects on this screen stay identical and the markup stays short
-// enough to read.
+// Common styling for form inputs.
 const FIELD_CLASS =
   'mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
 
@@ -52,10 +50,7 @@ const FILTERS = [
   { id: 'current', label: 'Current' },
 ];
 
-// The fields a bulk edit may change, and ONLY these. A record's member and its certification are what the row IS, so
-// changing them across a selection would be re-labelling history rather than correcting it - the honest way to fix a
-// record given to the wrong person, or of the wrong type, is to delete it and add the right one, which is what the
-// table's own Delete does one row at a time.
+// Fields that can be modified during a bulk edit.
 const EDITABLE_FIELDS = [
   { key: 'effective_date', label: 'Effective date', type: 'date' },
   { key: 'end_date', label: 'End date', type: 'date' },
@@ -68,18 +63,7 @@ const TOOLBAR_BUTTON_CLASS =
 const FILE_BUTTON_CLASS =
   'inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700';
 
-// THE SCAN ATTACHED TO A RECORD - one optional file per period, and the only place one is attached.
-//
-// Its own component, with its own state, on purpose: the editor around it is a form that saves a ROW, and this is not a
-// field of that row. It writes nothing at all until the record exists, because the server has to read the record to
-// know whose file it is - so a record that has not been saved yet says so, rather than offering an upload that could
-// only fail.
-//
-// Attaching is TWO steps, and both live in services: the bytes go straight to the bucket
-// (services/certificationFileStorage), where storage.rules decides whether they may, and the row is written by a
-// callable (api#adminSaveCertificationFile) once the server has read the record and the uploaded object together. A
-// failure between the two removes the bytes again, so a refused file cannot be left sitting in the bucket with nothing
-// pointing at it.
+// Upload and manage an optional scanned copy of a certification card.
 function CertificationFileField({ recordId, memberId, token }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -90,8 +74,6 @@ function CertificationFileField({ recordId, memberId, token }) {
 
   useEffect(() => {
     let canceled = false;
-    // With no record there is nothing to read, and nothing to clear either: the JSX says so in words, and it branches
-    // on `recordId` BEFORE it looks at `file` - so a file from the record that was open a moment ago is never shown.
     if (!recordId) return undefined;
 
     const load = async () => {
@@ -99,7 +81,6 @@ function CertificationFileField({ recordId, memberId, token }) {
       setError(null);
       try {
         const response = await fetchCertificationFiles(recordId, token);
-        // One file per record, so the first row IS the file.
         if (!canceled) setFile(response?.success ? (response.files || [])[0] || null : null);
       } catch (err) {
         if (!canceled) setError(err?.message || 'Could not read what is attached to this record.');
@@ -116,7 +97,6 @@ function CertificationFileField({ recordId, memberId, token }) {
 
   const attach = async (event) => {
     const chosen = event.target.files && event.target.files[0];
-    // Cleared before anything is awaited, so choosing the SAME file again after a failure still fires a change.
     event.target.value = '';
     if (!chosen) return;
 
@@ -145,7 +125,6 @@ function CertificationFileField({ recordId, memberId, token }) {
       setFile({ ...saved });
     } catch (err) {
       setError(err?.message || 'That file could not be attached.');
-      // The bytes are removed as well: an object with no row is a scan in the bucket that nothing points at.
       if (uploaded) await discardCertificationUpload(uploaded.storagePath);
     } finally {
       setBusy(false);
@@ -179,9 +158,6 @@ function CertificationFileField({ recordId, memberId, token }) {
       </span>
 
       {!storageConfigured() ? (
-        // A build with no bucket configured can still record a certification; it cannot store the card. Said here, in
-        // words, rather than offered as a button that fails at the first byte - see VITE_FIREBASE_STORAGE_BUCKET in
-        // .env.example.
         <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
           This build has no storage bucket configured, so a scan cannot be attached here.
         </p>
@@ -247,14 +223,7 @@ function CertificationFileField({ recordId, memberId, token }) {
   );
 }
 
-// The Certifications tab: one row per member per certification PERIOD.
-//
-// Two things about this screen are the feature rather than decoration:
-//
-//   * renewing saves a NEW row. Editing an existing one is for correcting a mistake; recording a renewal is a
-//     new period, which is what leaves the station a history instead of a single current answer.
-//   * the end date is DISABLED for a certification whose setup says it cannot be renewed. One-off achievements
-//     have no expiry, and the server blanks the field too, so the rule survives somebody editing the sheet.
+// Certifications tab: track and manage member certification records.
 export default function AdminCertificationsTab({ token, users = [], setup = [], records = [], departmentName = '', departmentLogoUrl = '', onDataChanged, onBadgesChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Whether the editor modal is open: "a new record" and "no editor" are both `formData.id === ''`.
@@ -281,10 +250,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  // The rows names are drawn from arrive as `users` - the panel merges the crew directory with the joined Users
-  // section before handing them over (see AdminPanel#nameRows), so this tab does not care which of the two a row
-  // came from. They are directory-shaped on a fresh session, which is why nothing here reads `user_name` or
-  // `status`: userLabel already falls back to the name.
+  // Index users by ID for quick lookups.
   const usersById = useMemo(() => {
     const index = {};
     users.forEach((user) => {
@@ -324,13 +290,9 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     [setup, formData.certification_id]
   );
 
-  // A certification that cannot be renewed has no end date. This is the visible half of that rule; the server
-  // enforces the other half.
+  // Disable end date input if the certification cannot be renewed.
   const endDateOff = !selectedType || !selectedType.is_renewable;
 
-  // Opening and closing are two different acts: `startNew` OPENS the editor (the New record button calls it), so it
-  // could not also be the close handler - closing it left `editorOpen` true, the dismissal animation hid the panel
-  // anyway, and the next Edit changed the form data with nothing on screen to show for it.
   const closeEditor = () => {
     setError(null);
     setEditorOpen(false);
@@ -364,15 +326,9 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         setError(response?.message || 'Could not save this certification.');
         return;
       }
-      // Saved, so the editor closes - the same close the Cancel path uses.
       closeEditor();
-      // THE BADGE INDEX COMES BACK WITH THE REPLY. The server rebuilds it after the write - the badges beside a name
-      // are derived from these records, so a save here can change every member's icons - and the reply carries the
-      // result. Handing it up is what makes a badge appear or vanish the moment an officer saves, instead of on the next
-      // sign-in. Free: the work is already done, and this is the only way to get it without reading it again.
+      // Pass the updated badge list up so names update right away.
       onBadgesChanged?.(response.badges);
-      // Not awaited: the save is confirmed and the refresh is a background reload. Written as `void` so the call
-      // is greppable - see verify-refresh-wiring, which checks every saving screen still asks for its refresh.
       void onDataChanged?.('certificationRecords');
     } catch (err) {
       setError(err.message || 'Could not save this certification.');
@@ -395,7 +351,6 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         return;
       }
       if (formData.id === target.id) closeEditor();
-      // Deleting a record can remove a badge too, and the reply carries the rebuilt index - see the save path above.
       onBadgesChanged?.(response.badges);
       void onDataChanged?.('certificationRecords');
     } catch (err) {
@@ -407,7 +362,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
 
   const recordsForView = includeInactive && inactiveRecords ? inactiveRecords : records;
 
-  // Non-current certifications first, then member and certification names for a stable, scannable roster.
+  // Filter and sort records based on search criteria and status filters.
   const visible = useMemo(() => {
     const nameOf = (row) => userLabel(usersById[row.user_id]);
     const rows = recordsForView.filter((row) => {
@@ -416,8 +371,6 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
       return true;
     });
 
-    // Then the two searches, so everything downstream - the table, the print sheet and the CSV - is the same list the
-    // officer is looking at. A filtered table that exports the whole database is the bug this avoids.
     return sortCertificationRows(
       rows.filter((row) =>
         certificationRowMatches(row, { memberName: memberQuery, certificationIds: typeFilter }, nameOf)
@@ -426,7 +379,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     );
   }, [recordsForView, filter, usersById, memberQuery, typeFilter]);
 
-  // Whether either search is on, for the Clear control and the empty state.
+  // Check if any search filters are currently applied.
   const searchesActive = certificationFiltersActive({ memberName: memberQuery, certificationIds: typeFilter });
 
   const toggleType = (id) =>
@@ -434,12 +387,9 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
       current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]
     );
 
-  // What the closed button says: see certificationFilterLabel. Its awkward case is a filter naming a type that has
-  // since been deleted from the catalogue, which must not read as "All certifications" over a table that is filtered.
   const typeFilterLabel = certificationFilterLabel(setup, typeFilter);
 
-  // Dismiss the dropdown on an outside pointer press or Escape - the idiom the clock tab's address popover uses, and
-  // `pointerdown` rather than `click` so the dismissal lands before whatever was pressed does its work.
+  // Close dropdown menu when clicking outside or pressing Escape.
   useEffect(() => {
     if (!typeOpen) return undefined;
     const handlePointerDown = (event) => {
@@ -456,12 +406,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     };
   }, [typeOpen]);
 
-  // A NEW SEARCH STARTS AT THE FIRST PAGE: staying on page 4 of what is now a one-page list is how a paginated table
-  // looks broken for no reason, and the sequence that gets there is ordinary - search, page forward, then clear it.
-  //
-  // DONE DURING RENDER, NOT IN AN EFFECT. This is React's own pattern for "reset state when the inputs change"; an
-  // effect would set the page after a commit and draw the table twice, which is the flicker the set-state-in-effect
-  // rule exists to catch. `pageSlice` clamps as well, for what this cannot see - a delete, or a save that removes rows.
+  // Jump back to page 1 whenever search filters change.
   const searchKey = JSON.stringify([filter, memberQuery, typeFilter]);
   const [pagedFor, setPagedFor] = useState(searchKey);
   if (pagedFor !== searchKey) {
@@ -469,15 +414,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     setPage(1);
   }
 
-  // ---- Bulk -------------------------------------------------------------------------------------------------------
-  //
-  // TWO gestures, because a station does two things in batches:
-  //
-  //   * RECORD FOR SEVERAL - one certification and one set of dates, for every member ticked. That is how a course a
-  //     group sat together gets onto the books, and the shared dates are the whole point of the gesture.
-  //   * EDIT SELECTED - a change applied to the rows ticked in the table. Each field has its own "change this" box,
-  //     so a blank box means UNTOUCHED rather than "clear it": without that, an officer fixing one date would wipe
-  //     every note on the rows they had selected.
+  // State for bulk recording and editing records.
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkForm, setBulkForm] = useState({ certification_id: '', effective_date: '', end_date: '', notes: '' });
   const [bulkMembers, setBulkMembers] = useState([]);
@@ -494,31 +431,25 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   );
   const bulkEndDateOff = !bulkType || !bulkType.is_renewable;
 
-  // The roster the bulk add ticks through: everyone, since a record can be given to somebody whose status is
-  // inactive as easily as to one on duty, with the search an officer needs at a station of any size.
+  // Filtered member list for bulk addition modal.
   const bulkMemberList = useMemo(() => {
     const wanted = bulkMemberQuery.trim().toLowerCase();
     const rows = users.filter((user) => !wanted || userLabel(user).toLowerCase().includes(wanted));
     return [...rows].sort((a, b) => userLabel(a).localeCompare(userLabel(b)));
   }, [users, bulkMemberQuery]);
 
-  // ONLY the ticked rows that survive the searches. A row hidden by a search cannot be seen to be selected, and
-  // changing something the officer cannot see is how a bulk edit becomes a surprise. A row on ANOTHER PAGE is a
-  // different matter: it was ticked deliberately, the toolbar says how many are selected, and the pager's Clear
-  // selection is how that is undone.
+  // Only consider selected rows that are visible under current filters.
   const selectedRows = useMemo(
     () => visible.filter((row) => selectedIds.includes(row.id)),
     [visible, selectedIds]
   );
 
-  // THE PAGE, from the arithmetic shared with the events list and the system log. `currentPage` is clamped rather than
-  // trusted, so a save or a delete that shortens the list lands on the last page instead of on nothing.
+  // Calculate pages and slices for the current table view.
   const pageCount = totalPages(visible.length, CERTIFICATIONS_PAGE_SIZE);
   const currentPage = clampPage(page, visible.length, CERTIFICATIONS_PAGE_SIZE);
   const pageRows = pageSlice(visible, currentPage, CERTIFICATIONS_PAGE_SIZE);
 
-  // The header checkbox is THE PAGE - a checkbox in a table header has always meant the rows under it, and with paging
-  // those are the page's. Ticking it does not disturb a selection made on another page.
+  // Selection handlers for the current page.
   const allPageSelected = pageRows.length > 0 && pageRows.every((row) => selectedIds.includes(row.id));
 
   const toggleAllOnPage = () =>
@@ -531,9 +462,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   const toggleSelected = (id) =>
     setSelectedIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
 
-  // The same two gestures over the roster inside the bulk-add editor: tick one member, tick everybody the search is
-  // showing, or clear. "Select all" adds and removes only what is ON SCREEN, so a search left running cannot become
-  // a way to tick people the officer never saw.
+  // Toggle selection for individual members in the bulk-add list.
   const toggleBulkMember = (id) =>
     setBulkMembers((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
 
@@ -562,9 +491,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
     setEditOpen(true);
   };
 
-  // Both bulk saves end the way the single one does: close, hand up the rebuilt badge index, and ask for the refresh
-  // in the background. The rows are built here because what is SHARED between them - the dates, or the one field being
-  // changed - is the gesture rather than something the writer could work out.
+  // Save certification record for all selected members at once.
   const handleBulkAdd = async () => {
     if (!bulkForm.certification_id || !bulkForm.effective_date || bulkMembers.length === 0) return;
     setBulkSaving(true);
@@ -656,8 +583,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           onDone={() => setPrintOpen(false)}
         />
       )}
-      {/* The editor, in the viewport modal every New card in this module now uses. Its body is a div rather than a
-          <form>, so the toolbar's Save calls handleSave through onSave instead of submitting anything. */}
+      {/* Editor modal dialog for creating or updating a record. */}
       {editorOpen && (
         <ViewportModal
           title={formData.id ? 'Edit certification record' : 'New certification record'}
@@ -761,9 +687,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             />
           </label>
 
-          {/* THE SCAN, which is not a field of the row: a record saves with or without one, and this writes nothing
-              until the record exists. It is the last thing in the form because that is the order an officer works in -
-              record what somebody holds, then attach the card they showed you. */}
+          {/* Scanned certificate attachment field. */}
           <CertificationFileField recordId={formData.id} memberId={formData.user_id} token={token} />
         </div>
 
@@ -771,7 +695,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         </ViewportModal>
       )}
 
-      {/* The records and their filters share one toolbar. */}
+      {/* Toolbar for record filters, searches, and batch actions. */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-4 dark:border-slate-700">
           {FILTERS.map((option) => (
@@ -805,8 +729,6 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             {inactiveLoading && <Loader2 aria-label="Loading inactive records" className="h-3.5 w-3.5 animate-spin" />}
           </label>
           <div className="ml-auto flex flex-wrap gap-2">
-            {/* Contextual, and only when there is a selection to act on: a button that changes several records at
-                once should never be reachable by accident. */}
             {selectedRows.length > 0 && (
               <button
                 type="button"
@@ -857,10 +779,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           </div>
         </div>
 
-        {/* THE TWO SEARCHES, on their own row under the chips because they answer a different question: the chips are
-            "what needs my attention", these are "the member and the paperwork in front of me". They are visible at all
-            times - a table that looks empty because something is filtered is the failure this prevents, and a Clear
-            control that only appears when there is something to clear is what makes it obvious. */}
+        {/* Member name search and certification type dropdown. */}
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700/70">
           <label className="inline-flex h-9 items-center gap-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
             Member
@@ -913,8 +832,6 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                     </button>
                   </div>
 
-                  {/* Checkboxes rather than a native <select multiple>: a ctrl-click list is a gesture nobody has been
-                      taught, and every choice is visible at once here. */}
                   <div className="max-h-64 overflow-y-auto p-1">
                     {setup.map((type) => (
                       <label
@@ -1038,9 +955,6 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                         {certificationStateLabel(row.state)}
                       </span>
                     </td>
-                    {/* Notes are too long for a cell and are read in the editor, so the column answers the only
-                        question a table row can: is there anything in them? The icon carries a title, because an
-                        icon-only cell is a mystery to a screen reader otherwise. */}
                     <td className="px-4 py-3 text-center">
                       {row.notes ? (
                         <span
@@ -1053,10 +967,6 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
                         <span className="text-slate-300 dark:text-slate-600">—</span>
                       )}
                     </td>
-                    {/* The scan, as a check - the same shape as the Notes column and for the same reason: there is one
-                        file per record, so the only question a row can answer is whether there is one at all. The fact
-                        is kept on the record as the file is attached (see functions/index.js), which is what lets this
-                        list draw the column without reading a single file. */}
                     <td className="px-4 py-3 text-center">
                       {row.has_upload ? (
                         <span
@@ -1100,15 +1010,11 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           </table>
         </div>
 
-        {/* THE PAGER, hidden on a single page - a "Page 1 of 1" bar is chrome around nothing, the same judgment the
-            events list makes. What it counts is the ROWS ON SCREEN, which is why it is the range and not a total: Print
-            and Export CSV are deliberately not paged, and saying "57" in a bar above a 20-row table would invite the
-            reader to think the other 37 were missing. */}
+        {/* Pagination controls. */}
         {pageCount > 1 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500 dark:border-slate-700/70 dark:text-slate-400">
             <span>{pageRangeLabel(visible.length, currentPage, CERTIFICATIONS_PAGE_SIZE)}</span>
             <div className="flex items-center gap-2">
-              {/* A selection can outlive the page it was made on, so it needs a way out that is not "save it". */}
               {selectedRows.length > 0 && (
                 <button
                   type="button"
@@ -1144,8 +1050,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         )}
       </div>
 
-      {/* RECORD FOR SEVERAL: one certification and one set of dates, for the members who earned it. The dates are asked
-          for ONCE, above the list, because their being shared is the whole gesture. */}
+      {/* Modal to record a certification for multiple members at once. */}
       {bulkOpen && (
         <ViewportModal
           title="Record for several members"
@@ -1269,8 +1174,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
         </ViewportModal>
       )}
 
-      {/* EDIT SELECTED: only what is ticked changes. A field with its box unticked is absent from the request
-          altogether, which is what keeps a date fix from wiping a note on every row in the selection. */}
+      {/* Modal to bulk edit fields on selected records. */}
       {editOpen && (
         <ViewportModal
           title="Change selected records"

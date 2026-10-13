@@ -104,7 +104,7 @@ export const ADMIN_PERMISSIONS = [
     // the move changes where somebody looks and nothing about who may look: the same role that maintained those cards keeps
     // them. (The boundary and the background are WRITTEN with `can_edit_map`, which is the switch about the map's content - an
     // officer without it sees those cards and is refused by the server, exactly as they were from the settings tab.)
-    moreTabs: ['map'],
+    moreTabs: ['map', 'navigation'],
     label: 'Manage system settings',
     description: 'Change station-wide settings, including the loading messages and defaults, and the district map\'s own screen (System → Map Settings): the boundary, the county\'s roads and waterways, and the uploaded drawing.',
   },

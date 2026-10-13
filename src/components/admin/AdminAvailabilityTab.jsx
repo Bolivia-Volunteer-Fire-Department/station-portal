@@ -12,38 +12,23 @@ import { MONTHS } from '../../utils/calendarConstants';
 import { membersWithNoAvailability, monthAvailabilityLoaded, windowDaysForMonth } from '../../utils/availability';
 import { eventSegmentTimeLabel, eventSegmentTitle, eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { toDateKey } from '../../utils/scheduleDate';
-// WHAT A SLOT IS, and every place on a day somebody can be put - the same rule the Schedule Management board draws from
-// (utils/scheduleSlots), so a shift offered here is the same shift the board shows in the same slot.
+// Helper functions for shift slots and available places on each date.
 import { placesFittingWindow, placesForDate, rowDateRange, slotsByDay, templateSlotsForMonth } from '../../utils/scheduleSlots';
 import { toTimeInputValue } from '../../utils/timeInputValue';
 import { userLabel } from '../../utils/displayLabel';
 import { assignmentColor } from '../../utils/assignmentColor';
 
-// The value that means "show everyone" in the member picker. Deliberately not a user id,
-// so it can never collide with one.
+// Special ID to represent all members in the dropdown.
 const ALL_MEMBERS = '__all__';
 
-// The popover the day's shifts are offered in - the same shape and the same positioning helper the board's own slot
-// popover uses (utils/viewportPopover), so a list that appears beside a name behaves the way the ones on the board do.
+// Width and height limits for the shift assignment popover.
 const PICKER_WIDTH = 340;
 const PICKER_MAX_HEIGHT = 380;
-// The gap between the button and its menu, and the margin kept from the edges of the screen - the same two numbers the
-// shared positioning helper uses, named here because the flip below is worked out from the space they leave.
+// Spacing constants for positioning the popover.
 const PICKER_GAP = 6;
 const PICKER_MARGIN = 8;
 
-// Administrator view of availability.
-//
-// One member selected: the same month grid the member sees, toggling that member's rows - useful when someone phones in
-// and needs a change made for them.
-//
-// All Members: each day of the month, the availability windows that fall on it, and the members who claimed them -
-// and BESIDE it, a card naming the members who claimed nothing at all this month, which is the other half of the
-// answer. That list is now the whole view: it used to be built from the month's shift templates, with their times,
-// assignments and ranks, which is a lot of machinery to answer "who can cover Tuesday night?".
-//
-// BOTH views read the SAME two things: the windows (station reference data, loaded once) and a month of claims. That is
-// the simplification the windows model buys: one short list instead of templates, assignments and ranks per member.
+// Admin view for member availability (single member or whole crew).
 export default function AdminAvailabilityTab({
   token,
   users = [],
@@ -53,33 +38,20 @@ export default function AdminAvailabilityTab({
   loadedTo = '',
   onLoadMonth,
   ranks = [],
-  // The roles, for ONE question: which members can set their own availability at all, so the "hasn't filled it in"
-  // card lists the people worth chasing rather than everybody whose role offers them no way to answer.
   roles = [],
   timeFormat = '12',
   hideEventsByDefault = false,
-  // Non-shift entries, drawn on BOTH views: on the single-member grid so an administrator sees the same month the member
-  // does, and in each day's heading of the All Members list, which is where they were before the availability model moved
-  // to windows. The audience filter is the grid's alone: the list is an administrator's view of the whole crew, so an event
-  // aimed at one rank still belongs in it.
   events = [],
   _eventAudience = {},
-  // THE SCHEDULE, for the All Members list's assign control. The templates and assignments are station reference data
-  // the panel already holds; `schedule` is the month the app last read and `onNeedSchedule` is how this tab asks for
-  // another - the same read the board makes, so this needs no route of its own.
   scheduleTemplates = [],
   assignments = [],
   schedule = [],
   onNeedSchedule,
   onDataChanged,
 }) {
-  // Opens on All Members: the first thing an administrator wants from this tab is the
-  // overview, and the picker sits right above it to drill into one person.
   const [selected, setSelected] = useState(ALL_MEMBERS);
 
-  // The month the All Members view is showing. It lives HERE rather than inside the roster because two things read
-  // it - the roster's day list and the no-availability card beside it - and they must agree. (The single-member
-  // view keeps its own month: it is a different screen with its own arrows.)
+  // The month currently selected in the All Members view.
   const [today] = useState(() => new Date());
   const [rosterDate, setRosterDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const rosterYear = rosterDate.getFullYear();
@@ -94,27 +66,17 @@ export default function AdminAvailabilityTab({
     ? null
     : users.find((u) => String(u.id) === String(selected)) || null;
 
-  // The All Members view's two month-scoped readings: whether the month's claims have been read at all, and who
-  // said nothing. Both come from utils/availability, so the card and the day list cannot disagree.
+  // Check if availability data is loaded and find members with none.
   const rosterLoaded = monthAvailabilityLoaded(loadedFrom, loadedTo, rosterYear, rosterMonth);
   const noAvailability = membersWithNoAvailability({
     users,
     availability: rosterAvailability,
-    // The roles, because "who said nothing" is only worth listing for the members who can say anything: see the note on
-    // the filter in utils/availability. The tab is handed them for this one question.
     roles,
     year: rosterYear,
     month: rosterMonth,
   });
 
-  // The calendar owns the draft; this performs the batch save and refreshes. The token is passed explicitly on purpose:
-  // refreshAvailability expects one, and calling it bare would come back UNAUTHORIZED and raise the re-auth prompt.
-  //
-  // AND THE RANGE GOES WITH IT, which is the difference between one read and a growing one. An unnamed range is the WHOLE
-  // `availability_months` collection - one document per member per month, accumulated for the station's whole life - and
-  // this runs after EVERY availability save, so an officer correcting a fortnight was paying for every month every member
-  // has ever claimed. The window to name is the one the screens are holding: `loadedFrom`/`loadedTo` is the scope the
-  // officer loaded (onLoadMonth), so those are the months a save can have changed.
+  // Save availability changes for the selected member.
   const save = useCallback(
     async (changes) => {
       if (!token || !selectedMember) {
@@ -185,14 +147,9 @@ export default function AdminAvailabilityTab({
               loadedFrom={loadedFrom}
               loadedTo={loadedTo}
               onLoadMonth={onLoadMonth}
-              // The events, in each day's heading. The All Members list names WHO is free, and an event is very often why
-              // fewer of them are - so it belongs beside the day, not only on the single-member grid below.
               events={events}
               timeFormat={timeFormat}
               hideEventsByDefault={hideEventsByDefault}
-              // The schedule the assign control reads and writes. NOT gated on `can_edit_schedule`: an officer whose role
-              // lacks it will be refused by the callable when they save, and the refusal is reported as what it is (see
-              // saveError) rather than hidden behind a control that is missing for no visible reason.
               scheduleTemplates={scheduleTemplates}
               assignments={assignments}
               schedule={schedule}
@@ -211,7 +168,6 @@ export default function AdminAvailabilityTab({
           onLoadMonth={onLoadMonth}
           ranks={ranks}
           timeFormat={timeFormat}
-          // The audience is the MEMBER being edited, so an administrator sees the month that member sees.
           events={events}
           eventAudience={{ roleId: selectedMember?.role_id, rankId: selectedMember?.rank_id, userId: selectedMember?.id }}
           hideEventsByDefault={hideEventsByDefault}
@@ -226,14 +182,8 @@ export default function AdminAvailabilityTab({
   );
 }
 
-// All Members: each day of the month, the windows that fall on it, and the members who claimed each one.
-//
-// A LIST rather than a grid, because the question is "who can cover this?" rather than "what can this person work?" - and
-// it is a short list now: the windows in the month, not every shift occurrence the station knows about. Nothing here is
-// editable; an officer changes a claim by picking that member in the picker above.
+// Roster view showing who is available for each window across the month.
 function AvailabilityRoster({
-  // The visible month and its arrows - owned by the tab above, because the no-availability card this view draws
-  // beside the list reads the same month and the two must not be able to drift apart.
   year,
   month,
   isCurrentMonth,
@@ -247,16 +197,9 @@ function AvailabilityRoster({
   loadedFrom = '',
   loadedTo = '',
   onLoadMonth,
-  // The month's events, in the day heading. This is the shape `AdminAvailabilityRoster` drew before the availability
-  // model was rebuilt around windows (see commit 3edde4a, src/components/admin/AdminAvailabilityRoster.jsx) - it was lost
-  // with the split of that file, and this is it put back rather than a new idea about it.
-  //
-  // SHOWN ONCE PER DATE RATHER THAN PER WINDOW, for the reason the original gave and it is still the right one: an event
-  // belongs to the DAY, and repeating it down every window under it would bury the names this view exists to show.
   events = [],
   hideEventsByDefault = false,
   timeFormat = '12',
-  // The schedule the assign control reads and writes (see the props' note on the tab above).
   scheduleTemplates = [],
   assignments = [],
   schedule = [],
@@ -265,26 +208,21 @@ function AvailabilityRoster({
 }) {
   const [showEvents, setShowEvents] = useState(() => !hideEventsByDefault);
 
-  // WHAT AN OFFICER HAS DECIDED AND NOT YET SAVED.
-  //
-  // A name click adds to this and NOTHING is written until Save, so a whole month can be built in one pass - the same
-  // draft-then-save shape the schedule board uses, and the reason the batch route (adminBulkSaveSchedule) exists: half a
-  // month applied is a schedule nobody asked for.
+  // Temporary assignments chosen by the admin before saving.
   const [draft, setDraft] = useState({});
-  // The shift picker: which member it was opened for, and where to draw it. Null when closed.
+  // Active popover details for assigning a member to a shift.
   const [picker, setPicker] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [notice, setNotice] = useState('');
   const pickerAnchorRef = useRef(null);
-  // Which month's shifts have been asked for, so a click does not re-read one.
+  // Tracks which month was fetched to prevent duplicate reads.
   const shiftsAsked = useRef('');
 
   const days = windowDaysForMonth({ year, month, windows, availability, users });
   const monthStart = toDateKey(new Date(year, month, 1));
   const monthEnd = toDateKey(new Date(year, month + 1, 0));
-  // Whether this month's claims have been read - the SAME derivation the no-availability card uses, so the two
-  // cannot disagree about whether "everyone has said nothing" is the truth or just a month nobody has asked for.
+  // Whether this month's availability claims have been loaded.
   const loaded = monthAvailabilityLoaded(loadedFrom, loadedTo, year, month);
 
   const assignmentById = useCallback(
@@ -292,22 +230,7 @@ function AvailabilityRoster({
     [assignments]
   );
 
-  // THE MONTH'S SHIFTS ARE READ WHEN THIS LIST OPENS, because the list DRAWS them: a name that already holds a shift is
-  // filled in with that shift's colour (see the chip below), and that is the thing this view is for - an officer has to
-  // see who is spoken for WITHOUT clicking every name to find out.
-  //
-  // It used to wait for the first name click, and the reason was a good one: this is the biggest read on the screen, and
-  // the only thing that needed it was the assign menu, which most visits never open. The chips are on every paint, so
-  // there is nothing left for the wait to save. What is NOT given up is the cost control around it:
-  //
-  //   * it is the tab's own WINDOWED read - a month, never the whole schedule - so the panel's `sectionsForTab` still
-  //     leaves 'schedule' out for this tab (scripts/verify-read-budget asserts exactly that);
-  //   * it is skipped entirely when App is already holding the month (`monthAlreadyHeld`), which is the common case for an
-  //     officer who has just come from the schedule board;
-  //   * it happens once per month, because `shiftsAsked` remembers the month it asked for.
-  //
-  // The templates and assignments come with the tab instead (small station reference data the panel already holds for
-  // other tabs), so a slot can be drawn the moment the menu opens; only the rows are waited on.
+  // Track loading state for month shifts.
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [shiftsError, setShiftsError] = useState('');
 
@@ -325,8 +248,7 @@ function AvailabilityRoster({
     try {
       await Promise.resolve(onNeedSchedule(monthStart, monthEnd));
     } catch (error) {
-      // A FAILED READ IS NOT REMEMBERED AS DONE, so the next click tries again rather than the month being quietly
-      // empty for the rest of the session.
+      // Reset cache key so user can retry if the fetch failed.
       shiftsAsked.current = '';
       setShiftsError(error?.message || 'Could not read the shifts for this month.');
     } finally {
@@ -334,31 +256,21 @@ function AvailabilityRoster({
     }
   };
 
-  // Called on open and again on a month change - see the note above on why the read no longer waits for a click. The
-  // dependency list is the MONTH rather than `ensureShifts` on purpose: that function is rebuilt on every render, so an
-  // effect depending on it would fire after every paint, which is the re-read trap scripts/dom-env.mjs documents for
-  // `onNeedSchedule`.
+  // Load shifts when viewing a different month.
   useEffect(() => {
     void ensureShifts();
   }, [year, month]);
 
-  // NOT WRAPPED IN useMemo, and that follows the note on the events derivation below: the React Compiler memoizes this
-  // itself, and a manual memo written here is reported as one it cannot preserve. One pass over the month's templates
-  // either way, so there is nothing to be clever about.
   const slotsForDay = slotsByDay(templateSlotsForMonth({ year, month, scheduleTemplates, assignmentById }));
 
-  // Every place on a day somebody can be put, each carrying who is already in it - one list answering both "what is
-  // free" and "who has the rest".
+  // All shifts and open slots for a given date.
   const placesForDay = (dateKey) => placesForDate({ dateKey, slots: slotsForDay[dateKey] || [], rows: schedule });
 
-  // The assignment a place carries, whichever kind of place it is: a template slot names it on its template, a one-off
-  // shift on its own row. Kept here so the chip below can colour from either without caring which it is.
+  // Helper to get assignment ID from either a slot or row.
   const placeAssignmentId = (place) =>
     place?.kind === 'row' ? place.row?.assignment_id : place.slot?.template?.assignment_id;
 
-  // WHO IS ALREADY ON A SHIFT, keyed by date and member - the saved side of the question `draftFor` answers for the
-  // choice in hand. Built in one pass for the whole month rather than asked once per chip: `placesForDate` walks the
-  // month's rows, and a lookup per name per day would walk them hundreds of times for a single paint.
+  // Map of members already assigned to shifts for each date.
   const heldPlaces = (() => {
     const map = new Map();
     for (const day of days) {
@@ -379,23 +291,17 @@ function AvailabilityRoster({
     return start || end || '';
   };
 
-  // The assignment this member has been given on this day and not yet saved, if any - shown on their chip so a draft is
-  // never a mystery about who it was for.
+  // Find any unsaved draft assignment for this member on this day.
   const draftFor = (member, dateKey) =>
     Object.values(draft).find(
       (entry) => entry.place.dateKey === dateKey && entry.userId === String(member.id)
     ) || null;
 
-  // Who holds a filled place. An id with no row in the directory still has to say something: this list names a member
-  // the caller may not be able to look up, and "Unnamed member" beside a struck-through shift is worse than useless.
+  // Look up a member by ID, with a fallback if their profile isn't found.
   const memberById = (id) =>
     users.find((user) => String(user.id) === String(id)) || { id, name: 'Another member' };
 
-  // ONLY THE SHIFTS THE MEMBER SAID THEY COULD WORK. The day's shifts are filtered to the window whose name was clicked,
-  // so the menu answers "who can cover this?" rather than offering a day shift beside somebody who claimed a night.
-  //
-  // THE REJECTED ONES ARE KEPT rather than dropped: an empty menu has to be able to say it was filtered and how many it
-  // hid, or it reads as a bug - which is exactly how it read before the filter existed.
+  // Only show shifts that fit within the availability window the member signed up for.
   const pickerFilter = picker
     ? placesFittingWindow(placesForDay(picker.dateKey), picker.window)
     : { fitted: [], outside: [] };
@@ -409,13 +315,7 @@ function AvailabilityRoster({
 
   const openPicker = (event, member, dateKey, availabilityWindow) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    // WHERE IT GOES, and the flipped case is anchored by its BOTTOM.
-    //
-    // The shared helper sizes the panel as if it were `maxHeight` tall and returns a `top` for that assumption, so a menu
-    // holding three rows that flips above its button lands a few hundred pixels too high - visibly detached from the name
-    // it belongs to, which is exactly the complaint the first version earned. Anchoring with `bottom` places the box by
-    // the edge nearest the button, so the menu's own height cannot move it away. Each direction gets the space that is
-    // actually there for `max-height`, so a long list scrolls rather than running off the screen.
+    // Position popover above or below the button depending on screen space.
     const spaceAbove = rect.top - PICKER_MARGIN - PICKER_GAP;
     const spaceBelow = window.innerHeight - rect.bottom - PICKER_MARGIN - PICKER_GAP;
     const flipUp = spaceBelow < PICKER_MAX_HEIGHT && spaceAbove > spaceBelow;
@@ -434,7 +334,6 @@ function AvailabilityRoster({
     setPicker({
       member,
       dateKey,
-      // The window whose name was clicked. The menu lists only the shifts that fall inside it (see placeFitsWindow).
       window: availabilityWindow || null,
       flipUp,
       top: flipUp ? undefined : rect.bottom + PICKER_GAP,
@@ -446,8 +345,7 @@ function AvailabilityRoster({
     void ensureShifts();
   };
 
-  // CLOSES ON SCROLL rather than chasing the page. The board repositions its popover on scroll; this list is long and the
-  // anchor may scroll away entirely, and a menu left floating over unrelated rows is worse than one that closes.
+  // Close the popup menu when the user scrolls or hits Escape.
   useEffect(() => {
     if (!picker) return undefined;
     const onKey = (event) => {
@@ -479,9 +377,7 @@ function AvailabilityRoster({
       return next;
     });
 
-  // A REFUSAL BY PERMISSION IS NAMED AS ONE. This screen is open to roles that manage availability but not the schedule,
-  // and the callable requires `can_edit_schedule` - so the likeliest failure here is a role that needs a permission
-  // added, and saying exactly that is more use than "internal".
+  // Turn server errors into helpful messages.
   const readSaveError = (error) => {
     const code = String(error?.code || '');
     const message = String(error?.message || '');
@@ -499,17 +395,14 @@ function AvailabilityRoster({
     setSaveError('');
     setNotice('');
     try {
-      // Every entry is a COMPLETE field set (utils/scheduleSlots#rowFieldsOf): the writer replaces a row's fields rather
-      // than merging, so an entry that omitted the times would blank a custom shift's own hours.
+      // Save all shift fields so custom hours and settings are preserved.
       const entries = chosen.map((entry) => ({ ...entry.fields, user_id: entry.userId }));
       const result = await adminBulkSaveSchedule({ entries }, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save the schedule.');
       const count = result.saved ?? entries.length;
       setDraft({});
       setNotice(`Saved ${count} assignment${count === 1 ? '' : 's'}.`);
-      // RE-READ THE MONTH, and that is the whole refresh: App's loadScheduleWindow replaces the rows it was asked about
-      // and holds them in the shared array the board reads too, so one call puts both screens right and picks up the
-      // server-assigned ids a later edit would need. Clearing the asked-for marker is what makes the re-read happen.
+      // Ask the parent component to refresh schedule data for this month.
       shiftsAsked.current = '';
       await Promise.resolve(onNeedSchedule?.(monthStart, monthEnd)).catch(() => {});
     } catch (error) {
@@ -519,18 +412,10 @@ function AvailabilityRoster({
     }
   };
 
-
-  // The month's events, keyed by date - expanded for RECURRING ones, because `eventSegmentsByDay` is what turns a weekly
-  // drill night into an entry on each Tuesday it falls on. Normalised defensively, as the original was, so a row that
-  // arrives half-built cannot silently disappear from a heading.
-  //
-  // NOT WRAPPED IN useMemo, and that is a change from the original. The React Compiler memoizes this itself, and when a
-  // manual `useMemo` is written here it reports `react(preserve-manual-memoization)` - four warnings saying the memo it
-  // cannot keep is being thrown away, which is the opposite of what writing one was for. The derivation is a single pass
-  // over the month's events, so there is nothing to be clever about either way.
+  // Group events by day across the month, expanding recurring events.
   const allEventsByDay = eventSegmentsByDay(normalizeEventList(events), monthStart, monthEnd, { ranks });
   const eventsByDay = showEvents ? allEventsByDay : new Map();
-  // Counted as well as shown, because an event is very often WHY fewer people are free that night.
+  // Count total events shown this month.
   const eventCount = showEvents ? days.reduce((sum, day) => sum + (eventsByDay.get(day.dateKey) || []).length, 0) : 0;
 
   const rankOf = (rankId) =>
@@ -601,9 +486,7 @@ function AvailabilityRoster({
             />
           </div>
         )}
-        {/* The month's events, counted as well as listed per day - an officer reading "3 members available" wants to know
-            whether that is because nobody claimed it or because the drill night took them. Counted over the days this
-            list actually draws, so a recurring event is counted once per occurrence it puts on the calendar. */}
+        {/* Show total count of events across the month. */}
         {eventCount > 0 && (
           <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             <CalendarRange className="w-3.5 h-3.5 shrink-0" />
@@ -611,10 +494,7 @@ function AvailabilityRoster({
           </p>
         )}
 
-        {/* THE CHIPS ARE DRAWN FROM THIS READ, so it is never silent: a filled chip means "already on a shift here", and
-            an unfilled one has to mean "nobody is" rather than "nobody asked". While the month is arriving the chips are
-            still blank for that reason, and a failed read says so instead of leaving a month of blank chips looking like
-            a month of free members - the same honesty the "nobody's claims are loaded" banner above is for. */}
+        {/* Loading and error status for the month's shifts. */}
         {(shiftsLoading || shiftsError) && (
           <p
             role={shiftsError ? 'alert' : undefined}
@@ -658,9 +538,7 @@ function AvailabilityRoster({
 
         {days.map((day) => (
           <div key={day.dateKey} className="space-y-2">
-            {/* THE DAY HEADING, and the events that fall on it - restored from `AdminAvailabilityRoster` (3edde4a), which
-                drew them here before the file was split. A coloured DOT rather than a filled chip, for the reason the
-                original gave: a pale event colour must not swallow the date, and these should not read as shift pills. */}
+            {/* Day header showing date and any events on that date. */}
             <h4 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
               <CalendarRange className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               {new Date(`${day.dateKey}T12:00:00`).toLocaleDateString(undefined, {
@@ -713,20 +591,12 @@ function AvailabilityRoster({
                   )}
                   {window.claimed.map((member) => {
                     const rank = rankOf(member.rank_id);
-                    // THE CHOICE IN HAND FIRST, THEN THE SHIFT ALREADY HELD - so a name that has been put on a shift
-                    // reads the same way whether or not that month has been saved yet, and an officer opening this list
-                    // can see who is spoken for without clicking every name to find out.
+                    // Check draft first, then saved shifts for who is assigned.
                     const pending = draftFor(member, day.dateKey);
                     const held = pending ? null : heldFor(member, day.dateKey);
                     const chosen = pending ? pending.place : held;
-                    // A MEMBER WHO HAS BEEN GIVEN A SHIFT IS FILLED IN, with the ASSIGNMENT's colour - the same solid
-                    // fill the board draws for a staffed shift, so the same member reads the same way on both screens -
-                    // and the shift's name goes UNDER their name rather than trailing it. A trailing name made one long
-                    // chip that pushed the rest of the row about and read as part of the member's name; on its own line
-                    // the assignment is plainly a second fact about that member, and a run of names stays a readable row.
+                    // Use the assignment's color if assigned.
                     const assignedColor = chosen ? assignmentColor(placeAssignmentId(chosen), assignments) : '';
-                    // A filled chip says WHICH shift it is, so the colour is never a mystery; `Check` is only for the
-                    // choice in hand, which is the one thing on this screen that has not been written yet.
                     const rankPrefix = rank?.description ? `${member.name} — ${rank.description}. ` : '';
                     const chipTitle = chosen
                       ? `${rankPrefix}Already on ${chosen.name} on this day. Click to change it.`
@@ -743,8 +613,6 @@ function AvailabilityRoster({
                         onClick={(event) => openPicker(event, member, day.dateKey, window)}
                         aria-haspopup="dialog"
                         title={chipTitle}
-                        // A BUTTON because it is one: clicking a name is how the month gets built from this list, and a
-                        // span with onClick is unreachable by keyboard and invisible to anything reading the page aloud.
                         className={`inline-flex flex-col items-start gap-0.5 rounded-xl border px-2 py-1 text-xs font-medium transition ${
                           assignedColor ? '' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
                         }`}
@@ -752,7 +620,6 @@ function AvailabilityRoster({
                       >
                         <span className="inline-flex items-center gap-1.5">
                           {rank?.icon ? <RankIcon name={rank.icon} className="h-3 w-3" /> : null}
-                          {/* The name component every other screen uses, so a certification badge shows up here too. */}
                           <MemberName user={member} className="h-3 w-3" />
                         </span>
                         {chosen && (
@@ -770,9 +637,7 @@ function AvailabilityRoster({
         ))}
       </div>
 
-      {/* THE DAY'S SHIFTS, BESIDE THE NAME THAT WAS CLICKED. In the viewport layer rather than inside this card, because
-          the list scrolls and a menu drawn in place would be clipped by it (see utils/viewportLayer - a transformed
-          ancestor decides where a fixed element lands, and the page transition puts one on exactly that ancestor). */}
+      {/* Popover menu to pick a shift for the clicked member. */}
       {picker &&
         renderInViewport(
           <>
@@ -835,11 +700,8 @@ function AvailabilityRoster({
                 )}
                 {pickerPlaces.map((place) => {
                   const taken = Boolean(place.userId);
-                  // A slot this member already holds is not an error to be refused - it is the answer, and saying so
-                  // stops an officer assigning the same person twice.
                   const theirs = taken && place.userId === String(picker.member.id);
-                  // Chosen FOR THIS MEMBER in the draft. Clicking it takes the choice back, which is how a mis-click is
-                  // undone without discarding the rest of the month.
+                  // Check if this shift is chosen for this member in the current unsaved draft.
                   const chosenHere =
                     Boolean(draft[place.key]) && draft[place.key].userId === String(picker.member.id);
                   return (

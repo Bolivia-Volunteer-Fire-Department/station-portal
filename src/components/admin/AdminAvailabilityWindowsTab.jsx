@@ -12,8 +12,7 @@ import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import { recordHeading } from '../../utils/displayLabel';
 
-// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through the
-// HTML `form` attribute - so Enter in a text input still saves the window.
+// Form ID for the availability window editor.
 const WINDOW_FORM_ID = 'availability-window-editor-form';
 
 const EMPTY_FORM = {
@@ -60,17 +59,7 @@ function FieldLabel({ htmlFor, children }) {
 const INPUT_CLASS =
   'w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
 
-// AVAILABILITY WINDOWS are the weekly patterns a member chooses from, and this is where an officer maintains them.
-//
-// It is deliberately the closest thing in the app to the Shifts tab: a window is a start time, an end time and the days
-// it runs on - the same shape, and the same familiar editor. Two fields are the windows' own: the NICKNAME, which is
-// what a member sees on the pill, and the EFFECTIVE/END pair, which is the life of the CONFIGURATION rather than of an
-// occurrence. Retiring a window is ending it on its last day rather than deleting it: members' claims point at it, and
-// the history should still read (utils/availability.js).
-//
-// THIS IS THE OPTIONS LIST, NOT THE CLAIMS. A member still marks themselves available day by day, exactly as before -
-// what changed is where the options come from. Nothing else reads windows yet: the member module and the
-// administration roster move onto them in the next step, which is why saving here reloads this list and nothing else.
+// Manage availability windows, which are the weekly time slots members can sign up for.
 function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -78,10 +67,8 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
-  // The editor is a modal, opened by New window or by choosing a row, so the page behind it is the list.
   const [editorOpen, setEditorOpen] = useState(false);
 
   const reload = useCallback(async () => {
@@ -108,8 +95,7 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
 
   const isEditing = !!formData.id;
 
-  // Closing the editor and clearing the form are the same act, so every existing call site - saved, cancelled and
-  // deleted-while-open - carries on working unchanged.
+  // Clear form inputs and close the editor popup.
   const resetForm = () => {
     setFormData(EMPTY_FORM);
     setEditorOpen(false);
@@ -117,7 +103,6 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
 
   const buildFormFromWindow = (row) => ({
     id: row.id,
-    // Carried through the form so the backend can refuse a save built on a stale copy.
     row_version: row.row_version,
     nickname: row.nickname || '',
     start_time: toTimeInputValue(row.start_time),
@@ -151,8 +136,7 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
       const result = await adminSaveAvailabilityWindow(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save the window.');
       await reload();
-      // A save here is a change members will see, because their module draws its options from this list. Nothing reads
-      // the list yet - the switchover comes next - so this reloads its own table and tells the app a save happened.
+      // Notify parent that data changed so other screens can refresh.
       void onDataChanged?.();
       resetForm();
     } catch (err) {
@@ -162,7 +146,6 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered.
   const handleDelete = (row) => setPendingDelete(row);
 
   const confirmDelete = async () => {
@@ -186,16 +169,13 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
 
   const activeDayCount = (row) => DAYS.filter((day) => isTruthy(row[day.key])).length;
 
-  // What the list says about a window's life, in the spirit of the announcements list's Showing / Not showing. A retired
-  // window is kept on purpose - claims point at it, and the history should read - so the screen has to say which ones are
-  // retired rather than leaving an officer to work it out from two dates.
+  // Check if a window is currently active today based on its date range.
   const todayKey = toDateKey(new Date());
   const lifeLabel = (row) => (windowIsLiveOn(row, todayKey) ? 'Active' : 'Inactive');
 
   return (
     <div className="space-y-6">
-      {/* The editor, in a modal that takes most of the viewport - the format every New card in the Administration
-          module uses. Mounted only while it is open. */}
+      {/* Window editor modal dialog. */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Availability window', formData.nickname) : 'New availability window'}
@@ -318,10 +298,7 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
         </div>
       )}
 
-      {/* THE CARD AND ITS "New window" BUTTON RENDER WHETHER OR NOT THERE ARE ANY WINDOWS YET. The list and the empty state
-          used to be two separate panels behind `rows.length`, so a station with no windows - the state every station starts
-          in, and the state this one is in - got a sentence saying so and NO WAY TO ADD THE FIRST ONE. That is the one
-          moment the button is most needed, so the header is now unconditional and the empty state sits inside it. */}
+      {/* Table showing all defined availability windows. */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -431,9 +408,7 @@ function AdminAvailabilityWindowsTab({ token, onDataChanged }) {
         )}
       </div>
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard (ConfirmModal plays the
-          tone), and it names what is about to be deleted. A window that members have claimed should normally be
-          RETIRED by setting an end date rather than deleted, which is what the editor above says. */}
+      {/* Confirmation dialog before deleting a window. */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete availability window"

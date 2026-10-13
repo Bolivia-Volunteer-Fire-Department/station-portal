@@ -8,19 +8,18 @@ import { clockRoundingMinutes, roundClockHours } from '../../utils/clockRounding
 import RankIcon from '../RankIcon';
 import ViewportModal from '../ViewportModal';
 
-// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+// Form ID for the timeclock editor form.
 const CLOCK_ENTRY_FORM_ID = 'timeclock-editor-form';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
-// Shows a hover/focus popover with the reverse-geocoded address for a clock in/out time,
-// falling back to the raw GPS coordinates when no address was resolved.
+// Popover showing the location address or GPS coordinates where someone clocked in or out.
 function AddressPopover({ label, address, lat, lon, children }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef(null);
   const popoverId = useId();
 
-  // Close on outside tap/click or Escape (also makes the popover dismissible on touch devices)
+  // Close popup when clicking outside or pressing Escape.
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (e) => {
@@ -49,7 +48,6 @@ function AddressPopover({ label, address, lat, lon, children }) {
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
-      {/* Invisible hover bridge keeps the popover open while moving from the timestamp down into it */}
       <span aria-hidden="true" className="absolute inset-x-0 top-full h-1" />
       <button
         type="button"
@@ -82,7 +80,7 @@ function AddressPopover({ label, address, lat, lon, children }) {
 
 const EMPTY_FORM = { id: '', user_id: '', time_in: '', time_out: '' };
 
-// Converts a sheet timestamp ("yyyy-MM-dd HH:mm:ss" or Date) into a <input type="datetime-local"> value
+// Convert timestamp string to a datetime-local form value.
 function toDatetimeLocalValue(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -91,7 +89,7 @@ function toDatetimeLocalValue(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// Converts a <input type="datetime-local"> value back into the sheet's "yyyy-MM-dd HH:mm:ss" format
+// Convert a datetime-local form value back to a timestamp string.
 function fromDatetimeLocalValue(value) {
   if (!value) return '';
   const [datePart, timePart] = value.split('T');
@@ -117,9 +115,7 @@ function computeDurationHours(log) {
   return '--';
 }
 
-// The duration as a NUMBER, or null when there is none to state - rounded to the station's step from Clock Settings, so
-// this table reads the same hours as the report it is reconciled against. `computeDurationHours` above answers in display
-// text ('--' for an entry that is still open), which is why this cannot simply wrap it.
+// Compute total shift hours, rounded to the station's rounding interval.
 function durationHoursFor(log, roundingMinutes) {
   const hours = Number(computeDurationHours(log));
   return Number.isFinite(hours) ? roundClockHours(hours, roundingMinutes) : null;
@@ -127,13 +123,10 @@ function durationHoursFor(log, roundingMinutes) {
 
 export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [], systemSettings = [], loadedFrom = '', onLoadOlder }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
-  // A "load older entries" press is a read of a year of the station's clock entries, so it says it is working.
   const [loadingOlder, setLoadingOlder] = useState(false);
-  // Whether the editor modal is open: "a new entry" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
@@ -188,8 +181,6 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
   const handleDelete = (log) => setPendingDelete(log);
 
   const confirmDelete = async () => {
@@ -210,8 +201,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
     }
   };
 
-  // THE STATION'S ROUNDING STEP, from System Settings > Clock Settings: the same value the member's own history and the
-  // Clocked-vs-scheduled report use, so an officer correcting an entry here is looking at the hours that get paid.
+  // Station rounding interval from settings.
   const roundingMinutes = useMemo(() => clockRoundingMinutes(systemSettings), [systemSettings]);
 
   const filteredSortedLogs = useMemo(
@@ -272,14 +262,12 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
   return (
     <div className="space-y-6">
       {/* Add / Edit Entry Card */}
-      {/* The editor, in the viewport modal every New card in this module now uses. */}
+      {/* Timeclock entry editor modal. */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Timeclock Entry') : 'New timeclock entry'}
           subtitle={isEditing ? 'Editing an existing entry' : 'Not saved yet'}
           icon={<Clock className="h-4 w-4" />}
-          // Three short fields and a computed readout: five or fewer is the small frame, by the rule documented on
-          // ViewportModal. A 92dvh panel around this much would be mostly empty space.
           size="small"
           formId={CLOCK_ENTRY_FORM_ID}
           saveLabel={isEditing ? 'Save changes' : 'Add entry'}
@@ -295,9 +283,6 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
             </div>
           )}
 
-          {/* Two columns of the space the FIELDS actually get, never three: at a 40rem panel three columns are
-              10rem each, which squashes a datetime input and turns its label into a tower. Member takes the full
-              width because a name is the longest thing here. */}
           <div className="grid grid-cols-1 gap-4 @md:grid-cols-2">
             <div className="@md:col-span-2">
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Member</label>
@@ -385,7 +370,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
               onChange={(e) => setSortBy(e.target.value)}
               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
             >
-              {/* The same option list the member view uses, so the two cannot drift apart. */}
+              {/* Sort options matching member view. */}
               {CLOCK_LOG_SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
@@ -399,10 +384,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             Timeclock Entries {filteredSortedLogs.length > 0 && `(${filteredSortedLogs.length})`}
-            {/* WHAT THIS TABLE HOLDS, said out loud: the count is what is LOADED, not the station's lifetime total, and
-                this line is what stops the two being read as the same thing (the member's Clock History says it the same
-                way). It opens on the PAY PERIOD - as many days as System Settings says, ending today - because `timeclock`
-                grows on its own: see App#loadLogs. */}
+            {/* Show start date of loaded pay period range. */}
             {loadedFrom ? (
               <span className="ml-2 font-normal text-xs text-slate-500 dark:text-slate-400">
                 · entries back to {loadedFrom}
@@ -429,9 +411,7 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
             <Download className="w-4 h-4" />
             Export CSV
           </button>
-          {/* THE OTHER HALF OF A SMALLER DEFAULT: the table opens on a quarter, so an officer who wants further back asks
-              for it here rather than paying for a year on every visit. The export above exports what is LOADED, which is
-              why this sits beside it. */}
+          {/* Button to load older historical entries on demand. */}
           {onLoadOlder && (
             <button
               type="button"

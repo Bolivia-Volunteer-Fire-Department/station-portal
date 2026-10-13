@@ -53,40 +53,22 @@ import {
 import { checklistSignatureEntries } from '../../utils/checklists';
 import { clampPage, pageRangeLabel, pageSlice, totalPages } from '../../utils/pagination';
 
-// How many signature rows the card shows at once.
-//
-// Smaller than the 20 a table uses, because this card sits INSIDE the edit form rather than being the page: on a
-// checklist it fills up fast (every member who signed every item is a row) and it was the thing pushing the
-// document's own fields off the screen.
+// Number of signature rows displayed per page in the document edit modal.
 const SIGNATURE_PAGE_SIZE = 10;
 
-// The editor's form id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
-// the HTML `form` attribute - so the fields keep their native behaviour (Enter in a text input, validation)
-// while the button sits where it can be reached from the bottom of a long checklist.
+// Form ID for the document editor.
 const EDITOR_FORM_ID = 'document-editor-form';
 
-// `sort_order` is TEXT here, and blank is a real answer - see `checklistItemSortOrder`. The default is blank, meaning
-// "put it wherever the list says", which is what `EMPTY_ITEM_FORM` always meant; it just could not say so while the
-// field held the number 0.
+// Default blank values for a checklist item.
 const EMPTY_ITEM_FORM = { id: '', label: '', section: '', sort_order: '' };
 
-// The name of a GAP in the list - the space between two documents, or the end of a folder's run.
-//
-// A gap has no row to be identified by, so it is named after the two things that decide where it is: the folder it
-// belongs to, and the document it comes BEFORE (blank for the gap after the last one). One string, so the element that
-// shows the insertion bar and the handler that performs the drop cannot disagree about which gap is which - and the
-// folder is part of it because the same document id appears in only one folder, while a blank anchor appears in all of
-// them.
+// Unique key for drop gaps between documents during reordering.
 const gapKey = (folder, beforeId) => `${folder}|${beforeId}`;
 
-// WHERE AN UNSAVED ORDER WAITS. Reordering is now "move as many rows as you like, then save once", so the moves have to
-// survive the screen going away - and switching Administration tabs unmounts this one. sessionStorage rather than state
-// because the draft has to outlive the unmount, and rather than localStorage because an order nobody saved is about this
-// sitting, not about this station. The schedule board keeps its unsaved month the same way and for the same reason.
+// Session storage key for saving document order drafts.
 const ORDER_DRAFT_KEY = 'documents.order.draft';
 
-// The stored draft, as pairs. Anything unreadable is no draft at all: a corrupted entry must not stop the tab opening,
-// and forgetting where a row was put is a smaller failure than refusing to draw the library.
+// Read any unsaved document ordering draft from session storage.
 const readOrderDraft = () => {
   try {
     const parsed = JSON.parse(sessionStorage.getItem(ORDER_DRAFT_KEY) || 'null');
@@ -98,18 +80,10 @@ const readOrderDraft = () => {
   }
 };
 
-// Today, once, for the window badges. The same value the schedule's own tab uses: a lifecycle label that changed
-// while a page was open would be worse than one that is a moment stale.
+// Today's date key for document status calculations.
 const todayKeyValue = toDateKey(new Date());
 
-// Saving or removing an item writes to the ITEMS sheet, but the document row is what carries the version this
-// editor sends back - and `upsertSheetRowById` moves that version on any write, including one that only touches
-// `content_revision`. Re-stating it locally after an item write is what keeps the next document save from being
-// refused as a concurrent edit: to the admin that refusal would say somebody else had been editing the document,
-// and there would be no way to tell it apart from the real thing.
-//
-// The form is NOT reloaded from the server here on purpose: an admin who added an item halfway through rewriting
-// the text would lose what they had typed.
+// Increment document version number after saving changes.
 const advanceRowVersion = (value) => String((Number.parseInt(value, 10) || 0) + 1);
 
 const fieldClass =
@@ -117,31 +91,18 @@ const fieldClass =
 
 const labelClass = 'block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5';
 
-// The Documents tab: write and manage the station's documents.
-//
-// The list is metadata (one request per open, not per keystroke) and a body is fetched when a document is
-// selected, so opening this tab on a station with a hundred documents costs what it costs on a fresh one. A save
-// goes through one action that creates or updates by id, and the list is reloaded from the server afterwards
-// rather than patched locally - the server owns `sort_order`, the revision and the author, and a locally patched
-// row would eventually disagree with all three.
+// Admin tab for creating, editing, and organizing department documents and checklists.
 export default function AdminDocumentsTab({
   token,
   ranks = [],
   users = [],
   timeFormat = '12',
-  // The signed-in admin's id, so the verification view can leave their OWN checklist off the list: the server
-  // refuses self-verification.
+  // Current user's ID (used to prevent self-verification).
   currentUserId = '',
-  // Two permissions open this tab (see roleAllowsTab). Managing documents is the editor below; verifying them is
-  // the queue at the bottom. A role may have either, or both.
+  // Permissions for document management and checklist verification.
   canManageDocuments = false,
   canVerifyDocuments = false,
-  // NOT CALLED, deliberately, and kept in the signature so the panel's prop list stays uniform: every save in this tab
-  // already reloads the list it changed (`refresh()` / `loadSignatures`), and DOCUMENTS ARE NOT IN THE SIGN-IN PAYLOAD AT
-  // ALL - so asking for it re-read eighteen collections, including every shift ever scheduled, to update a screen that
-  // reads none of them. See verify-read-budget.
-  // _onDataChanged: the Documents tab reloads its own lists and needs no refresh wave (see
-  // verify-read-budget), so the prop is accepted but deliberately unused.
+  // Unused callback kept for prop signature compatibility.
   onDataChanged: _onDataChanged,
 }) {
   const [rows, setRows] = useState([]);
@@ -157,70 +118,45 @@ export default function AdminDocumentsTab({
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState({ from: '', to: '' });
-  // The signature report for the open document: fetched separately from the body, because a document body and a
-  // list of who has signed it are different questions asked at different times.
+  // Signatures for the open document.
   const [signatures, setSignatures] = useState([]);
   const [loadingSignatures, setLoadingSignatures] = useState(false);
   const [signaturesError, setSignaturesError] = useState('');
   const [pendingSignatureRemoval, setPendingSignatureRemoval] = useState(null);
   const [removingSignature, setRemovingSignature] = useState(false);
-  // Which page of the signatures card is showing. Reset whenever the signatures are (re)loaded, because a reload
-  // is a different list: page 4 of the previous one is not page 4 of this one.
+  // Current page number for signatures list.
   const [signaturePage, setSignaturePage] = useState(1);
-  // The checklist items of the document being edited, and the item form. Items are their own records because a
-  // signature points at an item's id: editing the wording keeps the id, so what somebody signed stays attached to
-  // what they signed.
+  // Checklist items and form state for the current document.
   const [items, setItems] = useState([]);
   const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
   const [savingItem, setSavingItem] = useState(false);
   const [pendingItemRemoval, setPendingItemRemoval] = useState(null);
-  // Dragging to reorder. `dragging` holds whichever thing was picked up - a document id or a folder name - and
-  // `dragOver` is where the pointer currently is, so the row under it can look like the place the drop will land.
-  // Both are cleared on drop and on drag end, so a drag that is abandoned (Escape, or dropped outside) leaves no
-  // highlight behind.
+  // Drag-and-drop state for reordering documents and folders.
   const [draggingDocumentId, setDraggingDocumentId] = useState('');
   const [dragOverDocumentId, setDragOverDocumentId] = useState('');
-  // WHICH GAP a document is hovering over, by `gapKey` - see the note on it. Kept apart from `dragOverDocumentId`
-  // because the two are different answers to "where would this land": one is a row, the other is the space beside it.
   const [dragOverInsert, setDragOverInsert] = useState('');
   const [draggingFolder, setDraggingFolder] = useState('');
   const [dragOverFolder, setDragOverFolder] = useState('');
   const [savingOrder, setSavingOrder] = useState(false);
-  // THE ORDER AS IT WAS LAST SAVED, `id -> sort_order`, and the working copy the officer is building against it.
-  //
-  // Reordering is staged: every drop and every Move up / Move down changes `rows` locally, and nothing is written until
-  // Save order. So the tab has to know two things at once - what the library looks like now (in `rows`, and therefore on
-  // screen) and what is actually stored (`savedOrder`) - and the difference between them is both the button's reason to
-  // exist and the exact pairs a save has to write. See `pendingDocumentOrderPairs`.
+  // Stored document order map and pending draft order.
   const [savedOrder, setSavedOrder] = useState(() => new Map());
-  // The pending pairs as of the last render, for `refresh` to read: a reload must not throw away an order the officer
-  // has arranged but not saved. A ref rather than the state value because `refresh` is a callback that must not be
-  // rebuilt every time the order changes.
   const pendingOrderRef = useRef([]);
-  // Whether the stored draft has been looked at. It is read ONCE, on the first load, and applied to the rows that
-  // arrive - reading it again later would resurrect a draft the officer had just discarded.
   const draftReadRef = useRef(false);
 
   const [removingItem, setRemovingItem] = useState(false);
-  // Items typed before the document exists. A checklist's items need a document to belong to, so on a NEW checklist
-  // they are held here and written the moment the document is created - rather than making the author save, reopen
-  // and start again, which is exactly what made this look unimplemented.
+  // Staged checklist items typed before a new document is saved.
   const [stagedItems, setStagedItems] = useState([]);
 
   const memberLabel = useCallback(
     (userId) => {
       const found = (Array.isArray(users) ? users : []).find((user) => String(user?.id) === String(userId));
       const name = found ? String(found.name || '').trim() : '';
-      // A member who cannot be resolved reads as a phrase rather than as their id: it happens when they have been
-      // deleted since they signed, which a reader should not have to interpret a UUID to understand.
       return name || unnamedLabel('member');
     },
     [users]
   );
 
-  // The minimum-rank choices, highest rank first. Built from the ranks themselves rather than from
-  // `minRankChoices` (which collapses equal orders into one entry) because a document stores a rank ID, so two
-  // ranks sharing an order have to stay distinguishable here.
+  // Minimum required rank choices sorted from highest to lowest rank.
   const rankChoices = useMemo(() => {
     const choices = [];
     (Array.isArray(ranks) ? ranks : []).forEach((rank) => {
@@ -239,22 +175,14 @@ export default function AdminDocumentsTab({
     return normalizeDocumentList(result.documents);
   }, [token]);
 
+  // Refresh document list while preserving any unsaved order changes.
   const refresh = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
       const fresh = await loadRows();
-      // A RELOAD IS NOT A REASON TO LOSE AN UNSAVED ORDER. Any save in this tab reloads the library, and so does the
-      // first mount - and applying the raw answer would put every staged row back where the server has it, silently,
-      // which is the same class of quiet loss the staging exists to avoid. So the working order is laid over the rows
-      // that arrived: they carry the fresh contents, the officer's arrangement sits on top.
-      //
-      // On the FIRST load the pending order comes from sessionStorage instead, because the state is empty then by
-      // definition - that is what makes the draft survive the tab being closed.
       const draft = draftReadRef.current ? pendingOrderRef.current : readOrderDraft();
       draftReadRef.current = true;
-      // The snapshot is the rows as the SERVER sent them, taken before the draft is applied - so "what is stored" and
-      // "what is on screen" stay two different, correct answers.
       setSavedOrder(documentOrderSignature(fresh));
       setRows(draft.length > 0 ? applyDocumentOrder(fresh, draft) : fresh);
     } catch (err) {
@@ -270,25 +198,7 @@ export default function AdminDocumentsTab({
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
-  // Everything the editor shows about ONE document, put back to nothing - so the editor never carries a fact about the
-  // last document into the next one.
-  //
-  // THE ITEMS ARE THE HALF THAT WAS MISSING, and they were the reported fault: after saving a checklist, "New document"
-  // kept the items of the one just saved. Two things made that possible, and both are why this is a function rather
-  // than a couple of lines at the call site. `items` is filled by `loadSignatures`, which a new document never calls -
-  // it has no id to read - so nothing was ever going to overwrite them; and the item card draws `items` and
-  // `stagedItems` together, so a leftover in either is drawn, with a count and a "no items yet" line that agree with
-  // the wrong answer. `editorChecklistItemRows` now refuses to draw stored items for a document that has no id, so the
-  // leak can no longer reach the screen - and this is the half that stops the state existing in the first place.
-  //
-  // CLEARED FOR AN EXISTING DOCUMENT TOO, and not only for a new one. The signatures and the items arrive from a
-  // request, so between opening a checklist and its reply the PREVIOUS document's rows are still in state; and if that
-  // request fails, nothing ever overwrites them, which leaves one document showing another's items beside its own
-  // signatures. The pending removals go with them because each holds a whole row of the document being left behind.
-  //
-  // Nothing is written from this state - an item save needs `form.id`, and the create-time flush reads `stagedItems`,
-  // which is exactly what gets emptied - so what is being fixed here is a screen that tells the truth, not a row that
-  // lands in the wrong document.
+  // Reset editor state when switching or creating documents.
   const resetEditorState = () => {
     setItems([]);
     setStagedItems([]);
@@ -301,13 +211,9 @@ export default function AdminDocumentsTab({
     setError('');
   };
 
+  // Open the document editor modal and fetch document data if editing an existing one.
   const openDocument = async (id) => {
-    // Opened before the fetch, so the modal appears immediately and shows its own spinner while the document
-    // loads. The alternative - waiting for the request and then opening - is the pause this modal exists to
-    // explain.
     setEditorOpen(true);
-    // Before the branch below, deliberately: the new-document path returns from here, so anything reset after it
-    // would never run for the one case that has no request to reset it for us.
     resetEditorState();
     if (!id) {
       setForm(EMPTY_DOCUMENT_FORM);
@@ -326,19 +232,14 @@ export default function AdminDocumentsTab({
     loadSignatures(id);
   };
 
-  // The signature report, asked for separately so a failure here still leaves the document editable. It carries
-  // each signature's staleness, decided by the server against the document as it stands, so this screen and the
-  // member's own view cannot disagree about which signatures predate the last edit.
+  // Load signatures and checklist items for a document.
   const loadSignatures = async (documentId) => {
     setLoadingSignatures(true);
-    // Back to the first page: this is a fresh list, and the pager is about the list, not about the card.
     setSignaturePage(1);
     try {
       const result = await fetchDocumentSignatures(documentId, token);
       if (!result?.success) throw new Error(result?.message || 'Could not load the signatures.');
       setSignatures(normalizeSignatureList(result.signatures));
-      // The same read carries the document's items, so a checklist's rows can be named without asking for the
-      // document body a second time.
       setItems(normalizeChecklistItemList(result.items));
     } catch (err) {
       setSignatures([]);
@@ -348,10 +249,7 @@ export default function AdminDocumentsTab({
     }
   };
 
-  // Checklist items: one at a time, each written through its own action so the server can bump the document's
-  // revision and refuse the ones that must not change. On a document that does not exist yet there is nothing to
-  // write against, so the item is staged instead - and `flushStagedItems` writes them the instant the document is
-  // created.
+  // Save a checklist item.
   const handleSaveItem = async (event) => {
     event.preventDefault();
     if (savingItem) return;

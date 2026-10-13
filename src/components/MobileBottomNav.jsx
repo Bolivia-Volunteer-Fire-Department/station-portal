@@ -124,7 +124,7 @@ export default function MobileBottomNav({
         );
       })}
 
-      {/* 4. More */}
+      {/* More menu button */}
       <button
         type="button"
         onClick={onOpenMore}
