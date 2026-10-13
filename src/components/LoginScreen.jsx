@@ -95,7 +95,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName, de
       </div>
 
       <p className="mt-6 text-xs text-slate-400 dark:text-slate-500 text-center select-none tracking-wide">
-        StationSync v1.61
+        StationSync v1.62
       </p>
     </div> 
   );

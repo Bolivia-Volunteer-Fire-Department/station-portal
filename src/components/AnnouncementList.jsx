@@ -34,6 +34,7 @@ export default function AnnouncementList({
   location,
   audience = {},
   compact = false,
+  iconOnly = false,
   className = '',
 }) {
   const userId = audience?.userId || '';
@@ -71,6 +72,7 @@ export default function AnnouncementList({
           key={String(announcement.id)}
           announcement={announcement}
           compact={compact}
+          iconOnly={iconOnly}
           onDismiss={announcementFlag(announcement.is_dismissable) ? () => dismiss(announcement) : undefined}
         />
       ))}

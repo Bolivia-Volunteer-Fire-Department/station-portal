@@ -16,18 +16,27 @@ import {
  * Compact by default, because the sidebar and dashboard placements sit among other content rather than
  * owning the page.
  */
-export default function AnnouncementCallout({ announcement, onDismiss, compact = false }) {
+export default function AnnouncementCallout({ announcement, onDismiss, compact = false, iconOnly = false }) {
   const variant = announcementVariant(announcement?.context_variant);
   const icon = String(announcement?.icon ?? '').trim() || ANNOUNCEMENT_ICON_FALLBACK;
 
   return (
-    <div className={`rounded-xl border border-l-4 ${variant.box} ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
-      <div className="flex items-start gap-2">
-        <span className={`shrink-0 ${variant.head} ${compact ? 'mt-0.5' : 'mt-1'}`}>
+    <div
+      className={`rounded-xl border border-l-4 ${variant.box} ${
+        iconOnly
+          ? 'px-3 py-2 md:p-2 md:flex md:items-center md:justify-center'
+          : compact
+            ? 'px-3 py-2'
+            : 'px-4 py-3'
+      }`}
+      title={iconOnly ? `${announcement?.title ? announcement.title + ': ' : ''}${announcement?.message || ''}` : undefined}
+    >
+      <div className={`flex items-start gap-2 ${iconOnly ? 'w-full md:w-auto md:justify-center' : ''}`}>
+        <span className={`shrink-0 ${variant.head} ${compact ? 'mt-0.5' : 'mt-1'} ${iconOnly ? 'md:mt-0' : ''}`}>
           <RankIcon name={icon} className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
         </span>
 
-        <div className="min-w-0 flex-1">
+        <div className={`min-w-0 flex-1 ${iconOnly ? 'md:hidden' : ''}`}>
           <div className={`font-semibold ${variant.head} ${compact ? 'text-xs' : 'text-sm'}`}>
             {announcement?.title}
           </div>
@@ -42,7 +51,9 @@ export default function AnnouncementCallout({ announcement, onDismiss, compact =
             type="button"
             onClick={onDismiss}
             aria-label={`Dismiss "${announcement?.title}"`}
-            className={`shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 ${compact ? '' : 'mt-0.5'}`}
+            className={`shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 ${
+              compact ? '' : 'mt-0.5'
+            } ${iconOnly ? 'md:hidden' : ''}`}
           >
             <X className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           </button>
