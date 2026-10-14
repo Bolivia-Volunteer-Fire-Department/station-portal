@@ -239,10 +239,11 @@ function AvailabilityRoster({
     return Boolean(from && to) && from <= monthEnd && to >= monthStart;
   });
 
-  const ensureShifts = async () => {
+  const ensureShifts = useCallback(async () => {
     const askedFor = `${year}-${month}`;
     if (!onNeedSchedule || shiftsAsked.current === askedFor || monthAlreadyHeld) return;
     shiftsAsked.current = askedFor;
+    await Promise.resolve();
     setShiftsLoading(true);
     setShiftsError('');
     try {
@@ -254,7 +255,7 @@ function AvailabilityRoster({
     } finally {
       setShiftsLoading(false);
     }
-  };
+  }, [year, month, onNeedSchedule, monthAlreadyHeld, monthStart, monthEnd]);
 
   // Load shifts when viewing a different month.
   useEffect(() => {

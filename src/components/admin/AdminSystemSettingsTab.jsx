@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, Map as MapIcon, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone, Compass } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, Map as MapIcon, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone, Compass, Database, ShieldCheck, Archive, Clock, RotateCw, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { stationLogoUrl } from '../../utils/assets';
 import { processUploadedLogo, generatePwaAssets, createZipArchive, downloadBlob } from '../../utils/pwaIcons';
-import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
+import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting, adminTriggerDatabaseBackup } from '../../services/api';
 import { SIDEBAR_NAV_ORDER_KEY, SIDEBAR_NAV_ICONS_KEY } from '../../utils/sidebarNav';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
@@ -35,6 +35,7 @@ import {
   parseMobileNavModules,
   formatMobileNavModules,
 } from '../../utils/mobileNav';
+import { getBackupConfig, formatBackupDate, backupStatusDetails } from '../../utils/databaseBackup';
 import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
 import ConfirmModal from '../ConfirmModal';
@@ -59,6 +60,12 @@ const KNOWN_KEYS = [
   MOBILE_NAV_MODULES_KEY,
   SIDEBAR_NAV_ORDER_KEY,
   SIDEBAR_NAV_ICONS_KEY,
+  'backup_last_run_at',
+  'backup_last_status',
+  'backup_last_message',
+  'backup_bucket_name',
+  'backup_pitr_status',
+  'backup_retention_days',
 ];
 
 function isTruthySetting(value) {
@@ -92,6 +99,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
   return (
     <CenteredContent className="space-y-6">
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <DatabaseBackupCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <MapSettingsPointer onOpenMapSettings={onOpenMapSettings} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -389,6 +397,158 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function DatabaseBackupCard({ token, systemSettings, onDataChanged }) {
+  const config = getBackupConfig(systemSettings);
+  const statusInfo = backupStatusDetails(config.status);
+  const [runningBackup, setRunningBackup] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  const handleRunBackup = async () => {
+    setRunningBackup(true);
+    setFeedback(null);
+    try {
+      const response = await adminTriggerDatabaseBackup(token);
+      if (response && response.success === false) {
+        setFeedback({ type: 'error', message: response.error || 'Backup attempt reported an error.' });
+      } else {
+        setFeedback({
+          type: 'success',
+          message: response?.message || 'Database snapshot successfully initiated and archived.',
+        });
+        if (typeof onDataChanged === 'function') {
+          onDataChanged();
+        }
+      }
+    } catch (err) {
+      setFeedback({ type: 'error', message: err?.message || 'Failed to trigger database backup.' });
+    } finally {
+      setRunningBackup(false);
+    }
+  };
+
+  const badgeStyles = {
+    success: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
+    info: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
+    warning: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
+    danger: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800',
+  }[statusInfo.variant] || 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400">
+            <Database className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                Database Backup & Recovery
+              </h2>
+              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${badgeStyles}`}>
+                {config.status === 'running' || runningBackup ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : config.status === 'success' ? (
+                  <CheckCircle2 className="h-3 w-3" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3" />
+                )}
+                {runningBackup ? 'Running Backup...' : statusInfo.label}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Protection against accidental deletions and data loss with continuous rollbacks and daily cold-storage snapshots.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleRunBackup}
+          disabled={runningBackup || config.status === 'running'}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+        >
+          {runningBackup || config.status === 'running' ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Backing up…</span>
+            </>
+          ) : (
+            <>
+              <RotateCw className="h-4 w-4" />
+              <span>Back Up Now</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {feedback && (
+        <div
+          className={`mt-4 rounded-xl border p-3 text-sm ${
+            feedback.type === 'error'
+              ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-300'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
+
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Pillar 1: Point-In-Time Recovery */}
+        <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-4 dark:border-slate-800/80 dark:bg-slate-800/40">
+          <div className="flex items-center gap-2 text-slate-900 dark:text-white">
+            <Clock className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-sm font-semibold">Continuous 7-Day Recovery (PITR)</span>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+            Firestore keeps a continuous change log. If someone accidentally deletes or changes important records,
+            an administrator can rewind the database back to any exact minute in the past 7 days.
+          </p>
+          <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            <span>Continuous protection active</span>
+          </div>
+        </div>
+
+        {/* Pillar 2: Cold Storage Daily Snapshots */}
+        <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-4 dark:border-slate-800/80 dark:bg-slate-800/40">
+          <div className="flex items-center gap-2 text-slate-900 dark:text-white">
+            <Archive className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            <span className="text-sm font-semibold">Automated Cold Storage Snapshots</span>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+            A full database export runs automatically every night at 2:00 AM and is stored in Google Cloud Coldline/Archive storage for long-term safety.
+          </p>
+          <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+            <div>
+              <span className="font-medium text-slate-700 dark:text-slate-300">Last snapshot: </span>
+              <span>{formatBackupDate(config.lastRunAt)}</span>
+            </div>
+            {config.bucket && (
+              <div className="truncate" title={config.bucket}>
+                <span className="font-medium text-slate-700 dark:text-slate-300">Storage bucket: </span>
+                <span className="font-mono">{config.bucket}</span>
+              </div>
+            )}
+            <div>
+              <span className="font-medium text-slate-700 dark:text-slate-300">Retention: </span>
+              <span>Retained on cold archive for {config.retentionDays} days</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {config.message && (
+        <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300">
+          <span className="font-medium text-slate-700 dark:text-slate-200">Latest activity: </span>
+          <span>{config.message}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,7 +10,7 @@ The tab opens on **All Members**, because the overview is the point of the scree
 It lists, for each day of the month, the availability windows that fall on it, with:
 
 - the window's nickname and its hours, and
-- the names of the members who claimed it — each carrying their rank's color and icon. A name that has **already been given a shift** on that day is filled in the shift's colour instead, with the shift named underneath, so the list shows who is spoken for at a glance.
+- the names of the members who claimed it — each carrying their rank's color and icon. A name that has **already been given a shift** on that day is filled in the shift's color instead, with the shift named underneath, so the list shows who is spoken for at a glance.
 
 Windows come from *Scheduling → Availability Windows*, so the list is short and the same for everybody. An empty window is worth spotting: it is a gap to fill or a window nobody wants.
 
@@ -19,7 +19,7 @@ The list reads **that month's shifts as it opens**, because those are what fill 
 > [!NOTE]
 > Availability is **not rank-gated, by design**. A window is an hour of the station's week rather than a slot somebody has to qualify for, so a name on this list means "they could work it", not "they are eligible for the shift that happens to fall then". The rank rules still govern who you may *schedule* — see **Ranks**.
 
-**A name that is already on a shift is filled in with that shift's colour** — the same solid colour the schedule board uses for a staffed shift — with the shift's name printed under the member's name. That colour belongs to the **assignment**, not the rank, so a filled chip is telling you what the shift is; hover it for the full label, and click it to change what they are on.
+**A name that is already on a shift is filled in with that shift's color** — the same solid color the schedule board uses for a staffed shift — with the shift's name printed under the member's name. That color belongs to the **assignment**, not the rank, so a filled chip is telling you what the shift is; hover it for the full label, and click it to change what they are on.
 
 **Each name carries its rank** — the rank's color, with the rank's icon beside it — so a glance down a shift shows who is senior enough to lead it without opening anything. Hover a name to see the full label, such as *Member 1 — Driver/Operator*.
 
@@ -43,7 +43,7 @@ Beside the days sits **No availability**: the members who have marked nothing at
 - A shift **somebody already holds** is struck through and says who holds it, and cannot be picked. If it is already theirs it says so — which is how the same person is kept off the same shift twice.
 - The menu lists the day's shifts in time order, so you can see what else the window holds. To put somebody on a shift **outside** their claimed hours, use *Scheduling → Schedule Management*, where the whole day is on the board.
 
-Each chip you have given something to shows a tick and the shift's name, and the bar at the top counts what is pending. **The tick is the only mark that means "not saved yet"**: a name the schedule already holds is filled in and names its shift without one, so the two states can be told apart on sight.
+Each chip you have given something to shows a checkmark and the shift's name, and the bar at the top counts what is pending. **The checkmark is the only mark that means "not saved yet"**: a name the schedule already holds is filled in and names its shift without one, so the two states can be told apart on sight.
 
 > [!IMPORTANT]
 > **Nothing is saved until you press Save.** Every choice is held as a draft, so a whole month can be built in one pass, and **Discard** throws the lot away. That is deliberate: half a month applied because a tab was closed is a schedule nobody asked for.
@@ -56,7 +56,7 @@ Each chip you have given something to shows a tick and the shift's name, and the
 Pick a member from the dropdown and you get **the same calendar they see**: a month grid of the windows that fall in it, with their marks.
 
 - Change it exactly as they would, then save. It is one batched request.
-- **Discard** throws pending ticks away, and switching member does too, so one person's draft never leaks into another's.
+- **Discard** throws pending changes away, and switching member does too, so one person's draft never leaks into another's.
 - Past dates are shown but cannot be edited.
 
 This is what you use when someone phones in their availability, or when a member asks you to change it because they cannot sign in. From a workflow standpoint, it is strongly recommended that members are encouraged to enter their own availability.
@@ -79,4 +79,4 @@ In order of likelihood:
 1. **Nobody has opened their availability this month.** It is a manual action, and a quiet month looks the same as a broken feature. If it is consistently empty, ask people to check their own screens.
 2. **The month is not loaded.** If the tab says so, press **Load *month*** — the app will not show you an unloaded month as if it were empty on purpose, but the notice is easy to skim past.
 3. **The window has been retired.** A window whose end date has passed still reads in the history but offers nothing new, so it appears on no day. Check *Scheduling → Availability Windows* for an **In force** badge.
-4. **The window covers a different day than you expect.** A window is drawn on the days it is ticked for, and that is the day it **starts** — a Tuesday night running to 08:00 belongs to Tuesday.
+4. **The window covers a different day than you expect.** A window is drawn on the days it is checked for, and that is the day it **starts** — a Tuesday night running to 08:00 belongs to Tuesday.

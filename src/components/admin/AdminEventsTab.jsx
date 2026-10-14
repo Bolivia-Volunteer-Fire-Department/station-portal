@@ -230,9 +230,6 @@ export default function AdminEventsTab({
 
   useEffect(() => {
     let canceled = false;
-    setLoading(true);
-    setLoadError(null);
-
     loadRows()
       .then((list) => {
         if (!canceled) setRows(list);

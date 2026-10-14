@@ -29,7 +29,7 @@ An expired certification is mentioned too, until it is renewed — the alternati
 
 ## Not renewable means no end date
 
-Leaving **This certification can be renewed** unticked is for a one-off achievement: a course you completed once, an award, a certificate with no renewal cycle.
+Leaving **This certification can be renewed** unchecked is for a one-off achievement: a course you completed once, an award, a certificate with no renewal cycle.
 
 The end date is then disabled on the Certifications tab, and the server clears it, so a date cannot be attached to something that does not expire — even if the record is edited by hand.
 

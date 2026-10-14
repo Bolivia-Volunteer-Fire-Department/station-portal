@@ -947,6 +947,10 @@ export const isUnknownAction = (result) => !!result && result.code === 'UNKNOWN_
 export const adminDeleteSystemSetting = async (key, token) =>
   dispatchRequest({ action: 'ADMIN_DELETE_SYSTEM_SETTING', token, key });
 
+// Triggers an on-demand database snapshot and updates the backup status.
+export const adminTriggerDatabaseBackup = async (token) =>
+  dispatchRequest({ action: 'ADMIN_TRIGGER_DATABASE_BACKUP', token });
+
 // Fetches push notification delivery status across all members.
 export const adminFetchPushStatus = async (token) =>
   dispatchRequest({ action: 'ADMIN_GET_PUSH_STATUS', token });

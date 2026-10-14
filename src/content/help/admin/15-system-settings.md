@@ -13,9 +13,18 @@ The **District Map** is NOT on this screen any more. Its boundary, the county's 
 
 It is the first thing a member sees, so use the name they would recognize.
 
+## Database Backup & Recovery
+
+The **Database Backup & Recovery** card gives officers peace of mind that station data is protected against accidental deletions or corruption:
+
+- **Continuous 7-Day Recovery (PITR)**: Firestore keeps an active change log. If someone accidentally deletes members, schedules, or records, the database can be rewound to any exact minute in the last 7 days.
+- **Automated Daily Cold Storage Snapshots**: Every night at 2:00 AM, the app automatically exports a complete snapshot of the database to Google Cloud Coldline/Archive storage, retained for 365 days.
+- **Back Up Now**: Officers can click the **Back Up Now** button anytime to run an immediate snapshot before making large station changes.
+- **Live Status Badge**: The card shows the date and time of the last backup, the destination storage bucket, and whether the system is healthy.
+
 ## Clock Settings
 
-Two station-wide policies about the timeclock, in one card: **how reported hours are rounded**, and **whether clocking in and out is restricted to the station**.
+Two station-wide policies about the timeclock, in one card: **how reported hours are rounded**, and **whether clock actions are restricted to the station**.
 
 ### Round reported hours
 
@@ -34,7 +43,7 @@ The default is **Nearest 15 minutes**, which is the finest step, so a station th
 
 ### Clock-in location
 
-An optional check that restricts clocking in and out to the station, within a radius you choose.
+An optional check that restricts clocking to the station, within a radius you choose.
 
 | Field | Notes |
 |---|---|

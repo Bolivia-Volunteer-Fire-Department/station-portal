@@ -94,23 +94,23 @@ Left empty, a report behaves as it always has: grouped by one thing, the biggest
 
 ## What the runner may change
 
-By default a report runs exactly as defined. Tick a box under **Parameters when the report is launched** to hand the runner control of one thing:
+By default a report runs exactly as defined. Check a box under **Parameters when the report is launched** to hand the runner control of one thing:
 
-- **Viewer can change the date range** — every report asks for a range. Left unticked, the **default date range** below is used and the range is fixed.
+- **Viewer can change the date range** — every report asks for a range. Left unchecked, the **default date range** below is used and the range is fixed.
 - **Viewer can change what the report is grouped by**
 - **Viewer can change the visualization**
 - **Viewer can filter by training category** (training reports only)
 - **Viewer can choose which members to include** (station-scoped reports only)
 
-Anything left unticked uses the value set in the definition.
+Anything left unchecked uses the value set in the definition.
 
 ## Who can use it
 
-Under **Who can use this report?**, choose either **Everyone with View reports**, or tick the **roles** and **ranks** it is shared with. A matching role or rank grants access in addition to the **View reports** permission — an officer whose role is not named and who has no other schedule/training permission will not be able to read what the report needs and it will be refused.
+Under **Who can use this report?**, choose either **Everyone with View reports**, or check the **roles** and **ranks** it is shared with. A matching role or rank grants access in addition to the **View reports** permission — an officer whose role is not named and who has no other schedule/training permission will not be able to read what the report needs and it will be refused.
 
 ## Turning one off, and deleting one
 
-Leave **Enabled** ticked to offer the report. Untick it to keep the definition without showing it to anybody: a disabled report is marked in the list and is not offered when reports are run, but its settings stay.
+Leave **Enabled** checked to offer the report. Uncheck it to keep the definition without showing it to anybody: a disabled report is marked in the list and is not offered when reports are run, but its settings stay.
 
 **Delete** removes the definition. It does not touch any data — the shifts and training signatures it described are untouched. The deletion asks for confirmation first, and says that people who had access will no longer be able to run it.
 

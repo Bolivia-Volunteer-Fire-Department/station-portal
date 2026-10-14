@@ -13,7 +13,7 @@ Each row is one training: date, title, location, instructors and how many member
 
 Rename or correct a training with **Edit**, which opens it in the editor — the same one **Add training** opens; **Delete** removes it entirely.
 
-## Filtering, and totalling training hours
+## Filtering, and totaling training hours
 
 The **Filter & sort** bar above the report drives both the list and the totals beneath it, so the numbers always describe exactly what is on screen.
 
@@ -61,7 +61,7 @@ Checking **Entered into an external system** is permanent. It should be set once
 - **locks the training itself** — no field can be changed again, by anyone,
 - **locks its signatures** — none can be removed, added or altered,
 - **prevents deletion**, and
-- cannot be unticked in the app. **Only the external system, or somebody editing the record outside the app, can clear it.**
+- cannot be unchecked in the app. **Only the external system, or somebody editing the record outside the app, can clear it.**
 
 The app asks you to confirm before it sets the marker, and says all of the above at the time. A locked training shows a padlock in the **Ext.** column, and its Edit, Delete and signature-remove controls are all disabled — including for you.
 

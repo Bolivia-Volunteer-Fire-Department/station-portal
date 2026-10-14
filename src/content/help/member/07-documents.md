@@ -61,10 +61,10 @@ Check the lines you have done — several at once is fine — and press **Save s
 
 | What you see | What it means |
 |---|---|
-| A filled check | You have signed that line. It cannot be unticked from here |
+| A filled check | You have signed that line. It cannot be unchecked from here |
 | **Awaiting verification** | You have signed it; somebody still has to confirm it |
 | **Verified by …** | Somebody has confirmed it, with their name and the date they did it. On a phone the word **Verified** is a button: tap it and the name and date appear under the line, so the wording of the item keeps the whole row to itself |
-| A line in blue-gray, unticked | Not signed yet. Check it and save |
+| A line in blue-gray, unchecked | Not signed yet. Check it and save |
 
 If a line has been confirmed by more than one officer it says *Verified by 2 people* rather than naming one, because two confirmations is a fact about the line and neither officer is more right than the other.
 
@@ -73,16 +73,16 @@ If a document says **Members must sign this** and has *no* items, you sign the d
 > [!NOTE]
 > **Verification is not something you ask for.** It appears when somebody with the *Verify signatures* permission opens this checklist and confirms your lines. If your work is waiting, it shows as **Awaiting verification** until they do. Nobody can verify their own checklist, so an officer who is also on the crew has somebody else check theirs.
 >
-> A document can work the same way without any items. Where its author ticked **A verifier must confirm the signature**, the box under the document shows **Signed** with the date, and beneath it either **Verified by Jane Doe on …** or **Waiting for a verifier to confirm your signature**. Your file is signed either way — the second line is somebody else's job, not yours.
+> A document can work the same way without any items. Where its author checked **A verifier must confirm the signature**, the box under the document shows **Signed** with the date, and beneath it either **Verified by Jane Doe on …** or **Waiting for a verifier to confirm your signature**. Your file is signed either way — the second line is somebody else's job, not yours.
 
 ## Seeing another member's records
 
-If your role has the **Verify signatures** permission, the top of the module has a **View as** box. Choosing a member from it shows *their* document signatures and *their* checklist lines — ticked, awaiting verification, or verified by whom — instead of your own, so an officer can answer "did they do the truck check, and who confirmed it" without leaving the module.
+If your role has the **Verify signatures** permission, the top of the module has a **View as** box. Choosing a member from it shows *their* document signatures and *their* checklist lines — checked, awaiting verification, or verified by whom — instead of your own, so an officer can answer "did they do the truck check, and who confirmed it" without leaving the module.
 
 It is a reader, not a way to act as somebody else:
 
 - It shows the documents **as they see them** — the server applies *their* rank, so the list and its badges (how many are waiting on them, which folders) are their records, not yours.
-- Nothing can be ticked or signed while you are looking at another member's — those are theirs to do from their own sign-in, and the panel says so.
+- Nothing can be checked or signed while you are looking at another member's — those are theirs to do from their own sign-in, and the panel says so.
 - The card says **Viewing Jane Doe's records — read only** at the top of the document, in amber, so the mode is never a guess. Choose **Myself** to go back.
 
 If a line is **edited after you signed it**, the line says so. It means your signature covers the earlier wording — read it again, and check it once more if you are happy with the change.

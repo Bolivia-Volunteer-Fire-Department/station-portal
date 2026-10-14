@@ -1,6 +1,6 @@
 # Certifications
 
-*People → Certifications* records what each member holds, one row per **period**. It is the administrative half of the Certifications module members see, and the catalog it works from is defined in *Certification Setup*.
+*People → Certifications* records what each member holds, one row per **period**. It is the administrative half of the Certifications section members view in their **User Profile**, and the catalog it works from is defined in *Certification Setup*.
 
 > [!IMPORTANT]
 > Recording certifications requires the **Manage certifications** permission, and defining the catalog requires **Set up certifications**.

@@ -75,7 +75,7 @@ Use the arrows either side of the month name, or the **Today** button to jump ba
 
 An administrator approves or declines it. If it is approved, the shift becomes yours and appears as a solid pill.
 
-**If it is declined, that is final for the app.** The pill turns rose and reads *Declined*, and you cannot offer for that shift again — the button is gone, and the app refuses the offer even if you still had the page open from before. That is deliberate: it stops the same offer going backwards and forwards, and it keeps a decision a decision. **It does not mean you can never work that shift.** If your circumstances changed, or you think the shift was turned down by mistake, speak to an officer — they can put you on it directly, and a shift filled that way works exactly like one you were approved for.
+**If it is declined, that is final for the app.** The pill turns rose and reads *Declined*, and you cannot offer for that shift again — the button is gone, and the app refuses the offer even if you still had the page open from before. That is deliberate: it stops the same offer from going back and forth, and it keeps a decision a decision. **It does not mean you can never work that shift.** If your circumstances changed, or you think the shift was turned down by mistake, speak to an officer — they can put you on it directly, and a shift filled that way works exactly like one you were approved for.
 
 While an offer is still waiting you cannot offer a second time on the same shift; that is treated as the same offer rather than a duplicate. There is nothing to withdraw — an officer's decision is what closes an offer out.
 

@@ -1,34 +1,44 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
-import AdminRolesTab from './AdminRolesTab';
-import AdminRanksTab from './AdminRanksTab';
-import AdminScheduleTemplatesTab from './AdminScheduleTemplatesTab';
-import AdminAssignmentsTab from './AdminAssignmentsTab';
-import AdminAvailabilityTab from './AdminAvailabilityTab';
-import AdminAvailabilityWindowsTab from './AdminAvailabilityWindowsTab';
-import AdminScheduleManagementTab from './AdminScheduleManagementTab';
-import AdminSystemSettingsTab from './AdminSystemSettingsTab';
-import AdminNavigationSetupTab from './AdminNavigationSetupTab';
-import AdminMapSettingsTab from './AdminMapSettingsTab';
-import AdminClockManagementTab from './AdminClockManagementTab';
-import AdminPendingApprovalsTab from './AdminPendingApprovalsTab';
-import AdminNotificationsTab from './AdminNotificationsTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
-import AdminTrainingTab from './AdminTrainingTab';
-import AdminCertificationsTab from './AdminCertificationsTab';
-import AdminCertificationSetupTab from './AdminCertificationSetupTab';
-import AdminAnnouncementsTab from './AdminAnnouncementsTab';
-import AdminChatTab from './AdminChatTab';
-import AdminDocumentsTab from './AdminDocumentsTab';
-import AdminEventsTab from './AdminEventsTab';
-import AdminReportsConfigurationTab from './AdminReportsConfigurationTab';
-import AdminFormsTab from './AdminFormsTab';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
 import { fetchAdminDocumentVerificationSummary } from '../../services/api';
 import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
 import AdminMenuPage from './AdminMenuPage';
+
+const AdminRolesTab = lazy(() => import('./AdminRolesTab'));
+const AdminRanksTab = lazy(() => import('./AdminRanksTab'));
+const AdminScheduleTemplatesTab = lazy(() => import('./AdminScheduleTemplatesTab'));
+const AdminAssignmentsTab = lazy(() => import('./AdminAssignmentsTab'));
+const AdminAvailabilityTab = lazy(() => import('./AdminAvailabilityTab'));
+const AdminAvailabilityWindowsTab = lazy(() => import('./AdminAvailabilityWindowsTab'));
+const AdminScheduleManagementTab = lazy(() => import('./AdminScheduleManagementTab'));
+const AdminSystemSettingsTab = lazy(() => import('./AdminSystemSettingsTab'));
+const AdminNavigationSetupTab = lazy(() => import('./AdminNavigationSetupTab'));
+const AdminMapSettingsTab = lazy(() => import('./AdminMapSettingsTab'));
+const AdminClockManagementTab = lazy(() => import('./AdminClockManagementTab'));
+const AdminPendingApprovalsTab = lazy(() => import('./AdminPendingApprovalsTab'));
+const AdminNotificationsTab = lazy(() => import('./AdminNotificationsTab'));
+const AdminTrainingTab = lazy(() => import('./AdminTrainingTab'));
+const AdminCertificationsTab = lazy(() => import('./AdminCertificationsTab'));
+const AdminCertificationSetupTab = lazy(() => import('./AdminCertificationSetupTab'));
+const AdminAnnouncementsTab = lazy(() => import('./AdminAnnouncementsTab'));
+const AdminChatTab = lazy(() => import('./AdminChatTab'));
+const AdminDocumentsTab = lazy(() => import('./AdminDocumentsTab'));
+const AdminEventsTab = lazy(() => import('./AdminEventsTab'));
+const AdminReportsConfigurationTab = lazy(() => import('./AdminReportsConfigurationTab'));
+const AdminFormsTab = lazy(() => import('./AdminFormsTab'));
+
+function AdminTabLoading() {
+  return (
+    <div className="flex items-center justify-center py-16 text-slate-400">
+      <Loader2 className="w-6 h-6 animate-spin text-red-600" />
+      <span className="ml-3 text-sm font-medium text-slate-500 dark:text-slate-400">Loading module…</span>
+    </div>
+  );
+}
 
 // Categories and links displayed in the Administration navigation bar.
 export const ADMIN_NAV_CATEGORIES = [
@@ -341,7 +351,8 @@ export default function AdminPanel({
         })}
       </div>
 
-      {activeSubTab === 'users' && (
+      <Suspense fallback={<AdminTabLoading />}>
+        {activeSubTab === 'users' && (
         <AdminUsersTab
           token={token}
           users={users}
@@ -598,6 +609,7 @@ export default function AdminPanel({
           onAdminDataChanged={onAdminDataChanged}
         />
       )}
+      </Suspense>
     </div>
   );
 }

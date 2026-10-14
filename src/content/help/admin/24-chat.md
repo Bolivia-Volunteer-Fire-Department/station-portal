@@ -9,7 +9,7 @@
 |---|---|
 | **Name** | Required, up to 60 characters. The name shown in the member's room list |
 | **Order** | Where the room sits in the list. Lower first; rooms sharing a number fall back to alphabetical order |
-| **Everyone may see this room** | The common case. Unticked, choose **one** of the three ways below |
+| **Everyone may see this room** | The common case. Unchecked, choose **one** of the three ways below |
 | **…or a role** | Every member whose role is this one — for example an officers-only room |
 | **…or a rank** | Every member whose rank is this one |
 | **…or one member** | A room for a single person, with whoever sent the message |

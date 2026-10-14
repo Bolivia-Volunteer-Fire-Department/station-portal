@@ -8,37 +8,41 @@ Welcome to **StationSync**. This guide is for members: what each module is for, 
 |----|----|
 | **Timeclock** | Clock in and out, see the station clock, and see who is on duty |
 | **Clock History** | Every entry you have made, with your running totals |
-| **My Schedule** | Your shifts, and open shifts you can offer to fill |
-| **My Availability** | Tell the department which shifts you could work |
+| **Chat** | A station communication module |
+| **Roster** | A list of members of this station |
+| **Schedule** | Your shifts, and open shifts you can offer to fill |
+| **Availability** (My Availability) | Tell the department which shifts you could work |
 | **Training** | Sign off the trainings you attended |
+| **Documents** | Literature that the department wants to have available to you, for you to read and sign, or check off |
+| **District Map** | An interactive map of this station's district and surrounding districts |
+| **Reports & Forms** | A module for processing data entered into this app as some kind of organized output |
 | **Help** | These guides |
-| **User Settings** | Your preferences, notifications, password and access |
 
 > [!NOTE]
 > **Administration** also appears in the sidebar if your role has any administrator permissions. Information about that module can be read at *Administration → System → Help*.
 
 ## Signing in
 
-Your username and password are issued by an administrator. If you have forgotten your password, ask an administrator to reset it — you can change it yourself afterwards in **User Settings**.
+Your username and password are provided by an administrator. If you forget your password, ask an administrator to reset it. You can change your password anytime by clicking your name at the top of the sidebar to open your **User Profile**.
 
-Toward the start you may be asked to confirm your password again before a sensitive action such as clocking in. That is normal: the app is re-checking that it is still you, and it replays the action you were trying once you have confirmed, without needing you to repeat it.
+When you first use the app, you might be asked to re-enter your password before an important action, like clocking in. That is completely normal! The app is just double-checking that it is really you. Once you confirm your password, your action completes automatically.
 
 > [!CAUTION]
-> If you share a device, use **Log out** at the bottom of the sidebar rather than just closing the tab. Closing the tab leaves you signed in.
+> If you are using a shared computer or tablet, always click **Log out** at the bottom of the sidebar when you finish. Just closing the browser tab will leave you logged in!
 
 ## Why a module might be missing
 
-Modules are switched on by your **role**, not by you. If something you expect is not in the sidebar, your role does not include it and an administrator can add it in *Administration → People → Roles*.
+The modules you see in the sidebar depend on your assigned **role**. If you do not see a module you need, your role may not have access to it yet. An administrator can update your role under *Administration → People → Roles*.
 
-**User Settings → Your Access** lists exactly which permissions your role has, so if you need to ask for something you can say precisely what is missing.
+To see what you have access to, click your name at the top of the sidebar to open your **User Profile**, switch to the **My Settings** tab, and look at the **Your Access** card. This shows every permission your account currently has.
 
 ## A couple of extras
 
-* The **Firefighter Runner** is a small hidden game.
+* The **Firefighter Runner** is a fun mini-game hidden inside the app! Look around and tap the right spot to find it.
 
 ## About this app
 
-This app was created by Matt Wills for the Bolivia Fire Department.
+This app was originally created for the Bolivia Fire Department in Bolivia, North Carolina.
 
 ### Version 1.6x
 * Added the **District Map** module.
@@ -51,6 +55,11 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added an easier way for administrators to see documents to verify.
 * Added some version-checking mechanisms to help transition users to new versions.
 * *Moved* My Settings and Certifications to a new **User Profile** page, accessible to a user by clicking their own name.
+* Properly set up **lazy loading** in Administration tabs.
+* Extracted heavily-reused variables into their own React contexts to reduce prop drilling.
+* Addressed `set-state-in-effect` warnings, Eliminates cascading double-renders in `DocumentsModule.jsx` and `AdminDocumentsTab.jsx`.
+* Implemented a cache-first strategy for station metadata, like Ranks, Roles, and Shifts. This reduces document read billing to zero for repeat visits/background resumes.
+* Reorganized codebase into feature-based folder structure for better maintainability.
 
 ### Version 1.5x
 * **Rebranded** to *StationSync*!
@@ -93,7 +102,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue where Schedule Management would say someone isn't available during a time when they said they were available.
 * Added an **export** button to the Schedule module, allowing members to export their schedule to something like Google Calendar.
 * Added a bugles icon to the icon library for Captains.
-* Movied the position of the Availability toolbar buttons to be consistent with other modules.
+* Moved the position of the Availability toolbar buttons to be consistent with other modules.
 * Normalized some language across the app.
 * Added a ton of **Firestore optimizations** to reduce read & write costs.
 
@@ -103,7 +112,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue where users could grant themselves administrator access.
 * Fixed an issue where one member could overwrite another member's availability.
 * Fixed the role editor, which could be used to demote an administrator from their role.
-* Fixed an issue where members could rewrite their own clock history and on-dute state directly.
+* Fixed an issue where members could rewrite their own clock history and on-duty state directly.
 * Fixed an issue where verifiers could verify their own work. (allowed for admins)
 * Fixed an issue that allowed members to bypass a forced password change.
 * Fixed unnecessary Firestore reads and writes.
@@ -143,7 +152,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Adjusted the app settings so that, once it is installed on a phone or tablet, it feels like an app rather than a web page, and a stray two-finger touch cannot resize the screen by accident.
 * Added **Certifications**, where things like an EMT certification can be tracked. Optionally allowed the representing icon be displayed next to user names (to assist with scheduling).
 * Added more icons.
-* Changed icon dropdown to icon pickers, allowing users to administrators to visually select an icon instead of guessing based on name.
+* Changed icon dropdown to icon pickers, allowing users and administrators to visually select an icon instead of guessing based on name.
 * Added a **print** option to Training in the Administration module.
 * Altered training categories.
 * Added a filter for category to Training screens.

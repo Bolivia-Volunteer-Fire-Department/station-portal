@@ -194,8 +194,25 @@ export default function AdminDocumentsTab({
   }, [loadRows]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let canceled = false;
+    loadRows()
+      .then((fresh) => {
+        if (canceled) return;
+        const draft = draftReadRef.current ? pendingOrderRef.current : readOrderDraft();
+        draftReadRef.current = true;
+        setSavedOrder(documentOrderSignature(fresh));
+        setRows(draft.length > 0 ? applyDocumentOrder(fresh, draft) : fresh);
+      })
+      .catch((err) => {
+        if (!canceled) setLoadError(err?.message || 'Could not load the documents.');
+      })
+      .finally(() => {
+        if (!canceled) setLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [loadRows]);
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 

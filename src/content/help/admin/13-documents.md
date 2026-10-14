@@ -24,7 +24,7 @@ While a save is in flight the editor is **disabled** — every field, in one go 
 | **Minimum rank** | Who may see it. *Everyone*, or a rank and above |
 | **Effective Date** | The first date members may see it. Blank means it is live now |
 | **End Date** | The last date members may see it. After that it is **retired** — see below |
-| **Visible to members** | Untick for a draft — it stays out of every member's list, including yours |
+| **Visible to members** | Uncheck for a draft — it stays out of every member's list, including yours |
 | **Members must sign this** | For a *Document* or *Link*: whether members sign it. **Always on, and fixed on, for a Checklist** — a checklist's items are what gets signed |
 | **A verifier must confirm the signature** | For a *Document*, *Link* or *Assessment*: whether somebody else has to confirm each member's signature. Off until **Members must sign this** is on, and not offered on a Checklist — its items are confirmed one by one instead. See *The second signature* below |
 
@@ -151,7 +151,7 @@ A drag **never changes a document's folder**: the folder is a field on the docum
 
 ## Publishing and deleting
 
-New documents are **visible to members straight away**, so untick *Visible to members* before you start writing something you would rather nobody read yet.
+New documents are **visible to members straight away**, so uncheck *Visible to members* before you start writing something you would rather nobody read yet.
 
 > [!CAUTION]
 > A document that has been signed **cannot be deleted** — the app refuses and tells you how many signatures it has. Unpublish it instead. A signature is a record that somebody read a procedure, and deleting the procedure would leave that record pointing at nothing.
@@ -218,13 +218,13 @@ The **score is free text, not a number** — "Pass", "4:52", "12/15" and "Needs 
 
 ## Checklist items
 
-A document of type **Checklist** is signed one item at a time. A checklist is **always** open to signing — the **Members must sign this** box is ticked and locked, because the lines are what gets signed, and there is no separate signature for the checklist itself. Choosing *Checklist* as the type turns it on; the server enforces it too, so a checklist cannot be stored in a state where its own items refuse to be ticked.
+A document of type **Checklist** is signed one item at a time. A checklist is **always** open to signing — the **Members must sign this** box is checked and locked, because the lines are what gets signed, and there is no separate signature for the checklist itself. Choosing *Checklist* as the type turns it on; the server enforces it too, so a checklist cannot be stored in a state where its own items refuse to be checked.
 
 Set the **Type** to *Checklist* and the **Checklist items** card appears below the fields in the same editor — **before the document is saved as well as after**, so you can write the whole thing in one sitting:
 
 | Field | What it does |
 |---|---|
-| **Item** | The line the member ticks. Required |
+| **Item** | The line the member checks. Required |
 | **Section** | Groups items under a heading in both the member's view and the verification panel. Items with no section are shown last, under *Items* |
 | **Order** | Position within the list; lower first, with the label breaking ties. **Left blank**, the item goes after the last one, so items keep the order you typed them in. A number you type — **including 0** — is used exactly as typed, and is never rounded up or renumbered |
 
@@ -257,18 +257,18 @@ The shape of the screen follows the shape of the paper. An officer sits down wit
 
 **Save & next member** keeps the checklist, the date and the note and moves to the next name down the list, so a stack of thirty files is one pass with nothing to find again. **Save** on its own is for a file you are part-way through.
 
-Anything already on file — ticked by the member in the app, or entered from paper by somebody earlier — is shown with its date and cannot be ticked again, so nothing is ever recorded twice. The line above the list says how many are already recorded and how many you are about to save.
+Anything already on file — checked by the member in the app, or entered from paper by somebody earlier — is shown with its date and cannot be checked again, so nothing is ever recorded twice. The line above the list says how many are already recorded and how many you are about to save.
 
 ### What the record says about it
 
-A back-filled entry is **a real signature for that member**: their progress moves, their checklist completes, and it counts exactly as if they had ticked it. That is the point — the station's history would be wrong otherwise.
+A back-filled entry is **a real signature for that member**: their progress moves, their checklist completes, and it counts exactly as if they had checked it. That is the point — the station's history would be wrong otherwise.
 
 But it never pretends the member tapped it. Every row entered this way is stamped with **your name**, the **note** you typed and the **moment you entered it**, and the record reads *"Recorded by Jane Doe for Ana Ruiz"* rather than *"Signed by"*. Anybody reading it later can tell a paper record from an app one, which is the difference between a station's history and a guess about it.
 
 > [!IMPORTANT]
 > **Only administrators can do this** — it needs *Manage documents*. That is deliberate: writing a signature for somebody else is the one thing the rest of the app refuses, so the permission to do it is not handed out casually.
 
-**Also confirm these as verified** is ticked by default. It records a second row saying you confirmed what you entered — which is what the supervisor's initials on the paper already meant. Untick it if you would rather these went through the ordinary **Verify signatures** queue for a second pair of eyes, and they will appear there like anything else.
+**Also confirm these as verified** is checked by default. It records a second row saying you confirmed what you entered — which is what the supervisor's initials on the paper already meant. Uncheck it if you would rather these went through the ordinary **Verify signatures** queue for a second pair of eyes, and they will appear there like anything else.
 
 > [!NOTE]
 > **No item is required.** A document that members must sign (a policy acknowledgement, say) is back-filled with a single check per member rather than a list of items — there is only one acknowledgment to record. And you cannot back-fill your own record: enter your own items from your own checklist.
@@ -280,14 +280,16 @@ But it never pretends the member tapped it. Every row entered this way is stampe
 
 Verifying is somebody confirming work the member reported doing, and it is a permission of its own: **Verify signatures**. Give it to the officers who check a new member's truck checklist — they do not need **Manage documents**, and they do not need to be administrators.
 
-There are two ways to do it, and they answer different questions:
+An **amber badge** appears on the Administration landing page and next to Documents whenever items are waiting to be verified, showing the exact count of pending items. Inside the tab, quick-select buttons let you filter directly to checklists that need your attention.
+
+There are two ways to verify signatures, and they answer different questions:
 
 | Where | What it is good at |
 |---|---|
 | The **Verification** card on a checklist or a document in the member-facing **Documents** module | An officer who is already reading it |
 | **Verify signatures** at the bottom of this tab | *Who is waiting on me?* Pick the checklist or document, then the member |
 
-The second one is the one to use for a backlog. It lists everything that can be confirmed — every checklist, and every document whose author ticked **A verifier must confirm the signature** — and for the one you pick it lists the members with something outstanding.
+The second one is the one to use for a backlog. It lists everything that can be confirmed — every checklist, and every document whose author checked **A verifier must confirm the signature** — and for the one you pick it lists the members with something outstanding.
 
 On a **checklist** that is *3 to verify, 8 of 12 signed*, busiest first; expanding a member shows their signed items with **Verify** on each, and **Verify all 3** for the rest. Confirming several at once asks first, because a verification is a record that a check was made.
 
@@ -306,7 +308,7 @@ That is where you answer "who checked the truck checklist in March", and it work
 | What it says | What is actually going on |
 |---|---|
 | *This checklist has no items yet* | There is nothing to sign or confirm. Add the lines under **Checklist items** |
-| *Nobody has signed any items on this checklist yet* | The member has ticked but not pressed **Save signatures** — nothing is recorded until they do |
+| *Nobody has signed any items on this checklist yet* | The member has checked boxes but not pressed **Save signatures** — nothing is recorded until they do |
 | *The only signed items are yours* | You signed them yourself, and **nobody can verify their own checklist** — that rule is what makes a verification mean something. Ask another verifier to check yours, or wait for a member's items to arrive |
 | *Everything signed has been verified* | Nothing outstanding — this is the good one |
 

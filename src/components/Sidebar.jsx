@@ -14,34 +14,55 @@ import {
     getSidebarModuleIcon,
 } from '../utils/sidebarNav';
 import { getSettingValue } from '../utils/systemSettings';
+import { useAuth } from '../context/AuthContext';
+import { useStationData } from '../context/StationDataContext';
 
 export default function Sidebar({
-    currentUser,
+    currentUser: propUser,
     isClockedIn,
-    departmentName = '',
+    departmentName: propDept = '',
     activeTab,
     setActiveTab,
     isSidebarOpen,
     setIsSidebarOpen,
-    onLogout,
+    onLogout: propLogout,
     // Module visibility, each driven by a role permission:
-    canAdminister,
-    canViewSchedule,
-    canEditAvailability,
-    canUseTimeclock,
-    canSignTrainings,
-    canViewDocuments,
-    canViewMap = false,
-    canViewReports = false,
-    canGenerateForms = false,
-    canViewRoster = false,
-    canUseChat = false,
-    ranks = [],
+    canAdminister: propAdmin,
+    canViewSchedule: propSchedule,
+    canEditAvailability: propAvail,
+    canUseTimeclock: propClock,
+    canSignTrainings: propTrain,
+    canViewDocuments: propDocs,
+    canViewMap: propMap = false,
+    canViewReports: propReports = false,
+    canGenerateForms: propForms = false,
+    canViewRoster: propRoster = false,
+    canUseChat: propChat = false,
+    ranks: propRanks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
     announcementAudience = {},
-    systemSettings = [],
+    systemSettings: propSettings = [],
 }) {
+    const auth = useAuth();
+    const station = useStationData();
+
+    const currentUser = propUser || auth.currentUser;
+    const departmentName = propDept || station.departmentName || '';
+    const onLogout = propLogout || auth.onLogout;
+    const canAdminister = propAdmin !== undefined ? propAdmin : Boolean(auth.canAdminister);
+    const canViewSchedule = propSchedule !== undefined ? propSchedule : Boolean(auth.permissions?.canViewSchedule);
+    const canEditAvailability = propAvail !== undefined ? propAvail : Boolean(auth.permissions?.canEditOwnAvailability);
+    const canUseTimeclock = propClock !== undefined ? propClock : Boolean(auth.permissions?.canUseTimeclock);
+    const canSignTrainings = propTrain !== undefined ? propTrain : Boolean(auth.permissions?.canSignTrainings);
+    const canViewDocuments = propDocs !== undefined ? propDocs : Boolean(auth.permissions?.canViewDocuments);
+    const canViewMap = propMap || Boolean(auth.permissions?.canViewMap);
+    const canViewReports = propReports || Boolean(auth.permissions?.canViewReports);
+    const canGenerateForms = propForms || Boolean(auth.permissions?.canGenerateForms);
+    const canViewRoster = propRoster || Boolean(auth.permissions?.canViewRoster);
+    const canUseChat = propChat || Boolean(auth.permissions?.canUseChat);
+    const ranks = propRanks && propRanks.length ? propRanks : (station.ranks || []);
+    const systemSettings = propSettings && propSettings.length ? propSettings : (station.systemSettings || []);
     const [easterEggCount, setEasterEggCount] = React.useState(0);
     // Trigger pixel effect when clicking the logo.
     const [easterBurst, setEasterBurst] = React.useState(0);

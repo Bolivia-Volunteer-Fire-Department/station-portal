@@ -132,6 +132,9 @@ import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
 import { normalizeEventList } from './utils/events';
 import AppUpdateBanner from './components/AppUpdateBanner';
+import { AuthProvider } from './context/AuthContext';
+import { StationDataProvider } from './context/StationDataContext';
+import { readStationMetaCache, writeStationMetaCache, isStationMetaStale } from './utils/stationCache';
 
 // Loading spinner displayed while screen code is downloading.
 
@@ -149,9 +152,10 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [onDutyUsers, setOnDutyUsers] = useState([]);
   const [userSettings, setUserSettings] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [ranks, setRanks] = useState([]);
-  const [shifts, setShifts] = useState([]);
+  const [cachedStationMeta] = useState(() => readStationMetaCache());
+  const [roles, setRoles] = useState(() => cachedStationMeta?.roles || []);
+  const [ranks, setRanks] = useState(() => cachedStationMeta?.ranks || []);
+  const [shifts, setShifts] = useState(() => cachedStationMeta?.shifts || []);
   const [schedule, setSchedule] = useState([]);
   // Tracks the currently loaded date range for the schedule.
   const [scheduleWindow, setScheduleWindow] = useState({ from: '', to: '' });
@@ -178,7 +182,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [scheduleTemplates, setScheduleTemplates] = useState([]);
   const [assignments, setAssignments] = useState([]);
-  const [systemSettings, setSystemSettings] = useState([]);
+  const [systemSettings, setSystemSettings] = useState(() => cachedStationMeta?.systemSettings || []);
   const [currentUser, setCurrentUser] = useState(null);
   const [fontScalePreview, setFontScalePreview] = useState(null);
   // Member roster information for shift assignments.
@@ -206,8 +210,14 @@ export default function App() {
   const [reauthReason, setReauthReason] = useState(null);
   const [isClockedIn, setIsClockedIn] = useState(false);
 
-  // Notice shown when clocking in outside allowed station radius.
   const [clockNotice, setClockNotice] = useState(null);
+
+  // Synchronize station metadata changes to persistent client cache
+  useEffect(() => {
+    if (roles.length > 0 || ranks.length > 0 || shifts.length > 0 || systemSettings.length > 0) {
+      writeStationMetaCache({ roles, ranks, shifts, systemSettings });
+    }
+  }, [roles, ranks, shifts, systemSettings]);
   // Tracks online/offline connectivity status.
   const [offline, setOffline] = useState(() => isOffline());
   useEffect(() => {
@@ -800,7 +810,7 @@ const getLoadingMessage = () => {
     return stop;
   }, [currentUser?.id]);
 
-  // When network reconnects (or when a backgrounded tab returns to visible on a mobile browser), re-s...
+  // When network reconnects (or when a backgrounded tab returns to visible on a mobile browser), re-sync on-duty
   useEffect(() => {
     if (!currentUser?.id || !authToken) return undefined;
     const resyncOnDuty = () => {
@@ -808,9 +818,18 @@ const getLoadingMessage = () => {
         void refreshOnDuty(tokenRef.current);
       }
     };
+    const checkStationMetadataFreshness = () => {
+      const cached = readStationMetaCache();
+      if (isStationMetaStale(cached?.savedAt) && typeof navigator !== 'undefined' && navigator.onLine && tokenRef.current) {
+        if (canAdminister) {
+          void refreshAdminCollections(['roles', 'ranks', 'shifts'], tokenRef.current);
+        }
+      }
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         resyncOnDuty();
+        checkStationMetadataFreshness();
       }
     };
     window.addEventListener('online', resyncOnDuty);
@@ -819,7 +838,7 @@ const getLoadingMessage = () => {
       window.removeEventListener('online', resyncOnDuty);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [currentUser?.id, authToken]);
+  }, [currentUser?.id, authToken, canAdminister]);
 
   // Sets up live data listeners for instant updates.
   const onScheduleBoard = activeTab === 'admin' && adminSubTab === 'schedule';
@@ -1905,7 +1924,43 @@ const getLoadingMessage = () => {
           isLoading={globalLoading.active}
         />
       ) : (
-        <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden md:overscroll-y-contain pb-[env(safe-area-inset-bottom)] md:pb-0">
+        <AuthProvider
+          currentUser={currentUser}
+          currentRole={currentUserRole}
+          currentRank={currentUserRank}
+          authToken={authToken}
+          isAdmin={isAdmin}
+          canAdminister={canAdminister}
+          permissions={{
+            canApproveShifts,
+            canViewSchedule,
+            canMakeOffers,
+            canViewFullSchedule,
+            canEditOwnAvailability,
+            canUseTimeclock,
+            canSignTrainings,
+            canEditTrainings,
+            canViewRoster,
+            canUseChat,
+            canVerifyDocuments,
+            canAddAssessmentScores,
+            canViewDocuments,
+            canViewMap,
+            canEditMap,
+            canViewReports,
+            canGenerateForms,
+          }}
+          onLogout={handleLogout}
+        >
+          <StationDataProvider
+            ranks={ranks}
+            roles={roles}
+            shifts={shifts}
+            systemSettings={systemSettings}
+            departmentName={departmentName}
+            departmentLogo={departmentLogo}
+          >
+            <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row md:h-dvh md:overflow-hidden md:overscroll-y-contain pb-[env(safe-area-inset-bottom)] md:pb-0">
           {/* The strip the iOS status bar sits on.
           // Handles clock in and clock out actions.
           <div
@@ -2431,6 +2486,8 @@ const getLoadingMessage = () => {
             unreadChatCount={unreadChatCount}
           />
         </div>
+          </StationDataProvider>
+        </AuthProvider>
       )}
     </>
   );

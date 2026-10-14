@@ -13,7 +13,7 @@
 | Part | What it is | Example |
 |---|---|---|
 | **The blank** | The PDF to fill — choose it under **The blank PDF** | a state training record |
-| **The data source** | Where the values come from | *A member's training, totalled by category* |
+| **The data source** | Where the values come from | *A member's training, totaled by category* |
 | **The map** | Which box on the PDF gets which value | `Hazmat Hours` ← `totals.is_hazmat` |
 
 **You never type a PDF field's name.** Choosing a blank reads the fields *off the PDF* and lists them under **Where each value goes**; each row is one box on the sheet. Fill in the value for the boxes this form needs and leave the rest empty.
@@ -37,10 +37,10 @@ The **type** beside each value tells the PDF what kind of box it is — text, a 
 
 ## Who can generate it
 
-Under **Who can generate this form?**, choose **Everyone**, or tick the **roles** and **ranks** it is shared with. This is an *audience*, not a permission: it says who the form is *for*. The role still has to be able to reach the screen a form is run from.
+Under **Who can generate this form?**, choose **Everyone**, or check the **roles** and **ranks** it is shared with. This is an *audience*, not a permission: it says who the form is *for*. The role still has to be able to reach the screen a form is run from.
 
 ## Turning one off, and deleting one
 
-Leave **Enabled** ticked to offer the form. Untick it to keep the definition without offering it to anybody — it stays in this list, marked **Disabled**, so its settings are not lost.
+Leave **Enabled** checked to offer the form. Uncheck it to keep the definition without offering it to anybody — it stays in this list, marked **Disabled**, so its settings are not lost.
 
 **Delete** removes the definition. Sheets already generated and handed out are unaffected — a filled PDF is a document of its own once it has been made.

@@ -31,7 +31,7 @@ Supported formatting: headings, paragraphs, bold and italic, inline and fenced c
 
 ```text
 > [!WARNING]
-> Closing the tab with unsaved ticks loses them.
+> Closing the tab with unsaved changes loses them.
 ```
 
 The five types are `NOTE`, `TIP`, `IMPORTANT`, `WARNING` and `CAUTION`. Each renders as a colored callout with its own icon and the type name, so the meaning survives for someone who cannot see the color. The body is markdown like anywhere else — paragraphs, lists, emphasis and code all work inside one, and a blank `>` line separates paragraphs.
@@ -53,7 +53,7 @@ Which type to use:
 **One line per paragraph, and one line per list item — do not hard-wrap.** A long line is fine; it wraps on screen by itself. Breaking a line by hand is not cosmetic here, because it changes what renders:
 
 - a wrapped **list item** ends its list at the break, so the rest of the sentence appears as a stray paragraph outside the list;
-- a wrapped **emphasis span** leaves an unpaired `*` at each end, so `*Sign trainings*` shows the asterisks instead of italicising.
+- a wrapped **emphasis span** leaves an unpaired `*` at each end, so `*Sign trainings*` shows the asterisks instead of italicizing.
 
 Wrap in your editor rather than in the file, and the test suite will tell you if a stray break creeps in.
 

@@ -2735,3 +2735,15 @@ exports.beforeUserCreated = beforeUserCreated((event) => {
     throw new HttpsError('permission-denied', `An account must be on the @${EMAIL_DOMAIN} domain.`);
   }
 });
+
+// Database backups: automated daily cold-storage snapshots and manual trigger
+const {
+  backupFirestoreDaily,
+  triggerManualBackup,
+  getDatabaseBackupStatus,
+} = require('./backupDatabase');
+
+exports.backupFirestoreDaily = backupFirestoreDaily;
+exports.triggerManualBackup = triggerManualBackup;
+exports.getDatabaseBackupStatus = getDatabaseBackupStatus;
+

@@ -42,28 +42,21 @@ function AdminChecklistVerification({
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [openMemberId, setOpenMemberId] = useState('');
+  const [memberSelection, setMemberSelection] = useState({ listId: '', memberId: '' });
   const [verifyingItemId, setVerifyingItemId] = useState('');
   const [verifyingMemberId, setVerifyingMemberId] = useState('');
   const [verifyingAll, setVerifyingAll] = useState(false);
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [showingVerifiedFor, setShowingVerifiedFor] = useState('');
-  const [pendingCounts, setPendingCounts] = useState(documentVerificationCounts || {});
+  const [summaryCounts, setSummaryCounts] = useState({});
   const [summaryLoading, setSummaryLoading] = useState(
     !(documentVerificationCounts && Object.keys(documentVerificationCounts).length > 0)
   );
 
-  useEffect(() => {
-    if (documentVerificationCounts && Object.keys(documentVerificationCounts).length > 0) {
-      setPendingCounts((prev) => ({ ...prev, ...documentVerificationCounts }));
-      setSummaryLoading(false);
-    }
-  }, [documentVerificationCounts]);
-
   const refreshSummary = useCallback(async (candidateDocs = null) => {
     try {
       const summary = await fetchAdminDocumentVerificationSummary(candidateDocs);
-      setPendingCounts(summary.byDocument || {});
+      setSummaryCounts(summary.byDocument || {});
     } catch (err) {
       console.warn('[verification] could not load verification summary', err);
     } finally {
@@ -84,24 +77,21 @@ function AdminChecklistVerification({
     refreshSummary(verifiable.length > 0 ? verifiable : null);
   }, [refreshSummary, verifiable]);
 
-  // When summary resolves and a document with pending items exists, default requestedListId to it if the user hasn't selected one
-  useEffect(() => {
-    if (!requestedListId && verifiable.length > 0) {
-      const firstPending = verifiable.find((row) => (pendingCounts[row.id] || 0) > 0);
-      if (firstPending) {
-        setRequestedListId(firstPending.id);
-      }
-    }
-  }, [verifiable, pendingCounts, requestedListId]);
-
   // Pick the requested document, or default to the first one with pending items, or the first available.
   const activeListId = useMemo(() => {
     if (requestedListId && verifiable.some((row) => row.id === requestedListId)) return requestedListId;
-    const pendingDoc = verifiable.find((row) => (pendingCounts[row.id] || 0) > 0);
+    const base = { ...(documentVerificationCounts || {}), ...summaryCounts };
+    const pendingDoc = verifiable.find((row) => (base[row.id] || 0) > 0);
     if (pendingDoc) return pendingDoc.id;
     if (summaryLoading) return '';
     return verifiable.length > 0 ? verifiable[0].id : '';
-  }, [verifiable, requestedListId, pendingCounts, summaryLoading]);
+  }, [verifiable, requestedListId, documentVerificationCounts, summaryCounts, summaryLoading]);
+
+  const openMemberId = memberSelection.listId === activeListId ? memberSelection.memberId : '';
+  const setOpenMemberId = useCallback(
+    (memberId) => setMemberSelection({ listId: activeListId, memberId }),
+    [activeListId]
+  );
 
   const activeDocument = useMemo(
     () => verifiable.find((row) => row.id === activeListId) || null,
@@ -120,6 +110,7 @@ function AdminChecklistVerification({
         return;
       }
 
+      await Promise.resolve();
       setLoading(true);
       setError('');
       try {
@@ -140,7 +131,6 @@ function AdminChecklistVerification({
 
   // Reload signatures when the chosen document changes.
   useEffect(() => {
-    setOpenMemberId('');
     loadSignatures(activeListId);
   }, [activeListId, loadSignatures]);
 
@@ -160,14 +150,14 @@ function AdminChecklistVerification({
       : waiting.length;
   }, [waiting, isChecklistTarget]);
 
-  // Keep pendingCounts for the active document updated once its signatures load
-  useEffect(() => {
-    if (!activeListId || loading) return;
-    setPendingCounts((prev) => {
-      if (prev[activeListId] === activePendingCount) return prev;
-      return { ...prev, [activeListId]: activePendingCount };
-    });
-  }, [activeListId, activePendingCount, loading]);
+  // Derive pendingCounts directly with live activePendingCount override without cascading renders
+  const pendingCounts = useMemo(() => {
+    const counts = { ...(documentVerificationCounts || {}), ...summaryCounts };
+    if (activeListId && !loading) {
+      counts[activeListId] = activePendingCount;
+    }
+    return counts;
+  }, [documentVerificationCounts, summaryCounts, activeListId, loading, activePendingCount]);
 
   // Determine why the queue is empty so we can show a helpful explanation.
   const emptyReason = useMemo(() => {

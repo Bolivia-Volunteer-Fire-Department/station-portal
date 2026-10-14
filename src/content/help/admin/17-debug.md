@@ -57,7 +57,7 @@ Each sound has a slider for how loud the app plays it. The row shows the level i
 ## When to reach for this page
 
 - **"I saved it and nothing happened."** Fire the toasts and confirm the app can show one at all, then check the sound for that kind.
-- **"The app makes no noise."** Open **User Settings** and check the sounds switch, then play a sound here: if it plays, the app is working and the setting is off.
+- **"The app makes no noise."** Open **User Profile** (under the **My Settings** tab) and check the sounds switch, then play a sound here: if it plays, the app is working and the setting is off.
 - **"The click is too loud"** (or too quiet). Move that sound's level slider until it sounds right, then note the percentage — making it permanent is a code change, and the levels themselves are temporary.
 - **"What does a refused clock-in look like?"** Open it here rather than walking outside with a phone.
 - **"The session expired and I lost my work."** Show the re-authentication prompt, and the forced password change beside it, to whoever needs to see what the member was looking at.

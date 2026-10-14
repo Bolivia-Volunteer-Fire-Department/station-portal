@@ -102,7 +102,7 @@ Members set their availability themselves in their **My Availability** module, a
 
 When you approve an offer in **Pending Approvals**, the member is written onto the shift and the board reloads to show it. You do not need to fill the shift here yourself for an offer you intend to accept.
 
-**Declining is final for that member on that shift.** Their pill turns rose and reads *Declined*, and they cannot offer for it again from the app — which is the point: it stops the same offer going backwards and forwards. It does not lock them out of the shift. If they call you the next day with a good reason, assign them the same way you would for anyone else, by editing the shift and choosing their name.
+**Declining is final for that member on that shift.** Their pill turns rose and reads *Declined*, and they cannot offer for it again from the app — which is the point: it stops the same offer from going back and forth. It does not lock them out of the shift. If they call you the next day with a good reason, assign them the same way you would for anyone else, by editing the shift and choosing their name.
 
 ## Printing the schedule
 

@@ -26,7 +26,7 @@ At least one place must be chosen, or the announcement would be saved and never 
 - **Sidebar** — below the name card, above the menu.
 
 > [!IMPORTANT]
-> **There is no longer a login-screen placement.** An announcement used to be postable to the login screen, where it could only ever be aimed at everyone: nobody is signed in yet, so a role, a rank or a person cannot be resolved. That made it the one thing the app had to read before anyone signed in, and anything that has to be read at that point belongs in the app's own code rather than in a form. If you were using it for something that genuinely matters — a hall closure, a burn ban — say so and it can be built into the login screen properly. An old announcement that still has the login screen ticked shows now on **neither** screen: open it, check the dashboard or the sidebar, and save.
+> **There is no longer a login-screen placement.** An announcement used to be postable to the login screen, where it could only ever be aimed at everyone: nobody is signed in yet, so a role, a rank or a person cannot be resolved. That made it the one thing the app had to read before anyone signed in, and anything that has to be read at that point belongs in the app's own code rather than in a form. If you were using it for something that genuinely matters — a hall closure, a burn ban — say so and it can be built into the login screen properly. An old announcement that still has the login screen checked shows now on **neither** screen: open it, check the dashboard or the sidebar, and save.
 
 > **An announcement arrives as soon as you save it.** The app keeps an eye out for new ones, so a member who is already signed in sees it within moments rather than at their next sign-in — which is what makes an announcement worth writing in a hurry.
 
@@ -50,7 +50,7 @@ If the combination matches nobody, the announcement is **refused** rather than s
 
 Check **Also send a push notification** and the announcement also goes to the registered devices of everyone it matches, as well as being visible in the app.
 
-Members can turn announcement pushes off for themselves in *User Settings → Notifications*, and the station default sits beside the other notification switches in *System → Notifications*.
+Members can turn announcement pushes off for themselves in *User Profile → My Settings → Notifications*, and the station default sits beside the other notification switches in *System → Notifications*.
 
 > [!NOTE]
 > **Turning the push off never hides the announcement.** The switch is about being interrupted, not about being told: a member who silences announcement pushes still sees every announcement on the dashboard and in the sidebar. Silence the push and the notice is still waiting for them in the app.

@@ -4,6 +4,8 @@ import CenteredContent from './CenteredContent';
 import { ProfilePictureCard, PersonalInformationCard, PasswordChangeCard } from './MySettings';
 import CertificationsModule from './CertificationsModule';
 import UserSettings from './MySettings';
+import { useAuth } from '../context/AuthContext';
+import { useStationData } from '../context/StationDataContext';
 
 const TABS = [
   { id: 'profile', label: 'My Profile', icon: User },
@@ -11,21 +13,32 @@ const TABS = [
 ];
 
 export default function UserProfile({
-  currentUser,
-  currentRole,
-  currentRank,
-  ranks = [],
-  token,
+  currentUser: propUser,
+  currentRole: propRole,
+  currentRank: propRank,
+  ranks: propRanks,
+  token: propToken,
   userSettings = [],
-  systemSettings = {},
-  canApproveShifts = false,
-  canUseChat = false,
+  systemSettings: propSystemSettings,
+  canApproveShifts: propCanApproveShifts,
+  canUseChat: propCanUseChat,
   onSaveSettings,
   onFontScalePreview,
   onPasswordChange,
   pushDeviceApi,
   initialTab = 'profile',
 }) {
+  const auth = useAuth();
+  const station = useStationData();
+
+  const currentUser = propUser || auth.currentUser;
+  const currentRole = propRole || auth.currentRole;
+  const ranks = propRanks || station.ranks || [];
+  const token = propToken || auth.authToken;
+  const systemSettings = propSystemSettings || station.systemSettingsMap || {};
+  const canApproveShifts = propCanApproveShifts !== undefined ? propCanApproveShifts : Boolean(auth.permissions?.canApproveShifts);
+  const canUseChat = propCanUseChat !== undefined ? propCanUseChat : Boolean(auth.permissions?.canUseChat);
+  const currentRank = propRank;
   const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {

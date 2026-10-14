@@ -159,6 +159,13 @@ export const PUBLIC_SETTING_KEYS = [
   'mobile_nav_modules',
   'sidebar_nav_order',
   'sidebar_nav_icons',
+  // Database backup status indicators, public so the live settings listener delivers them to officers.
+  'backup_last_run_at',
+  'backup_last_status',
+  'backup_last_message',
+  'backup_bucket_name',
+  'backup_pitr_status',
+  'backup_retention_days',
 ];
 
 // Which document a setting belongs in: 'public' or 'private'.

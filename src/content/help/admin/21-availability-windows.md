@@ -14,7 +14,7 @@ A window is a recurring weekly block of time with a name:
 - **Effective date** and **End date** — when this *configuration* is in force.
 
 > [!IMPORTANT]
-> **The day a window is ticked for is the day it starts, not the day it ends.** A window that runs 18:00 to 08:00 and is ticked for **Tuesday** is a Tuesday night: it finishes on Wednesday morning, and it belongs to Tuesday. That is why it appears on Tuesday's cell and nowhere else.
+> **The day a window is checked for is the day it starts, not the day it ends.** A window that runs 18:00 to 08:00 and is checked for **Tuesday** is a Tuesday night: it finishes on Wednesday morning, and it belongs to Tuesday. That is why it appears on Tuesday's cell and nowhere else.
 
 ## Effective and end dates are the window's life, not one occurrence
 
@@ -31,7 +31,7 @@ Windows are the *options list*, not the answer. A member still marks themselves 
 
 ## Where this shows up
 
-- **My Availability** — a member ticks the windows they could work, on the days they fall.
+- **My Availability** — a member checks the windows they could work, on the days they fall.
 - **Member Availability** (*Scheduling → Member Availability*) — the same windows, listed by date, with the names of everyone who claimed them. That is the screen to answer "who can cover Tuesday night?".
 
 > [!NOTE]

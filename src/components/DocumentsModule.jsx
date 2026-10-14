@@ -491,9 +491,6 @@ export default function DocumentsModule({
 
   useEffect(() => {
     let canceled = false;
-    setLoading(true);
-    setLoadError('');
-
     loadList()
       .then((loaded) => {
         if (canceled) return;

@@ -1,7 +1,7 @@
 *People → Ranks* defines the department's rank structure. Ranks relate mostly to the schedule and assignments.
 
 > [!IMPORTANT]
-> Editing ranks equires the **Manage ranks** role permission.
+> Editing ranks requires the **Manage ranks** role permission.
 
 ## The fields
 
@@ -23,7 +23,7 @@ Rank order is what the scheduling logic actually compares. It is used to decide:
 3. **Which shifts their availability calendar preloads.** Same rule again, which is why a member who says "that shift never appears for me" usually just does not hold the rank for it.
 4. **The order of the crew on a shift.** When several members share a shift, they are listed by the **rank the shift requires**, highest first, then by name.
 
-A higher number means more senior, so a Chief is a larger number than a Firefighter. If you set them the wrong way round, everyone's eligibility silently inverts.
+A higher number means more senior, so a Chief is a larger number than a Firefighter. If you set them the wrong way around, everyone's eligibility silently inverts.
 
 ## Colors and icons
 

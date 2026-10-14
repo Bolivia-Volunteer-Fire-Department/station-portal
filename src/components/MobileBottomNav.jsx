@@ -16,6 +16,7 @@ import {
   Menu,
 } from 'lucide-react';
 import { DEFAULT_MOBILE_NAV_MODULES } from '../utils/mobileNav';
+import { useAuth } from '../context/AuthContext';
 
 const MODULE_META = {
   dashboard: { label: 'Clock', icon: LayoutDashboard },
@@ -38,19 +39,31 @@ export default function MobileBottomNav({
   onSelectTab,
   onOpenMore,
   modules = DEFAULT_MOBILE_NAV_MODULES,
-  canViewSchedule = true,
-  canUseChat = true,
-  canUseTimeclock = true,
-  canEditAvailability = false,
-  canViewRoster = false,
-  canSignTrainings = false,
-  canViewDocuments = false,
-  canViewReports = false,
-  canGenerateForms = false,
-  canViewMap = false,
-  canAdminister = false,
+  canViewSchedule: propSchedule,
+  canUseChat: propChat,
+  canUseTimeclock: propClock,
+  canEditAvailability: propAvail,
+  canViewRoster: propRoster,
+  canSignTrainings: propTrain,
+  canViewDocuments: propDocs,
+  canViewReports: propReports,
+  canGenerateForms: propForms,
+  canViewMap: propMap,
+  canAdminister: propAdmin,
   unreadChatCount = 0,
 }) {
+  const auth = useAuth();
+  const canViewSchedule = propSchedule !== undefined ? propSchedule : (auth.permissions?.canViewSchedule ?? true);
+  const canUseChat = propChat !== undefined ? propChat : (auth.permissions?.canUseChat ?? true);
+  const canUseTimeclock = propClock !== undefined ? propClock : (auth.permissions?.canUseTimeclock ?? true);
+  const canEditAvailability = propAvail !== undefined ? propAvail : Boolean(auth.permissions?.canEditOwnAvailability);
+  const canViewRoster = propRoster !== undefined ? propRoster : Boolean(auth.permissions?.canViewRoster);
+  const canSignTrainings = propTrain !== undefined ? propTrain : Boolean(auth.permissions?.canSignTrainings);
+  const canViewDocuments = propDocs !== undefined ? propDocs : Boolean(auth.permissions?.canViewDocuments);
+  const canViewReports = propReports !== undefined ? propReports : Boolean(auth.permissions?.canViewReports);
+  const canGenerateForms = propForms !== undefined ? propForms : Boolean(auth.permissions?.canGenerateForms);
+  const canViewMap = propMap !== undefined ? propMap : Boolean(auth.permissions?.canViewMap);
+  const canAdminister = propAdmin !== undefined ? propAdmin : Boolean(auth.canAdminister);
   const isPermitted = (id) => {
     switch (id) {
       case 'dashboard':

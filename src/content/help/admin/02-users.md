@@ -39,10 +39,10 @@ Use it for anyone who is not on the roster — new recruits in training, someone
 
 Check **Must change password at next login** when you set someone's password for them — a new member, or anyone who has forgotten theirs. They sign in with that password once and land straight on a *Choose a new password* popup; until they save a new one they cannot open any other part of the portal. They can sign out instead, but signing back in brings the same popup until a new password is saved.
 
-The flag clears itself the moment they set their own password, so nothing has to be unticked afterwards. Until they do, the member stands out on the Users list with a **Password change due** badge — worth checking there before you phone somebody about a problem signing in.
+The flag clears itself the moment they set their own password, so nothing has to be unchecked afterwards. Until they do, the member stands out on the Users list with a **Password change due** badge — worth checking there before you phone somebody about a problem signing in.
 
 > [!NOTE]
-> **The check and the password belong together.** Unchecking the box does not change anybody's password; it only says the current one may be kept. If you set a password, type it, and leave the box unticked, the member keeps that password for as long as they like.
+> **The check and the password belong together.** Unchecking the box does not change anybody's password; it only says the current one may be kept. If you set a password, type it, and leave the box unchecked, the member keeps that password for as long as they like.
 
 ## Deactivating rather than deleting
 
@@ -62,4 +62,4 @@ Each member's editor carries four fields that are **not** on the station roster,
 | **Email Address** | The member, or an officer | For the station's records. Sign-in still uses the username, so this never changes how somebody logs in. |
 | **Phone Number** | The member, or an officer | For the station's records. |
 
-All four sit on the member's **private record** rather than the roster, and they are offered when adding a member too, so they can be recorded as they join. Members keep their own three up to date from **My Settings → Personal Information**; only an officer can set the member ID.
+All four sit on the member's **private record** rather than the roster, and they are offered when adding a member too, so they can be recorded as they join. Members keep their own three up to date from their **User Profile → Personal Information**; only an officer can set the member ID.

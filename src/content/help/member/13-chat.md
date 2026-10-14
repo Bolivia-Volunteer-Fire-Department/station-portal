@@ -59,13 +59,13 @@ Two rules run through all of them:
 - **A muted room is silent.** Muting a room already stops it counting towards your number, and it stops its sounds too.
 - **Your own message never rings at you.** It makes the send sound once, when it goes — not again when it echoes back, and not when your own badge moves.
 
-Everything goes through the app's own sound engine, so the **sound switch in My Settings** applies to chat as well, and an administrator can change how loud each of the six is on the **Debug** page — alongside every other sound the app ships.
+Everything goes through the app's own sound engine, so the **sound switch in your User Profile under My Settings** applies to chat as well, and an administrator can change how loud each of the six is on the **Debug** page — alongside every other sound the app ships.
 
 ## Sending needs a connection
 
 Chat is live, so messages arrive as they are sent. Sending, though, goes through the server rather than straight from your browser — that is what stops anybody writing a message that *looks* like it came from somebody else — so a message needs a connection to send.
 
-**While you are offline the send button is greyed out and says so.** Your text stays in the box until you close the room, and it sends once the connection is back and the button is live again.
+**While you are offline the send button is grayed out and says so.** Your text stays in the box until you close the room, and it sends once the connection is back and the button is live again.
 
 ## If a room is missing
 

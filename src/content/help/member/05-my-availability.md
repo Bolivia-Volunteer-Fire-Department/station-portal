@@ -33,7 +33,7 @@ Administrators can see your chosen availability once it's saved — the Member A
 
 Windows are set up once for the whole station in *Scheduling → Availability Windows*, so a missing one is a configuration question rather than a personal one. Two things worth knowing before you ask:
 
-- A window only appears on the days it is **ticked for**, and the day it is ticked for is the day it **starts** — a Tuesday night that runs to 08:00 belongs to Tuesday, not Wednesday.
+- A window only appears on the days it is **checked for**, and the day it is checked for is the day it **starts** — a Tuesday night that runs to 08:00 belongs to Tuesday, not Wednesday.
 - A window with an **end date** in the past has been retired: it no longer offers anything, and it is kept only so last year's availability still reads.
 
 If something you genuinely work is not on the list, ask an administrator to add it.

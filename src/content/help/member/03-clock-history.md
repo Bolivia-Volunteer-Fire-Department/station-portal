@@ -36,7 +36,7 @@ With no filters set these are the totals for **what the page is holding** — th
 | **Duration** | The length of the completed entry |
 | **Shift Time** | Which of the station's shift patterns your entry's hours fell in — *1 hr (Day), 14 hrs (Night)*. These are the station's own windows, rounded the same way as the hours below; they are not the shifts you were rostered on, which is what the *Clocked vs scheduled* report measures |
 
-Times follow the **Time Format** preference in User Settings (12-hour or 24-hour), so the table matches the rest of the app for you.
+Times follow your preferred **Time Format** (12-hour or 24-hour), which you can change in your **User Profile** under the **My Settings** tab. That way, the table always matches your preference!
 
 > [!NOTE]
 > **Hours are rounded the way your station reports them** — *System Settings → Clock Settings* — to the nearest 15 minutes, 30 minutes, or the hour. That covers each entry's **Duration**, the **Shift Time** it fell in, and the cards above, and it is the same step an officer's *Clocked vs scheduled* report uses, so the hours you read here are the hours you are paid for. Your recorded times are never changed, only the hours shown.

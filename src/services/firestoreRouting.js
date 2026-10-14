@@ -75,6 +75,7 @@ export const ROUTED_FEATURES = {
       'ADMIN_SAVE_SYSTEM_SETTING',
       'ADMIN_SAVE_SYSTEM_SETTINGS',
       'ADMIN_DELETE_SYSTEM_SETTING',
+      'ADMIN_TRIGGER_DATABASE_BACKUP',
       'ADMIN_DELETE_ROLE',
       'ADMIN_DELETE_RANK',
       'ADMIN_DELETE_SHIFT',
@@ -804,6 +805,8 @@ const DISPATCH = {
     const { deleteSystemSetting } = await writes();
     return ok(await deleteSystemSetting(body.key));
   },
+
+  ADMIN_TRIGGER_DATABASE_BACKUP: async () => ok(await callable('triggerManualBackup', {})),
 };
 
 // Maps admin actions to single-document collections.
