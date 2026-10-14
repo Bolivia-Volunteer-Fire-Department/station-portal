@@ -100,7 +100,6 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
     <CenteredContent className="space-y-6">
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DatabaseBackupCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
-      <MapSettingsPointer onOpenMapSettings={onOpenMapSettings} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -438,8 +437,8 @@ function DatabaseBackupCard({ token, systemSettings, onDataChanged }) {
   }[statusInfo.variant] || 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <div className="p-6 space-y-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400">
             <Database className="h-5 w-5" />
