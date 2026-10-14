@@ -9,20 +9,13 @@ import ConfirmModal from '../ConfirmModal';
 import MemberName from '../MemberName';
 import ToggleSwitch from '../ToggleSwitch';
 
-// Every value on this tab is a `system_settings` row (key/value sheet), the same
-// sheet the System Settings tab writes to - notifications just get their own
-// curated screen so the FCM wiring isn't buried in the generic key list.
+// System setting keys used for Firebase Cloud Messaging (push notifications).
 const FCM_KEYS = {
   webConfig: 'fcm_web_config',
   vapidPublicKey: 'fcm_vapid_public_key',
 };
 
-// Notification types a member or admin can switch on/off.
-//
-// ONE list, from utils/notificationPrefs: the keys are the matching `user_settings` / `system_settings`
-// column names, and this tab renders the station-facing wording (stationLabel/stationDescription) while
-// User Settings renders the member-facing wording. Keeping the keys in one place is what stops a new
-// toggle from existing in one screen and not the other.
+// List of notification types members and admins can toggle.
 import { NOTIFICATION_TYPES } from '../../utils/notificationPrefs';
 import { userLabel } from '../../utils/displayLabel';
 
@@ -39,10 +32,7 @@ function isTruthySetting(value) {
 export default function AdminNotificationsTab({ token, systemSettings, isAdmin = false, onDataChanged }) {
   const [status, setStatus] = useState(null);
 
-  // Credential *presence* comes from an authenticated admin action. The public
-  // initial payload no longer carries the service-account fields, so it cannot
-  // be used to decide whether setup is complete. The action is administrator-only,
-  // so it is not even called for anyone else.
+  // Check whether push notifications are configured on the server.
   const refreshStatus = async () => {
     if (!token || !isAdmin) return;
     try {
@@ -65,8 +55,6 @@ export default function AdminNotificationsTab({ token, systemSettings, isAdmin =
     await refreshStatus();
   };
 
-  // Capped and centerd: a stack of configuration and status cards rather than a table, so full width on a
-  // wide monitor would leave labels and their controls far apart. See utils/contentWidth.
   return (
     <CenteredContent className="space-y-6">
       {isAdmin ? (
@@ -77,9 +65,6 @@ export default function AdminNotificationsTab({ token, systemSettings, isAdmin =
           onSaved={handleConfigSaved}
         />
       ) : (
-        // Visible but inert for a role that manages notification settings without
-        // being an administrator: the credentials themselves stay admin-only, and
-        // the backend refuses these actions regardless of what the UI shows.
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden opacity-60">
           <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
             <Lock className="w-4 h-4 text-slate-400" />
@@ -100,14 +85,7 @@ export default function AdminNotificationsTab({ token, systemSettings, isAdmin =
 }
 
 function FcmConfigCard({ token, systemSettings, status, onSaved }) {
-  // The two values the browser actually needs to subscribe: the Firebase web config and the VAPID public key. Both are
-  // PUBLIC by nature (a web config is public by design and the VAPID key is handed to the browser to register), which is why
-  // they live in system settings and are prefilled here.
-  //
-  // THE SERVICE-ACCOUNT FIELDS ARE GONE, and that is the change rather than a tidy-up: they were write-only data nothing
-  // read. The email shown below comes from the server's own status, and the private key a station used to paste in is now
-  // simply the Cloud Functions service account - the runtime's own identity, which no browser should ever hold. A credential
-  // in a system-settings document is exactly what the data-model rules in the README say never to do.
+  // Firebase configuration and VAPID key needed by browsers to receive notifications.
   const [form, setForm] = useState({
     webConfig: settingValue(systemSettings, FCM_KEYS.webConfig),
     vapidPublicKey: settingValue(systemSettings, FCM_KEYS.vapidPublicKey),
@@ -131,8 +109,7 @@ function FcmConfigCard({ token, systemSettings, status, onSaved }) {
     setSaved(false);
 
     try {
-      // The web config has to be parseable JSON, otherwise the browser can't
-      // initialize Firebase and members will see "not configured yet".
+      // Make sure the web config is valid JSON.
       const rawConfig = String(form.webConfig || '').trim();
       if (rawConfig) {
         try {
@@ -362,8 +339,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
   const [error, setError] = useState(null);
   const [sendingTo, setSendingTo] = useState(null);
   const [testResult, setTestResult] = useState(null);
-  // The member whose notifications are about to be turned off, held while the confirmation asks. The
-  // other direction is not destructive and does not ask.
+  // Member whose notifications are being turned off.
   const [confirmingOff, setConfirmingOff] = useState(null);
   const [switchingId, setSwitchingId] = useState(null);
   const [switchResult, setSwitchResult] = useState(null);
@@ -400,7 +376,6 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
         userId,
         ok: !!response?.success,
         message: response?.message || (response?.success ? 'Test notification sent.' : 'Test notification failed.'),
-        // `advice` explains how to fix it; `detail` is the raw cause, kept for debugging.
         advice: response?.advice || '',
         detail: response?.detail || '',
       });
@@ -411,8 +386,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
     }
   };
 
-  // Turns one member's notifications off (or lets them back on), then re-reads the table so the row
-  // shows the new state rather than the state it had when it was drawn.
+  // Turns a member's notifications on or off.
   const handleSetPushDisabled = async (user, disabled) => {
     setSwitchingId(user.id);
     setSwitchResult(null);
@@ -439,7 +413,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
     }
   };
 
-  // Blank cells inherit the station default, so they read as "Default".
+  // Format preference value as On, Off, or Default.
   const prefLabel = (value) => {
     if (value === undefined || value === null || value === '') return 'Default';
     return isTruthySetting(value) ? 'On' : 'Off';
@@ -447,12 +421,7 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
 
   const users = Array.isArray(status?.users) ? status.users : [];
   const registeredCount = users.filter((u) => u.device_registered).length;
-  // Devices are counted, not members: one member with a phone and a computer is worth two, and the
-  // difference is what tells you whether a silent device is a configuration problem or simply a
-  // device nobody has set up yet.
   const deviceTotal = users.reduce((sum, user) => sum + (Number(user.device_count) || 0), 0);
-  // Members an administrator has switched off. Counted separately because they are NOT "not set up yet":
-  // nothing in their own settings will fix it, and only this table can turn it back on.
   const disabledCount = users.filter((u) => u.push_disabled).length;
 
   return (
@@ -564,16 +533,12 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
                 <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                   <td className="px-4 py-3 font-medium text-slate-900 dark:text-white"><MemberName user={user} /></td>
                   <td className="px-4 py-3">
-                    {/* A member switched off by an administrator is not the same as one who never set a
-                        device up: the first needs this table to change, the second needs that member. */}
                     {user.push_disabled ? (
                       <span className="text-amber-600 dark:text-amber-400">Off (administrator)</span>
                     ) : (
                       <span className={user.device_registered
                         ? 'text-emerald-600 dark:text-emerald-400'
                         : 'text-slate-400 dark:text-slate-500'}>
-                        {/* A count, not a tick: a member with a phone and a computer has two, and knowing
-                            how many is how you tell "one device is silent" from "no device at all". */}
                         {user.device_registered
                           ? `${Number(user.device_count) || 1} device${(Number(user.device_count) || 1) === 1 ? '' : 's'}`
                           : '—'}
@@ -600,9 +565,6 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
-                      // Turning a member off is destructive and, from this table, one-way: their devices
-                      // are forgotten and their browsers cannot put them back, so it asks first. Turning
-                      // them back on is neither destructive nor complete on its own, so it does not.
                       onClick={() => (user.push_disabled ? handleSetPushDisabled(user, false) : setConfirmingOff(user))}
                       disabled={switchingId === user.id || (!user.push_disabled && !user.device_registered)}
                       title={user.push_disabled
@@ -627,8 +589,6 @@ function DeliveryStatusCard({ token, fcmConfigured }) {
         </table>
       </div>
 
-      {/* The confirmation replaces a native dialog: styled, heard (ConfirmModal plays the tone), and able to
-          name what is lost - which here is two things, and both are why this is not a one-line delete. */}
       {confirmingOff && (
         <ConfirmModal
           title={`Turn off notifications for ${userLabel(confirmingOff)}?`}

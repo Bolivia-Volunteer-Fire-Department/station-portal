@@ -165,6 +165,7 @@ export default function App() {
   // Training activities and member completion signatures.
   const [trainings, setTrainings] = useState([]);
   const [trainingSignatures, setTrainingSignatures] = useState([]);
+  const [adminTrainingSignatures, setAdminTrainingSignatures] = useState([]);
   // Alerts for upcoming or expired certifications.
   const [certificationAlerts, setCertificationAlerts] = useState([]);
   const [certificationSetup, setCertificationSetup] = useState([]);
@@ -673,7 +674,12 @@ const getLoadingMessage = () => {
     scheduleOffers: setAdminOffers,
     certificationRecords: setCertificationRecords,
     certificationSetup: setCertificationSetup,
-    trainings: setTrainings,
+    trainings: (payload) => {
+      const rows = Array.isArray(payload) ? payload : payload?.trainings;
+      if (Array.isArray(rows)) setTrainings(rows);
+      const signatures = payload?.signatures || payload?.trainingSignatures;
+      if (Array.isArray(signatures)) setAdminTrainingSignatures(signatures);
+    },
   };
 
   // AFTER A SAVE, re-read only what that save could have changed
@@ -873,7 +879,7 @@ const getLoadingMessage = () => {
       documents: ['directory'],
       announcements: ['directory'],
       events: ['directory'],
-      training: ['directory'],
+      training: ['trainings', 'directory'],
     };
     const wanted = (sectionsForTab[adminSubTab] || []).filter((section) => !adminSectionLoaded[section]);
     if (!wanted.length) return;
@@ -954,6 +960,7 @@ const getLoadingMessage = () => {
     if (data.scheduleTemplates) setScheduleTemplates(data.scheduleTemplates);
     if (data.assignments) setAssignments(data.assignments);
     if (data.scheduleOffers) setAdminOffers(data.scheduleOffers);
+    if (data.adminTrainingSignatures) setAdminTrainingSignatures(data.adminTrainingSignatures);
   };
 
   // The signed-in member's own shift offers (pending/approved/declined) - what the My Schedule pills ...
@@ -1069,6 +1076,7 @@ const getLoadingMessage = () => {
       }
       if (data && data.trainings) setTrainings(data.trainings);
       if (data && data.signatures) setTrainingSignatures(data.signatures);
+      setAdminSectionLoaded((prev) => (prev.trainings ? { ...prev, trainings: false } : prev));
       return REFRESH_OK;
     } catch (err) {
       console.error('Failed to refresh training data:', err);
@@ -2314,7 +2322,7 @@ const getLoadingMessage = () => {
                 events={events}
                 offers={adminOffers}
                 trainings={trainings}
-                trainingSignatures={trainingSignatures}
+                trainingSignatures={adminTrainingSignatures}
                 // Lets any admin tab show a saved row immediately instead of waiting for the background refresh wav...
                 onRowSaved={applySavedRow}
                 departmentLogoUrl={departmentLogo}

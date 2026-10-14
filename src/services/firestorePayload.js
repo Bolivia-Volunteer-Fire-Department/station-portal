@@ -256,7 +256,17 @@ const ADMIN_SECTIONS = {
 
   certificationSetup: async (db) => ({ certificationSetup: await rowsOf(collection(db, 'certification_setup')) }),
 
-  trainings: async (db) => ({ trainings: await rowsOf(collection(db, 'trainings')) }),
+  trainings: async (db) => {
+    const [trainings, signatures] = await Promise.all([
+      rowsOf(collection(db, 'trainings')),
+      rowsOf(collection(db, 'training_signatures')),
+    ]);
+    return {
+      trainings: { trainings, signatures },
+      signatures,
+      trainingSignatures: signatures,
+    };
+  },
 
   scheduleOffers: async (db) => ({ scheduleOffers: await pendingOffers(db) }),
 

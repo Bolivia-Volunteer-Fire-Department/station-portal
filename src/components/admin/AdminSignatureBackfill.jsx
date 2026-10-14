@@ -23,16 +23,7 @@ const todayKey = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
 
-// THE TICK GRID, on its own so the panel above reads as a panel: sections with their own all/none, and one row per
-// item. Two things about it are worth stating.
-//
-// AN ITEM ALREADY ON FILE IS NOT CLICKABLE, and it says which kind of "done" it is. A member who ticked it in the app
-// and a member whose row an officer entered from paper are both done, and the officer working through the rest of that
-// person's file needs to see which - so the date and the word are shown rather than the row simply going grey. Offering
-// the tick would also be offering a save that writes nothing, since the writer refuses a second row for an item.
-//
-// THE SECTIONS KEEP THEIR ALL/NONE, because the real files are like the real checklists: "the whole exterior section was
-// done" is one fact, and it should be one click rather than eleven.
+// Checklist item grid with section headers and select all/none controls.
 function BackfillItemGrid({ gridItems, itemStates, selectable, ticked, onToggle, onAllFor, timeFormat = '12' }) {
   return (
     <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
@@ -100,30 +91,7 @@ function BackfillItemGrid({ gridItems, itemStates, selectable, ticked, onToggle,
   );
 }
 
-// BACK-FILLING THE PAPER FILES: recording what people did before this app existed.
-//
-// THE JOB THIS DOES. A station moves to this app and finds the crew has been doing the truck checks, the policy
-// acknowledgements and the drills on paper for years. There are three ways to handle that, and this screen exists
-// because the first two are wrong: make everybody re-do the work in the app (they will not, and they should not have
-// to), leave the history blank (so every member looks like they have done nothing - worse than useless when somebody
-// asks who has read the SCP), or enter it from the paper (correct, but done one item at a time through the member's own
-// screen, for every item of every person, it is an afternoon of clicking).
-//
-// So: the third option with the clicking taken out. The shape is ONE MEMBER AT A TIME, because that is the shape of the
-// paper - an officer sits down with a stack of files and works through them, and "this person did these things, that
-// person did those" is a per-person fact. Pick the person, tick what their file says, press Save, and - if there is
-// another file in the stack - Save & next, which keeps the same checklist, date and note and moves to the next name.
-// Filling in a crew of thirty becomes one pass with no screen to find again.
-//
-// WHY IT IS SAFE TO LET AN OFFICER WRITE SOMEBODY ELSE'S SIGNATURE. The row says what it is: `backfilled` is true,
-// `signed_by_user_id` is the officer, and the note and the moment of entry go with it. The rules refuse that shape
-// unless the flag is set, so this screen cannot be used to forge an ordinary in-app signature, and every place that
-// reads a signature can tell the two apart - including this one, which labels them. See utils/documents.
-//
-// AND IT IS A RULE, NOT A SECOND OPINION. What gets written is worked out by `backfillableItemIds`, the same pure
-// function the count on the button comes from, so "4 items" and the four rows that land cannot drift apart. An item
-// somebody has already signed - in the app, or by an earlier back-fill - is not selectable, and ticking it would write
-// nothing.
+// Tool for administrators to record past paper signatures and checklist items.
 function AdminSignatureBackfill({ token, documents = [], users = [], currentUserId = '', timeFormat = '12' }) {
   const [documentId, setDocumentId] = useState('');
   const [memberId, setMemberId] = useState('');
@@ -131,21 +99,14 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  // What the officer has ticked but not saved: item ids in a Set, so a double click is one entry.
+  // Set of currently checked item IDs
   const [ticked, setTicked] = useState(() => new Set());
   const [recordedOn, setRecordedOn] = useState(todayKey);
   const [note, setNote] = useState('');
   const [confirmVerified, setConfirmVerified] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Only what has a signature to record: a checklist, or a document that members must sign. Offering a document nobody
-  // has to sign would be a screen that does nothing.
-  //
-  // READ THROUGH `normalizeDocument`, like every other screen and the writer itself. The raw test this used to make
-  // (`row.is_sign_required === true`) is true of a row this app saved and FALSE of the same row written by the sheet -
-  // where the cell is 'TRUE' and the column has held strings since long before the move. A migrated document would then
-  // be missing from this list while the server would have accepted the back-fill for it, which is the kind of
-  // disagreement between two readings of one column that utils/documents exists to prevent.
+  // Only documents or checklists requiring a signature
   const signable = useMemo(
     () =>
       (Array.isArray(documents) ? documents : []).filter((row) => {
@@ -161,8 +122,7 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
   );
   const isChecklist = activeDocument?.doc_type === 'checklist';
 
-  // Everybody except the officer doing the recording: a back-fill is somebody else's record and the server refuses the
-  // alternative, so offering your own name here would be offering a save that always fails.
+  // List of other members who can have signatures backfilled
   const members = useMemo(
     () =>
       backfillCandidates(users, currentUserId)
@@ -173,8 +133,7 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
 
   const loadSignatures = useCallback(
     async (wanted) => {
-      // Nothing chosen yet: the panel is empty rather than loading, and this is settled BEFORE the await so the branch
-      // is not a second place the state is written from.
+      // Reset items and signatures if no document is selected
       if (!wanted) {
         setItems([]);
         setSignatures([]);
@@ -199,15 +158,11 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
     [token]
   );
 
-  // The checklist is read when it is chosen. The ticks are NOT cleared here: they are cleared where the cause is - in
-  // the two pickers below - because an effect that resets state on a dependency change is a second, less obvious place
-  // for "what is ticked" to be decided, and the two would eventually disagree.
   useEffect(() => {
     loadSignatures(documentId);
   }, [documentId, loadSignatures]);
 
-  // Moving to another document, or another member, drops the ticks: they mean "the officer is in the middle of entering
-  // THIS file", so carrying them across would put one person's paper against another person's record.
+  // Reset selections when changing document or member
   const chooseDocument = (id) => {
     setDocumentId(id);
     setTicked(new Set());
@@ -218,11 +173,6 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
     setTicked(new Set());
   };
 
-  // THE GRID: the checklist's items in order, grouped by section, each with whether it is already accounted for and how.
-  //
-  // The state is asked for the SELECTED member only, because that is the only member this screen ever writes for. A
-  // per-member progress figure therefore belongs in the panel below the picker rather than beside every name in the
-  // list, where one read could not honestly fill it in.
   const sections = useMemo(() => (isChecklist ? checklistSections(items) : []), [isChecklist, items]);
 
   const itemStates = useMemo(
@@ -230,16 +180,13 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
     [items, signatures, memberId]
   );
 
-  // EVERYTHING THE SCREEN SAYS ABOUT WHAT WILL BE WRITTEN COMES FROM HERE - one list, so the count beside the button,
-  // the "already on file" wording and the request body cannot disagree. The writer decides it again with the same
-  // function, which is what makes them one definition rather than two opinions.
+  // List of items ready to be backfilled
   const pending = useMemo(
     () => backfillableItemIds(items, signatures, memberId, [...ticked]),
     [items, signatures, memberId, ticked]
   );
 
   const recordedStates = useMemo(() => itemStates.filter((state) => state.recorded), [itemStates]);
-  // A plain document is ONE row rather than many, so there is nothing to tick: the member is the whole selection.
   const wholeDocumentPending = !isChecklist && memberId !== '' && recordedStates.length === 0;
 
   const toggle = (id) =>
@@ -250,8 +197,7 @@ function AdminSignatureBackfill({ token, documents = [], users = [], currentUser
       return next;
     });
 
-  // A section's all/none, and the whole checklist's. `selectable` is the items NOT already on file, so "select all"
-  // never claims to be adding something that is already there.
+  // Items that have not been recorded yet
   const selectable = useMemo(
     () => itemStates.filter((state) => !state.recorded).map((state) => state.itemId),
     [itemStates]
@@ -309,15 +255,11 @@ const handleSave = async ({ advance = false } = {}) => {
             : 'The member can be verified from the queue below.',
         });
       }
-      // The rows that landed come back with the reply, so the grid is redrawn from what is STORED rather than from what
-      // was ticked - the discipline the rest of this tab follows.
       setSignatures(normalizeSignatureList(result.signatures));
       setTicked(new Set());
 
       if (advance) {
-        // That file is done, so the next one is opened: same checklist, same date, same note, next name down the list.
-        // This is the whole ergonomic point - an officer with a stack of paper should never have to find this screen
-        // again, let alone pick the checklist and the date over for each person.
+        // Advance to the next member in the list
         const at = members.findIndex((user) => String(user.id) === memberId);
         const next = members[at + 1];
         if (next) {
@@ -404,10 +346,6 @@ const handleSave = async ({ advance = false } = {}) => {
                     </option>
                   ))}
                 </select>
-                {/* AN EMPTY LIST SAID OUT LOUD. This select has one control and no other content, so when the list is
-                    empty the panel is simply blank - which is what "I cannot select any members" looked like, and it
-                    was in fact the crew directory never having been read for this tab (see sectionsForTab in App.jsx).
-                    A sentence costs nothing and turns a dead-looking dropdown into a statement somebody can act on. */}
                 {members.length === 0 && (
                   <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
                     No members to record for. The crew list could not be read, or you are the only member on it — a
@@ -422,11 +360,9 @@ const handleSave = async ({ advance = false } = {}) => {
                 {error}
               </p>
             )}
-{documentId && memberId && (
+
+            {documentId && memberId && (
               <>
-                {/* THE RECORD OF THE PAPER ITSELF. Both fields belong to the whole sitting rather than to one member,
-                    which is why they sit above the grid and survive Save & next: a stack of files is usually one
-                    year's worth of paper, and the note is what makes the entry defensible a year later. */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div>
                     <label htmlFor="backfill-date" className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -456,9 +392,6 @@ const handleSave = async ({ advance = false } = {}) => {
                   </div>
                 </div>
 
-                {/* Whether copying a file down also CONFIRMS it is a visible choice rather than an implied one. On by
-                    default, because the paper being copied was already signed off by a supervisor; off, for a station
-                    that would rather these went through the ordinary verification queue below. */}
                 <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
                   <input
                     type="checkbox"
@@ -510,9 +443,6 @@ const handleSave = async ({ advance = false } = {}) => {
                   </p>
                 )}
 
-                {/* THE TWO SAVES. "Save" is for a file you are part-way through; "Save & next member" keeps the
-                    checklist, the date and the note and moves to the next name down the list, which is what makes
-                    working through a stack of paper one pass instead of thirty. */}
                 <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
                   <button
                     type="button"

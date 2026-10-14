@@ -1,6 +1,6 @@
 import verifier from '../functions/documentVerification.js';
 
-const { countPendingDocumentVerifications } = verifier;
+const { countPendingDocumentVerifications, pendingDocumentVerificationsSummary } = verifier;
 let failures = 0;
 const check = (label, actual, expected) => {
   const passed = JSON.stringify(actual) === JSON.stringify(expected);
@@ -40,6 +40,45 @@ check(
   'counts unique documents with actionable checklist or document signatures',
   countPendingDocumentVerifications({ documents, items, signatures, verifierUserId: 'verifier-a' }),
   2
+);
+check(
+  'summary breaks down actionable items per document',
+  pendingDocumentVerificationsSummary({ documents, items, signatures, verifierUserId: 'verifier-a' }),
+  {
+    count: 2,
+    byDocument: {
+      'checklist-pending': 1,
+      'document-pending': 1,
+    },
+  }
+);
+// Over 15 checklist items across 2 members on a single checklist document
+const multiItems = Array.from({ length: 10 }, (_, i) => ({ id: `multi-item-${i}`, document_id: 'checklist-heavy' }));
+const multiSignatures = [
+  ...Array.from({ length: 10 }, (_, i) => ({
+    id: `m1-${i}`,
+    document_id: 'checklist-heavy',
+    checklist_item_id: `multi-item-${i}`,
+    user_id: 'member-1',
+    signature_role: 'member',
+  })),
+  ...Array.from({ length: 5 }, (_, i) => ({
+    id: `m2-${i}`,
+    document_id: 'checklist-heavy',
+    checklist_item_id: `multi-item-${i}`,
+    user_id: 'member-2',
+    signature_role: 'member',
+  })),
+];
+check(
+  'counts every actionable checklist item across members on a single document',
+  countPendingDocumentVerifications({
+    documents: [{ id: 'checklist-heavy', doc_type: 'checklist' }],
+    items: multiItems,
+    signatures: multiSignatures,
+    verifierUserId: 'verifier-officer',
+  }),
+  15
 );
 check(
   'excludes the current verifier’s own work',

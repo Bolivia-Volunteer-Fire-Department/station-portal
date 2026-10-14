@@ -11,7 +11,10 @@ const { HttpsError, onCall } = require('firebase-functions/v2/https');
 // searchable in the Firebase console. See the note on `audit` below.
 const { logger } = require('firebase-functions/logger');
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
-const { countPendingDocumentVerifications } = require('./documentVerification');
+const {
+  countPendingDocumentVerifications,
+  pendingDocumentVerificationsSummary,
+} = require('./documentVerification');
 const {
   aggregateReconciliation,
   aggregateScheduleRows,
@@ -980,7 +983,7 @@ exports.readDocumentVerificationCount = onCall(async (request) => {
       const type = String(document.doc_type || '').trim().toLowerCase();
       return type === 'checklist' || (isGranted(document.is_sign_required) && isGranted(document.requires_verification));
     });
-  if (!documents.length) return { count: 0 };
+  if (!documents.length) return { count: 0, byDocument: {} };
 
   const items = [];
   const signatures = [];
@@ -994,13 +997,16 @@ exports.readDocumentVerificationCount = onCall(async (request) => {
     signatures.push(...signatureSnapshot.docs.map((row) => ({ ...row.data(), id: row.id })));
   }
 
+  const summary = pendingDocumentVerificationsSummary({
+    documents,
+    items,
+    signatures,
+    verifierUserId: caller.uid,
+  });
+
   return {
-    count: countPendingDocumentVerifications({
-      documents,
-      items,
-      signatures,
-      verifierUserId: caller.uid,
-    }),
+    count: summary.count,
+    byDocument: summary.byDocument,
   };
 });
 

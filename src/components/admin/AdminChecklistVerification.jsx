@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BadgeCheck, CheckCircle2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
-import { fetchDocumentSignatures, verifyChecklistItem, verifyChecklistRemaining, verifyDocumentSignature } from '../../services/api';
+import {
+  fetchAdminDocumentVerificationSummary,
+  fetchDocumentSignatures,
+  verifyChecklistItem,
+  verifyChecklistRemaining,
+  verifyDocumentSignature,
+} from '../../services/api';
 import { toast } from '../../utils/toast';
 import ConfirmModal from '../ConfirmModal';
 import {
@@ -23,7 +29,14 @@ const fieldClass =
   'w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
 
 // Verification panel: review and confirm checklist items or documents signed by members.
-function AdminChecklistVerification({ token, documents = [], users = [], currentUserId = '', timeFormat = '12' }) {
+function AdminChecklistVerification({
+  token,
+  documents = [],
+  users = [],
+  currentUserId = '',
+  timeFormat = '12',
+  documentVerificationCounts = {},
+}) {
   const [requestedListId, setRequestedListId] = useState('');
   const [items, setItems] = useState([]);
   const [signatures, setSignatures] = useState([]);
@@ -35,6 +48,26 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
   const [verifyingAll, setVerifyingAll] = useState(false);
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [showingVerifiedFor, setShowingVerifiedFor] = useState('');
+  const [pendingCounts, setPendingCounts] = useState(documentVerificationCounts || {});
+
+  useEffect(() => {
+    if (documentVerificationCounts && Object.keys(documentVerificationCounts).length > 0) {
+      setPendingCounts((prev) => ({ ...prev, ...documentVerificationCounts }));
+    }
+  }, [documentVerificationCounts]);
+
+  const refreshSummary = useCallback(async () => {
+    try {
+      const summary = await fetchAdminDocumentVerificationSummary();
+      setPendingCounts(summary.byDocument || {});
+    } catch (err) {
+      console.warn('[verification] could not load verification summary', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSummary();
+  }, [refreshSummary]);
 
   // Documents or checklists eligible for verification.
   const verifiable = useMemo(
@@ -45,11 +78,13 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [documents]
   );
 
-  // Pick the requested document or default to the first one available.
+  // Pick the requested document, or default to the first one with pending items, or the first available.
   const activeListId = useMemo(() => {
     if (requestedListId && verifiable.some((row) => row.id === requestedListId)) return requestedListId;
+    const pendingDoc = verifiable.find((row) => (pendingCounts[row.id] || 0) > 0);
+    if (pendingDoc) return pendingDoc.id;
     return verifiable.length > 0 ? verifiable[0].id : '';
-  }, [verifiable, requestedListId]);
+  }, [verifiable, requestedListId, pendingCounts]);
 
   const activeDocument = useMemo(
     () => verifiable.find((row) => row.id === activeListId) || null,
@@ -101,6 +136,22 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
     [isChecklistTarget, activeDocument, items, signatures, currentUserId]
   );
 
+  const activePendingCount = useMemo(() => {
+    if (!waiting) return 0;
+    return isChecklistTarget
+      ? waiting.reduce((sum, entry) => sum + (entry.remaining ? entry.remaining.length : 0), 0)
+      : waiting.length;
+  }, [waiting, isChecklistTarget]);
+
+  // Keep pendingCounts for the active document updated once its signatures load
+  useEffect(() => {
+    if (!activeListId || loading) return;
+    setPendingCounts((prev) => {
+      if (prev[activeListId] === activePendingCount) return prev;
+      return { ...prev, [activeListId]: activePendingCount };
+    });
+  }, [activeListId, activePendingCount, loading]);
+
   // Determine why the queue is empty so we can show a helpful explanation.
   const emptyReason = useMemo(() => {
     if (isChecklistTarget && items.length === 0) return 'no-items';
@@ -136,6 +187,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
       if (!result?.success) throw new Error(result?.message || 'Could not record the verification.');
       setSignatures(normalizeSignatureList(result.signatures));
       toast.success(result.already_verified ? 'That was already verified.' : 'Verified.');
+      refreshSummary();
     } catch (err) {
       toast.error(err?.message || 'Could not record the verification.');
     } finally {
@@ -158,6 +210,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
           ? 'There was nothing left to verify.'
           : `Verified ${verified} item${verified === 1 ? '' : 's'}.`
       );
+      refreshSummary();
     } catch (err) {
       toast.error(err?.message || 'Could not record the verifications.');
     } finally {
@@ -175,6 +228,7 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
       if (!result?.success) throw new Error(result?.message || 'Could not record the confirmation.');
       setSignatures(normalizeSignatureList(result.signatures));
       toast.success(result.already_verified ? 'That was already confirmed.' : 'Signature confirmed.');
+      refreshSummary();
     } catch (err) {
       toast.error(err?.message || 'Could not record the confirmation.');
     } finally {
@@ -194,6 +248,11 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
       (signature) => signature.checklist_item_id === itemId && signature.user_id === openMemberId
     );
 
+  const documentsNeedingVerification = useMemo(
+    () => verifiable.filter((row) => (pendingCounts[row.id] || 0) > 0),
+    [verifiable, pendingCounts]
+  );
+
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -209,7 +268,10 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
         </div>
         <button
           type="button"
-          onClick={() => loadSignatures(activeListId)}
+          onClick={() => {
+            loadSignatures(activeListId);
+            refreshSummary();
+          }}
           disabled={loading || !activeListId}
           className="ml-auto flex items-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-700"
         >
@@ -225,6 +287,46 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
         </p>
       ) : (
         <>
+          {documentsNeedingVerification.length > 0 && (
+            <div className="space-y-1.5 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/20 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-amber-950 dark:text-amber-200">
+                  Documents awaiting verification ({documentsNeedingVerification.length})
+                </span>
+                <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                  Click to open
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {documentsNeedingVerification.map((row) => {
+                  const count = pendingCounts[row.id] || 0;
+                  const isSelected = row.id === activeListId;
+                  return (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => setRequestedListId(row.id)}
+                      className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                        isSelected
+                          ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400'
+                          : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-amber-300 dark:border-amber-800/80 hover:bg-amber-100 dark:hover:bg-amber-900/40'
+                      }`}
+                    >
+                      <span>{row.title}</span>
+                      <span
+                        className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                          isSelected ? 'bg-slate-950 text-white' : 'bg-amber-400 text-amber-950'
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div>
             <label htmlFor="verification-checklist" className={labelClass}>
               Checklist or document
@@ -235,17 +337,47 @@ function AdminChecklistVerification({ token, documents = [], users = [], current
               onChange={(event) => setRequestedListId(event.target.value)}
               className={fieldClass}
             >
-              {verifiable.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.title}
-                  {row.folder ? ` — ${row.folder}` : ''}
-                  {String(row.doc_type || '') === 'checklist'
-                    ? row.item_count > 0
-                      ? ` (${row.item_count} item${row.item_count === 1 ? '' : 's'})`
-                      : ' (no items yet)'
-                    : ' (signature confirmed as a whole)'}
-                </option>
-              ))}
+              {documentsNeedingVerification.length > 0 ? (
+                <>
+                  <optgroup label={`Awaiting verification (${documentsNeedingVerification.length})`}>
+                    {documentsNeedingVerification.map((row) => {
+                      const count = pendingCounts[row.id] || 0;
+                      return (
+                        <option key={row.id} value={row.id}>
+                          {`● [${count} waiting] ${row.title}${row.folder ? ` — ${row.folder}` : ''}`}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                  <optgroup label="Other documents & checklists">
+                    {verifiable
+                      .filter((row) => !(pendingCounts[row.id] > 0))
+                      .map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.title}
+                          {row.folder ? ` — ${row.folder}` : ''}
+                          {String(row.doc_type || '') === 'checklist'
+                            ? row.item_count > 0
+                              ? ` (${row.item_count} item${row.item_count === 1 ? '' : 's'})`
+                              : ' (no items yet)'
+                            : ' (signature confirmed as a whole)'}
+                        </option>
+                      ))}
+                  </optgroup>
+                </>
+              ) : (
+                verifiable.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.title}
+                    {row.folder ? ` — ${row.folder}` : ''}
+                    {String(row.doc_type || '') === 'checklist'
+                      ? row.item_count > 0
+                        ? ` (${row.item_count} item${row.item_count === 1 ? '' : 's'})`
+                        : ' (no items yet)'
+                      : ' (signature confirmed as a whole)'}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 

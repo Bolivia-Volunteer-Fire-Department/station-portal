@@ -6,7 +6,7 @@ import {
 import { adminDeleteEvent, adminFetchEvents, adminSaveEvent } from '../../services/api';
 import ViewportModal from '../ViewportModal';
 
-// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+// Form ID for the event editor.
 const EVENT_FORM_ID = 'event-editor-form';
 import { toDateKey } from '../../utils/scheduleDate';
 import { authorLabel } from '../../utils/authorLabel';
@@ -20,10 +20,7 @@ import {
   filterEvents, normalizeEvent, normalizeEventColor, normalizeEventList, sortEvents, splitEventsByRecurrence,
 } from '../../utils/events';
 
-// One list card: a header with a count, the rows, and a pager that hides itself on a single page.
-//
-// Both cards are the same shell, so it lives here rather than being written twice. The pager owns its own page
-// number because the two lists page independently.
+// List card showing events with pagination controls.
 function EventListCard({ title, icon, rows, visible, page, onPageChange, emptyMessage, rowProps }) {
   const pageCount = totalPages(rows.length, EVENTS_PAGE_SIZE);
 
@@ -78,8 +75,7 @@ function EventListCard({ title, icon, rows, visible, page, onPageChange, emptyMe
   );
 }
 
-// A new event defaults to a one-hour block TODAY, repeating weekly: "every Tuesday" is the common case,
-// and it means the form is usable without typing a date at all.
+// Create default blank event form values.
 const todayKey = () => toDateKey(new Date());
 
 const EMPTY_FORM = () => ({
@@ -111,10 +107,7 @@ const chipClass =
 const selectClass =
   'bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
 
-// One event row, shared by both list cards.
-//
-// A local component rather than a second copy of the markup: the two cards show identical rows, and a copy is
-// how the calendars drifted apart earlier in this feature.
+// Single event row item.
 function EventRow({ event, roles, ranks, users, timeFormat, deletingId, onEdit, onDelete }) {
   const author = authorLabel(event, users);
 
@@ -131,9 +124,7 @@ function EventRow({ event, roles, ranks, users, timeFormat, deletingId, onEdit, 
           {event.isAllDay && <span className={chipClass}>All day</span>}
         </div>
 
-        {/* A repeating event has no single date, so it is described by its repeat and its TIMES. The "next" line
-            exists because the anchor date is not the first occurrence: a weekly event anchored on a Thursday and
-            set to Tuesdays first lands the following Tuesday, which reads as "it did not save" if nothing says so. */}
+        {/* Event time or recurrence details */}
         <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
           {event.isRecurring
             ? `${eventRecurrenceLabel(event)} · ${eventTimesLabel(event, timeFormat)}`
@@ -178,7 +169,7 @@ function EventRow({ event, roles, ranks, users, timeFormat, deletingId, onEdit, 
   );
 }
 
-// One labeled control, so twenty fields stay readable instead of repeating a wrapper each time.
+// Form input wrapper with label and optional hint.
 function Field({ label, hint, wide, children }) {
   return (
     <div className={wide ? 'md:col-span-2' : undefined}>
@@ -189,8 +180,7 @@ function Field({ label, hint, wide, children }) {
   );
 }
 
-// The sheet holds date/times as text and the form edits them as one string, so these two conversions live
-// here rather than in the shared engine, which takes whatever the cell happens to hold.
+// Helpers to format date/time values for input fields.
 const toInputValue = (instant, allDay) => {
   if (!instant) return '';
   if (allDay) return instant.dateKey;
@@ -215,7 +205,7 @@ export default function AdminEventsTab({
   const [rows, setRows] = useState([]);
   const [sort, setSort] = useState(DEFAULT_EVENT_SORT);
   const [filters, setFilters] = useState(emptyEventFilters);
-  // One page number per card, because the two lists are paged independently.
+  // Pagination state for one-off and recurring event lists.
   const [oneOffPage, setOneOffPage] = useState(1);
   const [recurringPage, setRecurringPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -224,15 +214,14 @@ export default function AdminEventsTab({
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
+  // Event selected for deletion.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
   const isEditing = !!form.id;
   const setField = (key, value) => setForm((previous) => ({ ...previous, [key]: value }));
 
-  // Fetched here rather than through the shared refresh wave: ADMIN_GET_EVENTS returns the whole sheet, and
-  // this tab only exists while an administrator is looking at it.
+  // Fetch all events from the server.
   const loadRows = useCallback(async () => {
     const result = await adminFetchEvents(token);
     if (!result?.success) throw new Error(result?.message || 'Failed to load events.');
@@ -260,8 +249,7 @@ export default function AdminEventsTab({
     };
   }, [loadRows]);
 
-  // Re-reads this tab's own list after a write. onDataChanged refreshes the calendars, which is a
-  // different set of screens.
+  // Reload events list after saving changes.
   const reload = async () => {
     try {
       setRows(await loadRows());
@@ -273,17 +261,16 @@ export default function AdminEventsTab({
 
   const handleEdit = (event) => {
     setError(null);
-    // Open the card, or the click would appear to do nothing.
+    // Open the editor modal.
     setFormOpen(true);
     setForm({
       id: event.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
+      // Track row version to prevent concurrent edit conflicts.
       row_version: event.row_version,
       title: event.title,
       date_from: toInputValue(event.startsAt, false),
       date_to: toInputValue(event.endsAt, false),
-      // The stored color is always resolved, so "no explicit color" has to be recovered by comparing
-      // against the default - otherwise the form would present gray as a chosen color.
+      // Use blank string for default color.
       color: event.color === EVENT_DEFAULT_COLOR ? '' : event.color,
       role_id: event.role_id,
       rank_id: event.rank_id,
@@ -307,14 +294,11 @@ export default function AdminEventsTab({
     setSaving(true);
     setError(null);
     try {
-      // The same rules the client enforces on read, so a bad event is caught before a round trip.
+      // Validate required event fields before saving.
       const problem = eventValidation(form);
       if (problem) throw new Error(problem);
 
-      // A repeat's date columns exist only to carry the anchor's TIMES - left alone they read as a day the
-      // event never happens on, which is how "every Tuesday" ended up filed under the day the form was open.
-      // The sheet backend stamped this on save (eventFieldsFrom); the write is the client's now, so the same
-      // stamp happens here, immediately before the request.
+      // Format date and time strings for repeating events.
       const payload = form.is_recurring
         ? {
             ...form,
@@ -337,8 +321,7 @@ export default function AdminEventsTab({
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  // Prompt user to confirm event deletion.
   const handleDelete = (event) => setPendingDelete(event);
 
   const confirmDelete = async () => {
@@ -363,11 +346,7 @@ export default function AdminEventsTab({
     }
   };
 
-  // The two lists, ordered, filtered and paged.
-  //
-  // All four steps are derived rather than stored: a reload, a delete or a filter change cannot leave the order,
-  // the split or a page number out of step with the rows underneath them. The clamp on each page is what stops a
-  // delete on the last page from rendering an empty card.
+  // Filter, sort, and paginate events into one-off and recurring lists.
   const orderedRows = useMemo(() => sortEvents(rows, sort), [rows, sort]);
   const matchingRows = useMemo(() => filterEvents(orderedRows, filters), [orderedRows, filters]);
   const { oneOff, recurring } = useMemo(() => splitEventsByRecurrence(matchingRows), [matchingRows]);
@@ -385,9 +364,7 @@ export default function AdminEventsTab({
 
   const filtersOn = eventFiltersActive(filters);
 
-  // Changing a filter sends both lists back to their first page: you filter to look at a different set of events,
-  // and landing on page 3 of a result you have not seen the start of reads as an empty screen. The clamp already
-  // makes an out-of-range page safe; this makes it sensible.
+  // Reset page to 1 when filters change.
   const updateFilters = (next) => {
     setFilters(next);
     setOneOffPage(1);
@@ -398,10 +375,7 @@ export default function AdminEventsTab({
   const isMonthly = form.is_recurring && form.recurring_frequency === 'monthly';
   const previewColor = normalizeEventColor(form.color) || EVENT_DEFAULT_COLOR;
 
-  // What the form currently describes, for the live "first appears" line below the repeat fields.
-  //
-  // This is the answer to the mistake that prompted it: a weekly event anchored on a Thursday and set to
-  // Tuesdays does not appear until the FOLLOWING Tuesday, so without this line the repeat looks broken.
+  // Preview next occurrence date for recurring events.
   const recurringPreview = form.is_recurring ? normalizeEvent({ ...form, id: 'preview' }) : null;
   const recurringNextLabel = recurringPreview
     ? eventNextOccurrenceLabel(recurringPreview, { fromKey: todayKey(), timeFormat, prefix: '' })
@@ -414,8 +388,7 @@ export default function AdminEventsTab({
 
   return (
     <div className="space-y-6">
-      {/* The editor, in the viewport modal every New card in this module now uses. `formOpen` is unchanged: it was
-          the collapse state and it is the open state now - the same question, asked of a different shell. */}
+      {/* Event editor modal */}
       {formOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Event', form.title) : 'New event'}

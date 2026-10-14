@@ -1,15 +1,6 @@
 import React from 'react';
 
-// The Administration landing page: a grid of large cards, one per nav category.
-//
-// WHY THIS EXISTS. Opening Administration used to drop the member straight into the first permitted
-// tab (Users, or Pending Approvals when offers were waiting), which paid for that tab's reads whether
-// or not the member wanted it. The menu reads nothing but the offers its badge counts, and every
-// card's tab list is the navigation: the dropdown bar at the top of the module only appears once a
-// section is chosen, and the way back here is the sidebar's Administration item again.
-//
-// The cards mirror ADMIN_NAV_CATEGORIES (the same source the dropdown bar renders), so a category
-// can never exist on the menu and be missing from the bar, or the other way round.
+// The Administration home menu: displays categories of administrative settings.
 export default function AdminMenuPage({
   categories,
   onSelectTab,
@@ -28,7 +19,6 @@ export default function AdminMenuPage({
 
   return (
     <div>
-      {/* The page heading above already says "Administration" - this is only the wayfinding note. */}
       <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">
         Choose a section to manage. Press <span className="font-medium">Administration</span> in the sidebar to
         come back here.
@@ -36,8 +26,7 @@ export default function AdminMenuPage({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {categories.map(({ id, label, icon: CategoryIcon, items }) => {
-          // The pending-offers badge belongs to the category that holds the approvals tab, so it is
-          // visible at a glance on the card - and again on the item itself, beside the label.
+          // Count of pending items to show on the category card.
           const cardBadge = items.some((item) => item.id === pendingTabId) ? pendingCount : 0;
 
           return (

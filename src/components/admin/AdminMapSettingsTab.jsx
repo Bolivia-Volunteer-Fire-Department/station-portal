@@ -18,8 +18,7 @@ import {
   cacheMapTypes,
   cachedMapTypes,
 } from '../../utils/districtMap';
-// WHAT A PIN CAN BE: the station's own list of types, its checks and its built-in starting set - the same functions the map
-// screen resolves a pin's kind with, so the card cannot save a list the map would refuse to draw.
+// Map pin types and settings.
 import {
   DEFAULT_MAP_TYPES,
   MAP_TYPE_COLOURS,
@@ -29,11 +28,10 @@ import {
   mapTypesProblem,
   mapTypesView,
 } from '../../utils/mapTypes';
-// The glyph set the picker offers - the same table the map draws its markers from.
+// List of available icon names for map pins.
 import { MAP_ICON_KEYS } from '../../utils/mapIcons';
 import MapTypeGlyph from '../MapTypeGlyph';
-// The district boundary's own checks and device copy - the same functions the writer stores with - and the one place that
-// talks to the county. See utils/districtMap for why the boundary is real coordinates rather than a drawing.
+// District boundary helpers and caching.
 import {
   MAP_BACKDROP_BAND_METRES,
   MAP_BACKDROP_FIELDS,
@@ -53,48 +51,22 @@ import {
   fireBeatSearchTerm,
   searchFireBeats,
 } from '../../services/countyGis';
-// The district map's own refusals, measurements and device copy - the SAME functions the writer stores with, so the file this
-// card accepts and the document that is written cannot be two different judgements. The URL hook is shared with the member's
-// map screen rather than duplicated there (see utils/mapDrawingUrl for why it is not imported FROM it).
+// District map drawing helpers and caching.
 import { cacheMapLayer, clearCachedMapLayer, formatBytes, mapLayerProblem, mapSvgBytes, mapSvgProblem } from '../../utils/mapLayer';
 import { useDrawingUrl } from '../../utils/mapDrawingUrl';
-// The station's own name, which the fire-beat search starts from rather than making an officer type it: getSettingValue reads a
-// system setting out of the payload the panel already holds.
+// Helper to read values from system settings.
 import { getSettingValue } from '../../utils/systemSettings';
 import CenteredContent from '../CenteredContent';
 import ConfirmModal from '../ConfirmModal';
 
-// THE MAP'S OWN SETTINGS, ON THEIR OWN SCREEN.
-//
-// These three cards used to sit in the middle of System Settings, between the department name and the clock rounding - which is
-// where they were written, and which stopped being the right place once the map grew from a picture of a department to a
-// boundary, a background and a set of landmarks. Nothing about them is a system setting: they are the ground the station covers,
-// they are read by exactly one screen, and one of them (the boundary) is what the other two are built against.
-//
-// A card each, in the order they depend on each other:
-//
-//   * THE BOUNDARY first, because it is the district itself and because the background is CLIPPED TO IT - the background card
-//     says so rather than fetching the whole county.
-//   * THE BACKGROUND second: the county's roads and waterways, copied once so the map works with no signal. The road names and
-//     the beats on either side of a road are part of that copy.
-//   * THE DRAWING last, since it is the oldest part of the feature and the only one that is a picture rather than geometry.
-//
-// The permissions are unchanged by the move, and deliberately so: this screen is reached by the same role that maintained these
-// cards when they were a section of System Settings. What changed is where somebody looks for them.
+// Admin settings tab for configuring district boundaries, background layers, landmark types, and custom map drawings.
 export default function AdminMapSettingsTab({ token, systemSettings, canEditMap = false, canEditSystemSettings = false }) {
-  // Capped and centerd, exactly as System Settings is: this is a stack of cards rather than a table, so full width on a wide
-  // monitor would leave each card's labels and their controls far apart. See utils/contentWidth.
   return (
     <CenteredContent className="space-y-6">
-      {/* EACH CARD FOLLOWS THE PERMISSION ITS SAVE NEEDS, because this screen opens for two of them (utils/permissions#roleAllowsTab).
-          A card somebody could not save is not shown greyed out with a save button that refuses: it is replaced by the sentence
-          naming the switch that would let them. Nobody is handed a control the server will reject. */}
       {canEditMap ? (
         <>
           <DistrictBoundaryCard token={token} systemSettings={systemSettings} />
           <MapBackgroundCard token={token} />
-          {/* THE LEGEND, edited where the rest of the map is set up: what a pin can be is as much a station decision as where
-              the district's edge runs. */}
           <MapTypesCard token={token} />
         </>
       ) : (
@@ -113,8 +85,7 @@ export default function AdminMapSettingsTab({ token, systemSettings, canEditMap 
   );
 }
 
-// WHAT A CARD SAYS WHEN THE OFFICER CANNOT USE IT. It names the card, and names the permission in the words the Roles screen
-// uses - so the answer to "who can do this?" is on the screen rather than in a conversation.
+// Displays a message when the user lacks the permission required to edit a setting.
 function NeedsPermission({ what, children }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
@@ -127,27 +98,16 @@ function NeedsPermission({ what, children }) {
   );
 }
 
-// THE DISTRICT MAP: the department's boundary drawing, uploaded here and drawn by the member's District Map module.
-//
-// IT TOUCHES NO SYSTEM SETTING, deliberately rather than by oversight. The drawing is a document of its own - read when
-// the map screen opens rather than on every sign-in, which is the difference between a few hundred kilobytes paid for by
-// one screen and the same paid for by every member's payload. utils/mapLayer holds the whole argument, including why the
-// drawing is stored as TEXT rather than as an SVG file in the storage bucket.
-//
-// WHAT THIS CARD OWNS is the part a person does, and each part exists because of a way it can go wrong: reading what is
-// stored, checking a chosen file with the SAME function the writer stores with, SHOWING what would be saved before it is,
-// and saying honestly whether it was. A refused file is a message about the file rather than a console error.
+// Card for uploading and previewing an SVG drawing of the district.
 function DistrictMapCard({ token }) {
   const [layer, setLayer] = useState(null);
   const [loading, setLoading] = useState(true);
-  // The chosen drawing's TEXT, held until Save: choosing a file must not upload it, or an officer who picked the wrong
-  // export would have already replaced the station's map.
+  // Holds the contents of the chosen SVG file before it is saved.
   const [chosen, setChosen] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  // The drawing being REMOVED, held in state while the dialog asks - the same shape every other card in this file uses, so
-  // the dialog is rendered by the component that holds what it is about to destroy (see scripts/verify-confirmations).
+  // Holds the map layer targeted for removal.
   const [pendingDelete, setPendingDelete] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -170,22 +130,17 @@ function DistrictMapCard({ token }) {
     };
   }, [token]);
 
-  // What is previewed: the file just chosen, or what is already stored. One <img>, so the officer sees the drawing the
-  // members will see - at the size the card has, which is why the file also reports its own measurements below.
+  // URL for rendering the chosen or stored SVG drawing.
   const previewUrl = useDrawingUrl(chosen ? chosen.svg : layer?.svg || '');
-  // A drawing STORED by an older build, or edited by hand, is checked through the same refusals an upload is: this card
-  // should not be the place it is discovered.
   const storedProblem = mapLayerProblem(layer);
 
   const handleFileChange = async (event) => {
     const file = event.target.files && event.target.files[0];
-    // Cleared immediately, so choosing the SAME file twice in a row after fixing it still fires a change event.
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (!file) return;
     setError(null);
     setSaved(false);
     try {
-      // Read as text, never uploaded: the drawing is stored as text, and this is the same text the writer will send.
       const text = await file.text();
       const problem = mapSvgProblem(text);
       if (problem) {
@@ -211,13 +166,10 @@ function DistrictMapCard({ token }) {
       if (!result || !result.success) {
         throw new Error((result && result.message) || 'Failed to save the district map.');
       }
-      // READ BACK rather than trust what was sent: the stored document is the answer to "what is the station's map", so the
-      // card shows that - including the date the writer stamped on it - instead of echoing back the file it handed over.
+      // Reload the updated map layer and cache it locally.
       const fresh = await fetchMapLayer();
       const next = fresh && fresh.mapLayer ? fresh.mapLayer : null;
       setLayer(next);
-      // ...and THIS DEVICE is made right at the same moment, because the officer usually opens the map next and the map
-      // screen's first paint is the copy on this device (utils/mapLayer).
       if (next) cacheMapLayer(next);
       setChosen(null);
       setSaved(true);
@@ -238,7 +190,6 @@ function DistrictMapCard({ token }) {
       if (!result || !result.success) {
         throw new Error((result && result.message) || 'Failed to remove the district map.');
       }
-      // The device's copy goes with it, or the next visit to the map would draw the map that was just taken down.
       clearCachedMapLayer();
       setLayer(null);
       setChosen(null);
@@ -295,8 +246,6 @@ function DistrictMapCard({ token }) {
 
         {previewUrl ? (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-3">
-            {/* The preview SAYS WHICH drawing it is. A file that has been chosen but not saved is the state this card exists
-                to make obvious: choosing is not uploading, so the two must never look the same. */}
             <p className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
               {chosen ? `Chosen: ${chosen.name} — not saved yet` : 'Currently saved'}
             </p>
@@ -319,9 +268,6 @@ function DistrictMapCard({ token }) {
             <input
               ref={fileInputRef}
               type="file"
-              // BOTH the extension and the MIME type, because a browser that has never opened an SVG offers it by type and
-              // one that has offers it by extension. What is actually ACCEPTED is decided by reading the text, not by
-              // either of these - so a file that arrives here with the wrong name is still judged on its contents.
               accept=".svg,image/svg+xml"
               onChange={handleFileChange}
               className="hidden"
@@ -347,8 +293,6 @@ function DistrictMapCard({ token }) {
             ) : null}
           </div>
 
-          {/* Disabled until a file has been CHOSEN and accepted: there is nothing to save before that, and a live button
-              that does nothing is worse than one that says so. */}
           <button
             type="submit"
             disabled={saving || !chosen}
@@ -360,9 +304,6 @@ function DistrictMapCard({ token }) {
         </div>
       </form>
 
-      {/* In THIS card rather than at the end of the file, and that is not tidiness: a dialog rendered by a component that
-          does not hold the drawing would be about something the renderer cannot see - and the row it names is held right
-          here, in `pendingDelete`. */}
       {pendingDelete ? (
         <ConfirmModal
           title="Remove district map"
@@ -382,26 +323,15 @@ function DistrictMapCard({ token }) {
   );
 }
 
-
-// THE DISTRICT BOUNDARY: the real one, in latitude and longitude - fetched from the county's own open data, or uploaded as a
-// GeoJSON file by a department whose county does not publish one.
-//
-// WHY THIS CARD EXISTS AT ALL, given the department can draw a map: a drawing is a picture of a map, and a boundary is the
-// map. The polygon is ~2,245 points and 51 KB for this station's district, it is the county's OFFICIAL line rather than a
-// traced copy of it, it can be pinned and measured, and it survives being redrawn. utils/districtMap holds the argument.
-//
-// IT IS COPIED, NOT LINKED, and that is the whole design: pressing "Find my department" asks the county ONCE and the answer
-// is stored in the station's own document. After that the map reads nothing but the station's own data, so it works with no
-// signal and does not depend on somebody else's server staying up. Refreshing it is the same button, pressed next year.
+// Card for setting the official geographic boundary of the district.
 function DistrictBoundaryCard({ token, systemSettings }) {
   const [boundary, setBoundary] = useState(null);
   const [loading, setLoading] = useState(true);
-  // The county's own name for a department contains words every department shares, so the first one that means something is
-  // searched for instead: "Bolivia Volunteer Fire Department" -> "Bolivia". See services/countyGis.js.
+  // Default search term derived from the department name.
   const [search, setSearch] = useState(() => fireBeatSearchTerm(getSettingValue(systemSettings, 'department_name', '')));
   const [matches, setMatches] = useState(null);
   const [checking, setChecking] = useState(false);
-  // The boundary being considered: from the county, or from a file. NOT saved until the officer presses Save.
+  // Selected boundary before saving.
   const [chosen, setChosen] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -457,8 +387,7 @@ function DistrictBoundaryCard({ token, systemSettings }) {
     });
   };
 
-  // A FILE, for a department whose county does not publish its beats - which is most of them. It is read as TEXT and parsed
-  // here rather than uploaded as bytes: what the app stores is the geometry, and it has no interest in the file itself.
+  // Reads a GeoJSON file from the user's computer.
   const handleFile = async (event) => {
     const file = event.target.files && event.target.files[0];
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -473,7 +402,7 @@ function DistrictBoundaryCard({ token, systemSettings }) {
       } catch {
         throw new Error('That file is not JSON. Export the boundary as GeoJSON from your GIS system, and upload that file.');
       }
-      // The SAME check the writer applies, so a file this card accepts is a file the save will accept.
+      // Check that the GeoJSON is valid.
       const problem = boundaryProblem(parsed);
       if (problem) throw new Error(problem);
       const properties = parsed?.features?.[0]?.properties || parsed?.properties || {};
@@ -497,8 +426,7 @@ function DistrictBoundaryCard({ token, systemSettings }) {
     try {
       const result = await adminSaveMapBoundary({ geojson: chosen.geojson, meta: chosen.meta }, token);
       if (!result || !result.success) throw new Error((result && result.message) || 'Failed to save the district boundary.');
-      // READ BACK, so the card says what the map will draw - including the stamp the writer put on the document - and CACHE
-      // it for this device, because the officer usually opens the map next.
+      // Reload and cache the saved boundary.
       const fresh = await fetchMapBoundary().catch(() => null);
       const next = fresh && fresh.mapBoundary ? fresh.mapBoundary : null;
       setBoundary(next);
@@ -642,8 +570,6 @@ function DistrictBoundaryCard({ token, systemSettings }) {
           ) : null}
         </div>
 
-        {/* The boundary being considered. It says so in as many words, because it is NOT saved yet - and saving replaces the
-            line every member sees on the map. */}
         {chosen ? (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
             <p className="font-medium">{chosen.meta.label || 'Boundary'} — not saved yet</p>
@@ -659,8 +585,6 @@ function DistrictBoundaryCard({ token, systemSettings }) {
             <input
               ref={fileInputRef}
               type="file"
-              // A `.geojson` file is JSON, and a GIS system may well export it as `.json`. What is ACCEPTED is decided by
-              // parsing it and checking it, not by the name.
               accept=".geojson,.json,application/geo+json,application/json"
               onChange={handleFile}
               className="hidden"
@@ -697,7 +621,6 @@ function DistrictBoundaryCard({ token, systemSettings }) {
         </div>
       </div>
 
-      {/* In THIS card, because this is the component holding the boundary being removed. */}
       {pendingDelete ? (
         <ConfirmModal
           title="Remove district boundary"
@@ -716,16 +639,7 @@ function DistrictBoundaryCard({ token, systemSettings }) {
   );
 }
 
-// THE MAP BACKGROUND: the county's own linework - its roads, its waterways, the FEMA flood zones, the fire districts
-// around this one, and the major roads out through them - fetched once and stored as the station's own geometry.
-//
-// IT IS A COPY FOR THE SAME REASON THE BOUNDARY IS (utils/districtMap argues it in full): a tile layer from somebody else's
-// server is the thing this deliberately is not, because the map has to work in a truck with no signal. What is stored is the
-// county's own linework, CLIPPED TO THE DISTRICT (and, for the layers that reach past the district line, to a band of ground
-// around it - or, for the nearby roads, to the neighbouring districts' own outlines) and GENERALISED BY THE COUNTY - which is
-// what turns 1.4 MB of flood zones into 80 KB, and why every layer fits in a document of its own.
-//
-// THE CLIP COMES FROM THE BOUNDARY, so this card needs one to exist: it says so rather than fetching the whole county.
+// Card for downloading and storing background layers like roads, waterways, and flood zones.
 function MapBackgroundCard({ token }) {
   const [boundary, setBoundary] = useState(null);
   const [backdrops, setBackdrops] = useState({});
@@ -764,25 +678,17 @@ function MapBackgroundCard({ token }) {
     setError(null);
     setSaved('');
     try {
-      // BOTH CLIPS, because WHICH one a layer is fetched with is the app's decision rather than this card's memory
-      // (utils/districtMap#MAP_BACKDROP_CLIP): the district's own outline for the water and the flood zones, and the box
-      // around the district plus a band of ground for the roads and the districts next door. A card that had to know which
-      // layer wanted which would eventually get it wrong, and the symptom would be a background that stops at the boundary.
       const clip = boundary ? esriClipFrom(boundary.geojson) : null;
       const band = boundary ? esriBandFrom(boundary.geojson, MAP_BACKDROP_BAND_METRES) : null;
       if (!clip || !band) {
         throw new Error('Set the district boundary first - every layer is clipped to it, so the whole county is not fetched.');
       }
-      // AND WHO THIS STATION IS, for the one layer that has to leave it out: the county is asked for the beats AROUND this one
-      // (services/countyGis#neighbourWhere), and a boundary that arrived as a file has no agency to match - in which case the
-      // screen drops the one polygon that lands on its own district.
       const answer = await fetchCountyBackdrop({ layer, clip, band, exclude: boundary.agency });
       const result = await adminSaveMapBackdrop(
         { layer, geojson: answer.collection, meta: { label: MAP_BACKDROP_STYLE[layer].label, source: answer.source, tolerance: answer.tolerance } },
         token
       );
       if (!result || !result.success) throw new Error((result && result.message) || 'Failed to save the map background.');
-      // Read back, so the row says what was STORED - including the size and the stamp the writer put on it.
       const fresh = await fetchMapBackdrops().catch(() => null);
       const next = fresh && fresh.backdrops && typeof fresh.backdrops === 'object' ? fresh.backdrops : {};
       setBackdrops(next);
@@ -819,8 +725,6 @@ function MapBackgroundCard({ token }) {
     const style = MAP_BACKDROP_STYLE[layer];
     const stored = backdrops[layer];
     const size = stored?.geojson ? `${Math.round(String(stored.geojson).length / 1024)} KB` : '';
-    // The attributes this layer is SUPPOSED to keep, against the ones it actually has. They differ for exactly one reason: a
-    // document fetched before the app started keeping them.
     const wanted = MAP_BACKDROP_FIELDS[layer] || [];
     const kept = Array.isArray(stored?.fields) ? stored.fields : [];
     return (
@@ -835,9 +739,7 @@ function MapBackgroundCard({ token }) {
               ? `${Number(stored.features || 0).toLocaleString()} features · ${Number(stored.points || 0).toLocaleString()} points · ${size} · set ${stored.updated_at || 'unknown'}`
               : 'Not fetched yet'}
           </p>
-          {/* WHAT THE LAYER KEEPS OF ITS OWN ATTRIBUTES, shown only for a layer that is supposed to keep some. A road layer
-              with none was fetched before the app started keeping the names and the beats - which is a one-button fix, and
-              worth saying out loud rather than leaving somebody to wonder why the roads have no names on them. */}
+          {/* Shows whether extra attributes were saved with this layer. */}
           {stored && wanted.length ? (
             <p
               className={`mt-0.5 text-xs ${
@@ -950,15 +852,7 @@ function MapBackgroundCard({ token }) {
   );
 }
 
-// THE LANDMARK TYPES: what a pin on this station's map can be - a name, an icon and a color each.
-//
-// THIS IS THE LEGEND, which is why it is a card rather than a corner of the map screen: a district's dots are read by everybody
-// at once, so what they mean is a station-wide decision. The card edits the WHOLE list and saves it in one write, because a type
-// added while another is being renamed has to arrive as one list (utils/mapTypes).
-//
-// IT ALSO COUNTS WHAT IS USING EACH TYPE. That is one extra read of the pins, which this card otherwise does not need - and it
-// is worth it, because removing a type in use is the one mistake here that stays invisible until somebody is looking at a grey
-// dot: the count is on the row before the button is pressed.
+// Card for customizing the types of landmarks that can be pinned to the map.
 function MapTypesCard({ token }) {
   const [types, setTypes] = useState(() => {
     const cached = cachedMapTypes();
@@ -969,8 +863,6 @@ function MapTypesCard({ token }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  // Which row has its icons open, and which has its colours open. One at a time: two open pickers on a phone is a card nobody
-  // can read.
   const [openIcons, setOpenIcons] = useState('');
   const [openColours, setOpenColours] = useState('');
 
@@ -978,8 +870,6 @@ function MapTypesCard({ token }) {
     let cancelled = false;
     const read = async () => {
       setLoading(true);
-      // Each read answers for itself: the types are what this card is FOR, and the pins are only a count - so a station whose
-      // pins cannot be read still gets an editable list rather than an error.
       const [typeAnswer, pinAnswer] = await Promise.all([
         fetchMapTypes().catch(() => null),
         fetchMapLandmarks().catch(() => null),
@@ -990,7 +880,6 @@ function MapTypesCard({ token }) {
       const counts = {};
       (pinAnswer?.mapLandmarks || []).forEach((pin) => {
         const key = String(pin?.kind || '');
-        // A pin counts under the key it still carries, so a type somebody removed and added back shows its pins again.
         if (key) counts[key] = (counts[key] || 0) + 1;
       });
       setUsage(counts);
@@ -1002,8 +891,6 @@ function MapTypesCard({ token }) {
     };
   }, []);
 
-  // EDITING IS LOCAL UNTIL SAVE, like every other card here: an officer who opens the card, changes their mind and leaves has
-  // changed nothing for anybody else.
   const editRow = (index, patch) => {
     setSaved(false);
     setError('');
@@ -1035,8 +922,7 @@ function MapTypesCard({ token }) {
       if (!result || !result.success) throw new Error((result && result.message) || 'Failed to save the landmark types.');
       const next = Array.isArray(result.types) ? result.types : types;
       setTypes(next);
-      // The device's copy, so the MAP picks the new colours up next time it opens without a signal - the same promise the pins
-      // and the boundary keep.
+      // Cache the types locally so the map can use them offline.
       cacheMapTypes({ types: next });
       setSaved(true);
     } catch (err) {
@@ -1087,8 +973,6 @@ function MapTypesCard({ token }) {
             {types.map((type, index) => (
               <div key={`${type.key}-${index}`} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* The type's own disc is also the button that opens the icon picker: the thing being chosen is the button
-                      that chooses it, so the row shows what the map will show. */}
                   <button
                     type="button"
                     title="Choose an icon"
@@ -1148,7 +1032,6 @@ function MapTypesCard({ token }) {
                             : 'text-slate-500 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700'
                         }`}
                       >
-                        {/* `currentColor` so one grid shows forty glyphs in the page's own ink rather than forty colours. */}
                         <MapTypeGlyph icon={icon} size={16} color="currentColor" />
                       </button>
                     ))}

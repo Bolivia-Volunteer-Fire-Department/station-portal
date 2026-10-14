@@ -47,6 +47,8 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Added a button to collapse the sidebar on larger screens.
 * Added a Navigation Setup tab.
 * Simplified codebase comments.
+* Fixed an issue where administrators could only see their own training signatures in the Administration module.
+* Added an easier way for administrators to see documents to verify.
 
 ### Version 1.5x
 * Added **Firebase Storage** for Certification uploads.

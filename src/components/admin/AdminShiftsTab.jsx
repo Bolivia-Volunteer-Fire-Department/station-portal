@@ -6,8 +6,7 @@ import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import { recordHeading } from '../../utils/displayLabel';
 
-// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
-// the HTML `form` attribute - so Enter in a text input still submits the shift.
+// HTML form ID for the editor modal
 const SHIFT_FORM_ID = 'shift-editor-form';
 
 const EMPTY_FORM = {
@@ -42,15 +41,11 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
-  // The editor is a modal now, opened by New shift or by choosing a row, so the page behind it is the list.
   const [editorOpen, setEditorOpen] = useState(false);
 
   const isEditing = !!formData.id;
-  // Closing the editor and clearing the form are the same act, so every existing call site - saved, cancelled and
-  // deleted-while-open - carries on working unchanged.
   const resetForm = () => {
     setFormData(EMPTY_FORM);
     setEditorOpen(false);
@@ -58,8 +53,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
 
   const buildFormFromShift = (shift) => ({
     id: shift.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
-      row_version: shift.row_version,
+    row_version: shift.row_version,
     description: shift.description || '',
     start_time: toTimeInputValue(shift.start_time),
     end_time: toTimeInputValue(shift.end_time),
@@ -94,8 +88,6 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
   const handleDelete = (shift) => setPendingDelete(shift);
 
   const confirmDelete = async () => {
@@ -120,9 +112,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
 
   return (
     <div className="space-y-6">
-      {/* The editor, in a modal that takes most of the viewport - the format every New card in the Administration
-          module uses. A shift has nine fields and a day grid, and the table behind it no longer has to sit under a
-          form that was usually empty. Mounted only while it is open. */}
+      {/* Shift editor modal */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Shift', formData.description) : 'New shift'}
@@ -208,7 +198,7 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
         </ViewportModal>
       )}
 
-      {/* Shifts Table, with New shift where somebody looks when they want another one. */}
+      {/* Shifts table */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <Clock className="h-4 w-4 shrink-0 text-red-500" />
@@ -284,8 +274,6 @@ export default function AdminShiftsTab({ token, shifts = [], onDataChanged }) {
         </table>
       </div>
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete shift"

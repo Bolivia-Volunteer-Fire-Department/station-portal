@@ -9,11 +9,11 @@ import PasswordInput from '../PasswordInput';
 import { recordHeading } from '../../utils/displayLabel';
 import { MEMBER_PRIVATE_ADMIN_FIELDS } from '../../utils/memberFields';
 
-// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+// Form IDs for modal submission.
 const USER_FORM_ID = 'user-editor-form';
 const BULK_FORM_ID = 'user-bulk-editor-form';
 
-// Every bulk field starts as '' = leave alone; only a field the officer changes is written, for every selected member.
+// Initial state for bulk edits (blank means no change).
 const BULK_EMPTY = { password: '', is_change_password_on_login: '', status: '', role_id: '', rank_id: '', exclude_from_scheduling: '' };
 const BULK_FIELD_CLASS = 'w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500';
 const BULK_LABEL_CLASS = 'block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5';
@@ -28,28 +28,26 @@ const BULK_CHANGE_LABELS = {
 
 const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'active', role_id: '', rank_id: '', exclude_from_scheduling: 'FALSE', runner_sound_profile: '', is_change_password_on_login: 'FALSE', fema_student_id: '', member_id: '', email: '', phone: '' };
 
-// The fields this form edits on the member's PRIVATE record - the half of an account a member may partly keep themselves.
-// utils/memberFields holds the one list, so this, the writer and the rules cannot disagree about which fields those are.
+// Private fields stored separately from the public roster.
 const PRIVATE_FIELDS = [...MEMBER_PRIVATE_ADMIN_FIELDS];
 
 export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
-  // What the member's FEMA student id WAS when the editor opened. It lives on the member's private record rather than on
-  // the roster row, so it is saved as its own write - and only when this differs, so an ordinary save stays one request.
+  // Tracks original private fields to only save changes.
   const [savedPrivate, setSavedPrivate] = useState({});
-  // Whether the editor modal is open: "a new member" and "no editor" are both `formData.id === ''`.
+  // Tracks whether the user editor modal is open.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
+  // Member selected for deletion.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
-  // True while the background refresh after a save is still in flight.
+  // True while reloading users in the background.
   const [refreshing, setRefreshing] = useState(false);
   const [sortField, setSortField] = useState('user_name');
   const [sortDirection, setSortDirection] = useState('asc');
   const [filterStatus, setFilterStatus] = useState('');
-  // Bulk edit: the table gains a selection column, and the chosen members are edited together.
+  // State for bulk editing multiple members at once.
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -101,7 +99,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       return next;
     });
 
-  // Only the fields that were changed. An untouched field is absent, which is what leaves it alone on every member.
+  // Collects only the fields that were modified.
   const bulkChanges = () => {
     const changes = {};
     Object.entries(bulkForm).forEach(([key, value]) => {
@@ -136,8 +134,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       const user = targets[index];
       setBulkProgress(`Updating ${index + 1} of ${targets.length}…`);
       try {
-        // The member's own values for everything not changed: the save replaces the roster document, so it has to be
-        // handed what is already there. user_name is left out, which is what keeps the username from being touched.
+        // Keep existing values for unchanged fields.
         const result = await adminSaveUser({
           id: user.id,
           name: user.name,
@@ -166,7 +163,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       exitBulkMode();
       return;
     }
-    // The ones that did not save stay selected, so fixing the cause and pressing Save again retries only them.
+    // Keep failed members selected for retry.
     setSelectedIds(new Set(failures.map((failure) => failure.user.id)));
     setBulkError(
       `${targets.length - failures.length} saved, ${failures.length} failed: ` +
@@ -183,11 +180,10 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
   const handleEdit = (user) => {
     setEditorOpen(true);
     setError(null);
-    // What the record holds now, so the save below can send only what the officer actually changed.
+    // Save current private field values to compare against.
     setSavedPrivate(Object.fromEntries(PRIVATE_FIELDS.map((key) => [key, String(user[key] ?? '').trim()])));
     setFormData({
       id: user.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
       row_version: user.row_version,
       user_name: user.user_name || '',
       name: user.name || '',
@@ -199,12 +195,9 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         String(user.exclude_from_scheduling ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
       runner_sound_profile: user.runner_sound_profile || '',
       fema_student_id: user.fema_student_id || '',
-      // The rest of the member's private details, edited here beside it. The member id is the officer's to set: the rules
-      // refuse it to the member on their own row, which is what keeps an issued identifier out of their hands.
       member_id: user.member_id || '',
       email: user.email || '',
       phone: user.phone || '',
-      // Normalized on the way in, so the checkbox is never in doubt about what the sheet holds.
       is_change_password_on_login:
         String(user.is_change_password_on_login ?? '').trim().toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
     });
@@ -215,14 +208,10 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
     setSaving(true);
     setError(null);
     try {
-      // One request: the sound profile rides along with the rest of the row, and the backend
-      // ignores it unless the caller is an administrator.
       const result = await adminSaveUser(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save user.');
 
-      // THE MEMBER'S OWN DETAILS ARE THEIR OWN WRITE, and only what CHANGED is sent: they live on the member's private
-      // record rather than the roster row this save wrote, and the rules allow only these keys there - so an untouched
-      // field is left alone rather than round-tripped, and an ordinary save is still the single request it has always been.
+      // Save changed private fields separately.
       const savedId = result.id || formData.id;
       const changed = Object.fromEntries(
         PRIVATE_FIELDS.map((key) => [key, String(formData[key] ?? '').trim()]).filter(
@@ -236,16 +225,11 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         }
       }
 
-      // Show the saved values in the list NOW. The refresh below is authoritative but cannot be
-      // waited on, and until it lands the list still holds the pre-save row - so re-opening the
-      // form straight after saving would show the old values.
+      // Update UI immediately with saved values.
       onRowSaved?.('users', { ...formData, id: result.id || formData.id });
       resetForm();
 
-      // The refresh is NOT awaited: doPost serializes every request behind a script lock, so
-      // waiting for the wave meant the spinner stayed up for the length of the queue rather than
-      // for the save. It is tracked instead, so the tab can say it is happening rather than
-      // leaving the list silently stale.
+      // The refresh is NOT awaited: data reload happens in the background.
       setRefreshing(true);
       Promise.resolve(onDataChanged?.('users')).finally(() => setRefreshing(false));
     } catch (err) {
@@ -255,8 +239,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  // Ask for confirmation before deleting.
   const handleDelete = (user) => setPendingDelete(user);
 
   const confirmDelete = async () => {
@@ -302,7 +285,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
   return (
     <div className="space-y-6">
-      {/* The editor, in the viewport modal every New card in this module now uses. */}
+      {/* Member editor modal */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('User', formData.name || formData.user_name) : 'New member'}
@@ -322,9 +305,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             </div>
           )}
 
-          {/* The saved row is applied locally straight away, so this is about the authoritative
-              refresh catching up rather than the copy in the list being wrong. Saying so is
-              better than a silently stale table. */}
+          {/* Background reload indicator */}
           {refreshing && (
             <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -365,8 +346,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />
-              {/* Sits with the password rather than with the other flags: it only means anything when a
-                  password is being set, and it is about THIS password. */}
+              {/* Require password reset on next login */}
               <label className="mt-2 flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -444,12 +424,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             </div>
           </div>
 
-          {/* THE MEMBER'S OWN DETAILS: four fields that live on the PRIVATE half of the account rather than the roster row
-              (a roster is readable by every member), written as their own call - see the note in firestore.rules. Offered
-              on the new-member form too, so an officer can record them while adding somebody.
-
-              MEMBER ID IS THE OFFICER'S ALONE. It is set here and nowhere else: no member sees it, which is why it is
-              absent from the sign-in shape (firebaseAuth) rather than merely left undrawn. */}
+          {/* Member's private contact and identification details */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Member ID</label>
@@ -515,9 +490,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
             </div>
           </div>
 
-          {/* The Firefighter Runner sound set. Shown to anyone who can manage users so the value
-              is visible, but only an administrator can change it - and the server enforces that
-              as well, so disabling the input here is convenience rather than the control. */}
+          {/* Custom sound pack for the mini-game */}
           {isEditing && (
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
@@ -553,7 +526,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         </ViewportModal>
       )}
 
-      {/* Bulk edit: one form for every selected member, and only what is changed here is written. */}
+      {/* Bulk edit modal */}
       {bulkOpen && (
         <ViewportModal
           size="small"
@@ -632,7 +605,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         </ViewportModal>
       )}
 
-      {/* The roster, with New member where somebody looks for another one. */}
+      {/* Member roster table */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <UsersIcon className="h-4 w-4 shrink-0 text-red-500" />
@@ -794,8 +767,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
         />
       )}
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {/* Confirmation dialog for deleting a member */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete member"

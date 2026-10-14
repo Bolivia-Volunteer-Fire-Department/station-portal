@@ -105,11 +105,21 @@ export const fetchAdminCertificationRecords = async ({ includeInactive = false }
   }));
 };
 
-// Counts how many documents need verification.
+// Counts how many documents/items need verification.
 export const fetchAdminDocumentVerificationCount = async () => {
   const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
   if (!response?.success) throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
   return Math.max(0, Number(response.count) || 0);
+};
+
+// Summary of pending document verifications including total count and per-document breakdown.
+export const fetchAdminDocumentVerificationSummary = async () => {
+  const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  if (!response?.success) throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  return {
+    count: Math.max(0, Number(response.count) || 0),
+    byDocument: response.byDocument && typeof response.byDocument === 'object' ? response.byDocument : {},
+  };
 };
 
 // Fetches reports available to the current user.

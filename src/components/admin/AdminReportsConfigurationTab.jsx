@@ -49,9 +49,7 @@ const DATASETS = {
     station: 'Everyone\'s training (requires Administer trainings)',
     summary: 'Station training',
   },
-  // WHAT WAS SCHEDULED AGAINST WHAT WAS ACTUALLY WORKED. The one dataset whose numbers an officer reconciles rather than
-  // reads: hours scheduled, hours clocked in, and the difference. It reads BOTH the schedule and the timeclock, which is
-  // why the station scope asks for the clock permission as well - see reportScopeIsAllowed in functions/index.js.
+  // Compares scheduled hours against clocked-in hours
   reconciliation: {
     label: 'Clocked vs scheduled (hours)',
     groupings: [['member', 'Member'], ['template', 'Shift Template'], ['day', 'Day'], ['month', 'Month']],
@@ -70,7 +68,7 @@ const toggleId = (values, id) =>
 export default function AdminReportsConfigurationTab({ roles = [], ranks = [] }) {
   const [reports, setReports] = useState([]);
   const [form, setForm] = useState(EMPTY_REPORT);
-  // How many levels the form's grouping has, which decides whether a chart is even offerable - a chart has one axis.
+  // Number of grouping levels selected (charts only support one level)
   const levelCount = (Array.isArray(form.group_by) ? form.group_by : [form.group_by]).filter(Boolean).length;
   const [editorOpen, setEditorOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -228,10 +226,7 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
                 className={FIELD_CLASS}
               >
                 <option value="table">Table</option>
-                {/* A CHART HAS ONE AXIS, so the graphing choices are offered only while the report groups by one thing.
-                    The server refuses a multi-level chart too (resolveReportOptions), because a rule enforced only in a
-                    dropdown is not a rule - but saying so HERE is what stops an author picking one and wondering why the
-                    report came back as a table. */}
+                {/* Graphs only work with a single grouping level */}
                 <option value="bar" disabled={levelCount > 1}>Bar graph{levelCount > 1 ? ' (one grouping only)' : ''}</option>
                 <option value="pie" disabled={levelCount > 1}>Pie graph{levelCount > 1 ? ' (one grouping only)' : ''}</option>
                 <option value="line" disabled={levelCount > 1}>Line graph{levelCount > 1 ? ' (one grouping only)' : ''}</option>
@@ -246,8 +241,7 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
                   onChange={(levels) => setForm({
                     ...form,
                     group_by: levels,
-                    // Adding a second level turns a chart into a table, in the form as well as in the engine, so what is
-                    // saved is what will be drawn.
+                    // If multiple groups are chosen, switch visualization to table
                     visualization: levels.length > 1 ? 'table' : form.visualization,
                   })}
                   fieldClass={FIELD_CLASS}
@@ -262,9 +256,7 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
                   min={0}
                   max={4}
                   value={Array.isArray(form.order_by) ? form.order_by : []}
-                  // THE SAME KEYS THE GROUPING OFFERS, PLUS THE MEASURE. A row carries only what it was grouped by, so
-                  // ordering by anything else would have nothing to sort on - and putting the MEASURE first is the
-                  // useful part: "biggest difference first, then by member".
+                  // Sort by the grouped fields or by total value
                   options={[
                     ...(DATASETS[form.dataset] || DATASETS.schedule).groupings.filter(([value]) =>
                       (Array.isArray(form.group_by) ? form.group_by : [form.group_by]).includes(value)
@@ -311,8 +303,6 @@ export default function AdminReportsConfigurationTab({ roles = [], ranks = [] })
               ['allow_visualization', 'Viewer can change the visualization'],
               ...(form.dataset === 'training' ? [['allow_category', 'Viewer can filter by training category']] : []),
               ...(form.scope === 'station' ? [['allow_members', 'Viewer can choose which members to include']] : []),
-              // WHICH ASSIGNMENTS COUNT AS PAID, ticked by whoever runs it. No column on the assignment says paid, because
-              // "is this paid?" is a question about THIS comparison rather than a fact about the shift.
               ...(form.dataset === 'reconciliation'
                 ? [['allow_assignments', 'Viewer can tick which assignments and shift templates count as paid time']]
                 : []),

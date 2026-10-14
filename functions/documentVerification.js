@@ -5,57 +5,86 @@ const flag = (value) => value === true || text(value).toUpperCase() === 'TRUE';
 const signatureRole = (signature) =>
   text(signature.signature_role).toLowerCase() === 'verifier' ? 'verifier' : 'member';
 
-const hasPendingChecklistWork = (document, items, signatures, verifierUserId) => {
+const pendingChecklistWorkCount = (document, items, signatures, verifierUserId) => {
+  const docId = text(document.id);
   const itemIds = new Set(
     items
-      .filter((item) => text(item.document_id) === document.id)
+      .filter((item) => text(item.document_id) === docId)
       .map((item) => text(item.id))
       .filter(Boolean)
   );
-  if (!itemIds.size) return false;
+  if (!itemIds.size) return 0;
 
-  const documentSignatures = signatures.filter((signature) => text(signature.document_id) === document.id);
+  const documentSignatures = signatures.filter((signature) => text(signature.document_id) === docId);
   const verified = new Set(
     documentSignatures
       .filter((signature) => signatureRole(signature) === 'verifier')
       .map((signature) => `${text(signature.user_id)}\u0000${text(signature.checklist_item_id)}`)
   );
 
-  return documentSignatures.some((signature) => {
-    if (signatureRole(signature) !== 'member') return false;
+  const pendingPairs = new Set();
+  documentSignatures.forEach((signature) => {
+    if (signatureRole(signature) !== 'member') return;
     const userId = text(signature.user_id);
     const itemId = text(signature.checklist_item_id);
-    return userId !== verifierUserId && itemIds.has(itemId) && !verified.has(`${userId}\u0000${itemId}`);
+    if (userId && itemId && userId !== verifierUserId && itemIds.has(itemId) && !verified.has(`${userId}\u0000${itemId}`)) {
+      pendingPairs.add(`${userId}\u0000${itemId}`);
+    }
   });
+
+  return pendingPairs.size;
 };
 
-const hasPendingDocumentWork = (document, signatures, verifierUserId) => {
-  if (!flag(document.is_sign_required) || !flag(document.requires_verification)) return false;
+const pendingDocumentWorkCount = (document, signatures, verifierUserId) => {
+  if (!flag(document.is_sign_required) || !flag(document.requires_verification)) return 0;
 
-  const documentSignatures = signatures.filter((signature) => text(signature.document_id) === document.id);
+  const docId = text(document.id);
+  const documentSignatures = signatures.filter((signature) => text(signature.document_id) === docId);
   const verified = new Set(
     documentSignatures
       .filter((signature) => signatureRole(signature) === 'verifier' && !text(signature.checklist_item_id))
       .map((signature) => text(signature.user_id))
   );
 
-  return documentSignatures.some((signature) => {
-    if (signatureRole(signature) !== 'member' || text(signature.checklist_item_id)) return false;
+  const pendingUsers = new Set();
+  documentSignatures.forEach((signature) => {
+    if (signatureRole(signature) !== 'member' || text(signature.checklist_item_id)) return;
     const userId = text(signature.user_id);
-    return userId !== verifierUserId && !verified.has(userId);
+    if (userId && userId !== verifierUserId && !verified.has(userId)) {
+      pendingUsers.add(userId);
+    }
   });
+
+  return pendingUsers.size;
 };
 
-const countPendingDocumentVerifications = ({ documents = [], items = [], signatures = [], verifierUserId = '' } = {}) => {
+const pendingDocumentVerificationsSummary = ({ documents = [], items = [], signatures = [], verifierUserId = '' } = {}) => {
   const verifier = text(verifierUserId);
-  return documents.filter((document) => {
+  const byDocument = {};
+  let total = 0;
+
+  documents.forEach((document) => {
     const id = text(document.id);
-    if (!id) return false;
+    if (!id) return;
     const type = text(document.doc_type).toLowerCase();
-    return type === 'checklist'
-      ? hasPendingChecklistWork({ ...document, id }, items, signatures, verifier)
-      : hasPendingDocumentWork({ ...document, id }, signatures, verifier);
-  }).length;
+    const count =
+      type === 'checklist'
+        ? pendingChecklistWorkCount({ ...document, id }, items, signatures, verifier)
+        : pendingDocumentWorkCount({ ...document, id }, signatures, verifier);
+    if (count > 0) {
+      byDocument[id] = count;
+      total += count;
+    }
+  });
+
+  return {
+    count: total,
+    byDocument,
+  };
 };
 
-module.exports = { countPendingDocumentVerifications };
+const countPendingDocumentVerifications = (options = {}) => {
+  return pendingDocumentVerificationsSummary(options).count;
+};
+
+module.exports = { countPendingDocumentVerifications, pendingDocumentVerificationsSummary };

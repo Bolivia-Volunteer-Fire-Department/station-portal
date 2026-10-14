@@ -39,6 +39,7 @@ import {
   formatMobileNavModules,
 } from '../../utils/mobileNav';
 
+// Settings tab for customizing navigation: reordering sidebar links, picking icons, and choosing mobile nav bar shortcuts.
 export default function AdminNavigationSetupTab({ token, systemSettings, onDataChanged }) {
   const currentRawIcons = getSettingValue(systemSettings, SIDEBAR_NAV_ICONS_KEY, '');
   const customIcons = useMemo(() => parseSidebarNavIcons(currentRawIcons), [currentRawIcons]);

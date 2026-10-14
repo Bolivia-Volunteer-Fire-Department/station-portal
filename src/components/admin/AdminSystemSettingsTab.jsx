@@ -4,15 +4,10 @@ import { stationLogoUrl } from '../../utils/assets';
 import { processUploadedLogo, generatePwaAssets, createZipArchive, downloadBlob } from '../../utils/pwaIcons';
 import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting } from '../../services/api';
 import { SIDEBAR_NAV_ORDER_KEY, SIDEBAR_NAV_ICONS_KEY } from '../../utils/sidebarNav';
-// The district map's boundary, background and drawing cards used to live in this file - between the department name and the
-// clock rounding. They are the ground the station covers rather than station configuration, so they are on their own screen now
-// (AdminMapSettingsTab, reached from System → Map Settings), and everything they need - the county's service, the boundary and
-// background utilities, the drawing's own checks - moved with them.
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
-// The signing window's own key and parser, from the module the member's Training module reads them with - so the card's
-// preview of a typed value and the rule the Sign button follows cannot be two different rules.
+// Configuration for training signature time limits.
 import { SIGNATURE_WINDOW_KEY, signatureWindowConfig } from '../../utils/training';
 import {
   DEFAULT_PAY_WEEK_START,
@@ -28,8 +23,7 @@ import {
   loadingMessageSavePlan,
   updateLoadingMessages,
   LOADING_MESSAGE_KEYS,
-  // The chief's five lines for the runner's boss level. The same card shape as the loading messages, and the same two
-  // helpers underneath it - see utils/systemSettings, where the sharing is explicit rather than duplicated.
+  // Phrases shown during the mini-game boss level.
   getBossSayings,
   updateBossSayings,
   bossSayingSavePlan,
@@ -45,8 +39,7 @@ import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
 import ConfirmModal from '../ConfirmModal';
 
-// Keys surfaced in their own curated category card rather than the generic list below. The loading messages
-// are curated too - ten of them, named rather than repeated here (see utils/systemSettings).
+// Settings that have their own dedicated card in the settings page.
 const KNOWN_KEYS = [
   'department_name',
   'department_logo_url',
@@ -58,17 +51,10 @@ const KNOWN_KEYS = [
   'gps_margin_of_error',
   CLOCK_ROUNDING_KEY,
   'session_timeout',
-  // The signing window for trainings: curated because a BLANK value means NO LIMIT rather than "off", which the generic
-  // value editor has no way to say - the same reason the session timeout has a card (see utils/training#signatureWindowConfig).
   SIGNATURE_WINDOW_KEY,
-  // The pay period: the window the clock history opens on, and the weekday a period starts. Curated because the LENGTH is a
-  // read budget as much as a display choice, and because the weekday is a dropdown rather than a value somebody types.
   PAY_PERIOD_DAYS_KEY,
   PAY_WEEK_START_KEY,
   ...LOADING_MESSAGE_KEYS,
-  // The chief's sayings are curated too - five of them, named rather than repeated here, and for the same reason as the
-  // loading messages: a card of five fields is a screen, and the generic value editor below it is for everything a
-  // station adds by itself.
   ...BOSS_SAYING_KEYS,
   MOBILE_NAV_MODULES_KEY,
   SIDEBAR_NAV_ORDER_KEY,
@@ -407,18 +393,7 @@ function GeneralSettingsCard({ token, systemSettings, onDataChanged }) {
   );
 }
 
-/**
- * Clock Settings: the two station-wide policies about the timeclock - how hours are rounded when they are reported, and
- * whether clocking in and out is restricted to the station.
- *
- * The rounding field is first because it always applies, while the fence only applies once all three of its keys are
- * filled in: any blank one leaves clocking exactly as it is today, so a half-finished setup cannot lock the station out
- * of its own timeclock. The card says which state the fence is in so the behavior is never a guess.
- *
- * "Use my current location" exists because typing a latitude and longitude by hand is the most error-prone part of this,
- * and the person configuring it is usually standing at the station.
- */
-
+// Settings card for clock-in rounding rules and GPS geofence boundaries.
 function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
   const [latitude, setLatitude] = useState(getSettingValue(systemSettings, 'required_clock_latitude', ''));
   const [longitude, setLongitude] = useState(getSettingValue(systemSettings, 'required_clock_longitude', ''));
@@ -436,8 +411,7 @@ function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
     setRounding(String(clockRoundingMinutes(systemSettings)));
   }, [systemSettings]);
 
-  // Evaluated live on the typed values, so the card reports what the next clock action will do
-  // rather than what the last save stored.
+  // Check if the current inputs form a valid GPS location.
   const preview = clockLocationConfig([
     { key: 'required_clock_latitude', value: latitude },
     { key: 'required_clock_longitude', value: longitude },
@@ -464,11 +438,8 @@ function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
     setError(null);
     setSaved(false);
     try {
-      // Saved in sequence rather than in parallel: each key is one Apps Script round trip, and a
-      // partial write is easier to reason about when the failure names the key that failed.
+      // Save each setting one by one.
       const entries = [
-        // The rounding first: it is the one that always applies, so a name-and-value list that fails on it should not
-        // leave the other three looking saved.
         [CLOCK_ROUNDING_KEY, rounding],
         ['required_clock_latitude', latitude],
         ['required_clock_longitude', longitude],
@@ -518,9 +489,7 @@ function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
           </div>
         )}
 
-        {/* ONE SETTING, TWO SCREENS. The member's own Clock History and the Clocked vs scheduled report both round by
-            this, so the hours a member reads are the hours an officer pays for. Recorded times are never touched - only
-            the hours the app reports. */}
+        {/* Rounding rule used when calculating work hours */}
         <div>
           <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
             Round reported hours
@@ -605,7 +574,7 @@ function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
           </div>
         </div>
 
-        {/* Says which of the two failure modes applies: a wrong value, or simply nothing entered. */}
+        {/* Show error message if latitude, longitude, or radius are invalid */}
         {(preview.invalid.length > 0 || preview.missing.length > 0) && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
             {preview.invalid.length > 0
@@ -641,17 +610,14 @@ function ClockSettingsCard({ token, systemSettings, onDataChanged }) {
   );
 }
 
-// Idle session timeout. A member who neither interacts nor navigates for this many minutes is
-// signed out - see utils/sessionTimeout.js for the client half and the idle-timer note there for the
-// server half, which is what actually stops the token being used afterwards.
+// Signs out users automatically after a period of inactivity.
 function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
   const [minutes, setMinutes] = useState(getSettingValue(systemSettings, 'session_timeout', ''));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
-  // Previewed from the TYPED value rather than the stored one, so the effect of a change is visible
-  // before it is saved - and so a typo is reported here rather than silently switching it off.
+  // Check if the entered minutes are valid before saving.
   const preview = sessionTimeoutConfig([{ key: 'session_timeout', value: minutes }]);
 
   const handleSave = async (e) => {
@@ -778,11 +744,7 @@ function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
   );
 }
 
-// THE TRAINING SIGNING WINDOW: how long after its date a training may still be signed.
-//
-// A card rather than a row in the generic editor, for the session timeout's reason and one more: a BLANK value means NO
-// LIMIT here, which is the opposite of what a blank means in a key/value list. It says what the window does to the
-// member's screen, because that is the only place its effect shows.
+// Sets how many days members have to sign training records before they lock.
 function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
   const [days, setDays] = useState(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
   const [saving, setSaving] = useState(false);
@@ -793,8 +755,7 @@ function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
     setDays(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
   }, [systemSettings]);
 
-  // Previewed from the TYPED value rather than the stored one, so the effect of a change is visible before it is saved
-  // and a typo is reported here rather than silently switching the window off.
+  // Check if the typed days value is valid.
   const preview = signatureWindowConfig([{ key: SIGNATURE_WINDOW_KEY, value: days }]);
 
   const handleSave = async (e) => {
@@ -934,14 +895,7 @@ function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
   );
 }
 
-// THE PAY PERIOD: how many days one period covers, and which weekday it begins on.
-//
-// THE LENGTH IS NOT COSMETIC. It is the window the clock history opens on - the largest read in the app, and the one that
-// grows on its own (see App#loadLogs) - which is why it is curated here rather than left to the generic value editor.
-//
-// THE WEEKDAY IS STORED, NOT YET USED, and the card says so rather than leaving somebody to wonder why changing it does
-// nothing: it is here because reports that total by pay period will need it, and because the day a period starts is a fact
-// about the station rather than a constant guessed later. Nothing does arithmetic with it today.
+// Sets the length of a pay period in days and which weekday it begins on.
 function PayPeriodCard({ token, systemSettings, onDataChanged }) {
   const [days, setDays] = useState(getSettingValue(systemSettings, PAY_PERIOD_DAYS_KEY, ''));
   const [weekStart, setWeekStart] = useState(
@@ -956,8 +910,7 @@ function PayPeriodCard({ token, systemSettings, onDataChanged }) {
     setWeekStart(getSettingValue(systemSettings, PAY_WEEK_START_KEY, '') || DEFAULT_PAY_WEEK_START);
   }, [systemSettings]);
 
-  // Previewed from the TYPED values rather than the stored ones, so a change is visible before it is saved and a typo is
-  // reported here rather than quietly falling back to the default.
+  // Check if the entered pay period settings are valid.
   const preview = payPeriodConfig([
     { key: PAY_PERIOD_DAYS_KEY, value: days },
     { key: PAY_WEEK_START_KEY, value: weekStart },
@@ -970,8 +923,7 @@ function PayPeriodCard({ token, systemSettings, onDataChanged }) {
     setError(null);
     setSaved(false);
     try {
-      // BOTH KEYS IN ONE REQUEST, so a failure cannot save the length and lose the weekday - the rule the loading messages
-      // card follows, for the same reason.
+      // Save both pay period settings together in one request.
       const result = await adminSaveSystemSettings(
         [
           { key: PAY_PERIOD_DAYS_KEY, value: String(days ?? '').trim() },
@@ -1171,8 +1123,7 @@ function SoundSettingsCard({ token, systemSettings, onDataChanged }) {
           onChange={setSoundsActive}
         />
 
-        {/* Says out loud what this setting does NOT reach, because "sounds off" reads like it covers everything.
-            The minigame's effects are its own, and a push notification's OS banner is the device's. */}
+        {/* Note that the mini-game has separate sound controls */}
         <p className="text-xs text-slate-500 dark:text-slate-400">
           The Firefighter Runner keeps its own sound effects, and this does not silence a device's own notification
           banner.
@@ -1359,8 +1310,7 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
+  // Ask for confirmation before deleting a setting.
   const handleDelete = (setting) => setPendingDelete(setting);
 
   const confirmDelete = async () => {
@@ -1484,10 +1434,7 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
         </table>
       </div>
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. It lives in THIS card, not at the
-          end of the file, because this is the component that holds the setting being deleted - the tab is a stack of
-          separate cards, and a dialog rendered from the wrong one would not compile, let alone work. */}
+      {/* Confirmation dialog before deleting */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete setting"
@@ -1500,20 +1447,11 @@ function CustomSettingsCard({ token, systemSettings, onDataChanged }) {
     </div>
   );
 }
-// The five lines the runner's boss level puts in the floating head's mouth, between fireball blasts. Saved all five at
-// once, like the loading messages below and for the same reason: the backend validates every pair before writing any of
-// them, so one bad value cannot leave the card half saved.
-//
-// A BLANK FIELD IS A REAL ANSWER HERE, and the whole point of showing the defaults: a line the station has never set is
-// shown with what the game is actually saying, so an empty box means "say nothing in that slot", and emptying all five
-// is how the bubbles are turned off - no separate switch to keep in step with five values (see
-// utils/systemSettings#bossSayingsFrom, which is where the two kinds of empty are told apart).
+
+// Configures custom phrases for the mini-game boss level.
 function BossSayingsCard({ token, systemSettings, onDataChanged }) {
   const [sayings, setSayings] = useState(() => getBossSayings(systemSettings));
-  // The card mirrors a prop, so a settings reload has to replace what is on screen. Done DURING RENDER rather than in an
-  // effect, which is the pattern React documents for exactly this and the one the lint rule asks for: an effect that
-  // calls setState costs a second render pass and paints the stale values once first. (The cards above use the effect -
-  // this is not a reason to change them, only a reason not to add another.)
+  // Update state when settings change.
   const [settingsSeen, setSettingsSeen] = useState(systemSettings);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1536,9 +1474,7 @@ function BossSayingsCard({ token, systemSettings, onDataChanged }) {
         token
       );
 
-      // The deployment in front of us may predate this action - the page and the backend are deployed separately.
-      // UNKNOWN_ACTION is exactly that case, so fall back to the per-key save rather than reporting a failure for an
-      // action the server has never heard of.
+      // Fall back to saving each saying one by one if batch save is not supported.
       if (isUnknownAction(result)) {
         console.warn('This deployment has no batch settings action; saving each saying on its own.');
         for (const { key, value, label } of plan) {
@@ -1599,12 +1535,10 @@ function BossSayingsCard({ token, systemSettings, onDataChanged }) {
             </label>
             <input
               type="text"
-              // A bubble is a bubble: a line long enough to wrap past three lines is one nobody reads before it goes.
               maxLength={60}
               placeholder="Leave blank for silence"
               value={saying.value}
-              // Matched by the saying's own id, never by position - the mistake that made the loading messages
-              // uneditable, and the reason both cards share updateSettingRow.
+              // Update saying by its unique ID.
               onChange={(e) =>
                 setSayings((current) => updateBossSayings(current, saying.id, e.target.value))
               }
@@ -1640,23 +1574,18 @@ function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    // No gate on a previous error: an earlier version only saved `if (!error)`, so once a save had failed the
-    // button did nothing at all until the tab was remounted - the retry was silently discarded.
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      // All ten in ONE request, so a failure cannot leave some saved and some not. The backend validates every
-      // pair before writing any of them - see loadingMessageSavePlan and setSystemSettingsBatch.
+      // Save all loading messages in a single batch request.
       const plan = loadingMessageSavePlan(loadingMessages);
       const result = await adminSaveSystemSettings(
         plan.map(({ key, value }) => ({ key, value })),
         token
       );
 
-      // The deployment in front of us may predate this action - the page and the backend are deployed
-      // separately. UNKNOWN_ACTION is exactly that case, so fall back to the per-key save rather than
-      // reporting a failure for an action the server has never heard of.
+      // Fall back to saving one message at a time if batch save is not supported.
       if (isUnknownAction(result)) {
         console.warn('This deployment has no batch settings action; saving each setting on its own.');
         for (const { key, value, label } of plan) {
@@ -1713,9 +1642,7 @@ function LoadingMessagesCard({ token, systemSettings, onDataChanged }) {
                 type="text"
                 placeholder={`${msg.label}...`}
                 value={msg.value}
-                // Matched by the message's own id, never by position: the previous version compared the map
-                // index (a number) against the tail of the id (a string), which is never true, so the field
-                // could be focused and typed into but the value never changed.
+                // Update the message by its unique ID.
                 onChange={(e) => setLoadingMessages((current) => updateLoadingMessages(current, msg.id, e.target.value))}
                 className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />

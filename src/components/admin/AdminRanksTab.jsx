@@ -9,23 +9,19 @@ import { recordHeading } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', description: '', color: '#ef4444', icon: '', rank_order: '' };
 
-// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
-// the HTML `form` attribute - so Enter in a text input still submits the rank.
+// Links the modal's save button to the form
 const RANK_FORM_ID = 'rank-editor-form';
 
 export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
-  // The editor is a modal now, opened by New rank or by choosing a row, so the page behind it is the list.
   const [editorOpen, setEditorOpen] = useState(false);
 
   const isEditing = !!formData.id;
-  // Closing the editor and clearing the form are the same act, which is why every existing call site - saved,
-  // cancelled, and deleted-while-open - carries on working: all three wanted both.
+  // Clears the form and closes the modal
   const resetForm = () => {
     setFormData(EMPTY_FORM);
     setEditorOpen(false);
@@ -36,7 +32,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
     setEditorOpen(true);
     setFormData({
       id: rank.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
+      // Tracks the version of the row to prevent overwriting newer edits
       row_version: rank.row_version,
       description: rank.description || '',
       color: rank.color || '#ef4444',
@@ -53,7 +49,6 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
     try {
       const result = await adminSaveRank(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save rank.');
-      // Straight onto the table; the refresh wave lands on its own time.
       onRowSaved?.('ranks', formData);
       void onDataChanged('ranks');
       resetForm();
@@ -64,8 +59,6 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
   const handleDelete = (rank) => setPendingDelete(rank);
 
   const confirmDelete = async () => {
@@ -88,10 +81,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
 
   return (
     <div className="space-y-6">
-      {/* The editor, in a modal that takes most of the viewport - the format every New card in the Administration
-          module uses. The rank form is short, but the table behind it was being pushed down the page by a form
-          that was almost always empty, and the modal also gives an unsaved rank somewhere to be abandoned.
-          Mounted only while it is open, so the page is just the list. */}
+      {/* Rank editor modal */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Rank', formData.description) : 'New rank'}
@@ -163,7 +153,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
                       value={formData.icon}
                       onChange={(icon) => setFormData({ ...formData, icon })}
                     />
-                    {/* The picker can only show one neutral glyph; this shows the same icon in the rank's colour. */}
+                    {/* Preview the icon in the chosen color */}
                     <div className="shrink-0 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
                       <RankIcon name={formData.icon} className="w-5 h-5" style={{ color: formData.color }} />
                     </div>
@@ -175,8 +165,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
         </ViewportModal>
       )}
 
-      {/* The list, with New rank where somebody looks when they want another one - the same place Documents keeps
-          its New document. */}
+      {/* Ranks list */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-x-auto">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <Shield className="h-4 w-4 shrink-0 text-red-500" />
@@ -268,8 +257,7 @@ export default function AdminRanksTab({ token, ranks, onDataChanged, onRowSaved 
 
       </div>
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {/* Delete confirmation modal */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete rank"

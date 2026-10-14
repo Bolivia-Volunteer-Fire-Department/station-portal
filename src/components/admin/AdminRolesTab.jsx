@@ -4,7 +4,7 @@ import { adminSaveRole, adminDeleteRole } from '../../services/api';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 
-// The editor form's id: the modal's toolbar submits it through the HTML `form` attribute.
+// Links the modal's save button to the form
 const ROLE_FORM_ID = 'role-editor-form';
 import { recordHeading } from '../../utils/displayLabel';
 import {
@@ -20,9 +20,7 @@ import {
   permissionsByGroup,
 } from '../../utils/permissions';
 
-// A new role starts as an ordinary member: they can see their own schedule and use
-// the timeclock, and nothing else. Every permission is still listed in the editor,
-// so granting more is a deliberate act.
+// Default permissions for new roles
 const MEMBER_DEFAULTS = ['can_view_my_schedule', 'can_use_timeclock'];
 
 const buildEmptyForm = () => {
@@ -33,13 +31,12 @@ const buildEmptyForm = () => {
   return form;
 };
 
-// Turn a stored role row into editable form state. Every flag is read through the
-// shared TRUE parser, so a sheet holding "TRUE" behaves the same as a boolean.
+// Converts a saved role into form state
 const formFromRole = (role) => {
   const form = {
     id: role.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
-      row_version: role.row_version,
+    // Tracks row version to prevent overwriting newer edits
+    row_version: role.row_version,
     description: role.description || '',
     [MASTER_PERMISSION_KEY]: permissionGranted(role, MASTER_PERMISSION_KEY),
   };
@@ -56,10 +53,8 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
   const [formData, setFormData] = useState(buildEmptyForm);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
-  // Whether the editor modal is open: "a new role" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
 
   const isEditing = !!formData.id;
@@ -68,13 +63,11 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
     setEditorOpen(false);
   };
 
-  // The STORED row being edited (if any). Its current flags decide what this editor
-  // is allowed to touch - the backend enforces the same rule.
+  // Check if editing an existing administrator role
   const storedRole = isEditing
     ? roles.find((role) => String(role.id) === String(formData.id))
     : null;
   const targetIsAdministrator = !!storedRole && permissionGranted(storedRole, MASTER_PERMISSION_KEY);
-  // An administrator-only role is out of reach for a role that merely manages roles.
   const blockedByAdminRole = targetIsAdministrator && !isAdmin;
 
   const handleEdit = (role) => {
@@ -90,8 +83,6 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
     try {
       const result = await adminSaveRole(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save role.');
-      // The row shows on the table straight away; the refresh wave lands in the background. A role edit
-      // changes permissions, so the screen that depends on them (this one, and the nav) must not wait for it.
       onRowSaved?.('roles', formData);
       void onDataChanged('roles');
       resetForm();
@@ -102,8 +93,6 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
   const handleDelete = (role) => setPendingDelete(role);
 
   const confirmDelete = async () => {
@@ -115,8 +104,6 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
     try {
       const result = await adminDeleteRole(role.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete role.');
-      // A deletion has no row to merge, so the table is honest for a moment longer than it was; the wave
-      // removes it. Nothing is held open for it.
       void onDataChanged('roles');
       if (String(formData.id) === String(role.id)) resetForm();
     } catch (err) {
@@ -126,9 +113,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
     }
   };
 
-  // One permission row: a checkbox plus its explanation. Administrators have every
-  // permission, so the box is shown locked on rather than removed; a permission
-  // whose prerequisite is off is locked off the same way.
+  // Checkbox for a single permission option
   const PermissionCheckbox = ({ permission }) => {
     const lockedOn = permissionLockedByAdmin(formData, permission.key);
     const blocked = permissionBlockedByDependency(formData, permission.key);
@@ -203,8 +188,6 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
             {roles.map((role) => {
               const isAdminRole = permissionGranted(role, MASTER_PERMISSION_KEY);
-              // An administrator-only role cannot be edited or deleted by a role
-              // that merely manages roles (enforced server-side as well).
               const lockedRow = isAdminRole && !isAdmin;
               const granted = grantedCount(role);
               return (
@@ -262,9 +245,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
         </table>
       </div>
 
-      {/* The editor, in the viewport modal every New card in this module now uses. Its own Save was disabled for a
-          non-administrator editing the administrator role; that rule moved to saveDisabled, so the toolbar button
-          carries it instead - with the reason beside it, where the granted count already was. */}
+      {/* Role editor modal */}
       {editorOpen && (
         <ViewportModal
           title={isEditing ? recordHeading('Role', formData.description) : 'New role'}
@@ -314,8 +295,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
             />
           </div>
 
-          {/* The master switch. Locked on for a non-administrator, who cannot grant
-              it to themselves or anyone else. */}
+          {/* Administrator full-access toggle */}
           <label
             className={`flex items-start gap-3 p-4 rounded-xl border ${
               isAdmin
@@ -353,9 +333,6 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {permissionsByGroup(ADMIN_PERMISSIONS, ADMIN_PERMISSION_GROUPS).map((group) => (
                 <div key={group.label} className="md:col-span-2 space-y-2">
-                  {/* A HEADING PER GROUP, and the row still lays out in two columns beneath it - which is the whole point
-                      of the change: twenty-two checkboxes in one grid is a wall, and the same twenty-two under six
-                      headings is a form somebody can read. */}
                   <h5 className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     {group.label}
                   </h5>
@@ -393,9 +370,7 @@ export default function AdminRolesTab({ token, roles = [], isAdmin = false, onDa
         </ViewportModal>
       )}
 
-
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
+      {/* Delete confirmation modal */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete role"

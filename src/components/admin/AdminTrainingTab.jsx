@@ -21,29 +21,20 @@ import {
   trainingTotals,
 } from '../../utils/training';
 
-// The Training report.
-//
-// Requires can_administer_trainings, which is the only permission that can do all three of:
-// see who signed each training (the rest of the app filters signatures to the signed-in
-// member), change any training, and remove a signature. A training is a record rather than a
-// preference, so removal is deliberately a separate, deliberate action here.
-//
-// The edit form is the same component the member module uses, so the two cannot disagree about
-// what a training is.
+// Displays training records and allows administrators to manage sessions and signatures.
 export default function AdminTrainingTab({
   token,
   trainings = [],
   signatures = [],
   users = [],
   currentUserId = '',
-  // For the printed sheet's header, like the schedule's: the station's own name on its own paper.
+  // Station name and logo for printed reports.
   departmentName = '',
   departmentLogoUrl = '',
   onDataChanged,
 }) {
   const [editing, setEditing] = useState(null);
-  // Whether the editor modal is open. `editing` alone cannot say, because "new training" is `editing === null` -
-  // which is also what a closed editor looks like.
+  // Controls whether the training edit modal is open.
   const [editorOpen, setEditorOpen] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
@@ -51,20 +42,14 @@ export default function AdminTrainingTab({
   const [message, setMessage] = useState(null);
   const [filters, setFilters] = useState(emptyTrainingFilters);
   const [sort, setSort] = useState(DEFAULT_TRAINING_SORT);
-  // The action awaiting confirmation in the modal below, or null. One piece of state for all three
-  // confirmations this tab needs - locking, deleting, and removing a signature - so there is exactly one dialog
-  // and no chance of two stacking.
+  // Stores details for any action that needs user confirmation.
   const [pending, setPending] = useState(null);
-  // Which sheet is being prepared: null, { mode: 'list' }, or { mode: 'training', training }.
-  // PrintableTraining mounts on this and unmounts itself through onDone, so a print cannot be opened twice
-  // and the sheet never lingers in the DOM after the dialog closes.
+  // Holds state for the printable view.
   const [printing, setPrinting] = useState(null);
 
   const allRows = useMemo(() => normalizeTrainingList(trainings), [trainings]);
 
-  // The Member filter asks "which trainings has this member signed", so it needs a set of the
-  // selected member's signature ids. All Members (the empty value) matches everything, which is
-  // what makes the "signed" filter below behave differently: it is only meaningful for one member.
+  // Get IDs of trainings signed by the selected member.
   const filterSignedIds = useMemo(() => {
     const memberId = String(filters.member || '').trim();
     if (!memberId) return new Set();
@@ -81,14 +66,13 @@ export default function AdminTrainingTab({
     [allRows, filters, filterSignedIds, sort]
   );
 
-  // Hours are summed over what is on screen; the signed/unsigned tile is only meaningful once a
-  // single member is selected, so it is passed only then.
+  // Calculate total hours and completed training counts.
   const totals = useMemo(
     () => trainingTotals(rows, filterSignedIds),
     [rows, filterSignedIds]
   );
 
-  // All Members first, then everyone with a name - so the select reads the way the label suggests.
+  // List of members for the filter dropdown.
   const memberOptions = useMemo(
     () => [
       { value: '', label: 'All Members' },
@@ -104,9 +88,7 @@ export default function AdminTrainingTab({
   const memberName = (userId) =>
     users.find((user) => String(user.id) === String(userId))?.name || unnamedLabel('member');
 
-  // Who is printing. A training record outlives whoever produced it, so the sheet names them - the same
-  // reason the calendar sheet does. Empty when the id is not in the roster, which prints nothing rather
-  // than "Unnamed member".
+  // Name of user printing the report.
   const printedByName =
     users.find((user) => String(user.id) === String(currentUserId))?.name || '';
 
@@ -138,8 +120,7 @@ export default function AdminTrainingTab({
     await saveTraining(values);
   };
 
-  // The write itself, run once the lock is confirmed (or straight through when it is not needed). It is separate
-  // from handleSave only because the confirmation is answered later, on a click.
+  // Save training changes to the database.
   const saveTraining = async (values) => {
     setSaving(true);
     setMessage(null);
@@ -159,8 +140,7 @@ export default function AdminTrainingTab({
 
   const handleDeleteTraining = (training) => {
     const signedCount = counts.get(String(training.id)) || 0;
-    // Deleting a training throws away its signatures, so the confirmation says so rather than
-    // asking a generic "are you sure?".
+    // Ask for confirmation before deleting a training and its signatures.
     setPending({ kind: 'train', training, signedCount });
   };
 
@@ -197,8 +177,7 @@ export default function AdminTrainingTab({
     }
   };
 
-  // Runs whichever action was confirmed. The pending value is cleared first so a slow write cannot be confirmed
-  // twice; from here the row's own spinner takes over, exactly as it did when the native dialog returned.
+  // Run whichever action was confirmed.
   const confirmPending = () => {
     const action = pending;
     setPending(null);
@@ -212,16 +191,12 @@ export default function AdminTrainingTab({
 
   return (
     <div className="space-y-4">
-      {/* The editor, mounted only while it is open. Mounting it per open is what its state seeding already assumed
-          (the key below and the mounting are the same trick): switching from Add to a row gives a fresh form. */}
+      {/* Training editor modal */}
       {editorOpen && (
         <TrainingForm
-          // Remounts when the edited row changes, so the form's state is seeded exactly once per
-          // row instead of being re-seeded by an effect.
           key={editing?.id || 'new'}
           editing={editing}
           saving={saving}
-          // The Administration report is the only place the external-system marker can be set.
           allowAdminFlags
           onSubmit={handleSave}
           onCancel={() => {
@@ -252,15 +227,12 @@ export default function AdminTrainingTab({
         onChange={setFilters}
         sort={sort}
         onSortChange={setSort}
-        // Location options come from the trainings on the sheet, and Members from the roster with
-        // All Members first - the form an administrator expects for a report.
         rows={allRows}
         memberOptions={memberOptions}
         signedLabel="Signatures"
       />
 
-      {/* The signature tile only means something for one member, so All Members gets the two
-          totals that always apply rather than a misleading "0 of N". */}
+      {/* Summary statistics for visible trainings */}
       <TrainingTotals
         totals={filters.member ? totals : { count: totals.count, hours: totals.hours }}
         signedLabel="Signed by this member"
@@ -274,8 +246,7 @@ export default function AdminTrainingTab({
             {signatures.length === 1 ? '' : 's'}
             {rows.length !== allRows.length ? ` (of ${allRows.length} trainings)` : ''}
           </span>
-          {/* Add a training, where the report is. The editor opens over the page rather than sitting under the
-              table, which is what the member-facing module does too - same form, same modal. */}
+          {/* Button to add a new training */}
           <button
             type="button"
             onClick={() => {
@@ -287,8 +258,7 @@ export default function AdminTrainingTab({
             <Plus className="h-3.5 w-3.5" />
             Add training
           </button>
-          {/* Prints what the table is showing - the same rows, filtered the same way - so the button is
-              pointless with nothing on screen and says why. */}
+          {/* Button to print the filtered training list */}
           <button
             type="button"
             onClick={() => setPrinting({ mode: 'list' })}
@@ -326,8 +296,6 @@ export default function AdminTrainingTab({
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
-                    {/* An empty filtered result is not an empty sheet, and only one of them is
-                        something to act on. */}
                     {allRows.length === 0
                       ? 'No trainings have been recorded yet. Use the form above to add the first one.'
                       : 'No trainings match these filters.'}
@@ -382,8 +350,7 @@ export default function AdminTrainingTab({
                         )}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {/* Printing a locked training is allowed on purpose: an external-system record is
-                            exactly the one somebody wants a paper copy of, and printing changes nothing. */}
+                        {/* Print button for individual training record */}
                         <button
                           type="button"
                           onClick={() => setPrinting({ mode: 'training', training })}
@@ -476,9 +443,7 @@ export default function AdminTrainingTab({
         </div>
       </div>
 
-      {/* The printed sheet, mounted only while a print is being prepared - it calls window.print() itself and
-          unmounts through onDone. It is handed the rows the TABLE is showing, already filtered and sorted, so
-          "print what the filters currently show" is that literally and the sheet cannot disagree with the screen. */}
+      {/* Printable report component */}
       {printing && (
         <PrintableTraining
           mode={printing.mode}
@@ -495,8 +460,7 @@ export default function AdminTrainingTab({
         />
       )}
 
-      {/* Every confirmation this tab needs. The wording is the same warning the native dialog carried, but it can
-          now name what is lost in bold rather than fitting it into a sentence. */}
+      {/* Confirmation dialog for locking, deleting, or removing signatures */}
       {pending && (
         <ConfirmModal
           title={

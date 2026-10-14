@@ -15,15 +15,13 @@ import { assignmentColor } from '../../utils/assignmentColor';
 import ViewportModal from '../ViewportModal';
 import { choosableAssignments } from '../../utils/assignmentDates';
 import { MINUTES_PER_DAY, layoutWeekDayCards } from '../../utils/weekLayout';
-// The same day order the board uses: start time, then the assignment's required rank (utils/crewOrder).
 import { sortSlotOrder } from '../../utils/crewOrder';
 import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel } from '../../utils/displayLabel';
 
 const EMPTY_FORM = { id: '', day_of_week: '', start_time: '', end_time: '', assignment_id: '', nickname: '', effective_date: '', end_date: '' };
 
-// The editor form's id. The modal's Save button lives in the toolbar, outside the <form>, and submits it through
-// the HTML `form` attribute - so Enter in a text input still submits the template.
+// HTML form ID for the editor modal
 const TEMPLATE_FORM_ID = 'template-editor-form';
 
 const DAYS = [
@@ -45,7 +43,6 @@ const DAY_NAMES = {
 const TRACK_H = 576;
 const DAY_KEYS = DAYS.map((d) => d.value);
 const todayColumnIndex = () => (new Date().getDay() + 6) % 7; // Monday = 0
-// Read once per render so every card on the grid is judged against the same day.
 const todayKeyValue = toDateKey(new Date());
 
 // Parses a sheet time value into minutes since midnight (null if unparseable)
@@ -62,7 +59,7 @@ const formatMinutes = (minutes) => {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 
-// Render duration; end on/before start wraps past midnight (equal = 24h)
+// Calculate duration in minutes, handling shifts that wrap past midnight.
 const durationMinutes = (startMin, endMin) => {
   if (startMin === null || endMin === null) return null;
   let d = endMin - startMin;
@@ -80,8 +77,6 @@ const cardFor = (assignments) => (template) => {
     startMin,
     durMin: durationMinutes(startMin, endMin),
     key: String(template.id ?? template.start_time ?? 'card'),
-    // The order two cards that start together are drawn in: the shift's required rank first (from its assignment, not
-    // from anybody filling it), then a name so the layout is deterministic. The same keys the board and the payload use.
     requiredRankOrder: Number.isFinite(rank) ? rank : null,
     name: `${(assignment && assignment.description) || unnamedLabel('assignment')} ${template.nickname || ''}`.trim(),
   };
@@ -89,11 +84,9 @@ const cardFor = (assignments) => (template) => {
 
 export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [], assignments = [], onDataChanged, onRowSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
-  // Whether the editor modal is open: "a new template" and "no editor" are both `formData.id === ''`.
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  // The row whose delete is being confirmed in the modal below.
   const [pendingDelete, setPendingDelete] = useState(null);
   const [savingMoveId, setSavingMoveId] = useState(null);
   const [dragId, setDragId] = useState(null);
@@ -119,15 +112,12 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     setError(null);
     setFormData({
       id: template.id,
-      // Carried through the form so the backend can refuse a save built on a stale copy.
       row_version: template.row_version,
       day_of_week: String(template.day_of_week ?? '').trim().toLowerCase(),
       start_time: toTimeInputValue(template.start_time),
       end_time: toTimeInputValue(template.end_time),
       assignment_id: String(template.assignment_id ?? ''),
       nickname: String(template.nickname ?? ''),
-      // An <input type="date"> takes yyyy-MM-dd, so the sheet's date cell is normalized here just as
-      // the comparison does - a template edited and re-saved must not shift by a day.
       effective_date: templateDateKey(template.effective_date),
       end_date: templateDateKey(template.end_date),
     });
@@ -144,12 +134,10 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     setSaving(true);
     setError(null);
     try {
-      // The same rule the backend enforces, checked here so a bad pair is caught before a round trip.
       const dateError = templateDateError(formData.effective_date, formData.end_date);
       if (dateError) throw new Error(dateError);
       const result = await adminSaveScheduleTemplate(formData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save schedule template.');
-      // Straight onto the week grid; the refresh wave lands on its own time.
       onRowSaved?.('scheduleTemplates', formData);
       void onDataChanged('scheduleTemplates');
       resetForm();
@@ -160,8 +148,6 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     }
   };
 
-  // The row awaiting confirmation. Nothing is written until the modal below is answered; the work
-  // itself is unchanged, it just runs from the modal's callback instead of inline.
   const handleDelete = (template) => setPendingDelete(template);
 
   const confirmDelete = async () => {
@@ -182,8 +168,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     }
   };
 
-  // Lay out each day's templates into side-by-side columns so overlapping (or
-  // identically timed) cards never hide each other (see utils/weekLayout).
+  // Lay out templates in columns so overlapping cards do not cover each other.
   const dayLayouts = DAYS.map((day) => {
     const cards = sortSlotOrder(
       scheduleTemplates
@@ -225,8 +210,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
     setDragOverDay(null);
   };
 
-  // Drops a dragged template onto a day track. The drop's vertical position
-  // sets the new start time (snapped to 15 min); duration is preserved.
+  // Dropping a template sets its new start time (snapped to 15 minutes).
   const handleDrop = async (e, dayValue) => {
     e.preventDefault();
     setDragOverDay(null);
@@ -260,7 +244,6 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
       const result = await adminSaveScheduleTemplate(
         {
           id: template.id,
-          // A drag is a save like any other, so it carries the version the card was drawn from.
           row_version: template.row_version,
           day_of_week: dayValue,
           start_time: formatMinutes(newStartMin),
@@ -271,7 +254,6 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
         token
       );
       if (!result?.success) throw new Error(result?.message || 'Failed to move template.');
-      // A drag is a save too: the card moves under the cursor rather than after the wave.
       onRowSaved?.('scheduleTemplates', {
         id: template.id,
         day_of_week: dayValue,
@@ -288,9 +270,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
 
   return (
     <div className="space-y-6">
-      {/* The editor, in a modal that takes most of the viewport - the format every New card in this module uses.
-          The week calendar below is the list, and it is where New template lives: it is what somebody is looking
-          at when they want another one. */}
+      {/* Template editor modal */}
       {editorOpen && (
         <ViewportModal
           title={
@@ -352,8 +332,6 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
               />
             </div>
 
-            {/* Optional window. Both blank keeps the template running indefinitely, which is how every
-                template behaved before these columns existed. */}
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 Effective Date <span className="font-normal text-slate-400">(required)</span>
@@ -400,8 +378,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               >
                 <option value="">-- Select Assignment --</option>
-                {/* Underlying list excludes assignments outside their own window, while always keeping the
-                    one already on this template (see utils/assignmentDates). */}
+                {/* Only show active assignments */}
                 {choosableAssignments(assignments, todayKeyValue, formData.assignment_id).map((a) => (
                   <option key={String(a.id)} value={String(a.id)}>{a.description}</option>
                 ))}
@@ -432,7 +409,8 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
         </form>
         </ViewportModal>
       )}
-{/* Visual week calendar */}
+
+      {/* Visual week calendar */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <div className="flex flex-wrap items-center gap-3">
@@ -482,22 +460,7 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
             })}
           </div>
 
-          {/* 24h week grid. `isolate` puts it in a stacking context of its own, and that is what stops a template block
-              from painting over the Administration nav dropdown.
-              THE BUG: each block sets `zIndex: 10` inline, and that number was being compared in the PAGE's stacking
-              context. The nav bar was `z-[5]` at the time, so 10 beat 5 and the blocks drew over the open menu. The
-              dropdown's own `z-30` could not rescue it, because that z-30 lives INSIDE the nav bar's context - a z-index only
-              competes with its own siblings, so the bar's whole subtree entered the page at 5. Raising the block to above the
-              bar would have "fixed" this by making the bug depend on a bigger number, and would have put the blocks over the
-              sticky app bar and every dialog in the app besides.
-              Isolating CONTAINS the 10 instead: it is compared only against the blocks' siblings in here, where it still
-              does its real job - keeping a block above the hour lines and the day columns' borders - and the grid enters
-              the page at `auto`, so the nav bar draws over it as intended.
-              (The bar itself has since moved to `z-[15]`, because content BELOW it in the page - the sticky table headers
-              every admin table has - was painting the menu out the same way. That does not change anything here: the grid
-              enters the page at `auto`, so the bar is above it either way, and the containment is what the check holds.)
-              It was the ONLY raw `zIndex` in the app; everything else uses a utility, which is why that convention is
-              worth keeping. verify:schedule-drop holds both halves. */}
+          {/* 24-hour week grid. 'isolate' prevents cards from rendering over navigation dropdowns. */}
           <div className="relative isolate rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700" style={{ height: TRACK_H }}>
             {/* Hour lines */}
             {Array.from({ length: 25 }, (_, h) => (
@@ -521,7 +484,8 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
                   </span>
                 ))}
               </div>
-{/* Day tracks */}
+
+              {/* Day tracks */}
               {dayLayouts.map(({ day, segments }, dayIdx) => (
                 <div
                   key={day.value}
@@ -551,8 +515,6 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
                       <div
                         key={s.c.key + (s.isTail ? '-tail' : '')}
                         draggable={!savingMoveId && !deletingId}
-                        // A div pill: the selector knows it by its draggable attribute, and this keeps the click
-                        // audible while it is temporarily not draggable. See utils/uiSounds.
                         data-sound="click"
                         onDragStart={(e) => handleDragStart(e, s.c.template)}
                         onDragEnd={handleDragEnd}
@@ -585,16 +547,11 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
                             {s.isTail ? '↻ ' : ''}{assignmentLabel(s.c.template.assignment_id)}
                           </div>
                         )}
-                        {/* The window, so a retired or not-yet-effective template is identifiable on the
-                            grid without opening it. The grid keeps drawing it either way - this is the
-                            editor, and the point of the dates is to retire a template WITHOUT deleting it. */}
                         {showLabel && templateDateLabel(s.c.template) && (
                           <div className="px-1.5 truncate text-[9px] leading-tight mt-0.5 text-white/80">
                             {templateDateLabel(s.c.template)}
                           </div>
                         )}
-                        {/* A template created before the effective date became required still has a blank
-                            cell, which keeps working - so it is nudged here rather than silently left. */}
                         {showLabel && templateNeedsDate(s.c.template) && (
                           <div className="px-1.5 truncate text-[9px] leading-tight mt-0.5 font-semibold text-amber-100">
                             ⚠ No start date
@@ -631,25 +588,9 @@ export default function AdminScheduleTemplatesTab({ token, scheduleTemplates = [
               ))}
             </div>
           </div>
-{/* Per-day add buttons */}
-          {/* <div className="grid grid-cols-7">
-            {DAYS.map((day) => (
-              <button
-                key={day.value}
-                type="button"
-                onClick={() => startAdd(day.value)}
-                className="flex items-center justify-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 py-1.5 transition"
-              >
-                <Plus className="w-3 h-3" />
-                Add
-              </button>
-            ))}
-          </div> */}
         </div>
       </div>
 
-      {/* Confirmed in the app rather than by a native dialog: it can be styled, it is heard
-          (ConfirmModal plays the tone), and it names what is about to be deleted. */}
       {pendingDelete && (
         <ConfirmModal
           title="Delete template"

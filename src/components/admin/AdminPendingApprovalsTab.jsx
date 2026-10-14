@@ -12,32 +12,26 @@ import {
 import { assignmentColor } from '../../utils/assignmentColor';
 import RankIcon from '../RankIcon';
 import { unnamedLabel } from '../../utils/displayLabel';
-// From our own wrapper, not from sonner: it plays the sound for each toast kind and then delegates. Importing
-// 'sonner' directly here would silence every toast on this screen (the verifier fails on that import).
+// Custom toast wrapper that plays audio alerts
 import { toast } from '../../utils/toast';
 
 export default function AdminPendingApprovalsTab({ token, offers = [], users = [], assignments = [], schedule = [], scheduleTemplates = [], timeFormat = '12', onAdminDataChanged }) {
   const [pendingOffers, setPendingOffers] = useState([]);
   const [resolvingOfferId, setResolvingOfferId] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  // Filtering and sorting. Ascending by shift date is the default: this is a queue of decisions,
-  // and the soonest shift is the one that needs making first.
+  // Filters and sort order
   const [memberFilter, setMemberFilter] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState('');
   const [sortBy, setSortBy] = useState(DEFAULT_OFFER_SORT);
   
-  // Always ensure pendingOffers is treated as an array
+  // Helper to ensure pendingOffers is an array
   const safeGetPending = () => Array.isArray(pendingOffers) ? pendingOffers : [];
   
-  // Lookup functions for display
+  // Helpers to look up user information
   const userById = (id) => users.find((u) => String(u.id) === String(id)) || users.find((u) => String(u.user_name) === String(id));
   const userName = (id) => userById(id)?.name || unnamedLabel('member');
 
-  // One described row per offer, built once per data change.
-  //
-  // The table, the sort and the filters all read this, so describeShiftOffer (which also resolves
-  // co-workers) runs once per offer rather than once per use - and the ordering rules get real
-  // dates and start times to work with instead of display strings.
+  // Formats each offer with member, shift, and coworker details for display
   const rows = useMemo(
     () =>
       safeGetPending().map((offer) => ({
@@ -77,8 +71,7 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
       return; 
     }
     
-    // Only undecided offers belong in this queue - the same rule the backend
-    // applies when it derives each offer's status.
+    // Keep only offers waiting for a decision
     setPendingOffers(pendingOffersOnly(offers));
   }, [offers, token]);
 
@@ -93,7 +86,7 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
     try {
       const result = await adminResolveShiftOffer(offer.id, 'APPROVE', token);
       
-      // Check for authorization issues - likely need to re-login with admin credentials
+      // Check for permission errors
       if (result && result.code === 'UNAUTHORIZED') {
         toast.error('You must be logged in as an administrator to approve shift offers. Please try again.');
         console.warn('Unauthorized error received');
@@ -127,7 +120,7 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
     try {
       const result = await adminResolveShiftOffer(offer.id, 'DECLINE', token);
       
-      // Check for authorization issues - likely need to re-login with admin credentials
+      // Check for permission errors
       if (result && result.code === 'UNAUTHORIZED') {
         toast.error('You must be logged in as an administrator to manage shift offers. Please try again.');
         console.warn('Unauthorized error received');
@@ -188,9 +181,7 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
         </button>
       </div>
 
-      {/* Filters and sort. The selects follow the same style as Clock Management, and the
-          options are built from the offers in the queue rather than the whole roster, so a
-          filter never lists a member with nothing waiting. */}
+      {/* Filters and sorting */}
       <div className="flex flex-wrap items-end gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mr-1">
           <Filter className="w-3.5 h-3.5" />
@@ -281,12 +272,6 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
               visibleRows.map(({ offer, shift }) => {
                 const offerUser = userById(offer.user_id);
 
-                // Date, shift window, assignment and co-workers come from the row built above
-                // (utils/shiftOfferRow), which resolves template-vs-row times the same way the
-                // schedule calendar does. The previous inline logic showed no date (it fed a raw
-                // ISO value to displayDate), put the assignment where the time belonged, and
-                // repeated the assignment under "Working With".
-
                 return (
                   <tr key={offer.id} className="hover:bg-slate-50 dark:hover:bg-slate-700">
                     <td className="px-4 py-4 whitespace-nowrap align-top">
@@ -297,11 +282,7 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
                     </td>
                     <td className="px-4 py-4 align-top">
                       <div className="text-slate-900 dark:text-white">{shift.dateLabel}</div>
-                      {/* THE SHIFT, THEN WHEN IT IS. The name is the template's nickname when it has one ("Day
-                          Shift"), which identifies a shift far quicker than its clock times - and the times follow on
-                          their own muted line rather than being replaced by it, because an officer approving cover
-                          needs to know the window even when the shift has a name. When there is no nickname the label
-                          IS the window, so nothing is printed twice. */}
+                      {/* Shift name or time window */}
                       <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         {shift.shiftLabel || 'Time not set'}
                       </div>

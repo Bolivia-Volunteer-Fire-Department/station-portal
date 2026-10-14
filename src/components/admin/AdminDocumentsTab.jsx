@@ -102,6 +102,7 @@ export default function AdminDocumentsTab({
   // Permissions for document management and checklist verification.
   canManageDocuments = false,
   canVerifyDocuments = false,
+  documentVerificationCounts = {},
   // Unused callback kept for prop signature compatibility.
   onDataChanged: _onDataChanged,
 }) {
@@ -258,8 +259,7 @@ export default function AdminDocumentsTab({
       return;
     }
 
-    // Staging: no document yet, so this is local. Left blank the order follows the list, ten apart, so an author who never
-    // touches the Order field still gets the items in the order they typed them - but a 0 they typed is stored as 0.
+    // Stage items locally before saving the document.
     if (!form.id) {
       const entry = {
         id: itemForm.id,
@@ -293,8 +293,7 @@ export default function AdminDocumentsTab({
       setItemForm(EMPTY_ITEM_FORM);
       setForm((current) => ({ ...current, row_version: advanceRowVersion(current.row_version) }));
       toast.success(itemForm.id ? 'Item updated.' : 'Item added.');
-      // The document changed, so its revision and its updated stamp have too. Reloaded rather than patched, for
-      // the same reason a document save reloads the list.
+      // Refresh the documents list to reflect item changes.
       await refresh();
     } catch (err) {
       toast.error(err?.message || 'Could not save the item.');
@@ -307,7 +306,7 @@ export default function AdminDocumentsTab({
     const target = pendingItemRemoval;
     if (!target || removingItem) return;
 
-    // A staged item was never written, so removing it is local - and there are no signatures to refuse it.
+    // Remove a staged item locally before save.
     if (!form.id || String(target.id).startsWith('staged-')) {
       setStagedItems((current) => current.filter((item) => item.id !== target.id));
       if (itemForm.id === target.id) setItemForm(EMPTY_ITEM_FORM);
@@ -335,8 +334,7 @@ export default function AdminDocumentsTab({
   const handleRemoveSignature = async () => {
     const target = pendingSignatureRemoval;
     if (!target || removingSignature) return;
-    // Named in the toast, because a reader who has just removed one of two records about the same item should be
-    // told which one went.
+    // Check if this signature was a verifier confirmation.
     const wasVerification = target.role === 'verifier';
     setRemovingSignature(true);
     try {
@@ -352,11 +350,7 @@ export default function AdminDocumentsTab({
     }
   };
 
-  // Writes the items staged before the document existed, one request each - that action owns an item's id, and an
-  // item is a record somebody will sign against, so it is worth a request of its own.
-  //
-  // What landed is COUNTED, not assumed. A checklist created with nine of ten items and a message saying ten would
-  // be worse than one that said so: the missing line is a line nobody would think to sign.
+  // Save all staged checklist items after creating a new document.
   const flushStagedItems = async (documentId) => {
     const pending = stagedItems.slice();
     if (pending.length === 0) return { saved: 0, failed: 0 };
@@ -371,8 +365,7 @@ export default function AdminDocumentsTab({
             document_id: documentId,
             label: item.label,
             section: item.section,
-            // The staged entry already holds a number - `checklistItemSortOrder` resolved it when the item was typed - so
-            // this only has to state it again, and it does so without reintroducing the blank-or-zero ambiguity.
+            // Preserve item sort order.
             sort_order: checklistItemSortOrder(item.sort_order),
           },
           token
@@ -401,25 +394,21 @@ export default function AdminDocumentsTab({
 
     setError('');
     setSaving(true);
-    // Captured before the await: an item can only be written once the document it belongs to has an id, so this is
-    // the one moment a staged checklist becomes a real one.
+    // Track if document is newly created.
     const wasNew = !form.id;
     const wasChecklist = form.doc_type === 'checklist';
     try {
       const result = await adminSaveDocument(form, token);
       if (!result?.success) throw new Error(result?.message || 'Could not save the document.');
       const documentId = result.id || form.id;
-      // Keep editing the row that was just written, now carrying its id and version, so a second save updates it
-      // rather than creating a duplicate.
+      // Update form with assigned ID and version.
       setForm((current) => ({
         ...current,
         id: documentId,
         row_version: result.row_version ?? current.row_version,
       }));
 
-      // The write is confirmed, so the editor closes here - before the refresh below, which belongs to the page
-      // behind it. That is what makes "only then should the modal close" true without making the reader watch a
-      // list reload.
+      // Close the editor once saved.
       setEditorOpen(false);
 
       if (wasNew && wasChecklist && stagedItems.length > 0) {
@@ -443,64 +432,26 @@ export default function AdminDocumentsTab({
     }
   };
 
-  // WHAT IS WAITING TO BE SAVED, which is the whole of the staged order: the rows whose number differs from the one
-  // the library was last read with. Everything about the bar reads from this one list - how many changes there are, and
-  // the exact pairs Save order sends - so the count can never disagree with what a save would write.
-  //
-  // DECLARED BEFORE THE DRAG HANDLERS BELOW rather than beside the item card, because they send it: a state value used
-  // by a callback that is defined earlier reads as "accessed while being initialized", which is what the React
-  // compiler's immutability rule means by it.
+  // Unsaved document order changes.
   const pendingOrder = useMemo(() => pendingDocumentOrderPairs(rows, savedOrder), [rows, savedOrder]);
   const orderDirty = pendingOrder.length > 0;
 
-  // Kept in a ref for `refresh` to read, which is a callback and must not be rebuilt whenever the order changes. The
-  // effect is what keeps it current: staging happens in an event handler, and by the time any later save reloads the
-  // library React has long since committed and run this.
+  // Keep pending order in sync.
   useEffect(() => {
     pendingOrderRef.current = pendingOrder;
   }, [pendingOrder]);
 
-  // The draft follows the pending pairs, so there is one description of "unsaved" rather than two. Writing it on every
-  // change is what makes the order survive the tab being closed - and clearing it the moment the last pair is saved (or
-  // the change is discarded) means a stale draft can never be restored over a library that is already correct.
+  // Persist pending order changes in session storage.
   useEffect(() => {
     try {
       if (pendingOrder.length > 0) sessionStorage.setItem(ORDER_DRAFT_KEY, JSON.stringify(pendingOrder));
       else sessionStorage.removeItem(ORDER_DRAFT_KEY);
     } catch {
-      /* Storage unavailable - a private window, or it is full. The bar still says what is unsaved; only the survival
-         across a tab switch is lost, which is not worth taking the screen down for. */
+      // Ignore storage errors.
     }
   }, [pendingOrder]);
 
-  // ---------------------------------------------------------------------------
-  // Dragging to reorder
-  // ---------------------------------------------------------------------------
-  // The two ways a member of staff expects to order things: drag a DOCUMENT within its folder, and drag a FOLDER to
-  // sit in front of another one. Neither writes anything itself - both ask a pure helper in utils/documents what
-  // the numbers should become, then stage that. The helper is where the rules live (dropping up lands above, the
-  // Unfiled shelf is pinned last, a document is never dragged into another folder by accident) and it is where
-  // they are tested; a rule restated here would be a second version of it.
-  //
-  // A drag that ends where it started stages nothing, which is what makes a fumbled drag harmless.
-  //
-  // MAKE ALL THE CHANGES, THEN SAVE ONCE. Every drop and both Move up / Move down change `rows` and stop there; the
-  // write happens when the officer presses Save order, and it is ONE request carrying every row that moved. Ordering a
-  // shelf is a single job - "this goes first, that goes last, the other one in between" - and a request per nudge made
-  // the officer wait on the network between each of them, half-saved if the third one failed, and unable to see how the
-  // finished list looked before committing to it. The staged items on a new checklist already work this way, and so
-  // does the schedule board, so this is the house pattern rather than a new idea.
-  //
-  // WHAT IS STAGED IS THE ORDER, NOT A COPY OF THE LIST. `rows` is the working copy the screen draws, and `savedOrder`
-  // is the last thing the server confirmed; the pairs in between are the save (see `pendingDocumentOrderPairs`). That is
-  // why a second drag builds on the first, and why dragging a row back where it was leaves nothing to save.
-  //
-  // A NOTE ON THE FAULT THIS REPLACED, because it is the reason the list is drawn the way it is: a reorder answers with
-  // a COUNT (`{ moved }`), not with the library, and this used to redraw the list from `result.documents` - a field no
-  // writer returns. `normalizeDocumentList(undefined)` is `[]`, so every drop emptied the list. Then, once that was
-  // fixed by applying the pairs locally, nothing VISIBLY moved, because the list was drawn in the order the array
-  // happened to be in rather than in `sort_order` - so the fix looked like it had not worked. Both halves are needed:
-  // the pairs decide the order, and `documentsInFolder` draws that order.
+  // Drag-and-drop document reordering helpers.
   const stageOrder = useCallback(
     (pairs) => {
       if (pairs.length === 0 || savingOrder) return;
@@ -509,9 +460,7 @@ export default function AdminDocumentsTab({
     [savingOrder]
   );
 
-  // ONE REQUEST FOR EVERY ROW THAT MOVED. `pendingOrder` is already the difference between the screen and the server, so
-  // there is nothing to work out here - and after it lands, the snapshot becomes the list the officer is looking at,
-  // which is what makes the bar disappear in the same breath.
+  // Save reordered document positions to database.
   const saveOrder = useCallback(async () => {
     const pairs = pendingOrder;
     if (pairs.length === 0 || savingOrder) return;
@@ -530,9 +479,7 @@ export default function AdminDocumentsTab({
     }
   }, [pendingOrder, rows, savingOrder, token]);
 
-  // Back to the stored order, with the snapshot rather than a read: the numbers that were saved are still in hand, so
-  // undoing a change should not cost a request. Dragging rows around to find a layout and then thinking better of it is
-  // the normal way to use this screen, not a failure to recover from.
+  // Discard unsaved reordering changes.
   const discardOrder = useCallback(() => {
     if (savingOrder) return;
     setRows((current) => applyDocumentOrder(current, savedDocumentOrderPairs(savedOrder)));
@@ -560,8 +507,7 @@ export default function AdminDocumentsTab({
     if (!moved) return;
     const pairs = reorderDocuments(rows, movedId, row.id);
     if (pairs.length === 0) {
-      // The only way here is a drop across folders, which the helper refuses. Saying so is better than a row that
-      // silently refuses to move.
+      // Documents cannot be dragged across different folders.
       if (documentFolder(moved) !== documentFolder(row)) {
         toast.warning('A document cannot be dragged into another folder.', {
           description: 'Change its Folder field instead - dragging only sets the order.',
@@ -572,16 +518,7 @@ export default function AdminDocumentsTab({
     stageOrder(pairs);
   };
 
-  // Dropping into a GAP - between two documents, or after the last one in a folder.
-  //
-  // This is the position the row drop cannot express, and it is the request that produced it: dropping ON a row lands
-  // the document beside that row with the side chosen by the direction of the drag, so there was no way to say "between
-  // these two" - and none at all to say "at the end" except by aiming at the last row from above. A gap names its own
-  // position, so this asks the helper for the position it names.
-  //
-  // A drop that changes nothing sends nothing, which covers both of the ways this happens: the document is already
-  // sitting in that gap (a fumbled drag, and the pull back is free), or it belongs to another folder - which a drag
-  // never changes, and where the officer is told so rather than watching nothing happen.
+  // Handle dropping a document into a gap between items.
   const dropOnInsert = (event, folder, beforeId) => {
     event.preventDefault();
     setDragOverInsert('');
@@ -605,7 +542,7 @@ export default function AdminDocumentsTab({
   };
 
   const startFolderDrag = (event, folder) => {
-    // Unfiled is not a folder anybody made: it is where documents with no folder are shown, and it is pinned last.
+    // Prevent moving the Unfiled section.
     if (savingOrder || folder === UNFILED_LABEL) {
       event.preventDefault();
       return;
@@ -635,8 +572,7 @@ export default function AdminDocumentsTab({
     }
   }
 
-  // A folder drag carries the name rather than an id, and the fallback has to tell the two apart: an id belongs to
-  // a document, a name to a folder.
+  // Extract folder name from dragged data.
   function readDraggedFolder(event, list) {
     const carried = readDraggedId(event);
     if (!carried) return '';
@@ -644,9 +580,7 @@ export default function AdminDocumentsTab({
     return list.some((row) => documentFolder(row) === carried) ? carried : '';
   }
 
-  // The same move a drag performs, for a device that cannot drag: a touch screen fires no HTML5 drag events, and
-  // "you cannot reorder on a tablet" is not a trade worth making for a tidier form. It uses the same helper, so the
-  // buttons and a drag can never disagree about what "up one" means.
+  // Move selected document up or down using buttons (for mobile or keyboard users).
   const moveSelectedDocument = (direction) => {
     if (!form.id || savingOrder) return;
     const siblings = orderedFolderDocuments(rows, documentFolder(form));
@@ -661,16 +595,7 @@ export default function AdminDocumentsTab({
   const selectedSiblings = form.id ? orderedFolderDocuments(rows, documentFolder(form)) : [];
   const selectedIndex = selectedSiblings.findIndex((row) => row.id === form.id);
 
-  // THE GAPS BETWEEN THE DOCUMENTS, which is where a document goes to land BETWEEN two others.
-  //
-  // A thin element sitting where the two chips would otherwise be 8px apart, so the list looks exactly as it did and
-  // the space between two documents has quietly become a target. It draws a bar only while a document is being carried
-  // and only over itself: `aria-hidden` as well as invisible, because it is a place rather than a thing, and it carries
-  // no text for a screen reader to announce.
-  //
-  // IT ONLY ANSWERS A DOCUMENT DRAG. A folder being carried has the folder HEADINGS as its targets, so the gaps do not
-  // preventDefault for one - a dragover that is not prevented is not a drop target at all, which is what keeps a folder
-  // drag from being caught by the space between two rows.
+  // Render a drop target bar between documents.
   const insertGap = (folder, beforeId) => {
     const key = gapKey(folder, beforeId);
     const active = dragOverInsert === key;
@@ -678,14 +603,9 @@ export default function AdminDocumentsTab({
       <span
         key={`gap-${key}`}
         aria-hidden="true"
-        // Two nested spans: the outer one is the TARGET - a full-height 8px of the list's width, so the gap is easy to
-        // hit - and the inner one is the BAR, which is what makes it read as an insertion point rather than a gap that
-        // happens to turn red.
         onDragOver={(event) => {
           if (!draggingDocumentId) return;
           event.preventDefault();
-          // One highlight at a time: the row ring and the gap bar are two answers to the same question, and both lit
-          // would say the document is landing in two places.
           setDragOverDocumentId('');
           setDragOverInsert(key);
         }}
@@ -710,17 +630,13 @@ export default function AdminDocumentsTab({
       const result = await adminDeleteDocument(target.id, token);
       if (!result?.success) throw new Error(result?.message || 'Could not delete the document.');
       toast.success('Document deleted.');
-      // The editor becomes a blank new-document form when the document it was showing is deleted, so it blanks
-      // everything else the way opening a document does - otherwise the item card would still be drawing the rows of
-      // the document that was just removed. See `resetEditorState`.
+      // Reset form if the deleted document was open.
       if (form.id === target.id) {
         setForm(EMPTY_DOCUMENT_FORM);
         resetEditorState();
       }
       await refresh();
     } catch (err) {
-      // The refusal for a SIGNED document arrives here, and it is the useful case: it names the signature count
-      // and says to unpublish instead.
       toast.error(err?.message || 'Could not delete the document.');
     } finally {
       setPendingDelete(null);
@@ -751,10 +667,7 @@ export default function AdminDocumentsTab({
 
   const isEditing = Boolean(form.id);
 
-  // The item card's rows, and the two counts in its heading - all three from ONE answer, so they cannot disagree about
-  // what the list holds. See `editorChecklistItemRows` for the rule, and for the reported fault that made stating it
-  // in one place worth doing: the count, the "no items yet" line and the rows were each worked out separately from
-  // `items.length + stagedItems.length`, so a leftover in `items` was wrong in all three at once.
+  // Checklist items to show in the editor.
   const itemRows = useMemo(
     () => editorChecklistItemRows(items, stagedItems, isEditing),
     [items, stagedItems, isEditing]
@@ -762,18 +675,14 @@ export default function AdminDocumentsTab({
   const stagedItemCount = itemRows.filter((row) => row.staged).length;
   const storedItemCount = itemRows.length - stagedItemCount;
 
-  // Item id -> label, so a signature row on a checklist names the item it is about instead of showing a bare id.
+  // Map checklist item IDs to their labels.
   const itemLabels = useMemo(() => {
     const map = new Map();
     items.forEach((item) => map.set(item.id, item.label));
     return map;
   }, [items]);
 
-  // The card's rows: one per member per item on a checklist, one per signature on anything else.
-  //
-  // Folding a member's item signature and its verification into one row is what stops every item being listed
-  // twice - see checklistSignatureEntries, which is the same arithmetic the member-facing screen already shows. On
-  // any other document there are no items and no verifications, so a row is a signature, as it always was.
+  // Combine signatures and verifications into display rows.
   const signatureRows = useMemo(() => {
     if (form.doc_type === 'checklist') {
       return checklistSignatureEntries(items, signatures).map((entry) => ({
@@ -790,8 +699,6 @@ export default function AdminDocumentsTab({
     return signatures.map((signature) => ({
       key: signature.id,
       userId: signature.user_id,
-      // A verifier row cannot normally exist on a document without items, but the sheet is hand-editable and a row
-      // that is not shown is a row an administrator cannot remove.
       itemLabel: signature.checklist_item_id
         ? itemLabels.get(signature.checklist_item_id) || 'an item since removed'
         : '',
@@ -803,8 +710,7 @@ export default function AdminDocumentsTab({
     }));
   }, [form.doc_type, items, signatures, itemLabels]);
 
-  // Paged, and clamped as well: removing the last row of the last page has to leave the card on the last page that
-  // still has rows rather than on an empty one - the same rule the events and log tables follow.
+  // Paginate the signatures list.
   const signaturePageCount = totalPages(signatureRows.length, SIGNATURE_PAGE_SIZE);
   const currentSignaturePage = clampPage(signaturePage, signatureRows.length, SIGNATURE_PAGE_SIZE);
   const signatureRowsOnPage = useMemo(
@@ -812,14 +718,10 @@ export default function AdminDocumentsTab({
     [signatureRows, currentSignaturePage]
   );
   const staleSignatureCount = signatureRows.filter((row) => row.stale).length;
-  // "signature" is the wrong word for a checklist row once they are folded: the row is one member's signature on
-  // one item, and the count has to describe what is under it or the heading disagrees with the list.
+  // Label for count (signature vs signed item).
   const signatureCountNoun = form.doc_type === 'checklist' ? 'signed item' : 'signature';
 
-  // A role that may VERIFY but not MANAGE gets only the verification view. There is nothing here for it to edit,
-  // and an editor whose every save the server would refuse is worse than no editor: it would look like a
-  // permission problem one save at a time. This is an early return rather than a hidden section, so the two roles'
-  // screens cannot drift apart - the same tab, two honest shapes.
+  // If user can only verify but not manage, show the verification queue.
   if (!canManageDocuments) {
     return (
       <div className="space-y-6">
@@ -830,6 +732,7 @@ export default function AdminDocumentsTab({
             users={users}
             currentUserId={currentUserId}
             timeFormat={timeFormat}
+            documentVerificationCounts={documentVerificationCounts}
           />
         ) : (
           <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -935,8 +838,7 @@ export default function AdminDocumentsTab({
             {groups.map((group) => (
               <div key={group.folder} className="mt-3 first:mt-0">
                 <div
-                  // Dropping onto a heading reorders FOLDERS. The heading itself is the target rather than the
-                  // documents under it, so a folder can be put before an empty-looking one without aiming at a row.
+                  // Dropping onto a folder header reorders folders.
                   onDragOver={(event) => {
                     if (!draggingFolder || draggingFolder === group.folder) return;
                     event.preventDefault();
@@ -954,9 +856,7 @@ export default function AdminDocumentsTab({
                     onDragEnd={() => {
                       setDraggingFolder('');
                       setDragOverFolder('');
-                      // A folder drag never lights a gap, but a document drag that ENDED over this heading left one
-                      // lit - and the drag can end anywhere on the page, so the tidy-up belongs here rather than only
-                      // on the elements the drag started from.
+                      // Clear gap highlight when drag ends.
                       setDragOverInsert('');
                     }}
                     title={
@@ -984,13 +884,10 @@ export default function AdminDocumentsTab({
                     </button>
                   )}
                 </div>
-                {/* The chips close up against each other and the GAPS provide the spacing, so the space between two
-                    documents is a target without the list looking any different from before. `items-center` and the
-                    chip's own `gap-2` are untouched: the gap elements are 8px wide, which is what `gap-2` was. */}
+                {/* List of document buttons in this folder */}
                 <div className="mt-1.5 flex flex-wrap items-center">
                   {group.documents.map((row) => (
-                    // A keyed Fragment rather than a key on the gap alone: the gap and the chip it precedes are one
-                    // unit of the list, and React has to be told which unit is which when the order changes.
+                    // Gap insertion target and document button.
                     <React.Fragment key={row.id}>
                       {insertGap(group.folder, row.id)}
                       <button
@@ -998,12 +895,11 @@ export default function AdminDocumentsTab({
                         onClick={() => openDocument(row.id)}
                         draggable={!savingOrder}
                         onDragStart={(event) => startDocumentDrag(event, row)}
-                        // Only a DOCUMENT drag highlights a document row: a folder being carried has the headings as
-                        // its targets, and marking rows under it would suggest a drop into that folder.
+                        // Highlight document when dragging another document over it.
                         onDragOver={(event) => {
                           if (!draggingDocumentId || draggingDocumentId === row.id) return;
                           event.preventDefault();
-                          // ...and the gap un-lights, for the same reason the gap lights: one answer at a time.
+                          // Clear gap highlight.
                           setDragOverInsert('');
                           setDragOverDocumentId(row.id);
                         }}
@@ -1046,9 +942,7 @@ export default function AdminDocumentsTab({
                       </button>
                     </React.Fragment>
                   ))}
-                  {/* ...AND ONE AFTER THE LAST DOCUMENT, which is the end of the run. Without it the only way to put a
-                      document last was to aim at the final chip from above, and a document already at the end could not
-                      be told where it was. */}
+                  {/* Gap at the end of the folder */}
                   {insertGap(group.folder, '')}
                 </div>
               </div>
@@ -1057,14 +951,8 @@ export default function AdminDocumentsTab({
         )}
       </div>
 
-      {/* The editor, in a modal that takes most of the viewport. This is the one place in the tab with more than a
-          few fields - and on a checklist it carries the items and the signature record as well - so it gets the
-          screen rather than a card at the bottom of a page nobody scrolls to. Mounted only while it is open,
-          which is why the page behind it is just the list, and why the form is not sitting there when all the
-          reader wants is to read a document. */}
+      {/* Document editor modal */}
       {editorOpen && (
-        // Both waits are this modal's: opening a document is a fetch, and saving is a write. Either way the reader
-        // cannot type into a form whose document has not arrived, or into one that is being written.
         <ViewportModal
           title={isEditing ? 'Edit document' : 'New document'}
           subtitle={
@@ -1097,9 +985,7 @@ export default function AdminDocumentsTab({
             ) : null
           }
         >
-          {/* The editor's own content: the fields a document owns - where it lives, who may read it, and its text. The
-              preview is the app's own renderer, so what is seen here is what members get. Its title, its Delete
-              button and its Save button are in the modal's toolbar above, so nothing here scrolls out of reach. */}
+          {/* Document fields and Markdown editor */}
           <form id={EDITOR_FORM_ID} onSubmit={handleSave} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
@@ -1120,9 +1006,7 @@ export default function AdminDocumentsTab({
                 <label htmlFor="document-folder" className={labelClass}>
                   Folder
                 </label>
-                {/* Existing folders are offered, so the usual case is a choice rather than retyping a name exactly -
-                    a typo would quietly create a second folder. A new name is still allowed: that is how folders are
-                    made, because a folder here is a name rather than a record. */}
+                {/* Choose existing folder or type a new one */}
                 <input
                   id="document-folder"
                   type="text"
@@ -1151,17 +1035,11 @@ export default function AdminDocumentsTab({
                     value={form.doc_type}
                     onChange={(event) => {
                       const nextType = event.target.value;
-                      // Choosing Checklist turns the signature on with it, because a checklist IS its items being
-                      // signed. Set here as well as on the server so the box the author is looking at matches what
-                      // will be stored - a locked checkbox showing the wrong state is worse than no checkbox.
+                      // Checklists always require signatures but don't need a document-level verification.
                       setForm((current) => ({
                         ...current,
                         doc_type: nextType,
                         is_sign_required: nextType === 'checklist' ? true : current.is_sign_required,
-                        // ...and takes the SECOND signature off with it. A checklist's acknowledgment is its items,
-                        // each confirmed on its own, so a document-level requirement cannot mean anything on one -
-                        // and `storedRequiresVerification` refuses to store it anyway. Clearing it here keeps the form
-                        // from holding a setting the save will silently drop.
                         requires_verification:
                           nextType === 'checklist' ? false : current.requires_verification,
                       }));
@@ -1182,15 +1060,11 @@ export default function AdminDocumentsTab({
                   </select>
                 </div>
                 <div className="flex flex-col justify-end gap-2">
-                  {/* There is no Order box: position is set by dragging the row in the list above, which is the only
-                      place the order is visible - a number typed here and a row sitting there would be two answers to
-                      the same question, and the one on screen would win. The number is still carried on save, so an
-                      untouched document keeps the position it has. */}
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     Position in the list is set by <strong>dragging the rows</strong> above, and the folder by its place
                     on a document. Moves wait until you press <strong>Save order</strong>.
                   </p>
-                  {/* The keyboard-and-tablet path to the same thing: a touch screen fires no drag events. */}
+                  {/* Button-based ordering for touchscreens and keyboards */}
                   {isEditing && (
                     <div className="flex flex-wrap items-center gap-2">
                       <button
@@ -1211,11 +1085,7 @@ export default function AdminDocumentsTab({
                         <ArrowDown className="w-3.5 h-3.5" />
                         Move down
                       </button>
-                      {/* THE BAR BEHIND THIS MODAL IS NOT VISIBLE FROM IN HERE, and Move up / Move down are inside it -
-                          so without this the one path a touch screen can use would stage a move nobody could save, and
-                          the button being grayed out while `savingOrder` would be the only feedback. Same pending list
-                          as the bar, read from the same place, so the two can never disagree; the count and the button
-                          appear together or not at all. */}
+                      {/* Notice and button for unsaved order moves */}
                       {orderDirty && (
                         <>
                           <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
@@ -1272,10 +1142,7 @@ export default function AdminDocumentsTab({
                   Visible to members
                 </label>
 
-                {/* Locked ON for a checklist, because a checklist is signed line by line and that is the whole point of
-                    the type: "you cannot create a checklist that does not accept checks". The server forces the flag
-                    too, so this is the visible half of one rule rather than the rule itself. For every other type the
-                    box is an ordinary choice. */}
+                {/* Checklists always require signatures; other documents can toggle */}
                 <label className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -1286,10 +1153,7 @@ export default function AdminDocumentsTab({
                       setForm((current) => ({
                         ...current,
                         is_sign_required: on,
-                        // THE TWO FLAGS ARE A PAIR. A document nobody signs has nothing to confirm, so turning the
-                        // signature off takes the requirement with it rather than leaving a stored setting that
-                        // describes nothing - and the payload builder would drop it on save anyway, which is a worse
-                        // way to find out.
+                        // If signatures are off, clear the verification requirement.
                         requires_verification: on ? current.requires_verification : false,
                       }));
                     }}
@@ -1306,13 +1170,7 @@ export default function AdminDocumentsTab({
                   </span>
                 </label>
 
-                {/* THE SECOND SIGNATURE - the same arrangement a checklist gives its items, for a document that is
-                    signed as a whole: the member acknowledges it, and somebody else confirms they looked. It appears
-                    only where it can mean something. On a checklist the box is not offered at all (its items are what
-                    get confirmed, one by one), and until "Members must sign this" is on it is DISABLED with the reason
-                    rather than hidden - an author looking for the option is told why it is not available instead of
-                    being left to wonder. The column is forced to match on save either way; see
-                    `storedRequiresVerification` in utils/documents. */}
+                {/* Verification requirement for non-checklist documents */}
                 {form.doc_type !== 'checklist' && (
                   <label className="flex items-start gap-2">
                     <input
@@ -1522,9 +1380,7 @@ export default function AdminDocumentsTab({
                     <input
                       id="item-order"
                       type="number"
-                      // Kept as the TEXT that was typed. Parsing on every keystroke is what made `0` and blank the same
-                      // value - and it also fought the author, turning a half-typed number into a different one under
-                      // the cursor. `checklistItemSortOrder` reads it once, at the save, where the difference matters.
+                      // Keep sort order as typed text.
                       value={itemForm.sort_order}
                       onChange={(event) =>
                         setItemForm((current) => ({ ...current, sort_order: event.target.value }))
@@ -1557,19 +1413,14 @@ export default function AdminDocumentsTab({
             </div>
           )}
 
-          {/* The signature report. Below the editor on purpose: it answers "who has signed this", which is a question
-              about the document rather than part of writing it. A stale signature is one taken before the latest edit
-              and is called out, because a signature that appears to approve text nobody read is the one way this
-              feature can mislead. */}
+          {/* Signatures collected for this document */}
           {isEditing && form.is_sign_required && (
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Signatures</h3>
                 {!loadingSignatures && !signaturesError && (
                   <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {/* Counted from the ROWS, not from the signature records. On a checklist those differ - every
-                        signed item is one row and every verification used to be another - and the heading has to
-                        describe the list beneath it, or a checklist with three signed items claims eleven signatures. */}
+                    {/* Total count of signed items or signatures */}
                     {signatureRows.length} {signatureCountNoun}
                     {signatureRows.length === 1 ? '' : 's'}
                     {staleSignatureCount > 0
@@ -1609,9 +1460,7 @@ export default function AdminDocumentsTab({
                           <span className="text-xs text-slate-500 dark:text-slate-400">
                             {signatureDateLabel({ signed_at: row.at }, timeFormat) || 'Signed'}
                           </span>
-                          {/* A verification is shown ON the row it belongs to, which is the whole point: the item is
-                              listed once and "verified by" is a fact about it rather than a second line the reader has
-                              to connect back to the first. */}
+                          {/* Display verifier name */}
                           {row.verifiedById && (
                             <span className="rounded-full bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               verified by {memberLabel(row.verifiedById)}
@@ -1634,9 +1483,7 @@ export default function AdminDocumentsTab({
                             </span>
                           )}
 
-                          {/* One control per underlying record, and each is named. "remove" alone was ambiguous once
-                              a row can carry both: a signature and a verification are separate rows in the sheet, so
-                              removing one must not look like removing the other. */}
+                          {/* Controls to remove verification or signature */}
                           <span className="ml-auto flex flex-wrap items-center gap-x-3">
                             {row.verifications.map((verification) => (
                               <button
@@ -1678,8 +1525,7 @@ export default function AdminDocumentsTab({
                     ))}
                   </ul>
 
-                  {/* The card is the whole document's signature record, and on a checklist it grows with every member
-                      who signs every item. The pager hides itself on a single page, as the events tables do. */}
+                  {/* Signatures pagination */}
                   {signaturePageCount > 1 && (
                     <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
                       <span>{pageRangeLabel(signatureRows.length, currentSignaturePage, SIGNATURE_PAGE_SIZE)}</span>
@@ -1740,8 +1586,7 @@ export default function AdminDocumentsTab({
           )}
 
           {pendingSignatureRemoval && (
-            // The two are separate records, so the message says which one goes and what stays: a verification can be
-            // removed without touching the signature it confirms, and the reader should not have to guess.
+            // Modal to confirm removal of a signature or verification.
             <ConfirmModal
               title={
                 pendingSignatureRemoval.role === 'verifier'
@@ -1823,9 +1668,7 @@ export default function AdminDocumentsTab({
         />
       )}
 
-      {/* The verification queue, for a role that may confirm signatures as well as write documents. It sits at the
-          BOTTOM because an editor's job here is the document; a verifier who cannot manage documents gets this on
-          its own, at the top of the early return above. */}
+      {/* Checklist verification queue */}
       {canVerifyDocuments && (
         <AdminChecklistVerification
           token={token}
@@ -1833,13 +1676,11 @@ export default function AdminDocumentsTab({
           users={users}
           currentUserId={currentUserId}
           timeFormat={timeFormat}
+          documentVerificationCounts={documentVerificationCounts}
         />
       )}
 
-      {/* Back-filling the paper files, for a role that manages documents - which is also what the write requires, so
-          the panel is only drawn for a role that could use it rather than offering a save the server would refuse. It
-          sits BELOW the verification queue deliberately: filling the history in is the one-off job somebody does when
-          the station arrives, and confirming a member's items is the recurring one. */}
+      {/* Signature backfill tool */}
       {canManageDocuments && (
         <AdminSignatureBackfill
           token={token}

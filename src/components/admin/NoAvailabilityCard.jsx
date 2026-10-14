@@ -3,12 +3,7 @@ import { UserX } from 'lucide-react';
 import MemberName from '../MemberName';
 import { MONTHS } from '../../utils/calendarConstants';
 
-// The members who have claimed NOTHING for the month on screen - who an officer has to chase before the month
-// closes. It sits BESIDE the All Members day list on a computer and ABOVE it on a phone; that layout decision is the
-// tab's, which owns the month the two agree on, so this component is only the card itself.
-//
-// An UNREAD month makes every member look unclaimed (there are no rows to count), so the card says that rather than
-// printing the whole crew - the same distinction the day list draws with its own "nothing is loaded" banner above.
+// Shows a card listing members who have not submitted any availability for the selected month.
 export default function NoAvailabilityCard({ members = [], year, month, loaded = true, className = '' }) {
   return (
     <section

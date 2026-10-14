@@ -9,15 +9,7 @@ import { listFormFields } from '../../utils/formFill';
 import { TRAINING_FLAGS } from '../../utils/training';
 import { categoryPairsFrom } from '../../utils/trainingSummary';
 
-// Printable form definitions: which blank PDF a form fills, which data feeds it, and where each value goes.
-//
-// THE FIELD MAPPER IS THE WHOLE POINT OF THIS SCREEN. A blank's field names are not guessable - they are whatever the
-// state's PDF happened to call them - so the screen reads them OFF THE BLANK (`listFormFields`, which pdf-lib can do)
-// and offers each one to be filled. An officer never types a field name; they pick it and point it at a value.
-//
-// THE BLANKS ARE BUNDLED FILES, so there is no upload here: the picker lists what utils/formCatalog registers, and if
-// nothing is registered yet the screen says so rather than offering an empty form. That is the honest state - the engine
-// was built before the blanks were - and it is why this screen works today with no PDF in the repo.
+// Settings for printable PDF forms: which blank PDF to use, where to get the data, and which fields to fill.
 const EMPTY_FORM = {
   id: '',
   name: '',
@@ -46,8 +38,7 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
-  // The fields the chosen BLANK declares, and how reading them went - kept apart from the definition, because a blank
-  // that cannot be read is not a reason to lose what the officer has typed.
+  // Fields found inside the selected blank PDF.
   const [blankFields, setBlankFields] = useState([]);
   const [fieldsError, setFieldsError] = useState('');
   const [readingFields, setReadingFields] = useState(false);
@@ -68,8 +59,7 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
     void refresh();
   }, []);
 
-  // Read the chosen blank's own fields. Cancelled on a change of blank, so a slow read for a blank the officer has moved
-  // away from cannot land on top of the one they moved to.
+  // Read the fields from the selected blank PDF file.
   useEffect(() => {
     const templateId = String(form.template && form.template.id ? form.template.id : '');
     if (!editorOpen || !templateId) {
@@ -122,8 +112,7 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
     });
   };
 
-  // One field's mapping. An emptied `from` REMOVES the entry rather than storing a blank instruction, so what is saved is
-  // only what the officer actually mapped.
+  // Updates how a single form field gets its value.
   const mapField = (name, patch) =>
     setForm((prev) => {
       const next = { ...(prev.fields || {}) };
@@ -155,7 +144,6 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
       closeEditor();
       await refresh();
     } catch (failure) {
-      // The writer normalises through the same pure validator the screen would, so its message is the one to show.
       setError(failure.message || 'Could not save this form.');
     } finally {
       setSaving(false);
@@ -175,8 +163,7 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
   };
 
   const mappedCount = Object.keys(form.fields || {}).length;
-  // The paths the chosen source offers, straight from its own registry entry. The categories go in because this source
-  // widens to one `totals.<flag>` per category the station uses, so a category added later appears here on its own.
+  // Available data fields that can be placed into the form.
   const linkages = sourceLinkages(form.source, { categories: categoryPairsFrom(TRAINING_FLAGS) });
   const linkageGroups = groupLinkages(linkages);
 
@@ -312,13 +299,7 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
             <fieldset className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700">
               <legend className="text-xs font-semibold text-slate-700 dark:text-slate-200">Where each value goes</legend>
               {linkages.length > 0 && (
-                // THE PATHS ON OFFER, taken from the source's own registry entry rather than a list kept here - so what
-                // this names and what the source can actually fill stay the same thing, because the list lives beside
-                // the `contextFor` that produces it. scripts/verify-forms asserts every path here resolves.
-                //
-                // It sits above the mapper rather than behind a disclosure: this app has no `<details>` anywhere, and a
-                // React `<details open>` re-asserts itself on every render, which would snap it open under the officer
-                // as they typed. A compact panel is duller and behaves.
+                // List of available data fields that the user can choose from.
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
                   <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                     Values that come from this source{' '}
