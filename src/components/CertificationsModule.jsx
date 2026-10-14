@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BadgeCheck, CalendarDays, AlertTriangle, FileText, Loader2 } from 'lucide-react';
+import { BadgeCheck, CalendarDays, AlertTriangle, FileText, Loader2, ChevronDown } from 'lucide-react';
 import RankIcon from './RankIcon';
 import CenteredContent from './CenteredContent';
 import { fetchCertifications, fetchMyCertificationFiles } from '../services/api';
@@ -18,7 +18,13 @@ import {
 // It reads on open rather than carrying the rows in the bootstrap: this is the only screen that shows the full
 // set, and what the bootstrap does carry (the sign-in notice) is a subset of it. The ATTACHED SCANS are a second
 // small read in the same wave, because the button that opens one is drawn per row.
-export default function CertificationsModule({ token }) {
+export default function CertificationsModule({
+  token,
+  collapsible = true,
+  defaultCollapsed = true,
+  unwrap = false,
+}) {
+  const [isCollapsed, setIsCollapsed] = useState(collapsible ? defaultCollapsed : false);
   const [certifications, setCertifications] = useState([]);
   // Keyed by the record's own id, because a record has at most one scan: see the one-file-per-record rule in
   // functions/index.js#saveCertificationFile.
@@ -84,90 +90,109 @@ export default function CertificationsModule({ token }) {
   const current = certifications.filter((row) => row.state === 'active' || row.state === 'expiring');
   const attention = certifications.filter((row) => row.state === 'expiring' || row.state === 'expired');
 
-  return (
-    <CenteredContent className="space-y-6">
+  const content = (
+    <div className="space-y-4">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <div className="flex items-center gap-3 p-6 border-b border-slate-200 dark:border-slate-700">
-          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
-            <BadgeCheck className="w-5 h-5" />
+        <button
+          type="button"
+          onClick={collapsible ? () => setIsCollapsed(!isCollapsed) : undefined}
+          className={`w-full flex items-center justify-between p-6 ${
+            !isCollapsed ? 'border-b border-slate-200 dark:border-slate-700' : ''
+          } text-left transition ${collapsible ? 'hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer' : ''}`}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500 shrink-0">
+              <BadgeCheck className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Certifications</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                {loading
+                  ? 'Loading your certifications…'
+                  : error
+                    ? error
+                    : certifications.length === 0
+                      ? 'Nothing has been recorded for you yet.'
+                      : `${current.length} current${
+                          attention.length > 0 ? `, ${attention.length} needing attention` : ''
+                        } — recorded by the station, so ask an administrator if something is missing or wrong.`}
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Certifications</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              {loading
-                ? 'Loading your certifications…'
-                : error
-                  ? error
-                  : certifications.length === 0
-                    ? 'Nothing has been recorded for you yet.'
-                    : `${current.length} current${
-                        attention.length > 0 ? `, ${attention.length} needing attention` : ''
-                      } — recorded by the station, so ask an administrator if something is missing or wrong.`}
-            </p>
-          </div>
-        </div>
+          {collapsible && (
+            <ChevronDown
+              className={`w-5 h-5 text-slate-400 shrink-0 transition-transform duration-200 ${
+                !isCollapsed ? 'rotate-180' : ''
+              }`}
+            />
+          )}
+        </button>
 
-        {openError && (
-          <p className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-800 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-200">
-            {openError}
-          </p>
-        )}
+        {!isCollapsed && (
+          <>
+            {openError && (
+              <p className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-800 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-200">
+                {openError}
+              </p>
+            )}
 
-        {certifications.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500 dark:text-slate-400">
-            Your certifications will appear here once an administrator records them.
-          </p>
-        ) : (
-          <div className="divide-y divide-slate-200 dark:divide-slate-700/70">
-            {certifications.map((row) => (
-              <div key={row.id} className="flex flex-wrap items-center gap-3 px-6 py-4">
-                <RankIcon
-                  name={row.icon}
-                  className="w-5 h-5 shrink-0 text-slate-500 dark:text-slate-300"
-                />
+            {certifications.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500 dark:text-slate-400">
+                Your certifications will appear here once an administrator records them.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-700/70">
+                {certifications.map((row) => (
+                  <div key={row.id} className="flex flex-wrap items-center gap-3 px-6 py-4">
+                    <RankIcon
+                      name={row.icon}
+                      className="w-5 h-5 shrink-0 text-slate-500 dark:text-slate-300"
+                    />
 
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-slate-900 dark:text-white">{row.name || 'Certification'}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    <CalendarDays className="mr-1 inline-block w-3 h-3 align-[-2px]" />
-                    {row.effective_date ? `Effective ${row.effective_date}` : 'No effective date'}
-                    {row.end_date ? ` · Ends ${row.end_date}` : ' · No end date'}
-                    {row.state === 'expiring' || row.state === 'expired'
-                      ? ` · ${certificationCountdown(row.days_until_end)}`
-                      : ''}
-                  </p>
-                </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-slate-900 dark:text-white">{row.name || 'Certification'}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        <CalendarDays className="mr-1 inline-block w-3 h-3 align-[-2px]" />
+                        {row.effective_date ? `Effective ${row.effective_date}` : 'No effective date'}
+                        {row.end_date ? ` · Ends ${row.end_date}` : ' · No end date'}
+                        {row.state === 'expiring' || row.state === 'expired'
+                          ? ` · ${certificationCountdown(row.days_until_end)}`
+                          : ''}
+                      </p>
+                    </div>
 
-                {files[row.id] && (
-                  <button
-                    type="button"
-                    onClick={() => openFile(row.id)}
-                    disabled={openingId === row.id}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                  >
-                    {openingId === row.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <FileText className="h-3.5 w-3.5" />
+                    {files[row.id] && (
+                      <button
+                        type="button"
+                        onClick={() => openFile(row.id)}
+                        disabled={openingId === row.id}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        {openingId === row.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <FileText className="h-3.5 w-3.5" />
+                        )}
+                        View upload
+                      </button>
                     )}
-                    View upload
-                  </button>
-                )}
 
-                <span
-                  className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${certificationStateBadge(
-                    row.state
-                  )}`}
-                >
-                  {certificationStateLabel(row.state)}
-                </span>
+                    <span
+                      className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${certificationStateBadge(
+                        row.state
+                      )}`}
+                    >
+                      {certificationStateLabel(row.state)}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
 
-      {attention.length > 0 && (
+      {!isCollapsed && attention.length > 0 && (
         <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-200">
           <AlertTriangle className="mt-0.5 w-4 h-4 shrink-0" />
           <p>
@@ -178,6 +203,12 @@ export default function CertificationsModule({ token }) {
           </p>
         </div>
       )}
-    </CenteredContent>
+    </div>
   );
+
+  if (unwrap) {
+    return content;
+  }
+
+  return <CenteredContent className="space-y-6">{content}</CenteredContent>;
 }

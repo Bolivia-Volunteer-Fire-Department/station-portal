@@ -50,6 +50,7 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Fixed an issue where administrators could only see their own training signatures in the Administration module.
 * Added an easier way for administrators to see documents to verify.
 * Added some version-checking mechanisms to help transition users to new versions.
+* *Moved* My Settings and Certifications to a new **User Profile** page, accessible to a user by clicking their own name.
 
 ### Version 1.5x
 * **Rebranded** to *StationSync*!

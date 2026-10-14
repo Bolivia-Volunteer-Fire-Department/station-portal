@@ -25,6 +25,7 @@ export const PAGE_BAR_LABELS = {
   reports: 'Reports & Forms',
   help: 'Help',
   settings: 'My Settings',
+  profile: 'User Profile',
   admin: 'Administration',
 };
 

@@ -1,7 +1,7 @@
 import React from 'react';
-import { LayoutDashboard, User, Settings, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare, Map as MapIcon, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { LayoutDashboard, User, LogOut, History, ShieldCheck, CalendarDays, Clock, BookOpen, BookText, GraduationCap, BadgeCheck, Users, BarChart3, MessagesSquare, Map as MapIcon, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import RankIcon from './RankIcon';
-import CertificationBadges from './CertificationBadges';
+import MemberName from './MemberName';
 import { stationLogoUrl, stationSyncLoopsUrl, stationSyncOnTransUrl } from '../utils/assets';
 // stationLogoUrl() preserved for test contract or department fallback
 import PixelBurst from './PixelBurst';
@@ -210,9 +210,6 @@ export default function Sidebar({
                     >
                         <NavIcon className="w-5 h-5 shrink-0" />
                         <span className={isCollapsed ? 'md:hidden' : ''}>Certifications</span>
-                        <span className={isCollapsed ? 'md:hidden' : 'inline-flex'}>
-                            <CertificationBadges userId={currentUser?.id} className="w-3.5 h-3.5" iconClassName="text-current opacity-80" />
-                        </span>
                     </button>
                 );
             case 'documents':
@@ -279,19 +276,6 @@ export default function Sidebar({
                     >
                         <NavIcon className="w-5 h-5 shrink-0" />
                         <span className={isCollapsed ? 'md:hidden' : ''}>Help</span>
-                    </button>
-                );
-            case 'settings':
-                return (
-                    <button
-                        key="settings"
-                        onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'settings' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                        title={isCollapsed ? 'My Settings' : undefined}
-                    >
-                        <NavIcon className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>My Settings</span>
                     </button>
                 );
             case 'admin':
@@ -366,14 +350,21 @@ export default function Sidebar({
                 </div>
 
                 <div
-                    className={`p-4 m-4 bg-slate-100 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/50 flex items-center ${
+                    className={`p-4 m-4 bg-slate-100 dark:bg-slate-900/60 rounded-xl border ${
+                        activeTab === 'profile' || activeTab === 'settings'
+                            ? 'border-red-500/50 ring-2 ring-red-500/20'
+                            : 'border-slate-200 dark:border-slate-700/50'
+                    } flex items-center ${
                         isCollapsed ? 'gap-3 md:gap-0 md:p-2 md:m-2 md:justify-center' : 'gap-3'
                     }`}
-                    title={isCollapsed ? `${currentUser.name} • Status: ${isClockedIn ? 'On Duty' : 'Off Duty'}` : undefined}
+                    title={isCollapsed ? `${currentUser.name} • Status: ${isClockedIn ? 'On Duty' : 'Off Duty'} • Click to view profile` : undefined}
                 >
-                    <div
-                        className="p-2 bg-slate-200 dark:bg-slate-800 rounded-lg shrink-0 relative"
+                    <button
+                        type="button"
+                        onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); }}
+                        className="p-2 bg-slate-200 dark:bg-slate-800 rounded-lg shrink-0 relative text-left cursor-pointer hover:bg-slate-300 dark:hover:bg-slate-700 transition"
                         style={{ color: currentUserRank?.color || undefined }}
+                        title="View Profile"
                     >
                         {currentUserRank ? (
                             <RankIcon name={currentUserRank.icon} className="w-5 h-5" />
@@ -387,9 +378,16 @@ export default function Sidebar({
                                 }`}
                             />
                         )}
-                    </div>
+                    </button>
                     <div className={`overflow-hidden ${isCollapsed ? 'md:hidden' : ''}`}>
-                        <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{currentUser.name}</p>
+                        <button
+                            type="button"
+                            onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); }}
+                            className="font-semibold text-sm text-slate-900 dark:text-white truncate text-left hover:text-red-600 dark:hover:text-red-400 hover:underline transition cursor-pointer max-w-full block"
+                            title="View Profile"
+                        >
+                            <MemberName user={currentUser} nameClassName="truncate" />
+                        </button>
                         <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">Status: {isClockedIn ? 'On Duty' : 'Off Duty'}</p>
                     </div>
                 </div>

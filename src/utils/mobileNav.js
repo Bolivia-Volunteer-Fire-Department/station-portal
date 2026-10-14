@@ -19,7 +19,7 @@ export const AVAILABLE_MOBILE_NAV_MODULES = [
   { id: 'reports', label: 'Reports', description: 'Reports & forms module', permissionKey: 'canViewReports' },
   { id: 'clock-history', label: 'History', description: 'Member clock-in history', permissionKey: 'canUseTimeclock' },
   { id: 'help', label: 'Help', description: 'Guides & documentation', permissionKey: null },
-  { id: 'settings', label: 'Settings', description: 'User preferences & account', permissionKey: null },
+  // { id: 'settings', label: 'Settings', description: 'User preferences & account', permissionKey: null },
 ];
 
 export function parseMobileNavModules(rawValue) {

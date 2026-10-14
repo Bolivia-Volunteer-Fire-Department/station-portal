@@ -85,6 +85,7 @@ import {
   ReportsModule,
   FormsModule,
   TrainingModule,
+  UserProfile,
   UserSettings,
   prefetchDeferredModules,
   prefetchableFor,
@@ -288,6 +289,7 @@ export default function App() {
 
   // Admin access is granted when the user's role has is_admin set
   const currentUserRole = roles.find((r) => String(r.id) === String(currentUser?.role_id));
+  const currentUserRank = ranks.find((r) => String(r.id) === String(currentUser?.rank_id));
   // Filters announcements matching current user role and rank.
   const announcementAudience = {
     roleId: String(currentUser?.role_id ?? ''),
@@ -2025,6 +2027,7 @@ const getLoadingMessage = () => {
                     {activeTab === 'reports' && 'Reports & Forms'}
                     {activeTab === 'help' && 'Help'}
                     {activeTab === 'settings' && 'My Settings'}
+                    {activeTab === 'profile' && 'User Profile'}
                     {activeTab === 'admin' && 'Administration'}
                   </h2>
                   <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
@@ -2042,6 +2045,7 @@ const getLoadingMessage = () => {
                     {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
                     {activeTab === 'help' && 'Guides for using StationSync. Administrators have their own set under Administration → System → Help.'}
                     {activeTab === 'settings' && 'Customize your personal account preferences.'}
+                    {activeTab === 'profile' && 'Manage your personal details, profile picture, certifications, and account settings.'}
                     {activeTab === 'admin' && 'Manage members, roles, ranks, and system settings.'}
                   </p>
                 </div>
@@ -2216,8 +2220,42 @@ const getLoadingMessage = () => {
               />
             )}
 
+            {activeTab === 'profile' && (
+              <UserProfile
+                initialTab="profile"
+                currentUser={currentUser}
+                currentRole={currentUserRole}
+                currentRank={currentUserRank}
+                ranks={ranks}
+                token={authToken}
+                userSettings={userSettings}
+                systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
+                canApproveShifts={canApproveShifts}
+                canUseChat={canUseChat}
+                onSaveSettings={handleSaveUserSettings}
+                onFontScalePreview={setFontScalePreview}
+                pushDeviceApi={pushDeviceApi}
+                onPasswordChange={handlePasswordChange}
+              />
+            )}
+
             {activeTab === 'certifications' && (
-              <CertificationsModule token={authToken} />
+              <UserProfile
+                initialTab="profile"
+                currentUser={currentUser}
+                currentRole={currentUserRole}
+                currentRank={currentUserRank}
+                ranks={ranks}
+                token={authToken}
+                userSettings={userSettings}
+                systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
+                canApproveShifts={canApproveShifts}
+                canUseChat={canUseChat}
+                onSaveSettings={handleSaveUserSettings}
+                onFontScalePreview={setFontScalePreview}
+                pushDeviceApi={pushDeviceApi}
+                onPasswordChange={handlePasswordChange}
+              />
             )}
 
             {/* The district map. Gated on can_view_map, which is also what firestore.rules checks on the read - so the
@@ -2254,16 +2292,19 @@ const getLoadingMessage = () => {
             )}
 
             {activeTab === 'settings' && (
-              <UserSettings
+              <UserProfile
+                initialTab="settings"
                 currentUser={currentUser}
+                currentRole={currentUserRole}
+                currentRank={currentUserRank}
+                ranks={ranks}
+                token={authToken}
                 userSettings={userSettings}
                 systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
-                currentRole={currentUserRole}
-                hideEventsByDefault={hideEventsByDefault}
-                onFontScalePreview={setFontScalePreview}
                 canApproveShifts={canApproveShifts}
                 canUseChat={canUseChat}
                 onSaveSettings={handleSaveUserSettings}
+                onFontScalePreview={setFontScalePreview}
                 pushDeviceApi={pushDeviceApi}
                 onPasswordChange={handlePasswordChange}
               />

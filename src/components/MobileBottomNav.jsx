@@ -11,7 +11,7 @@ import {
   History,
   BookOpen,
   Map as MapIcon,
-  Settings,
+  // Settings,
   ShieldCheck,
   Menu,
 } from 'lucide-react';
@@ -29,7 +29,7 @@ const MODULE_META = {
   reports: { label: 'Reports', icon: BarChart3 },
   'clock-history': { label: 'History', icon: History },
   help: { label: 'Help', icon: BookOpen },
-  settings: { label: 'Settings', icon: Settings },
+  // settings: { label: 'Settings', icon: Settings },
   admin: { label: 'Admin', icon: ShieldCheck },
 };
 
@@ -75,7 +75,7 @@ export default function MobileBottomNav({
       case 'admin':
         return Boolean(canAdminister);
       case 'help':
-      case 'settings':
+      // case 'settings':
       default:
         return true;
     }

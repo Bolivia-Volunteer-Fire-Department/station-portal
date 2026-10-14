@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck, Camera, Trash2 } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
 import PasswordInput from './PasswordInput';
+import RankIcon from './RankIcon';
 import { soundsActiveFrom } from '../utils/uiSounds';
 import { visibleNotificationTypes } from '../utils/notificationPrefs';
 import { rolePermissionAudit, roleColumnValue, ADMIN_PERMISSIONS } from '../utils/permissions';
@@ -137,12 +138,6 @@ export default function UserSettings({
 
   return (
     <div className="space-y-6">
-
-      {/* THEIR OWN DETAILS COME FIRST. This is the card people open this screen for, and it is the only one here that is
-          about the member rather than about the app's behaviour. */}
-      <ProfilePictureCard currentUser={currentUser} />
-
-      <PersonalInformationCard currentUser={currentUser} />
 
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -344,14 +339,12 @@ export default function UserSettings({
         pushDeviceApi={pushDeviceApi}
       />
 
-      <PasswordChangeCard onPasswordChange={onPasswordChange} />
-
       <AccessCard currentRole={currentRole} />
     </div>
   );
 }
 
-function PasswordChangeCard({ onPasswordChange }) {
+export function PasswordChangeCard({ onPasswordChange }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1074,7 +1067,7 @@ function AccessCard({ currentRole }) {
 // (services/avatarStorage.js), then this card stores the LINK that comes back on the member's roster row - two steps, and
 // the order matters, because a failure between them leaves a picture nothing points at, rather than a link pointing at
 // nothing.
-function ProfilePictureCard({ currentUser }) {
+export function ProfilePictureCard({ currentUser }) {
   // THE PICTURE IS HELD HERE AS WELL AS IN THE ROW. The roster listener will carry the new link within a second or two,
   // but a station's connection is not something to make somebody sit and watch: uploading and then seeing no change reads
   // as a failure whether or not it was one.
@@ -1219,7 +1212,7 @@ function ProfilePictureCard({ currentUser }) {
 }
 
 
-function PersonalInformationCard({ currentUser }) {
+export function PersonalInformationCard({ currentUser, currentRole, currentRank }) {
   const initialValues = () =>
     Object.fromEntries(MEMBER_PRIVATE_FIELDS.map((key) => [key, currentUser?.[key] || '']));
   const [form, setForm] = useState(initialValues);
@@ -1272,15 +1265,40 @@ function PersonalInformationCard({ currentUser }) {
           for the station&rsquo;s records &mdash; signing in still uses your username.
         </p>
 
-        {/* The name, shown rather than offered: it is the station's record of who somebody is. */}
-        <div>
-          <span className={LABEL_CLASS}>Name</span>
-          <p className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
-            {currentUser?.name || 'Unnamed member'}
-          </p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Changed by an administrator in Administration &rarr; Members.
-          </p>
+        {/* The name, rank, and role, shown rather than offered: they are the station's record of who somebody is. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <span className={LABEL_CLASS}>Name</span>
+            <p className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 truncate">
+              {currentUser?.name || 'Unnamed member'}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Set by an administrator in Members.
+            </p>
+          </div>
+
+          <div>
+            <span className={LABEL_CLASS}>Rank</span>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
+              {currentRank?.icon ? (
+                <RankIcon name={currentRank.icon} className="w-4 h-4 shrink-0" style={{ color: currentRank.color || undefined }} />
+              ) : null}
+              <span className="truncate">{currentRank?.description || currentRank?.name || 'No rank assigned'}</span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Assigned by an administrator.
+            </p>
+          </div>
+
+          <div>
+            <span className={LABEL_CLASS}>Role</span>
+            <p className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 truncate">
+              {currentRole?.description || currentRole?.name || 'No role assigned'}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Assigned by an administrator.
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

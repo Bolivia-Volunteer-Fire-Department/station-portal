@@ -34,6 +34,7 @@ const loaders = {
   ReportsAndFormsModule: () => import('../components/ReportsAndFormsModule'),
   ReportsModule: () => import('../components/ReportsModule'),
   FormsModule: () => import('../components/FormsModule'),
+  UserProfile: () => import('../components/UserProfile'),
   UserSettings: () => import('../components/MySettings'),
   HelpGuides: () => import('../components/HelpGuides'),
   MyClockHistory: () => import('../components/MyClockHistory'),
@@ -59,6 +60,7 @@ export const ReportsAndFormsModule = lazy(loaders.ReportsAndFormsModule);
 // that half's chunk is fetched. They are loaders all the same, so the prefetch walks them by this one list.
 export const ReportsModule = lazy(loaders.ReportsModule);
 export const FormsModule = lazy(loaders.FormsModule);
+export const UserProfile = lazy(loaders.UserProfile);
 export const UserSettings = lazy(loaders.UserSettings);
 export const HelpGuides = lazy(loaders.HelpGuides);
 export const MyClockHistory = lazy(loaders.MyClockHistory);
@@ -87,7 +89,7 @@ export const prefetchableFor = ({
   // it would download Leaflet for a tab that is not in their sidebar. Gated like every other gated screen.
   canViewMap = false,
 } = {}) => {
-  const keys = ['CertificationsModule', 'UserSettings', 'HelpGuides'];
+  const keys = ['CertificationsModule', 'UserSettings', 'HelpGuides', 'UserProfile'];
   if (canUseTimeclock) keys.push('MyClockHistory');
   if (canViewSchedule) keys.push('ScheduleCalendar');
   if (canViewMap) keys.push('DistrictMap');

@@ -95,12 +95,10 @@ export const DEFAULT_SIDEBAR_NAV_ORDER = [
   'schedule',
   'availability',
   'training',
-  'certifications',
   'documents',
   'district-map',
   'reports',
   'help',
-  'settings',
   'admin',
 ];
 
@@ -357,12 +355,6 @@ export const SIDEBAR_MODULE_CATALOG = [
     id: 'help',
     label: 'Help',
     description: 'Guides and documentation',
-    permissionKey: null,
-  },
-  {
-    id: 'settings',
-    label: 'My Settings',
-    description: 'User preferences and account',
     permissionKey: null,
   },
   {
