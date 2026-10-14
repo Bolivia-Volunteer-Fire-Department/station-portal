@@ -8,7 +8,8 @@ import { CHAT_PAGE_SIZE, isChatThread } from '../utils/chat.js';
 import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
 import { mergeRowsById } from '../utils/savedRow.js';
 import { claimRowsFromMonths, monthKeysBetween } from '../utils/availability.js';
-import { assessmentScoreId, isAssessment as isAssessmentDocument } from '../utils/documents.js';
+import { assessmentScoreId, documentRequiresVerification, isAssessment as isAssessmentDocument } from '../utils/documents.js';
+import { pendingDocumentVerificationsSummary } from '../utils/checklists.js';
 import { roleAllowsTab } from '../utils/permissions.js';
 import { MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID } from '../utils/mapLayer.js';
 import {
@@ -285,6 +286,31 @@ const allChatRooms = async () => {
   return rows.docs.map((row) => ({ ...row.data(), id: row.id })).filter((room) => !isChatThread(room));
 };
 
+// Reads all verifiable documents, items, and signatures to calculate pending verifications.
+export const readPendingDocumentVerifications = async (verifierUserId, verifiableDocs = null) => {
+  const db = firestore();
+  let docs = verifiableDocs;
+  if (!Array.isArray(docs) || docs.length === 0) {
+    const all = await rowsOf(collection(db, 'documents'));
+    docs = all.filter(
+      (row) => String(row.doc_type || '').toLowerCase() === 'checklist' || documentRequiresVerification(row)
+    );
+  }
+  if (!docs.length) return { count: 0, byDocument: {} };
+
+  const [items, signatures] = await Promise.all([
+    rowsOf(collection(db, 'document_checklist_items')),
+    rowsOf(collection(db, 'document_signatures')),
+  ]);
+
+  return pendingDocumentVerificationsSummary({
+    documents: docs,
+    items,
+    signatures,
+    verifierUserId,
+  });
+};
+
 export const READERS = {
   GET_ON_DUTY: (uid) => onDutyRows(uid).then((onDuty) => ({ onDuty })),
   // Reads the chat rooms this user is allowed to join.
@@ -494,6 +520,10 @@ export const READERS = {
     const snapshot = await getDoc(doc(firestore(), 'documents', wanted));
     if (!snapshot.exists()) return { success: false, message: 'That document is not available.' };
     return { success: true, document: await documentFullRow({ ...snapshot.data(), id: snapshot.id }) };
+  },
+  // Reads pending document and checklist verifications count and per-document breakdown.
+  ADMIN_GET_DOCUMENT_VERIFICATION_COUNT: async (uid, body) => {
+    return readPendingDocumentVerifications(uid, body?.verifiableDocs);
   },
   // Reads document and signature history for a specific member to verify them.
   GET_MEMBER_DOCUMENT_RECORDS: async (uid, body) => {

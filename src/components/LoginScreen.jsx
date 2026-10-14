@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { stationLogoUrl } from '../utils/assets';
+import { APP_VERSION } from '../utils/appVersion.js';
 import PasswordInput from './PasswordInput';
 
 // THE LOGIN SCREEN CARRIES NO ANNOUNCEMENTS, and that is deliberate rather than an omission: it is read before anybody
@@ -95,7 +96,7 @@ export default function LoginScreen({ onLogin, statusMessage, departmentName, de
       </div>
 
       <p className="mt-6 text-xs text-slate-400 dark:text-slate-500 text-center select-none tracking-wide">
-        StationSync v1.64
+        StationSync v{APP_VERSION}
       </p>
     </div> 
   );

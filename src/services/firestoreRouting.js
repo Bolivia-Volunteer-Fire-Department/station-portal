@@ -391,9 +391,17 @@ const READ_DISPATCH = {
     void uid;
     return ok(await callable('readAdminCertificationRecords', { includeInactive: body?.includeInactive === true }));
   },
-  ADMIN_GET_DOCUMENT_VERIFICATION_COUNT: async (uid) => {
-    void uid;
-    return ok(await callable('readDocumentVerificationCount', {}));
+  ADMIN_GET_DOCUMENT_VERIFICATION_COUNT: async (uid, body) => {
+    try {
+      const result = await callable('readDocumentVerificationCount', {});
+      if (result && typeof result.byDocument === 'object') {
+        return ok(result);
+      }
+    } catch (err) {
+      console.warn('[routing] callable readDocumentVerificationCount failed, using direct read', err);
+    }
+    const { readPendingDocumentVerifications } = await import('./firestoreReads.js');
+    return ok(await readPendingDocumentVerifications(uid, body?.verifiableDocs));
   },
   GET_REPORTS: async () => ok(await callable('getReports', {})),
   GET_REPORT_CONFIGS: async () => ok(await callable('getReportConfigurations', {})),

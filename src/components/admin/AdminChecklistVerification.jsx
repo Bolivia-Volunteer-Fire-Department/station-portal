@@ -49,25 +49,27 @@ function AdminChecklistVerification({
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [showingVerifiedFor, setShowingVerifiedFor] = useState('');
   const [pendingCounts, setPendingCounts] = useState(documentVerificationCounts || {});
+  const [summaryLoading, setSummaryLoading] = useState(
+    !(documentVerificationCounts && Object.keys(documentVerificationCounts).length > 0)
+  );
 
   useEffect(() => {
     if (documentVerificationCounts && Object.keys(documentVerificationCounts).length > 0) {
       setPendingCounts((prev) => ({ ...prev, ...documentVerificationCounts }));
+      setSummaryLoading(false);
     }
   }, [documentVerificationCounts]);
 
-  const refreshSummary = useCallback(async () => {
+  const refreshSummary = useCallback(async (candidateDocs = null) => {
     try {
-      const summary = await fetchAdminDocumentVerificationSummary();
+      const summary = await fetchAdminDocumentVerificationSummary(candidateDocs);
       setPendingCounts(summary.byDocument || {});
     } catch (err) {
       console.warn('[verification] could not load verification summary', err);
+    } finally {
+      setSummaryLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    refreshSummary();
-  }, [refreshSummary]);
 
   // Documents or checklists eligible for verification.
   const verifiable = useMemo(
@@ -78,13 +80,28 @@ function AdminChecklistVerification({
     [documents]
   );
 
+  useEffect(() => {
+    refreshSummary(verifiable.length > 0 ? verifiable : null);
+  }, [refreshSummary, verifiable]);
+
+  // When summary resolves and a document with pending items exists, default requestedListId to it if the user hasn't selected one
+  useEffect(() => {
+    if (!requestedListId && verifiable.length > 0) {
+      const firstPending = verifiable.find((row) => (pendingCounts[row.id] || 0) > 0);
+      if (firstPending) {
+        setRequestedListId(firstPending.id);
+      }
+    }
+  }, [verifiable, pendingCounts, requestedListId]);
+
   // Pick the requested document, or default to the first one with pending items, or the first available.
   const activeListId = useMemo(() => {
     if (requestedListId && verifiable.some((row) => row.id === requestedListId)) return requestedListId;
     const pendingDoc = verifiable.find((row) => (pendingCounts[row.id] || 0) > 0);
     if (pendingDoc) return pendingDoc.id;
+    if (summaryLoading) return '';
     return verifiable.length > 0 ? verifiable[0].id : '';
-  }, [verifiable, requestedListId, pendingCounts]);
+  }, [verifiable, requestedListId, pendingCounts, summaryLoading]);
 
   const activeDocument = useMemo(
     () => verifiable.find((row) => row.id === activeListId) || null,
@@ -187,7 +204,7 @@ function AdminChecklistVerification({
       if (!result?.success) throw new Error(result?.message || 'Could not record the verification.');
       setSignatures(normalizeSignatureList(result.signatures));
       toast.success(result.already_verified ? 'That was already verified.' : 'Verified.');
-      refreshSummary();
+      refreshSummary(verifiable);
     } catch (err) {
       toast.error(err?.message || 'Could not record the verification.');
     } finally {
@@ -210,7 +227,7 @@ function AdminChecklistVerification({
           ? 'There was nothing left to verify.'
           : `Verified ${verified} item${verified === 1 ? '' : 's'}.`
       );
-      refreshSummary();
+      refreshSummary(verifiable);
     } catch (err) {
       toast.error(err?.message || 'Could not record the verifications.');
     } finally {
@@ -228,7 +245,7 @@ function AdminChecklistVerification({
       if (!result?.success) throw new Error(result?.message || 'Could not record the confirmation.');
       setSignatures(normalizeSignatureList(result.signatures));
       toast.success(result.already_verified ? 'That was already confirmed.' : 'Signature confirmed.');
-      refreshSummary();
+      refreshSummary(verifiable);
     } catch (err) {
       toast.error(err?.message || 'Could not record the confirmation.');
     } finally {
@@ -269,13 +286,13 @@ function AdminChecklistVerification({
         <button
           type="button"
           onClick={() => {
-            loadSignatures(activeListId);
-            refreshSummary();
+            if (activeListId) loadSignatures(activeListId);
+            refreshSummary(verifiable);
           }}
-          disabled={loading || !activeListId}
+          disabled={loading || summaryLoading}
           className="ml-auto flex items-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-700"
         >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {loading || summaryLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Refresh
         </button>
       </div>
@@ -336,7 +353,11 @@ function AdminChecklistVerification({
               value={activeListId}
               onChange={(event) => setRequestedListId(event.target.value)}
               className={fieldClass}
+              disabled={summaryLoading && !activeListId}
             >
+              {summaryLoading && !activeListId && (
+                <option value="">Checking for pending verifications…</option>
+              )}
               {documentsNeedingVerification.length > 0 ? (
                 <>
                   <optgroup label={`Awaiting verification (${documentsNeedingVerification.length})`}>
@@ -387,6 +408,13 @@ function AdminChecklistVerification({
             </p>
           )}
 
+          {!error && summaryLoading && !activeListId && (
+            <p className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Checking for pending verifications…
+            </p>
+          )}
+
           {!error && loading && items.length === 0 && (
             <p className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -394,7 +422,7 @@ function AdminChecklistVerification({
             </p>
           )}
 
-          {!error && !loading && waiting.length === 0 && (
+          {!error && !loading && !summaryLoading && waiting.length === 0 && (
             <div className="text-sm text-slate-500 dark:text-slate-400">
               {emptyReason === 'no-items' && (
                 <p>

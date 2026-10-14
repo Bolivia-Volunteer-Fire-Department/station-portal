@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import { lockGesturesWhenInstalled } from './utils/nativeShell.js'
+import { startPeriodicUpdateChecks } from './utils/versionCheck.js'
 
 // When a new build is deployed, chunk hashes change on the hosting server. If an open tab
 // tries to dynamically import a chunk that was replaced, Vite fires 'vite:preloadError'.
@@ -34,6 +35,9 @@ window.addEventListener('vite:preloadError', (event) => {
 // records why the status bar is NOT adjusted here).
 lockGesturesWhenInstalled();
 
+// Monitor for new releases when app is in use or resumed.
+startPeriodicUpdateChecks();
+
 // Register the push-notification service worker up front so a device is ready
 // the moment a member enables notifications in User Settings. Notification
 // permission is requested there, from a click - never on page load.
@@ -42,6 +46,9 @@ if ('serviceWorker' in navigator) {
     const base = import.meta.env.BASE_URL || '/';
     navigator.serviceWorker
       .register(`${base}sw.js`, { scope: base })
+      .then((reg) => {
+        reg?.update().catch(() => {});
+      })
       .catch((err) => console.warn('[push] Service worker registration failed:', err));
   });
 }

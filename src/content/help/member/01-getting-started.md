@@ -49,36 +49,26 @@ This app was created by Matt Wills for the Bolivia Fire Department.
 * Simplified codebase comments.
 * Fixed an issue where administrators could only see their own training signatures in the Administration module.
 * Added an easier way for administrators to see documents to verify.
+* Added some version-checking mechanisms to help transition users to new versions.
 
 ### Version 1.5x
+* **Rebranded** to *StationSync*!
 * Added **Firebase Storage** for Certification uploads.
 * Fixed an issue with the Roster not showing everyone.
 * Added enhancements to the **Firefighter Runner** to make mobile play easier.
 * Added the **Chat** module.
-* Removed redundant fetchEvents one-shot read upon calendar tab mount; snapshot is already provided by subscribeLive.
-* Materialized name and rank_id directly onto on_duty/{uid} during clock-in; eliminated secondary per-member directory fetches.
-* Replaced unbounded scan with a targeted query.
-* Eliminated post-write re-queries in saveTrainingSignatures, verifyChecklistItem, verifyDocumentSignature, and verifyChecklistRemaining by assembling returned arrays locally.
-* Inverted lookup in deliverPush: queries push_devices first. If no candidate recipients hold registered devices, returns immediately with 0 reads. Only fetches settings/public and user_settings/{id} for members with registered devices.
-* Single-member certification edits query only that member's records instead of all department certifications.
-* Centralized bumpScheduleSentinel and invoked it explicitly once in saveScheduleBoard and approveOffer, avoiding trigger storms while keeping live/schedule accurate.
-* Added in-memory caching for conversation metadata, narrowed directory reads for direct messages, and ensured chunked batch writes.
-* Replaced static icons with `<Loader2 className="w-5 h-5 animate-spin" />` during active clock operations.
+* Removed redundant and unnecessary fetch events/unbounded scans.
+* Tweaked handling of push notifications.
+* Fixed certifications viewing permissions.
 * Updated button labels to "Clocking In..." and "Clocking Out..." during loading, keeping offline/disabled safeguards intact.
 * Added autoCapitalize="none", autoCorrect="off", and spellCheck={false} to the username field to prevent mobile keyboards from uppercasing or autocorrecting station credentials.
 * Replaced standard button text with `<Loader2 className="w-5 h-5 animate-spin" />` and "Signing In..." while submission is in flight, disabling double-submissions.
-* Relocated the version number label out of the form card into a subtle, centered footer below the card on the Login Screen.
-* Added a lightweight sticky bottom bar for viewports `< 768px (md:hidden)` featuring the top daily firefighter actions: Clock, Schedule, Chat (with live unread message badge count), and More (triggers the full navigation drawer).
-* Main content area includes bottom safe-area clearance to ensure no content is obscured.
-* Gave today's calendar cell a distinctive accent ring and a bold solid red date badge with an uppercase "TODAY" micro-chip in month view.
-* Boosted contrast and sizing on weekday headers and regular date keys.
+* Relocated the version number on the Login Screen.
+* Added a lightweight sticky bottom bar for mobile devices featuring the top daily firefighter actions.
+* Added bottom safe-area clearance to main content area to ensure no content is obscured.
+* **Calendar viewing enhancements**: made "today" more apparent, boosted contrast and sizing on weekday headers and regular date keys, week numbers.
 * Styled table headers with `sticky top-0 z-10 bg-slate-100/95 dark:bg-slate-900/95 backdrop-blur-sm border-b` across Reports, Roster, and Admin management tabs so column titles remain visible during long table scrolls.
-* Added animated skeleton shimmer rows to the Roster table during member searches/loads.
-* Added skeleton card shimmers for the Administration module initial read.
-* When scrolled up reading conversation backlog, newly arrived messages no longer abruptly yank the scroll position. Instead, a bouncing "New messages below ↓" chip appears at the bottom. Tapping it smoothly scrolls down and dismisses it.
-* The chat message textarea dynamically expands its height from single-line up to 112px as multiline messages are composed, and immediately resets to 1 row once sent.
-* Added week numbers to Schedule and Schedule Management to help separate the weeks in a more readable format.
-* **Rebranded** to *StationSync*!
+* Added animated skeleton shimmer rows to: Roster table during member searches/loads and the Administration module initial read.
 
 ### Version 1.4x
 * Every password field now has an **eye** on it, so you can check what you are typing on the login screen and anywhere else a password is entered.

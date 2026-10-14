@@ -130,6 +130,7 @@ import { updateRuntimePwaIcons } from './utils/pwaIcons';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
 import AnnouncementList from './components/AnnouncementList';
 import { normalizeEventList } from './utils/events';
+import AppUpdateBanner from './components/AppUpdateBanner';
 
 // Loading spinner displayed while screen code is downloading.
 
@@ -1821,6 +1822,9 @@ const getLoadingMessage = () => {
           bottom: 'max(16px, calc(env(safe-area-inset-bottom, 0px) + 80px))',
         }}
       />
+
+      {/* Floating banner alert when a new release is deployed */}
+      <AppUpdateBanner />
 
       {/* Idle timeout warning. Shown only in the final minute, so it reads as a warning rather than
           as a permanent fixture. "Stay signed in" pushes the server window out as well as resetting

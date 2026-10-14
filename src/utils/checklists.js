@@ -14,7 +14,12 @@
 // resolves `./documents` happily, so these two lines were fine for as long as this module was only reached through the
 // bundler. It is not any more: `scripts/verify-firestore-writes.mjs` imports it unbundled, straight into Node, which
 // requires the extension and failed with ERR_MODULE_NOT_FOUND - the same wall that module hit, and the same fix.
-import { normalizeChecklistItemList, normalizeSignatureList } from './documents.js';
+import {
+  documentRequiresVerification,
+  membersAwaitingDocumentVerification,
+  normalizeChecklistItemList,
+  normalizeSignatureList,
+} from './documents.js';
 import { formatLogTimestamp } from './systemLog.js';
 
 // One item's state for one member: what they did, and what was confirmed about it.
@@ -243,4 +248,44 @@ export const checklistSignatureEntries = (items, signatures) => {
     if (a.signedAt !== b.signedAt) return a.signedAt < b.signedAt ? -1 : 1;
     return a.userId.localeCompare(b.userId);
   });
+};
+
+// Calculates pending verification counts per document and total across all documents.
+export const pendingDocumentVerificationsSummary = ({
+  documents = [],
+  items = [],
+  signatures = [],
+  verifierUserId = '',
+} = {}) => {
+  const byDocument = {};
+  let total = 0;
+  const wantedVerifier = String(verifierUserId || '').trim();
+
+  (Array.isArray(documents) ? documents : []).forEach((doc) => {
+    const docId = String(doc?.id || '').trim();
+    if (!docId) return;
+    const isChecklist = String(doc.doc_type || '').toLowerCase() === 'checklist';
+    const docItems = (Array.isArray(items) ? items : []).filter(
+      (it) => String(it.document_id || '').trim() === docId
+    );
+    const docSignatures = (Array.isArray(signatures) ? signatures : []).filter(
+      (s) => String(s.document_id || '').trim() === docId
+    );
+
+    let count = 0;
+    if (isChecklist) {
+      const waiting = membersAwaitingVerification(docItems, docSignatures, wantedVerifier);
+      count = waiting.reduce((sum, entry) => sum + (entry.remaining ? entry.remaining.length : 0), 0);
+    } else if (documentRequiresVerification(doc)) {
+      const waiting = membersAwaitingDocumentVerification(doc, docSignatures, wantedVerifier);
+      count = waiting.length;
+    }
+
+    if (count > 0) {
+      byDocument[docId] = count;
+      total += count;
+    }
+  });
+
+  return { count: total, byDocument };
 };

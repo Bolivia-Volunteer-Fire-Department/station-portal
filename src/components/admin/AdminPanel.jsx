@@ -193,7 +193,7 @@ export default function AdminPanel({
   }, [pendingApprovalsCount, allowedTabs, activeSubTab, onSelectTab]);
 
   useEffect(() => {
-    if (activeSubTab !== null || !canViewDocumentVerificationCount) return undefined;
+    if (!canViewDocumentVerificationCount) return undefined;
     let cancelled = false;
     fetchAdminDocumentVerificationSummary()
       .then((summary) => {
@@ -209,7 +209,7 @@ export default function AdminPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeSubTab, canViewDocumentVerificationCount, currentUserId]);
+  }, [canViewDocumentVerificationCount, currentUserId]);
 
   const closeMenus = () => setOpenCategory(null);
 

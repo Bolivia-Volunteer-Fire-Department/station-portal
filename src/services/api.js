@@ -113,8 +113,8 @@ export const fetchAdminDocumentVerificationCount = async () => {
 };
 
 // Summary of pending document verifications including total count and per-document breakdown.
-export const fetchAdminDocumentVerificationSummary = async () => {
-  const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+export const fetchAdminDocumentVerificationSummary = async (verifiableDocs = null) => {
+  const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT', { verifiableDocs });
   if (!response?.success) throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
   return {
     count: Math.max(0, Number(response.count) || 0),

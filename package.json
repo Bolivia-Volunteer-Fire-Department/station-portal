@@ -109,7 +109,8 @@
     "verify:badge-render": "vite build --ssr scripts/verify-badge-render.mjs --outDir tmp-test-out/badge-render --logLevel error && node tmp-test-out/badge-render/verify-badge-render.js",
     "verify:rank-dot": "vite build --ssr scripts/verify-rank-dot.mjs --outDir tmp-test-out/rank-dot --logLevel error && node tmp-test-out/rank-dot/verify-rank-dot.js",
     "verify:member-schedule-runtime": "vite build --ssr scripts/verify-member-schedule-runtime.mjs --outDir tmp-test-out/member-schedule-runtime --logLevel error && node tmp-test-out/member-schedule-runtime/verify-member-schedule-runtime.js",
-    "verify:rich-markdown": "vite build --ssr scripts/verify-rich-markdown.mjs --outDir tmp-test-out/rich-markdown --logLevel error && node tmp-test-out/rich-markdown/verify-rich-markdown.js"
+    "verify:rich-markdown": "vite build --ssr scripts/verify-rich-markdown.mjs --outDir tmp-test-out/rich-markdown --logLevel error && node tmp-test-out/rich-markdown/verify-rich-markdown.js",
+    "verify:version-check": "node scripts/verify-version-check.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
