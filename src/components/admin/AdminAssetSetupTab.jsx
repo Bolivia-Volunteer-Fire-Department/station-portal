@@ -217,7 +217,7 @@ export default function AdminAssetSetupTab({ token, onDataChanged }) {
       setSuccessMessage('Asset type saved successfully.');
       setTimeout(() => setSuccessMessage(null), 3000);
       await loadData();
-      void onDataChanged?.('assetTypes');
+      void onDataChanged?.();
     } catch (err) {
       console.error('Failed to save asset type:', err);
       setError(err.message || 'Could not save this asset type.');
@@ -241,7 +241,7 @@ export default function AdminAssetSetupTab({ token, onDataChanged }) {
       setSuccessMessage('Asset type deleted.');
       setTimeout(() => setSuccessMessage(null), 3000);
       await loadData();
-      void onDataChanged?.('assetTypes');
+      void onDataChanged?.();
     } catch (err) {
       console.error('Failed to delete asset type:', err);
       setError(err.message || 'Could not delete this asset type.');

@@ -180,7 +180,7 @@ export default function AdminEquipmentTab({
       const result = await adminSaveEquipment(cleanData, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to save equipment.');
       await loadEquipment();
-      if (typeof onDataChanged === 'function') onDataChanged('equipment');
+      if (typeof onDataChanged === 'function') onDataChanged();
       resetForm();
     } catch (err) {
       setError(err.message || 'Failed to save equipment record.');
@@ -198,7 +198,7 @@ export default function AdminEquipmentTab({
       const result = await adminDeleteEquipment(item.id, token);
       if (!result?.success) throw new Error(result?.message || 'Failed to delete equipment.');
       await loadEquipment();
-      if (typeof onDataChanged === 'function') onDataChanged('equipment');
+      if (typeof onDataChanged === 'function') onDataChanged();
       if (formData.id === item.id) resetForm();
     } catch (err) {
       setError(err.message || 'Failed to delete equipment.');
