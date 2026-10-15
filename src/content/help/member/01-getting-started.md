@@ -44,6 +44,10 @@ To see what you have access to, click your name at the top of the sidebar to ope
 
 This app was originally created for the Bolivia Fire Department in Bolivia, North Carolina.
 
+### Version 1.7x
+* Added **Equipment** and **Apparatuses**
+* Revamped how Documents are organized in the Administration module.
+
 ### Version 1.6x
 * Added the **District Map** module.
 * Fixed an issue where the app would desync with Firestore when encountering intermittent connectivity issues. Added a self-healing mechanism to auto-resync.

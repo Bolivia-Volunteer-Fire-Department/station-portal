@@ -3,6 +3,7 @@ import { User, Settings } from 'lucide-react';
 import CenteredContent from './CenteredContent';
 import { ProfilePictureCard, PersonalInformationCard, PasswordChangeCard } from './MySettings';
 import CertificationsModule from './CertificationsModule';
+import AssignedEquipmentCard from './AssignedEquipmentCard';
 import UserSettings from './MySettings';
 import { useAuth } from '../context/AuthContext';
 import { useStationData } from '../context/StationDataContext';
@@ -86,6 +87,11 @@ export default function UserProfile({
             currentUser={currentUser}
             currentRole={currentRole}
             currentRank={rank}
+          />
+
+          <AssignedEquipmentCard
+            currentUser={currentUser}
+            token={token}
           />
 
           <CertificationsModule

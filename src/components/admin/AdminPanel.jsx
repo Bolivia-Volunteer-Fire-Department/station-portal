@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
@@ -30,6 +30,9 @@ const AdminDocumentsTab = lazy(() => import('./AdminDocumentsTab'));
 const AdminEventsTab = lazy(() => import('./AdminEventsTab'));
 const AdminReportsConfigurationTab = lazy(() => import('./AdminReportsConfigurationTab'));
 const AdminFormsTab = lazy(() => import('./AdminFormsTab'));
+const AdminEquipmentTab = lazy(() => import('./AdminEquipmentTab'));
+const AdminApparatusTab = lazy(() => import('./AdminApparatusTab'));
+const AdminAssetSetupTab = lazy(() => import('./AdminAssetSetupTab'));
 
 function AdminTabLoading() {
   return (
@@ -52,6 +55,16 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'roles', label: 'Role Setup', icon: ShieldCheck },
       { id: 'ranks', label: 'Rank Setup', icon: Award },
       { id: 'certification-setup', label: 'Certification Setup', icon: ClipboardCheck },
+    ],
+  },
+  {
+    id: 'catAssets',
+    label: 'Assets',
+    icon: Package,
+    items: [
+      { id: 'equipment', label: 'Equipment', icon: ShieldAlert },
+      { id: 'apparatus', label: 'Apparatuses', icon: Truck },
+      { id: 'asset-setup', label: 'Asset Setup', icon: SlidersHorizontal },
     ],
   },
   {
@@ -607,6 +620,31 @@ export default function AdminPanel({
           scheduleTemplates={scheduleTemplates}
           timeFormat={timeFormat}
           onAdminDataChanged={onAdminDataChanged}
+        />
+      )}
+
+      {/* Equipment asset tracking & lifecycle tab */}
+      {activeSubTab === 'equipment' && (
+        <AdminEquipmentTab
+          token={token}
+          users={nameRows}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Apparatus fleet asset tracking tab */}
+      {activeSubTab === 'apparatus' && (
+        <AdminApparatusTab
+          token={token}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Asset types setup tab (equipment & apparatus types) */}
+      {activeSubTab === 'asset-setup' && (
+        <AdminAssetSetupTab
+          token={token}
+          onDataChanged={onDataChanged}
         />
       )}
       </Suspense>

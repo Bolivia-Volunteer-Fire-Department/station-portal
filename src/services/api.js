@@ -951,6 +951,42 @@ export const adminDeleteSystemSetting = async (key, token) =>
 export const adminTriggerDatabaseBackup = async (token) =>
   dispatchRequest({ action: 'ADMIN_TRIGGER_DATABASE_BACKUP', token });
 
+// Saves an equipment asset record (turnout gear, radio, or SCBA cylinder).
+export const adminSaveEquipment = async (item, token) =>
+  dispatchRequest({ action: 'ADMIN_SAVE_EQUIPMENT', token, id: item.id, ...item });
+
+// Deletes an equipment asset record.
+export const adminDeleteEquipment = async (id, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_EQUIPMENT', token, id });
+
+// Fetches equipment asset records.
+export const fetchEquipment = async (token) =>
+  dispatchRequest({ action: 'GET_EQUIPMENT', token });
+
+// Saves an apparatus asset record.
+export const adminSaveApparatus = async (item, token) =>
+  dispatchRequest({ action: 'ADMIN_SAVE_APPARATUS', token, id: item.id, ...item });
+
+// Deletes an apparatus asset record.
+export const adminDeleteApparatus = async (id, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_APPARATUS', token, id });
+
+// Fetches apparatus asset records.
+export const fetchApparatus = async (token) =>
+  dispatchRequest({ action: 'GET_APPARATUS', token });
+
+// Saves an asset type definition (equipment gear type, radio type, or apparatus type).
+export const adminSaveAssetType = async (typeData, token) =>
+  dispatchRequest({ action: 'ADMIN_SAVE_ASSET_TYPE', token, id: typeData.id, ...typeData });
+
+// Deletes an asset type definition.
+export const adminDeleteAssetType = async (id, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_ASSET_TYPE', token, id });
+
+// Fetches configured asset types.
+export const fetchAssetTypes = async (token) =>
+  dispatchRequest({ action: 'GET_ASSET_TYPES', token });
+
 // Fetches push notification delivery status across all members.
 export const adminFetchPushStatus = async (token) =>
   dispatchRequest({ action: 'ADMIN_GET_PUSH_STATUS', token });

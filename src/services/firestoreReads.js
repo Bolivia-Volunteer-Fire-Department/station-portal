@@ -728,4 +728,19 @@ export const READERS = {
     const settings = await getDoc(doc(firestore(), 'settings', 'public'));
     return { systemSettings: settingRows(settings) };
   },
+  // Reads equipment asset records.
+  GET_EQUIPMENT: async () => {
+    const snapshot = await getDocs(collection(firestore(), 'equipment'));
+    return { equipment: snapshot.docs.map((row) => ({ id: row.id, ...row.data() })) };
+  },
+  // Reads apparatus asset records.
+  GET_APPARATUS: async () => {
+    const snapshot = await getDocs(collection(firestore(), 'apparatus'));
+    return { apparatus: snapshot.docs.map((row) => ({ id: row.id, ...row.data() })) };
+  },
+  // Reads configured equipment and apparatus asset types.
+  GET_ASSET_TYPES: async () => {
+    const snapshot = await getDocs(collection(firestore(), 'asset_types'));
+    return { assetTypes: snapshot.docs.map((row) => ({ id: row.id, ...row.data() })) };
+  },
 };

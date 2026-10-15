@@ -63,6 +63,9 @@ export const ADMIN_BAR_LABELS = {
   chat: 'Chat Rooms',
   debug: 'Debug',
   help: 'Help',
+  equipment: 'Equipment',
+  apparatus: 'Apparatuses',
+  'asset-setup': 'Asset Setup',
 };
 
 export const adminBarLabel = (subTabId) => ADMIN_BAR_LABELS[String(subTabId || '')] || '';

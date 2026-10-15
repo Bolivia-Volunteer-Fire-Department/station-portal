@@ -100,6 +100,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
     <CenteredContent className="space-y-6">
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DatabaseBackupCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <MapSettingsPointer onOpenMapSettings={onOpenMapSettings} />
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />

@@ -334,7 +334,17 @@ service cloud.firestore {
 
     match /apparatus/{apparatusId} {
       allow read: if signedIn();
-      allow write: if permission('can_edit_schedule');
+      allow write: if permission('can_manage_apparatus') || permission('can_edit_schedule');
+    }
+
+    match /equipment/{equipmentId} {
+      allow read: if signedIn();
+      allow write: if permission('can_manage_equipment');
+    }
+
+    match /asset_types/{typeId} {
+      allow read: if signedIn();
+      allow write: if permission('can_manage_asset_setup') || permission('can_manage_equipment') || permission('can_manage_apparatus');
     }
 
     // The split that keeps an officer's private note off a member's screen: the fields members draw are in

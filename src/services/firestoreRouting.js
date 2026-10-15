@@ -76,6 +76,12 @@ export const ROUTED_FEATURES = {
       'ADMIN_SAVE_SYSTEM_SETTINGS',
       'ADMIN_DELETE_SYSTEM_SETTING',
       'ADMIN_TRIGGER_DATABASE_BACKUP',
+      'ADMIN_SAVE_EQUIPMENT',
+      'ADMIN_DELETE_EQUIPMENT',
+      'ADMIN_SAVE_APPARATUS',
+      'ADMIN_DELETE_APPARATUS',
+      'ADMIN_SAVE_ASSET_TYPE',
+      'ADMIN_DELETE_ASSET_TYPE',
       'ADMIN_DELETE_ROLE',
       'ADMIN_DELETE_RANK',
       'ADMIN_DELETE_SHIFT',
@@ -109,6 +115,9 @@ export const ROUTED_FEATURES = {
       'GET_EVENTS',
       'GET_INITIAL_DATA',
       'MY_PUSH_DEVICES',
+      'GET_EQUIPMENT',
+      'GET_APPARATUS',
+      'GET_ASSET_TYPES',
     ],
     switchReads: [],
   },
@@ -818,6 +827,9 @@ const DOCUMENT_SAVES = {
   ADMIN_SAVE_CHECKLIST_ITEM: 'document_checklist_items',
   ADMIN_SAVE_ASSIGNMENT: 'assignments',
   ADMIN_SAVE_SCHEDULE_TEMPLATE: 'schedule_templates',
+  ADMIN_SAVE_EQUIPMENT: 'equipment',
+  ADMIN_SAVE_APPARATUS: 'apparatus',
+  ADMIN_SAVE_ASSET_TYPE: 'asset_types',
 };
 
 // Certification saves that trigger recalculation of roster badges.
@@ -839,6 +851,9 @@ const DOCUMENT_DELETES = {
   ADMIN_DELETE_EVENT: 'events',
   ADMIN_DELETE_ASSIGNMENT: 'assignments',
   ADMIN_DELETE_SCHEDULE_TEMPLATE: 'schedule_templates',
+  ADMIN_DELETE_EQUIPMENT: 'equipment',
+  ADMIN_DELETE_APPARATUS: 'apparatus',
+  ADMIN_DELETE_ASSET_TYPE: 'asset_types',
 };
 
 // Collections that save audience keys for rank or role visibility filtering.

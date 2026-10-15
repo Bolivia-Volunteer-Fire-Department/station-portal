@@ -1,5 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileText, FolderInput, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Award,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  Folder,
+  FolderInput,
+  FolderOpen,
+  GripVertical,
+  ListChecks,
+  Loader2,
+  Plus,
+  Save,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   adminDeleteChecklistItem,
   adminDeleteDocument,
@@ -169,6 +189,51 @@ export default function AdminDocumentsTab({
   }, [ranks]);
   const folders = useMemo(() => documentFolders(rows), [rows]);
   const groups = useMemo(() => groupDocumentsByFolder(rows), [rows]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
+
+  const toggleFolderCollapse = useCallback((folder) => {
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(folder)) next.delete(folder);
+      else next.add(folder);
+      return next;
+    });
+  }, []);
+
+  const allCollapsed = useMemo(() => {
+    if (groups.length === 0) return false;
+    return groups.every((g) => collapsedFolders.has(g.folder));
+  }, [groups, collapsedFolders]);
+
+  const toggleAllCollapse = useCallback(() => {
+    if (allCollapsed) {
+      setCollapsedFolders(new Set());
+    } else {
+      setCollapsedFolders(new Set(groups.map((g) => g.folder)));
+    }
+  }, [allCollapsed, groups]);
+
+  const displayedGroups = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return groups;
+    return groups
+      .map((group) => {
+        const folderMatches = group.folder.toLowerCase().includes(q);
+        const matchingDocs = group.documents.filter(
+          (doc) =>
+            folderMatches ||
+            (doc.title && doc.title.toLowerCase().includes(q)) ||
+            (doc.doc_type && doc.doc_type.toLowerCase().includes(q))
+        );
+        return {
+          ...group,
+          documents: matchingDocs,
+        };
+      })
+      .filter((group) => group.documents.length > 0);
+  }, [groups, searchQuery]);
 
   const loadRows = useCallback(async () => {
     const result = await adminFetchDocuments(token);
@@ -628,11 +693,13 @@ export default function AdminDocumentsTab({
         }}
         onDragLeave={() => setDragOverInsert((current) => (current === key ? '' : current))}
         onDrop={(event) => dropOnInsert(event, folder, beforeId)}
-        className="flex h-8 w-2 shrink-0 items-center justify-center"
+        className={`flex w-full shrink-0 items-center justify-center transition-all ${
+          active ? 'h-3 my-0.5' : 'h-1.5'
+        }`}
       >
         <span
-          className={`h-full w-0.5 rounded-full transition-colors ${
-            active ? 'bg-red-500' : 'bg-transparent'
+          className={`w-full rounded-full transition-all ${
+            active ? 'h-1 bg-red-500 shadow-sm' : 'h-0.5 bg-transparent'
           }`}
         />
       </span>
@@ -769,21 +836,71 @@ export default function AdminDocumentsTab({
       )}
 
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-2">
-          <FileText className="w-4 h-4 text-red-500 shrink-0" />
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Documents</h3>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {rows.length} document{rows.length === 1 ? '' : 's'}
-          </span>
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60 dark:bg-slate-900/40">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400">
+              <FileText className="w-5 h-5 shrink-0" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">Documents</h3>
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                  {rows.length} document{rows.length === 1 ? '' : 's'}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                  {folders.length} {folders.length === 1 ? 'folder' : 'folders'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Organize department documents, packets, SOPs, and checklists
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => openDocument('')}
-            className="ml-auto flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-4 py-2 rounded-xl shadow-sm transition active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             New document
           </button>
         </div>
+
+        {/* Toolbar: Search & View controls */}
+        {rows.length > 0 && !loading && (
+          <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-800">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search documents or folders..."
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-8 py-1.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleAllCollapse}
+                className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 rounded-lg transition"
+              >
+                {allCollapsed ? 'Expand all' : 'Collapse all'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* No "opening" line here any more: the editor is a modal now, and it says so itself while the document
             loads. A line on the page underneath would be behind it and never read. */}
@@ -798,7 +915,7 @@ export default function AdminDocumentsTab({
             No documents yet. Create one with <strong>New document</strong>.
           </p>
         ) : (
-          <div className="p-3" aria-busy={savingOrder}>
+          <div className="p-4" aria-busy={savingOrder}>
             {/* The list is the drag surface: pick a row up and drop it where it should sit, and pick a folder
                 heading up and drop it in front of another folder. There is no Order box to type into any more -
                 the position is the position you see. */}
@@ -847,123 +964,262 @@ export default function AdminDocumentsTab({
                 </p>
               </div>
             ) : (
-              <p className="px-1 pb-2 text-xs text-slate-500 dark:text-slate-400">
+              <p className="px-1 pb-3 text-xs text-slate-500 dark:text-slate-400">
                 Drag a document to reorder it, or a folder heading to move the whole folder — then press{' '}
                 <strong className="font-semibold">Save order</strong>.
               </p>
             )}
-            {groups.map((group) => (
-              <div key={group.folder} className="mt-3 first:mt-0">
-                <div
-                  // Dropping onto a folder header reorders folders.
-                  onDragOver={(event) => {
-                    if (!draggingFolder || draggingFolder === group.folder) return;
-                    event.preventDefault();
-                    setDragOverFolder(group.folder);
-                  }}
-                  onDragLeave={() => setDragOverFolder((current) => (current === group.folder ? '' : current))}
-                  onDrop={(event) => dropOnFolder(event, group.folder)}
-                  className={`flex items-center gap-2 rounded-lg px-1 py-1 transition ${
-                    dragOverFolder === group.folder ? 'bg-red-50 dark:bg-red-950/40 ring-1 ring-red-400' : ''
-                  } ${draggingFolder === group.folder ? 'opacity-50' : ''}`}
+
+            {displayedGroups.length === 0 ? (
+              <div className="py-12 text-center">
+                <FileText className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                  No documents found matching &ldquo;{searchQuery}&rdquo;
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="mt-2 text-xs font-semibold text-red-600 hover:text-red-500 underline"
                 >
-                  <span
-                    draggable={group.folder !== UNFILED_LABEL && !savingOrder}
-                    onDragStart={(event) => startFolderDrag(event, group.folder)}
-                    onDragEnd={() => {
-                      setDraggingFolder('');
-                      setDragOverFolder('');
-                      // Clear gap highlight when drag ends.
-                      setDragOverInsert('');
-                    }}
-                    title={
-                      group.folder === UNFILED_LABEL
-                        ? 'Unfiled is always shown last'
-                        : `Drag to move the ${group.folder} folder`
-                    }
-                    className={`${
-                      group.folder === UNFILED_LABEL ? '' : 'cursor-grab active:cursor-grabbing'
-                    } text-slate-300 dark:text-slate-600`}
-                  >
-                    <FolderInput className="w-3.5 h-3.5" />
-                  </span>
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    {group.folder}
-                  </h4>
-                  {group.folder !== UNFILED_LABEL && (
-                    <button
-                      type="button"
-                      onClick={() => setRenaming({ from: group.folder, to: group.folder })}
-                      title={`Rename or move the ${group.folder} folder`}
-                      className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition"
-                    >
-                      <FolderInput className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-                {/* List of document buttons in this folder */}
-                <div className="mt-1.5 flex flex-wrap items-center">
-                  {group.documents.map((row) => (
-                    // Gap insertion target and document button.
-                    <React.Fragment key={row.id}>
-                      {insertGap(group.folder, row.id)}
-                      <button
-                        type="button"
-                        onClick={() => openDocument(row.id)}
-                        draggable={!savingOrder}
-                        onDragStart={(event) => startDocumentDrag(event, row)}
-                        // Highlight document when dragging another document over it.
-                        onDragOver={(event) => {
-                          if (!draggingDocumentId || draggingDocumentId === row.id) return;
-                          event.preventDefault();
-                          // Clear gap highlight.
-                          setDragOverInsert('');
-                          setDragOverDocumentId(row.id);
-                        }}
-                        onDragLeave={() =>
-                          setDragOverDocumentId((current) => (current === row.id ? '' : current))
-                        }
-                        onDrop={(event) => dropOnDocument(event, row)}
-                        onDragEnd={() => {
-                          setDraggingDocumentId('');
-                          setDragOverDocumentId('');
-                          setDragOverInsert('');
-                        }}
-                        title={`${row.title} — drag to reorder, or drop it in a gap to place it between two documents`}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm transition ${
-                        form.id === row.id
-                          ? 'bg-red-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      } ${savingOrder ? '' : 'cursor-grab active:cursor-grabbing'} ${
-                        dragOverDocumentId === row.id ? 'ring-2 ring-red-400' : ''
-                      } ${draggingDocumentId === row.id ? 'opacity-50' : ''}`}
-                    >
-                      {row.title}
-                      {!row.is_published && (
-                        <span className="text-xs opacity-80" title="Not visible to members">
-                          · draft
-                        </span>
-                      )}
-                      {/* A window that has closed is the one thing an administrator must be able to see at a glance,
-                          because the document is otherwise indistinguishable from a live one in this list. */}
-                      {documentLifecycle(row, todayKeyValue) === 'retired' && (
-                        <span className="text-xs opacity-80" title={documentWindowLabel(row) || 'Retired'}>
-                          · retired
-                        </span>
-                      )}
-                      {documentLifecycle(row, todayKeyValue) === 'scheduled' && (
-                        <span className="text-xs opacity-80" title={documentWindowLabel(row)}>
-                          · scheduled
-                        </span>
-                      )}
-                      </button>
-                    </React.Fragment>
-                  ))}
-                  {/* Gap at the end of the folder */}
-                  {insertGap(group.folder, '')}
-                </div>
+                  Clear search
+                </button>
               </div>
-            ))}
+            ) : (
+              <div className="space-y-3">
+                {displayedGroups.map((group) => {
+                  const isCollapsed = !searchQuery.trim() && collapsedFolders.has(group.folder);
+                  return (
+                    <div
+                      key={group.folder}
+                      className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-900/40 shadow-xs overflow-hidden transition"
+                    >
+                      <div
+                        // Dropping onto a folder header reorders folders.
+                        onDragOver={(event) => {
+                          if (!draggingFolder || draggingFolder === group.folder) return;
+                          event.preventDefault();
+                          setDragOverFolder(group.folder);
+                        }}
+                        onDragLeave={() => setDragOverFolder((current) => (current === group.folder ? '' : current))}
+                        onDrop={(event) => dropOnFolder(event, group.folder)}
+                        className={`flex items-center justify-between gap-3 px-4 py-3 transition ${
+                          isCollapsed
+                            ? ''
+                            : 'border-b border-slate-200 dark:border-slate-700/70 bg-white dark:bg-slate-800/80'
+                        } ${
+                          dragOverFolder === group.folder ? 'bg-red-50 dark:bg-red-950/40 ring-1 ring-red-400' : ''
+                        } ${draggingFolder === group.folder ? 'opacity-50' : ''}`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            draggable={group.folder !== UNFILED_LABEL && !savingOrder}
+                            onDragStart={(event) => startFolderDrag(event, group.folder)}
+                            onDragEnd={() => {
+                              setDraggingFolder('');
+                              setDragOverFolder('');
+                              // Clear gap highlight when drag ends.
+                              setDragOverInsert('');
+                            }}
+                            title={
+                              group.folder === UNFILED_LABEL
+                                ? 'Unfiled is always shown last'
+                                : `Drag to move the ${group.folder} folder`
+                            }
+                            className={`${
+                              group.folder === UNFILED_LABEL
+                                ? 'opacity-30 cursor-not-allowed'
+                                : 'cursor-grab active:cursor-grabbing hover:text-slate-600 dark:hover:text-slate-200'
+                            } text-slate-400 dark:text-slate-500 p-0.5`}
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleFolderCollapse(group.folder)}
+                            className="flex items-center gap-2 text-left group/title focus:outline-none"
+                            title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-4 h-4 text-slate-400 group-hover/title:text-slate-600 dark:group-hover/title:text-slate-200 transition shrink-0" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-slate-400 group-hover/title:text-slate-600 dark:group-hover/title:text-slate-200 transition shrink-0" />
+                            )}
+                            <Folder className="w-4 h-4 text-amber-500 shrink-0" />
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 group-hover/title:text-red-600 dark:group-hover/title:text-red-400 transition">
+                              {group.folder}
+                            </h4>
+                          </button>
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                            {group.documents.length}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {group.folder !== UNFILED_LABEL && (
+                            <button
+                              type="button"
+                              onClick={() => setRenaming({ from: group.folder, to: group.folder })}
+                              title={`Rename or move the ${group.folder} folder`}
+                              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 rounded-lg transition"
+                            >
+                              <FolderInput className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Rename</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {!isCollapsed && (
+                        <div className="p-3">
+                          {/* List of documents in this folder */}
+                          <div className="space-y-1">
+                            {group.documents.map((row) => (
+                              // Gap insertion target and document button.
+                              <React.Fragment key={row.id}>
+                                {insertGap(group.folder, row.id)}
+                                <button
+                                  type="button"
+                                  onClick={() => openDocument(row.id)}
+                                  draggable={!savingOrder}
+                                  onDragStart={(event) => startDocumentDrag(event, row)}
+                                  // Highlight document when dragging another document over it.
+                                  onDragOver={(event) => {
+                                    if (!draggingDocumentId || draggingDocumentId === row.id) return;
+                                    event.preventDefault();
+                                    // Clear gap highlight.
+                                    setDragOverInsert('');
+                                    setDragOverDocumentId(row.id);
+                                  }}
+                                  onDragLeave={() =>
+                                    setDragOverDocumentId((current) => (current === row.id ? '' : current))
+                                  }
+                                  onDrop={(event) => dropOnDocument(event, row)}
+                                  onDragEnd={() => {
+                                    setDraggingDocumentId('');
+                                    setDragOverDocumentId('');
+                                    setDragOverInsert('');
+                                  }}
+                                  title={`${row.title} — drag to reorder, or drop it in a gap to place it between two documents`}
+                                  className={`w-full group flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl text-left border transition ${
+                                    form.id === row.id
+                                      ? 'bg-slate-700 text-white border-slate-600 shadow-sm'
+                                      : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/80 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 shadow-xs'
+                                  } ${savingOrder ? '' : 'cursor-grab active:cursor-grabbing'} ${
+                                    dragOverDocumentId === row.id ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-950/40' : ''
+                                  } ${draggingDocumentId === row.id ? 'opacity-50' : ''}`}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    <span
+                                      className={`${
+                                        form.id === row.id
+                                          ? 'text-white/70'
+                                          : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
+                                      } shrink-0`}
+                                    >
+                                      <GripVertical className="w-4 h-4" />
+                                    </span>
+                                    <span className="shrink-0 p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700/60">
+                                      {row.doc_type === 'checklist' ? (
+                                        <ListChecks className="w-4 h-4 text-emerald-500" />
+                                      ) : row.doc_type === 'link' ? (
+                                        <ExternalLink className="w-4 h-4 text-blue-500" />
+                                      ) : row.doc_type === 'assessment' ? (
+                                        <Award className="w-4 h-4 text-purple-500" />
+                                      ) : (
+                                        <FileText className="w-4 h-4 text-slate-400" />
+                                      )}
+                                    </span>
+                                    <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                                      <span className="font-medium text-sm truncate">{row.title}</span>
+                                      <span
+                                        className={`text-[11px] font-medium ${
+                                          form.id === row.id ? 'text-red-100' : 'text-slate-400 dark:text-slate-500'
+                                        }`}
+                                      >
+                                        {row.doc_type === 'checklist'
+                                          ? 'Checklist'
+                                          : row.doc_type === 'link'
+                                            ? 'Link'
+                                            : row.doc_type === 'assessment'
+                                              ? 'Assessment'
+                                              : 'Document'}
+                                      </span>
+                                      {!row.is_published && (
+                                        <span
+                                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                            form.id === row.id
+                                              ? 'bg-red-700 text-red-100'
+                                              : 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'
+                                          }`}
+                                          title="Not visible to members"
+                                        >
+                                          draft
+                                        </span>
+                                      )}
+                                      {/* A window that has closed is the one thing an administrator must be able to see at a glance,
+                                          because the document is otherwise indistinguishable from a live one in this list. */}
+                                      {documentLifecycle(row, todayKeyValue) === 'retired' && (
+                                        <span
+                                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                            form.id === row.id
+                                              ? 'bg-red-700 text-red-100'
+                                              : 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300'
+                                          }`}
+                                          title={documentWindowLabel(row) || 'Retired'}
+                                        >
+                                          retired
+                                        </span>
+                                      )}
+                                      {documentLifecycle(row, todayKeyValue) === 'scheduled' && (
+                                        <span
+                                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                            form.id === row.id
+                                              ? 'bg-red-700 text-red-100'
+                                              : 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300'
+                                          }`}
+                                          title={documentWindowLabel(row)}
+                                        >
+                                          scheduled
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    {row.is_sign_required && (
+                                      <span
+                                        className={`text-xs hidden md:inline-flex items-center gap-1 ${
+                                          form.id === row.id
+                                            ? 'text-red-100'
+                                            : 'text-slate-400 dark:text-slate-500'
+                                        }`}
+                                      >
+                                        Signature required
+                                      </span>
+                                    )}
+                                    <span
+                                      className={`text-xs font-medium flex items-center gap-1 ${
+                                        form.id === row.id
+                                          ? 'text-white'
+                                          : 'text-slate-400 group-hover:text-red-600 dark:group-hover:text-red-400'
+                                      }`}
+                                    >
+                                      Edit <ChevronRight className="w-3.5 h-3.5" />
+                                    </span>
+                                  </div>
+                                </button>
+                              </React.Fragment>
+                            ))}
+                            {/* Gap at the end of the folder */}
+                            {insertGap(group.folder, '')}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1635,44 +1891,63 @@ export default function AdminDocumentsTab({
             />
           )}
 
-          {renaming.from && (
-            <form
-              onSubmit={handleRenameFolder}
-              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-6 space-y-3"
-            >
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Folder &ldquo;{renaming.from}&rdquo;
-              </h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Renaming moves every document in it. Leave the new name blank to move them to {UNFILED_LABEL}.
-              </p>
+        </ViewportModal>
+      )}
+
+      {renaming.from && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <form
+            onSubmit={handleRenameFolder}
+            className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <Folder className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Rename &ldquo;{renaming.from}&rdquo;
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Folder organization
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Renaming moves every document in it. Leave the new name blank to move them to {UNFILED_LABEL}.
+            </p>
+            <div>
+              <label htmlFor="rename-folder-input" className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                New folder name
+              </label>
               <input
+                id="rename-folder-input"
                 type="text"
                 value={renaming.to}
                 onChange={(event) => setRenaming((current) => ({ ...current, to: event.target.value }))}
                 placeholder={UNFILED_LABEL}
                 aria-label="New folder name"
+                autoFocus
                 className={fieldClass}
               />
-              <div className="flex items-center gap-3">
-                <button
-                  type="submit"
-                  className="bg-slate-700 hover:bg-slate-600 text-white font-medium text-sm px-4 py-2 rounded-xl transition"
-                >
-                  Rename folder
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRenaming({ from: '', to: '' })}
-                  className="text-sm font-medium text-slate-500 dark:text-slate-400 hover:underline"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-
-        </ViewportModal>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setRenaming({ from: '', to: '' })}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700/60 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="bg-red-600 hover:bg-red-500 text-white font-semibold text-sm px-4 py-2 rounded-xl shadow-sm transition active:scale-[0.98]"
+              >
+                Rename folder
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {pendingDelete && (

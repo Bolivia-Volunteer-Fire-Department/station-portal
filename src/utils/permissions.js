@@ -180,6 +180,24 @@ export const ADMIN_PERMISSIONS = [
     label: 'Manage chat rooms',
     description: 'Open Chat Rooms: add, edit, reorder and delete the station\'s rooms, and choose who may see each one. Deleting a room removes its messages with it. This does not give access to Chat itself - that is "Chat".',
   },
+  {
+    key: 'can_manage_equipment',
+    tab: 'equipment',
+    label: 'Manage equipment & assets',
+    description: 'Track equipment lifecycles, NFPA inspection/retirement dates, SCBA hydro tests, and gear assignments.',
+  },
+  {
+    key: 'can_manage_apparatus',
+    tab: 'apparatus',
+    label: 'Manage apparatuses',
+    description: 'Track station apparatuses and fleet vehicles: add, edit, and organize fire trucks, engines, rescues, and brush trucks.',
+  },
+  {
+    key: 'can_manage_asset_setup',
+    tab: 'asset-setup',
+    label: 'Set up equipment & apparatus',
+    description: 'Configure available equipment categories, gear types, radio models, and apparatus fleet types.',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -394,6 +412,9 @@ export const ADMIN_PERMISSION_GROUPS = [
       'can_manage_certifications',
       'can_manage_certification_setup',
       'can_manage_documents',
+      'can_manage_equipment',
+      'can_manage_apparatus',
+      'can_manage_asset_setup',
     ],
   },
   { label: 'Communication', keys: ['can_make_announcements', 'can_manage_chat_rooms'] },
