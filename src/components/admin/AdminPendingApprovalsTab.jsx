@@ -95,7 +95,8 @@ export default function AdminPendingApprovalsTab({ token, offers = [], users = [
       
       if (result && result.success) { 
         toast.success('Shift offer approved');
-        setPendingOffers((current) => current.filter((row) => row.id !== offer.id));
+        const declinedSet = new Set(result.declinedIds || []);
+        setPendingOffers((current) => current.filter((row) => row.id !== offer.id && !declinedSet.has(row.id)));
         void onAdminDataChanged?.(['schedule', 'scheduleOffers'], token);
       } 
       else { 

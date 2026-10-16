@@ -51,6 +51,8 @@ This app was originally created for the Bolivia Fire Department in Bolivia, Nort
 * Migrated the Timeclock module to a new **Dashboard** module, which is a customizable widget-based dashboard module.
 * Added **Pre-Incident Plans** to the District Map.
 * Added **Maintenance Records** to Apparatuses.
+* Fixed an issue where shift offers ironically didn't do anything anymore.
+* Set sibling shift offers to automatically decline when one is accepted.
 
 ### Version 1.6x
 * Added the **District Map** module.

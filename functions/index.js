@@ -1355,28 +1355,191 @@ exports.approveOffer = onCall(async (request) => {
   if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
   await requirePermission(caller.uid, 'can_approve_shifts', 'approve a shift offer');
 
-  const offerId = String((request.data || {}).offerId || '');
+  const offerId = String((request.data || {}).offerId || '').trim();
+  if (!offerId) throw new HttpsError('invalid-argument', 'offerId is required.');
+
   const result = await db.runTransaction(async (transaction) => {
     const offerRef = db.doc(`schedule_offers/${offerId}`);
     const offer = await transaction.get(offerRef);
     if (!offer.exists) throw new HttpsError('not-found', 'That offer no longer exists.');
-    const data = offer.data();
+    const data = offer.data() || {};
     if (String(data.status) !== 'pending') throw new HttpsError('failed-precondition', 'already-resolved');
 
-    transaction.update(offerRef, { status: 'approved', approved_by: caller.uid });
-    if (data.schedule_id) {
-      transaction.set(
-        db.doc(`schedule/${String(data.schedule_id)}`),
-        { user_id: String(data.user_id), is_open: false, updated_by: caller.uid },
-        { merge: true }
+    const userId = String(data.user_id || '').trim();
+    if (!userId) throw new HttpsError('invalid-argument', 'That offer has no member on it.');
+
+    const normalizeDateKey = (val) => {
+      if (!val) return '';
+      const s = String(val).trim();
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? `${m[1]}-${m[2]}-${m[3]}` : s;
+    };
+
+    let scheduleId = String(data.schedule_id || '').trim();
+    let scheduleRef = null;
+    let scheduleRow = null;
+
+    if (scheduleId) {
+      scheduleRef = db.doc(`schedule/${scheduleId}`);
+      const scheduleSnap = await transaction.get(scheduleRef);
+      if (scheduleSnap.exists) {
+        const existing = scheduleSnap.data() || {};
+        const existingUser = String(existing.user_id || '').trim();
+        if (existingUser && existingUser !== userId) {
+          throw new HttpsError('failed-precondition', 'That shift has already been filled.');
+        }
+        scheduleRow = {
+          ...existing,
+          user_id: userId,
+          is_open: false,
+          updated_by: caller.uid,
+        };
+      } else {
+        scheduleRow = {
+          schedule_template_id: String(data.schedule_template_id || '').trim(),
+          date_from: normalizeDateKey(data.date_from),
+          date_to: normalizeDateKey(data.date_to || data.date_from),
+          assignment_id: String(data.assignment_id || '').trim(),
+          user_id: userId,
+          is_open: false,
+          updated_by: caller.uid,
+        };
+      }
+    } else {
+      const dateFrom = normalizeDateKey(data.date_from);
+      const templateId = String(data.schedule_template_id || '').trim();
+
+      // Check if an existing open row for this slot exists in schedule
+      let existingOpenDoc = null;
+      if (dateFrom && templateId) {
+        const sameSlot = await transaction.get(
+          db
+            .collection('schedule')
+            .where('date_from', '==', dateFrom)
+            .where('schedule_template_id', '==', templateId)
+        );
+        for (const docSnap of sameSlot.docs) {
+          const docData = docSnap.data() || {};
+          const occupant = String(docData.user_id || '').trim();
+          if (occupant && occupant !== userId) {
+            throw new HttpsError('failed-precondition', 'That shift has already been filled.');
+          }
+          if (!occupant || docData.is_open) {
+            existingOpenDoc = docSnap;
+            break;
+          }
+        }
+      }
+
+      if (existingOpenDoc) {
+        scheduleRef = existingOpenDoc.ref;
+        scheduleId = existingOpenDoc.id;
+        scheduleRow = {
+          ...(existingOpenDoc.data() || {}),
+          user_id: userId,
+          is_open: false,
+          updated_by: caller.uid,
+        };
+      } else {
+        scheduleRef = db.collection('schedule').doc();
+        scheduleId = scheduleRef.id;
+
+        let templateData = null;
+        if (templateId) {
+          const templateSnap = await transaction.get(db.doc(`schedule_templates/${templateId}`));
+          if (templateSnap.exists) {
+            templateData = templateSnap.data() || {};
+          }
+        }
+
+        scheduleRow = {
+          schedule_template_id: templateId,
+          date_from: dateFrom,
+          date_to: normalizeDateKey(data.date_to || dateFrom),
+          apparatus_id: String(templateData?.apparatus_id || '').trim(),
+          assignment_id: String(data.assignment_id || templateData?.assignment_id || '').trim(),
+          start_time: String(templateData?.start_time || '').trim(),
+          end_time: String(templateData?.end_time || '').trim(),
+          user_id: userId,
+          is_open: false,
+          updated_by: caller.uid,
+        };
+      }
+    }
+
+    transaction.set(scheduleRef, scheduleRow, { merge: true });
+    transaction.update(offerRef, {
+      status: 'approved',
+      approved_by: caller.uid,
+      schedule_id: scheduleId,
+    });
+
+    // Close out sibling pending offers for the same shift / slot
+    const declinedIds = [];
+    const siblingQueries = [];
+    if (data.slot_key) {
+      siblingQueries.push(
+        transaction.get(
+          db
+            .collection('schedule_offers')
+            .where('slot_key', '==', String(data.slot_key))
+            .where('status', '==', 'pending')
+        )
       );
     }
-    return { scheduleId: String(data.schedule_id || '') };
+    if (scheduleId) {
+      siblingQueries.push(
+        transaction.get(
+          db
+            .collection('schedule_offers')
+            .where('schedule_id', '==', scheduleId)
+            .where('status', '==', 'pending')
+        )
+      );
+    }
+    const templateId = String(data.schedule_template_id || '').trim();
+    const dateFrom = normalizeDateKey(data.date_from);
+    if (templateId && dateFrom) {
+      siblingQueries.push(
+        transaction.get(
+          db
+            .collection('schedule_offers')
+            .where('schedule_template_id', '==', templateId)
+            .where('date_from', '==', dateFrom)
+            .where('status', '==', 'pending')
+        )
+      );
+    }
+
+    const querySnapshots = await Promise.all(siblingQueries);
+    const seenSiblingIds = new Set([offerId]);
+
+    for (const snap of querySnapshots) {
+      for (const docSnap of snap.docs) {
+        if (!seenSiblingIds.has(docSnap.id)) {
+          seenSiblingIds.add(docSnap.id);
+          transaction.update(docSnap.ref, {
+            status: 'declined',
+            declined_by: caller.uid,
+          });
+          declinedIds.push(docSnap.id);
+        }
+      }
+    }
+
+    return {
+      scheduleId,
+      declinedIds,
+      scheduleRow: {
+        id: scheduleId,
+        ...scheduleRow,
+      },
+    };
   });
 
   await bumpScheduleSentinel();
 
-  await audit(caller.uid, 'ADMIN_APPROVE_OFFER', `Approved an offer for shift ${result.scheduleId}`);
+  await audit(caller.uid, 'ADMIN_APPROVE_OFFER', `Approved offer ${offerId} for shift ${result.scheduleId}`);
   return result;
 });
 

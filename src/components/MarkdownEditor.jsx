@@ -419,30 +419,62 @@ export default function MarkdownEditor({
     if (!surface) return;
     const block = surface.querySelector(`[data-block][data-index="${index}"]`);
     if (!block) return;
-    const wanted = cell ? block.querySelector(`tr:nth-child(${cell.row + 1}) > *:nth-child(${cell.column + 1})`) : null;
-    const target = wanted || (block.matches('ul, ol') ? block.querySelector('li') || block : block);
+
+    let targetCell = null;
+    if (cell) {
+      const allRows = block.querySelectorAll('tr');
+      if (allRows.length > 0) {
+        const targetRow =
+          cell.row >= 0 && cell.row < allRows.length
+            ? allRows[cell.row]
+            : allRows[allRows.length - 1];
+        if (targetRow && targetRow.children.length > 0) {
+          targetCell =
+            cell.column >= 0 && cell.column < targetRow.children.length
+              ? targetRow.children[cell.column]
+              : targetRow.children[targetRow.children.length - 1];
+        }
+      }
+    }
+
     const range = document.createRange();
-    range.selectNodeContents(target);
-    range.collapse(false);
+    if (targetCell) {
+      range.selectNodeContents(targetCell);
+      const hasOnlyBreak =
+        targetCell.childNodes.length === 1 && targetCell.firstChild?.nodeName === 'BR';
+      range.collapse(hasOnlyBreak);
+    } else {
+      const target = block.matches('ul, ol') ? block.querySelector('li') || block : block;
+      range.selectNodeContents(target);
+      range.collapse(false);
+    }
+
     const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
     surface.focus({ preventScroll: true });
   };
 
   // WHERE THE CARET IS INSIDE A TABLE, as the rendered position the table commands take: `row` counts from the header
   // (0), `column` from the left. Null when the caret is not in one, which is what hides the table toolbar.
   const tableCellAt = () => {
-    const element = currentBlockElement();
-    if (!element || element.getAttribute('data-block') !== 'table') return null;
+    const surface = surfaceRef.current;
     const selection = typeof window === 'undefined' ? null : window.getSelection();
     const anchor = selection?.anchorNode;
-    if (!anchor) return null;
+    if (!anchor || !surface || !surface.contains(anchor)) return null;
+
     const node = anchor.nodeType === 1 ? anchor : anchor.parentElement;
-    const cellElement = node?.closest('th, td');
+    let cellElement = node?.closest('th, td');
+    if (!cellElement && (node?.tagName === 'TR' || node?.closest('tr'))) {
+      const tr = node.tagName === 'TR' ? node : node.closest('tr');
+      const offset = selection.anchorOffset || 0;
+      cellElement = tr.children[offset] || tr.children[0];
+    }
     const rowElement = cellElement?.closest('tr');
     const table = cellElement?.closest('table');
-    if (!cellElement || !rowElement || !table) return null;
+    if (!cellElement || !rowElement || !table || !surface.contains(table)) return null;
     return {
       row: [...table.querySelectorAll('tr')].indexOf(rowElement),
       column: [...rowElement.children].indexOf(cellElement),
@@ -493,12 +525,35 @@ export default function MarkdownEditor({
   const runBlockCommand = (action) => {
     const surface = surfaceRef.current;
     if (!surface) return;
-    const range = getSelectedBlockRange();
-    const blocks = blocksFromHtml(surface.innerHTML);
-    const startIndex = range ? range.startIndex : blocks.length - 1;
-    const endIndex = range ? range.endIndex : startIndex;
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+
     const cell = action.mode === 'table' ? tableCellAt() : null;
-    const result = applyBlockCommand(blocks, Number.isFinite(startIndex) ? startIndex : 0, { ...action, cell }, endIndex);
+
+    let startIndex;
+    let endIndex;
+    if (action.mode === 'table') {
+      const selection = typeof window === 'undefined' ? null : window.getSelection();
+      const anchor = selection?.anchorNode;
+      const anchorNode = anchor?.nodeType === 1 ? anchor : anchor?.parentElement;
+      const tableWrap = anchorNode?.closest('[data-block="table"]');
+      const dataIdx = tableWrap?.getAttribute('data-index');
+      if (dataIdx !== null && dataIdx !== undefined && !isNaN(Number(dataIdx))) {
+        startIndex = Number(dataIdx);
+        endIndex = startIndex;
+      }
+    }
+
+    const blocks = blocksFromHtml(surface.innerHTML);
+    if (startIndex === undefined) {
+      const range = getSelectedBlockRange();
+      startIndex = range ? range.startIndex : blocks.length - 1;
+      endIndex = range ? range.endIndex : startIndex;
+    }
+
+    const validStart = Number.isFinite(startIndex) && startIndex >= 0 && startIndex < blocks.length ? startIndex : 0;
+    const validEnd = Number.isFinite(endIndex) && endIndex >= 0 && endIndex < blocks.length ? endIndex : validStart;
+
+    const result = applyBlockCommand(blocks, validStart, { ...action, cell }, validEnd);
 
     surface.innerHTML = htmlFromBlocks(result.blocks);
     const markdown = blocksToMarkdown(result.blocks);
