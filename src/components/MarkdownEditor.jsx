@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Baseline,
   Bold,
   Check,
   ChevronDown,
@@ -9,6 +10,7 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  HelpCircle,
   Highlighter,
   Italic,
   Link as LinkIcon,
@@ -20,15 +22,18 @@ import {
   Rows3,
   Columns3,
   SquareCode,
+  Strikethrough,
   Table as TableIcon,
   TableColumnsSplit,
   TableRowsSplit,
   Trash2,
   TextQuote,
+  Underline,
+  X,
 } from 'lucide-react';
 import Markdown from './Markdown';
 import { DOCUMENT_CONTENT_LIMIT, documentCharactersLeft } from '../utils/documents';
-import { EDITOR_SURFACE_CLASSES } from '../utils/markdownStyles';
+import { EDITOR_SURFACE_CLASSES, bgColorClass, textColorClass } from '../utils/markdownStyles';
 import {
   BLOCK_ACTIONS,
   CALLOUT_ACTIONS,
@@ -66,6 +71,8 @@ const EDITOR_MODES = ['write', 'markdown', 'preview'];
 const ICONS = {
   Bold,
   Italic,
+  Underline,
+  Strikethrough,
   Highlighter,
   Code,
   Link: LinkIcon,
@@ -101,6 +108,26 @@ const applySurfaceHtml = (element, markdown) => {
   element.innerHTML = htmlFromBlocks(editorBlocksFromMarkdown(markdown));
 };
 
+const TEXT_COLOR_OPTIONS = [
+  { id: 'default', label: 'Default', dotClass: 'bg-slate-700 dark:bg-slate-300' },
+  { id: 'red', label: 'Red', dotClass: 'bg-red-600' },
+  { id: 'amber', label: 'Amber / Orange', dotClass: 'bg-amber-600' },
+  { id: 'green', label: 'Green', dotClass: 'bg-emerald-600' },
+  { id: 'blue', label: 'Blue', dotClass: 'bg-blue-600' },
+  { id: 'purple', label: 'Purple', dotClass: 'bg-purple-600' },
+  { id: 'slate', label: 'Slate Gray', dotClass: 'bg-slate-500' },
+];
+
+const BG_COLOR_OPTIONS = [
+  { id: 'none', label: 'Clear highlight', dotClass: 'border border-slate-300 dark:border-slate-600 bg-transparent' },
+  { id: 'yellow', label: 'Yellow (Standard)', dotClass: 'bg-amber-300' },
+  { id: 'red', label: 'Red', dotClass: 'bg-red-300' },
+  { id: 'green', label: 'Green', dotClass: 'bg-emerald-300' },
+  { id: 'blue', label: 'Blue', dotClass: 'bg-blue-300' },
+  { id: 'purple', label: 'Purple', dotClass: 'bg-purple-300' },
+  { id: 'slate', label: 'Gray', dotClass: 'bg-slate-300' },
+];
+
 export default function MarkdownEditor({
   value = '',
   onChange,
@@ -112,9 +139,15 @@ export default function MarkdownEditor({
   const [draft, setDraft] = useState(() => String(value ?? ''));
   const [linkDraft, setLinkDraft] = useState(null);
   const [showCallouts, setShowCallouts] = useState(false);
+  const [showTextColorMenu, setShowTextColorMenu] = useState(false);
+  const [showBgColorMenu, setShowBgColorMenu] = useState(false);
+  const [showReference, setShowReference] = useState(false);
   // The callout menu's own element, so a click inside it can be told from a click outside. See the outside-click effect.
   const calloutRef = useRef(null);
+  const textColorRef = useRef(null);
+  const bgColorRef = useRef(null);
   const [activeBlock, setActiveBlock] = useState('paragraph');
+  const [activeBlockMeta, setActiveBlockMeta] = useState({ level: null, ordered: false });
   const [activeInline, setActiveInline] = useState([]);
 
   const surfaceRef = useRef(null);
@@ -194,13 +227,20 @@ export default function MarkdownEditor({
 
     const element = anchor.nodeType === 1 ? anchor : anchor.parentElement;
     const block = element?.closest('[data-block]');
-    setActiveBlock(block ? block.getAttribute('data-block') : 'paragraph');
+    const blockType = block ? block.getAttribute('data-block') : 'paragraph';
+    setActiveBlock(blockType);
+
+    const level = block?.getAttribute('data-level') ? Number(block.getAttribute('data-level')) : null;
+    const isOrdered = block ? (block.tagName === 'OL' || Boolean(block.closest('ol'))) : false;
+    setActiveBlockMeta({ level, ordered: isOrdered });
 
     const marks = [];
     let node = element;
     while (node && node !== surface) {
       if (node.tagName === 'STRONG' || node.tagName === 'B') marks.push('bold');
       if (node.tagName === 'EM' || node.tagName === 'I') marks.push('italic');
+      if (node.tagName === 'U') marks.push('underline');
+      if (node.tagName === 'DEL' || node.tagName === 'S' || node.tagName === 'STRIKE') marks.push('strikethrough');
       if (node.tagName === 'MARK') marks.push('highlight');
       if (node.tagName === 'CODE') marks.push('code');
       if (node.tagName === 'A') marks.push('link');
@@ -216,21 +256,23 @@ export default function MarkdownEditor({
     return () => document.removeEventListener('selectionchange', handler);
   }, [mode, refreshActiveFormats]);
 
-  // A MENU THAT ONLY ITS OWN BUTTON CAN CLOSE IS A MENU PEOPLE CLICK TWICE. The callout list had exactly that problem in
-  // Markdown mode (see `runAction`, which fixed the choosing half); this is the other half - clicking anywhere else, or
-  // pressing Escape, dismisses it the way every other menu in the app does.
-  //
-  // `mousedown` rather than `click`, so the dismissal lands BEFORE whatever was clicked does its work: a click outside
-  // should put the menu away and then do what it was aimed at, rather than being swallowed by the close. Clicks INSIDE
-  // are left alone entirely, which is what lets a callout be chosen at all.
+  // Close menus when clicking outside or pressing Escape
   useEffect(() => {
-    if (!showCallouts || typeof document === 'undefined') return undefined;
+    if (!showCallouts && !showTextColorMenu && !showBgColorMenu) return undefined;
     const close = (event) => {
       if (calloutRef.current && calloutRef.current.contains(event.target)) return;
+      if (textColorRef.current && textColorRef.current.contains(event.target)) return;
+      if (bgColorRef.current && bgColorRef.current.contains(event.target)) return;
       setShowCallouts(false);
+      setShowTextColorMenu(false);
+      setShowBgColorMenu(false);
     };
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') setShowCallouts(false);
+      if (event.key === 'Escape') {
+        setShowCallouts(false);
+        setShowTextColorMenu(false);
+        setShowBgColorMenu(false);
+      }
     };
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', onKeyDown);
@@ -238,19 +280,137 @@ export default function MarkdownEditor({
       document.removeEventListener('mousedown', close);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [showCallouts]);
+  }, [showCallouts, showTextColorMenu, showBgColorMenu]);
 
-  // The element the caret's line belongs to, and the index the model knows its block by. A list item reports its
-  // LIST, because the whole list converts together - which is what pressing the bullet button inside one line of it
-  // should do.
-  const currentBlockElement = () => {
+  // Resolves the block range selected by the author.
+  // Handles collapsed carets at the end of a line and multi-block selections across the document.
+  const getSelectedBlockRange = () => {
     const surface = surfaceRef.current;
     const selection = typeof window === 'undefined' ? null : window.getSelection();
     if (!surface || !selection || selection.rangeCount === 0) return null;
-    const anchor = selection.anchorNode;
-    if (!anchor || !surface.contains(anchor)) return null;
-    const element = anchor.nodeType === 1 ? anchor : anchor.parentElement;
-    return element?.closest('li')?.closest('[data-block]') ?? element?.closest('[data-block]') ?? null;
+    const range = selection.getRangeAt(0);
+
+    const elements = Array.from(surface.children);
+    if (elements.length === 0) return null;
+
+    const getElementForNode = (node, offset, isEnd) => {
+      if (!node || !surface.contains(node)) return null;
+      if (node === surface) {
+        let target = isEnd && offset > 0 ? surface.childNodes[offset - 1] : surface.childNodes[offset];
+        if (!target) {
+          return isEnd ? elements[elements.length - 1] : elements[0];
+        }
+        if (target.nodeType !== 1) {
+          target = isEnd ? target.previousElementSibling : target.nextElementSibling;
+        }
+        return target && target.parentElement === surface ? target : null;
+      }
+      let curr = node.nodeType === 1 ? node : node.parentElement;
+      while (curr && curr.parentElement && curr.parentElement !== surface) {
+        curr = curr.parentElement;
+      }
+      return curr && curr.parentElement === surface ? curr : null;
+    };
+
+    if (range.collapsed) {
+      let target = null;
+      if (range.startContainer === surface) {
+        if (range.startOffset > 0) {
+          let prev = surface.childNodes[range.startOffset - 1];
+          if (prev && prev.nodeType !== 1) prev = prev.previousElementSibling;
+          target = prev;
+        } else {
+          let next = surface.childNodes[0];
+          if (next && next.nodeType !== 1) next = next.nextElementSibling;
+          target = next;
+        }
+      } else {
+        target = getElementForNode(range.startContainer, range.startOffset, false);
+      }
+      if (!target) target = elements[0];
+      const idx = elements.indexOf(target);
+      const validIdx = idx !== -1 ? idx : 0;
+      return {
+        startBlock: target,
+        endBlock: target,
+        startIndex: validIdx,
+        endIndex: validIdx,
+      };
+    }
+
+    let startEl = getElementForNode(range.startContainer, range.startOffset, false);
+    let endEl = getElementForNode(range.endContainer, range.endOffset, true);
+
+    if (!startEl) startEl = endEl || elements[0];
+    if (!endEl) endEl = startEl || elements[elements.length - 1];
+
+    let startIdx = elements.indexOf(startEl);
+    let endIdx = elements.indexOf(endEl);
+    if (startIdx === -1) startIdx = 0;
+    if (endIdx === -1) endIdx = startIdx;
+
+    if (startIdx > endIdx) {
+      const tmp = startIdx;
+      startIdx = endIdx;
+      endIdx = tmp;
+      const tmpEl = startEl;
+      startEl = endEl;
+      endEl = tmpEl;
+    }
+
+    // Boundary bleed prevention:
+    // If the selection ends at offset 0 of endEl (e.g. author dragged to end of previous block):
+    if (startIdx < endIdx) {
+      const isAtStart = (container, offset, topEl) => {
+        if (offset !== 0) return false;
+        if (container === topEl) return true;
+        let curr = container;
+        while (curr && curr !== topEl) {
+          if (curr.previousSibling) return false;
+          curr = curr.parentNode;
+        }
+        return curr === topEl;
+      };
+
+      if (isAtStart(range.endContainer, range.endOffset, endEl)) {
+        endIdx = Math.max(startIdx, endIdx - 1);
+        endEl = elements[endIdx];
+      }
+    }
+
+    // If the selection starts at the very end of startEl (e.g. author clicked end of previous block):
+    if (startIdx < endIdx) {
+      const isAtEnd = (container, offset, topEl) => {
+        if (container.nodeType === 3) {
+          if (offset < container.textContent.length) return false;
+        } else if (offset < container.childNodes.length) {
+          return false;
+        }
+        let curr = container;
+        while (curr && curr !== topEl) {
+          if (curr.nextSibling) return false;
+          curr = curr.parentNode;
+        }
+        return curr === topEl;
+      };
+
+      if (isAtEnd(range.startContainer, range.startOffset, startEl)) {
+        startIdx = Math.min(endIdx, startIdx + 1);
+        startEl = elements[startIdx];
+      }
+    }
+
+    return {
+      startBlock: startEl,
+      endBlock: endEl,
+      startIndex: startIdx,
+      endIndex: endIdx,
+    };
+  };
+
+  const currentBlockElement = () => {
+    const range = getSelectedBlockRange();
+    return range?.startBlock ?? null;
   };
 
   // Puts the caret at the end of a block, after the surface has been re-rendered from the model.
@@ -259,9 +419,6 @@ export default function MarkdownEditor({
     if (!surface) return;
     const block = surface.querySelector(`[data-block][data-index="${index}"]`);
     if (!block) return;
-    // A TABLE LANDS IN THE CELL THE EDIT WAS ABOUT, not at the end of the grid. Adding a row and being put at the bottom
-    // of the last cell is the small annoyance that makes a table feel unusable; landing in the new row is what makes the
-    // button worth pressing. `cell` is where the author was, or '' for "wherever the block starts".
     const wanted = cell ? block.querySelector(`tr:nth-child(${cell.row + 1}) > *:nth-child(${cell.column + 1})`) : null;
     const target = wanted || (block.matches('ul, ol') ? block.querySelector('li') || block : block);
     const range = document.createRange();
@@ -275,9 +432,6 @@ export default function MarkdownEditor({
 
   // WHERE THE CARET IS INSIDE A TABLE, as the rendered position the table commands take: `row` counts from the header
   // (0), `column` from the left. Null when the caret is not in one, which is what hides the table toolbar.
-  //
-  // Read from the DOM rather than from the model, like every other "where is the caret" question here: the DOM is where
-  // the caret actually is, and the model is rebuilt from it anyway.
   const tableCellAt = () => {
     const element = currentBlockElement();
     if (!element || element.getAttribute('data-block') !== 'table') return null;
@@ -339,22 +493,19 @@ export default function MarkdownEditor({
   const runBlockCommand = (action) => {
     const surface = surfaceRef.current;
     if (!surface) return;
-    const element = currentBlockElement();
+    const range = getSelectedBlockRange();
     const blocks = blocksFromHtml(surface.innerHTML);
-    const index = element ? Number(element.getAttribute('data-index')) : blocks.length - 1;
-    // Where in the table the caret is, BEFORE the surface is rebuilt - the position is a fact about the DOM as it stands,
-    // and the rebuilt surface no longer has the caret in it. Only a table action uses it.
+    const startIndex = range ? range.startIndex : blocks.length - 1;
+    const endIndex = range ? range.endIndex : startIndex;
     const cell = action.mode === 'table' ? tableCellAt() : null;
-    const result = applyBlockCommand(blocks, Number.isFinite(index) ? index : 0, { ...action, cell });
+    const result = applyBlockCommand(blocks, Number.isFinite(startIndex) ? startIndex : 0, { ...action, cell }, endIndex);
 
     surface.innerHTML = htmlFromBlocks(result.blocks);
     const markdown = blocksToMarkdown(result.blocks);
     renderedMarkdown.current = markdown;
     setDraft(markdown);
     onChange?.(markdown);
-    // After an ADD, the caret goes where the author is looking: the new row, or the new column of the cell they were in.
-    // A delete keeps them where they were, which is the cell beside the gap that closed - and deleting the whole table
-    // has no cell to aim at, so it falls back to the block.
+
     const caret =
       cell && action.id !== 'tableRemove'
         ? {
@@ -378,11 +529,180 @@ export default function MarkdownEditor({
       return;
     }
 
-    const tag = { bold: 'STRONG', italic: 'EM', highlight: 'MARK', code: 'CODE' }[action.id];
+    const tag = {
+      bold: 'STRONG',
+      italic: 'EM',
+      underline: 'U',
+      strikethrough: 'DEL',
+      highlight: 'MARK',
+      code: 'CODE',
+    }[action.id];
     if (!tag) return;
     toggleInlineTag(tag);
     scheduleCommit();
     refreshActiveFormats();
+  };
+
+  // Apply text color to selection in Write mode or Markdown mode
+  const applyTextColor = (colorId) => {
+    if (mode === 'markdown') {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart ?? 0;
+      const end = textarea.selectionEnd ?? 0;
+      if (colorId === 'default' || !colorId) {
+        setShowTextColorMenu(false);
+        return;
+      }
+      const selected = draft.slice(start, end);
+      const wrapped = `[color:${colorId}]${selected}[/color]`;
+      const next = draft.slice(0, start) + wrapped + draft.slice(end);
+      setDraft(next);
+      onChange?.(next);
+      setShowTextColorMenu(false);
+      return;
+    }
+
+    const surface = surfaceRef.current;
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    if (!surface || !selection || selection.rangeCount === 0 || !surface.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0);
+
+    const element = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    const existing = element?.closest('[data-color]');
+    if (existing && surface.contains(existing)) {
+      if (colorId === 'default' || !colorId) {
+        const parent = existing.parentNode;
+        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        parent.removeChild(existing);
+        scheduleCommit();
+        setShowTextColorMenu(false);
+        return;
+      }
+      existing.setAttribute('data-color', colorId);
+      existing.className = textColorClass(colorId);
+      scheduleCommit();
+      setShowTextColorMenu(false);
+      return;
+    }
+
+    if (colorId === 'default' || !colorId) {
+      setShowTextColorMenu(false);
+      return;
+    }
+
+    const span = document.createElement('span');
+    span.setAttribute('data-color', colorId);
+    span.className = textColorClass(colorId);
+    if (range.collapsed) {
+      span.appendChild(document.createTextNode('\u200b'));
+      range.insertNode(span);
+      const inner = document.createRange();
+      inner.selectNodeContents(span);
+      selection.removeAllRanges();
+      selection.addRange(inner);
+    } else {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      const after = document.createRange();
+      after.selectNodeContents(span);
+      selection.removeAllRanges();
+      selection.addRange(after);
+    }
+    scheduleCommit();
+    setShowTextColorMenu(false);
+  };
+
+  // Apply background / highlight color to selection
+  const applyBgColor = (bgId) => {
+    if (mode === 'markdown') {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart ?? 0;
+      const end = textarea.selectionEnd ?? 0;
+      if (bgId === 'none' || !bgId) {
+        setShowBgColorMenu(false);
+        return;
+      }
+      const selected = draft.slice(start, end);
+      const wrapped = bgId === 'yellow' ? `==${selected}==` : `[bg:${bgId}]${selected}[/bg]`;
+      const next = draft.slice(0, start) + wrapped + draft.slice(end);
+      setDraft(next);
+      onChange?.(next);
+      setShowBgColorMenu(false);
+      return;
+    }
+
+    const surface = surfaceRef.current;
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    if (!surface || !selection || selection.rangeCount === 0 || !surface.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0);
+
+    const element = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    const existing = element?.closest('[data-bg]') || element?.closest('mark');
+    if (existing && surface.contains(existing)) {
+      if (bgId === 'none' || !bgId) {
+        const parent = existing.parentNode;
+        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        parent.removeChild(existing);
+        scheduleCommit();
+        setShowBgColorMenu(false);
+        return;
+      }
+      existing.setAttribute('data-bg', bgId);
+      existing.className = bgColorClass(bgId);
+      scheduleCommit();
+      setShowBgColorMenu(false);
+      return;
+    }
+
+    if (bgId === 'none' || !bgId) {
+      setShowBgColorMenu(false);
+      return;
+    }
+
+    const mark = document.createElement('mark');
+    mark.setAttribute('data-bg', bgId);
+    mark.className = bgColorClass(bgId);
+    if (range.collapsed) {
+      mark.appendChild(document.createTextNode('\u200b'));
+      range.insertNode(mark);
+      const inner = document.createRange();
+      inner.selectNodeContents(mark);
+      selection.removeAllRanges();
+      selection.addRange(inner);
+    } else {
+      mark.appendChild(range.extractContents());
+      range.insertNode(mark);
+      const after = document.createRange();
+      after.selectNodeContents(mark);
+      selection.removeAllRanges();
+      selection.addRange(after);
+    }
+    scheduleCommit();
+    setShowBgColorMenu(false);
+  };
+
+  // Keyboard shortcuts in Write mode
+  const handleKeyDown = (event) => {
+    if (event.metaKey || event.ctrlKey) {
+      if (event.key === 'b' || event.key === 'B') {
+        event.preventDefault();
+        runAction({ id: 'bold', mode: 'inline' });
+      } else if (event.key === 'i' || event.key === 'I') {
+        event.preventDefault();
+        runAction({ id: 'italic', mode: 'inline' });
+      } else if (event.key === 'u' || event.key === 'U') {
+        event.preventDefault();
+        runAction({ id: 'underline', mode: 'inline' });
+      } else if ((event.key === 'x' || event.key === 'X' || event.key === 's' || event.key === 'S') && event.shiftKey) {
+        event.preventDefault();
+        runAction({ id: 'strikethrough', mode: 'inline' });
+      } else if (event.key === 'k' || event.key === 'K') {
+        event.preventDefault();
+        runAction({ id: 'link', mode: 'inline' });
+      }
+    }
   };
 
 
@@ -463,12 +783,12 @@ export default function MarkdownEditor({
   const isActive = (action) => {
     if (mode !== 'write') return false;
     if (action.mode === 'inline') return activeInline.includes(action.id);
-    if (action.id === 'bullet') return activeBlock === 'list';
-    if (action.id === 'numbered') return activeBlock === 'list';
+    if (action.id === 'bullet') return activeBlock === 'list' && !activeBlockMeta.ordered;
+    if (action.id === 'numbered') return activeBlock === 'list' && Boolean(activeBlockMeta.ordered);
     if (action.id === 'quote') return activeBlock === 'quote';
     if (action.id === 'codeBlock') return activeBlock === 'code';
     if (action.id === 'callout') return activeBlock === 'callout';
-    if (action.id === 'heading') return activeBlock === 'heading';
+    if (action.id === 'heading') return activeBlock === 'heading' && activeBlockMeta.level === action.level;
     if (action.id === 'paragraph') return activeBlock === 'paragraph';
     return false;
   };
@@ -523,7 +843,7 @@ export default function MarkdownEditor({
       </div>
 
       {mode !== 'preview' && (
-        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5">
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/95 dark:bg-slate-800/95 backdrop-blur-xs p-1.5 shadow-xs">
           {INLINE_ACTIONS.map((action) => (
             <ToolbarButton
               key={action.id}
@@ -533,6 +853,85 @@ export default function MarkdownEditor({
               className={toolbarButtonClass(isActive(action))}
             />
           ))}
+
+          {/* Text color picker */}
+          <div className="relative" ref={textColorRef}>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setShowTextColorMenu((open) => !open);
+                setShowBgColorMenu(false);
+                setShowCallouts(false);
+              }}
+              aria-expanded={showTextColorMenu}
+              aria-haspopup="true"
+              title="Text color"
+              aria-label="Text color"
+              className={`${toolbarButtonClass(false)} relative`}
+            >
+              <Baseline className="w-4 h-4" />
+              <span className="absolute bottom-1 w-3 h-0.5 rounded-full bg-red-600" />
+            </button>
+            {showTextColorMenu && (
+              <div className="absolute left-0 top-9 z-30 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1.5 origin-top-left animate-popoverIn">
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Text Color
+                </div>
+                {TEXT_COLOR_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => applyTextColor(opt.color)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                  >
+                    <span className={`w-3.5 h-3.5 rounded-full ${opt.dotClass} shrink-0`} />
+                    <span>{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Background / Highlight color picker */}
+          <div className="relative" ref={bgColorRef}>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setShowBgColorMenu((open) => !open);
+                setShowTextColorMenu(false);
+                setShowCallouts(false);
+              }}
+              aria-expanded={showBgColorMenu}
+              aria-haspopup="true"
+              title="Highlight background color"
+              aria-label="Highlight background color"
+              className={`${toolbarButtonClass(false)} relative`}
+            >
+              <Highlighter className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+            </button>
+            {showBgColorMenu && (
+              <div className="absolute left-0 top-9 z-30 w-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1.5 origin-top-left animate-popoverIn">
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Highlight Color
+                </div>
+                {BG_COLOR_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => applyBgColor(opt.bg)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                  >
+                    <span className={`w-3.5 h-3.5 rounded-full ${opt.dotClass} shrink-0`} />
+                    <span>{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
 
@@ -550,7 +949,12 @@ export default function MarkdownEditor({
           <div className="relative" ref={calloutRef}>
             <button
               type="button"
-              onClick={() => setShowCallouts((open) => !open)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setShowCallouts((open) => !open);
+                setShowTextColorMenu(false);
+                setShowBgColorMenu(false);
+              }}
               aria-expanded={showCallouts}
               aria-haspopup="true"
               title="Callout"
@@ -560,11 +964,12 @@ export default function MarkdownEditor({
               <ChevronDown className="w-4 h-4" />
             </button>
             {showCallouts && (
-              <div className="absolute left-0 top-9 z-20 w-40 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1 origin-top-left animate-popoverIn">
+              <div className="absolute left-0 top-9 z-30 w-40 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1 origin-top-left animate-popoverIn">
                 {CALLOUT_ACTIONS.map((action) => (
                   <button
                     key={action.callout}
                     type="button"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => runAction(action)}
                     className="flex w-full items-center rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                   >
@@ -586,6 +991,20 @@ export default function MarkdownEditor({
               className={toolbarButtonClass(false)}
             />
           ))}
+
+          <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
+
+          {/* Quick reference guide button */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setShowReference(true)}
+            title="Markdown quick reference & cheat sheet"
+            aria-label="Markdown quick reference & cheat sheet"
+            className={`${toolbarButtonClass(false)} text-slate-500 hover:text-red-600 dark:hover:text-red-400`}
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -595,7 +1014,7 @@ export default function MarkdownEditor({
           there is something for it to act on and disappears when there is not, so it reads as a property of the table
           rather than as part of the toolbar. */}
       {mode === 'write' && activeBlock === 'table' && (
-        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-300 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">
+        <div className="sticky top-11 z-20 flex flex-wrap items-center gap-1 rounded-xl border border-slate-300 bg-slate-50/95 p-1.5 dark:border-slate-700 dark:bg-slate-900/95 backdrop-blur-xs shadow-xs">
           <span className="px-1 text-xs font-medium text-slate-500 dark:text-slate-400">Table</span>
           {TABLE_ACTIONS.map((action) => (
             <ToolbarButton
@@ -687,6 +1106,7 @@ export default function MarkdownEditor({
           onInput={scheduleCommit}
           onBlur={commitSurface}
           onPaste={handlePaste}
+          onKeyDown={handleKeyDown}
           onKeyUp={refreshActiveFormats}
           onMouseUp={refreshActiveFormats}
           className={EDITOR_SURFACE_CLASSES}
@@ -695,11 +1115,254 @@ export default function MarkdownEditor({
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
         Select text and use the toolbar, as in a word processor — the buttons show what is already applied, and
-        pressing one twice takes it off. Bold, italic, highlights, headings, lists, quotes, callouts, code, tables and
-        dividers all render here exactly as they will for a member, spacing included. Put the cursor in a table and a
-        second row of buttons appears for adding and removing rows and columns.{' '}
-        <strong>Markdown</strong> shows the same document as plain text if you need to paste from elsewhere.
+        pressing one twice takes it off. Bold, italic, underline, strikethrough, text and background colors, headings,
+        lists, quotes, callouts, code, tables and dividers all render here exactly as they will for a member, spacing
+        included. Put the cursor in a table and a second row of buttons appears for adding and removing rows and
+        columns. <strong>Markdown</strong> shows the same document as plain text if you need to paste from elsewhere.
       </p>
+
+      {/* Markdown Quick Reference Modal */}
+      {showReference && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="markdown-ref-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn"
+          onClick={() => setShowReference(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden animate-popoverIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <HelpCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                <h3 id="markdown-ref-title" className="text-base font-semibold text-slate-900 dark:text-white">
+                  Markdown Formatting Quick Reference
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReference(false)}
+                className="rounded-lg p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                aria-label="Close reference guide"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-6 text-sm text-slate-700 dark:text-slate-200">
+              {/* Text Formatting */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Text Formatting & Emphasis
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>**Bold text**</code>
+                    <div className="mt-1 font-sans font-bold text-slate-900 dark:text-white">Bold text</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>*Italic text*</code> or <code>_Italic_</code>
+                    <div className="mt-1 font-sans italic text-slate-800 dark:text-slate-200">Italic text</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>__Underlined text__</code>
+                    <div className="mt-1 font-sans underline underline-offset-2 text-slate-800 dark:text-slate-200">
+                      Underlined text
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>~~Strikethrough~~</code>
+                    <div className="mt-1 font-sans line-through opacity-75 text-slate-800 dark:text-slate-200">
+                      Strikethrough
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Text & Background Colors */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Colors & Highlights
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>[color:red]Red alert[/color]</code>
+                    <div className="mt-1 font-sans font-medium text-red-600 dark:text-red-400">Red alert</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>[color:green]Clear[/color]</code> or <code>amber</code>, <code>blue</code>
+                    <div className="mt-1 font-sans font-medium text-emerald-600 dark:text-emerald-400">Clear status</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>==Highlighted phrase==</code>
+                    <div className="mt-1 font-sans">
+                      <mark className="rounded bg-amber-200/80 dark:bg-amber-300/25 px-1">Highlighted phrase</mark>
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Syntax: </span>
+                    <code>[bg:red]Urgent[/bg]</code> or <code>blue</code>, <code>green</code>
+                    <div className="mt-1 font-sans">
+                      <mark className="rounded bg-red-100 dark:bg-red-950/60 text-red-900 dark:text-red-200 px-1">
+                        Urgent note
+                      </mark>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Headings */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Headings
+                </h4>
+                <div className="space-y-1.5 text-xs font-mono p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                  <div className="flex items-baseline justify-between">
+                    <code># Heading 1</code>
+                    <span className="font-sans font-bold text-base text-slate-900 dark:text-white">Heading 1</span>
+                  </div>
+                  <div className="flex items-baseline justify-between border-t border-slate-200 dark:border-slate-700/60 pt-1.5">
+                    <code>## Heading 2</code>
+                    <span className="font-sans font-semibold text-sm text-slate-900 dark:text-white">Heading 2</span>
+                  </div>
+                  <div className="flex items-baseline justify-between border-t border-slate-200 dark:border-slate-700/60 pt-1.5">
+                    <code>### Heading 3</code>
+                    <span className="font-sans text-xs uppercase tracking-wide font-semibold text-slate-700 dark:text-slate-300">
+                      Heading 3
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lists and Checklists */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Lists & Checklists
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Bullets & Numbers:</span>
+                    <pre className="mt-1 whitespace-pre-wrap font-mono">
+                      {'- Bunker coat\n- Bunker pants\n1. First step\n2. Second step'}
+                    </pre>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Task Checklists:</span>
+                    <pre className="mt-1 whitespace-pre-wrap font-mono">
+                      {'- [ ] Daily SCBA check\n- [x] Pass inspection'}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Callouts */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Callout Alert Boxes
+                </h4>
+                <div className="space-y-1.5 text-xs font-mono p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                  <div>
+                    <code>&gt; [!NOTE] General information</code>
+                  </div>
+                  <div>
+                    <code>&gt; [!TIP] Helpful recommendation</code>
+                  </div>
+                  <div>
+                    <code>&gt; [!IMPORTANT] Critical station requirement</code>
+                  </div>
+                  <div>
+                    <code>&gt; [!WARNING] Potential safety hazard</code>
+                  </div>
+                  <div>
+                    <code>&gt; [!CAUTION] High-risk operation or gear retirement</code>
+                  </div>
+                </div>
+              </div>
+
+              {/* Links, Code & Tables */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Links, Code & Tables
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Links: </span>
+                    <code>[NFPA 1851](https://nfpa.org)</code>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+                    <span className="text-slate-400 select-none">Inline Code: </span>
+                    <code>`SERIAL-2026`</code>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 col-span-1 md:col-span-2">
+                    <span className="text-slate-400 select-none">Table: </span>
+                    <pre className="mt-1 whitespace-pre-wrap font-mono">
+                      {'| Item | Serial # | Expiration |\n| --- | --- | --- |\n| SCBA Bottle | B-4921 | 2028-10-15 |'}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Keyboard Shortcuts */}
+              <div>
+                <h4 className="font-semibold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  Keyboard Shortcuts (Write Mode)
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                  <div className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex justify-between">
+                    <span>Bold</span>
+                    <kbd className="font-mono bg-white dark:bg-slate-700 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600">
+                      ⌘/Ctrl+B
+                    </kbd>
+                  </div>
+                  <div className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex justify-between">
+                    <span>Italic</span>
+                    <kbd className="font-mono bg-white dark:bg-slate-700 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600">
+                      ⌘/Ctrl+I
+                    </kbd>
+                  </div>
+                  <div className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex justify-between">
+                    <span>Underline</span>
+                    <kbd className="font-mono bg-white dark:bg-slate-700 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600">
+                      ⌘/Ctrl+U
+                    </kbd>
+                  </div>
+                  <div className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex justify-between">
+                    <span>Strikethrough</span>
+                    <kbd className="font-mono bg-white dark:bg-slate-700 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600">
+                      ⇧⌘X
+                    </kbd>
+                  </div>
+                  <div className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex justify-between">
+                    <span>Add Link</span>
+                    <kbd className="font-mono bg-white dark:bg-slate-700 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600">
+                      ⌘/Ctrl+K
+                    </kbd>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-200 dark:border-slate-700 px-5 py-3 flex justify-end bg-slate-50 dark:bg-slate-900">
+              <button
+                type="button"
+                onClick={() => setShowReference(false)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white hover:bg-red-500 transition"
+              >
+                Close Guide
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -711,6 +1374,7 @@ function ToolbarButton({ action, active, onClick, className }) {
   return (
     <button
       type="button"
+      onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       title={action.label}
       aria-label={action.label}

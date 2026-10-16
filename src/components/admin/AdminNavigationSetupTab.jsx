@@ -13,6 +13,7 @@ import {
   Search,
   X,
   Check,
+  Lock,
 } from 'lucide-react';
 import CenteredContent from '../CenteredContent';
 import { adminSaveSystemSettings } from '../../services/api';
@@ -88,6 +89,8 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
   const isDirty = isOrderDirty || isIconsDirty;
 
   const moveItem = (fromIndex, toIndex) => {
+    // Dashboard module is permanently locked to index 0
+    if (fromIndex === 0 || toIndex === 0) return;
     if (toIndex < 0 || toIndex >= order.length) return;
     setOrder((prev) => {
       const next = [...prev];
@@ -99,6 +102,10 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
   };
 
   const handleDragStart = (e, index) => {
+    if (index === 0) {
+      e.preventDefault();
+      return;
+    }
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
     try {
@@ -110,6 +117,7 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
 
   const handleDragOver = (e, index) => {
     e.preventDefault();
+    if (index === 0) return;
     e.dataTransfer.dropEffect = 'move';
     if (dragOverIndex !== index) {
       setDragOverIndex(index);
@@ -122,7 +130,8 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
 
   const handleDrop = (e, targetIndex) => {
     e.preventDefault();
-    if (draggedIndex === null || draggedIndex === undefined) return;
+    if (draggedIndex === null || draggedIndex === undefined || draggedIndex === 0) return;
+    if (targetIndex === 0) return;
     if (draggedIndex !== targetIndex) {
       moveItem(draggedIndex, targetIndex);
     }
@@ -240,11 +249,12 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
             const isCustomIcon = Boolean(customIcons[moduleId]);
             const isDragging = draggedIndex === index;
             const isOver = dragOverIndex === index;
+            const isLocked = index === 0;
 
             return (
               <div
                 key={moduleId}
-                draggable={!saving}
+                draggable={!isLocked && !saving}
                 onDragStart={(e) => handleDragStart(e, index)}
                 onDragOver={(e) => handleDragOver(e, index)}
                 onDragLeave={handleDragLeave}
@@ -258,12 +268,21 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
                     : 'border-slate-200 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-900/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
                 }`}
               >
-                <div
-                  className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
-                  title="Drag to reorder"
-                >
-                  <GripVertical className="w-4 h-4" />
-                </div>
+                {isLocked ? (
+                  <div
+                    className="text-slate-400 p-1"
+                    title="Dashboard is pinned as the primary module"
+                  >
+                    <Lock className="w-4 h-4 text-slate-400" />
+                  </div>
+                ) : (
+                  <div
+                    className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                    title="Drag to reorder"
+                  >
+                    <GripVertical className="w-4 h-4" />
+                  </div>
+                )}
 
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-slate-200 dark:bg-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {index + 1}
@@ -288,6 +307,11 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
                     <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                       {meta.label}
                     </p>
+                    {isLocked && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-700/70 text-slate-600 dark:text-slate-300">
+                        Pinned first
+                      </span>
+                    )}
                     {isCustomIcon && (
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950/70 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/60">
                         Custom icon
@@ -303,7 +327,7 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
                   <button
                     type="button"
                     onClick={() => moveItem(index, index - 1)}
-                    disabled={index === 0 || saving}
+                    disabled={index <= 1 || isLocked || saving}
                     className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-20 disabled:hover:bg-transparent"
                     title="Move up"
                   >
@@ -312,7 +336,7 @@ function SidebarNavOrderCard({ token, systemSettings, onDataChanged }) {
                   <button
                     type="button"
                     onClick={() => moveItem(index, index + 1)}
-                    disabled={index === order.length - 1 || saving}
+                    disabled={index === order.length - 1 || isLocked || saving}
                     className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-20 disabled:hover:bg-transparent"
                     title="Move down"
                   >

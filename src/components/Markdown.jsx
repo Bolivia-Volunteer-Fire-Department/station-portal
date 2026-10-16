@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { CircleAlert, Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
 import { parseMarkdown } from '../utils/markdown';
-import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, headingClass } from '../utils/markdownStyles';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, textColorClass } from '../utils/markdownStyles';
 
 // Renders the parsed markdown tree as React elements.
 //
@@ -32,6 +32,34 @@ const inlineChildren = (tokens, keyPrefix) =>
         return <strong key={key}>{inlineChildren(token.children, key)}</strong>;
       case 'italic':
         return <em key={key}>{inlineChildren(token.children, key)}</em>;
+      case 'underline':
+        return (
+          <u key={key} className={INLINE_CLASSES.underline}>
+            {inlineChildren(token.children, key)}
+          </u>
+        );
+      case 'strikethrough':
+        return (
+          <del key={key} className={INLINE_CLASSES.strikethrough}>
+            {inlineChildren(token.children, key)}
+          </del>
+        );
+      case 'textColor': {
+        const cls = textColorClass(token.color);
+        return (
+          <span key={key} className={cls} style={cls ? undefined : { color: token.color }}>
+            {inlineChildren(token.children, key)}
+          </span>
+        );
+      }
+      case 'bgColor': {
+        const cls = bgColorClass(token.bg);
+        return (
+          <mark key={key} className={cls} style={cls ? undefined : { backgroundColor: token.bg }}>
+            {inlineChildren(token.children, key)}
+          </mark>
+        );
+      }
       case 'color':
         return (
           <mark key={key} className={INLINE_CLASSES.highlight}>
@@ -80,9 +108,29 @@ const renderBlock = (block, index) => {
           key={key}
           className={`${block.ordered ? BLOCK_CLASSES.numbers : BLOCK_CLASSES.bullets} ${BLOCK_CLASSES.list}`}
         >
-          {block.items.map((item, itemIndex) => (
-            <li key={`${key}-${itemIndex}`}>{inlineChildren(item, `${key}-${itemIndex}`)}</li>
-          ))}
+          {block.items.map((item, itemIndex) => {
+            const itemKey = `${key}-${itemIndex}`;
+            if (Array.isArray(item) && item[0]?.type === 'text' && /^\[([ xX])\]\s+/.test(item[0].value)) {
+              const match = /^\[([ xX])\]\s+/.exec(item[0].value);
+              const isChecked = match[1].toLowerCase() === 'x';
+              const trimmedFirst = { ...item[0], value: item[0].value.slice(match[0].length) };
+              const modifiedItem = [trimmedFirst, ...item.slice(1)];
+              return (
+                <li key={itemKey} className="list-none -ml-4 flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    readOnly
+                    tabIndex={-1}
+                    aria-label="List item checkbox"
+                    className="mt-1 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600 text-red-600 pointer-events-none"
+                  />
+                  <span>{inlineChildren(modifiedItem, itemKey)}</span>
+                </li>
+              );
+            }
+            return <li key={itemKey}>{inlineChildren(item, itemKey)}</li>;
+          })}
         </Tag>
       );
     }

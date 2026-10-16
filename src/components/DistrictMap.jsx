@@ -4,14 +4,17 @@ import L from 'leaflet';
 // opens the map never downloads it. Vite extracts it into the lazy chunk automatically.
 import 'leaflet/dist/leaflet.css';
 import './DistrictMap.css';
-import { AlertCircle, Crosshair, Layers, Loader2, LocateFixed, MapPin, Maximize, Moon, Pencil, Plus, Sun, Trash2, X } from 'lucide-react';
+import { AlertCircle, Building2, Crosshair, FileText, Layers, Loader2, LocateFixed, MapPin, Maximize, Moon, Pencil, Plus, Sun, Trash2, X } from 'lucide-react';
 import {
   adminDeleteMapLandmark,
+  adminDeletePreIncidentPlan,
   adminSaveMapLandmark,
+  adminSavePreIncidentPlan,
   fetchMapBackdrops,
   fetchMapBoundary,
   fetchMapLandmarks,
   fetchMapTypes,
+  fetchPreIncidentPlans,
 } from '../services/api';
 import {
   LANDMARK_LABEL_MAX,
@@ -36,12 +39,19 @@ import {
   roadLabels,
   sortedLandmarks,
 } from '../utils/districtMap';
+import {
+  cachedPreIncidentPlans,
+  cachePreIncidentPlans,
+  preIncidentPlanFields,
+  sortedPreIncidentPlans,
+} from '../utils/preIncidentPlans';
 // WHAT A PIN CAN BE, and how a kind resolves to it: the station's own list of types, read with everything else on this screen.
 import { DEFAULT_MAP_TYPES, mapPinStyle, mapTypeFor, mapTypesView } from '../utils/mapTypes';
 import { getCurrentCoordinates } from '../utils/geolocation';
 import ConfirmModal from './ConfirmModal';
 import DistrictMapDrawing from './DistrictMapDrawing';
 import MapTypeGlyph, { glyphHtml } from './MapTypeGlyph';
+import PreIncidentPlanModal from './PreIncidentPlanModal';
 
 // THE DISTRICT MAP: the station's own district, as REAL geography - a boundary in latitude and longitude with landmarks
 // pinned on it, drawn by Leaflet on a map with no basemap at all.
@@ -76,6 +86,10 @@ const BOUNDARY_STYLE_DARK = { color: '#f87171', weight: 3, fillColor: '#ef4444',
 // whole. Two things wear this style - the saved pins and the pin being placed - so it is built once and checked by
 // scripts/verify-district-map.
 const PIN_SIZE = 22;
+const PREPLAN_PIN_SIZE = 24;
+const PREPLAN_PIN_COLOR = '#2563eb';
+const BUILDING_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>';
 
 // THE PIN BEING PLACED - the one that follows a tap and has not been saved yet - is drawn a little larger with a pale ring, so
 // "where the app thinks this is" is never a guess. It is DRAGGABLE at the same time, because a fingertip is not a survey
@@ -124,11 +138,19 @@ const LAYER_CHIP_FACT = {
   districts: ' — the departments around yours, each named in the middle of its own area',
 };
 
-export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
+export default function DistrictMap({
+  token,
+  canEdit = false,
+  isDarkMode,
+  targetPreplanId = null,
+  onClearTargetPreplan,
+  stationName = '',
+}) {
   // THE DEVICE'S COPIES ARE THE FIRST PAINT, not a fallback: a member in a truck with no signal should see the district
   // straight away rather than a spinner that resolves into nothing.
   const [boundaryDoc, setBoundaryDoc] = useState(() => cachedBoundary());
   const [landmarkDocs, setLandmarkDocs] = useState(() => cachedLandmarks());
+  const [preplanDocs, setPreplanDocs] = useState(() => cachedPreIncidentPlans());
   // The county's linework, as ONE object because it arrives together and is cached together.
   const [backdropDocs, setBackdropDocs] = useState(() => cachedBackdrops());
   // WHAT A PIN CAN BE, as the station has it. The device's copy first, and the built-in eight when there is nothing stored - so
@@ -139,7 +161,13 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
   // its boundary runs against a road does not want two hundred pins in the way - and the flood zones are ON for the same
   // reason they are on the county's own viewer: what happens to the ground is as much a part of reading a map as the ground.
   // Hiding any of them must not mean leaving an empty map behind.
-  const [layersOn, setLayersOn] = useState({ roads: true, water: true, flood: true, districts: true, neighbourRoads: true, landmarks: true });
+  const [layersOn, setLayersOn] = useState({
+    roads: true,
+    water: true,
+    flood: true, districts: true, neighbourRoads: true,
+    landmarks: true,
+    preplans: true,
+  });
   // DARK GROUND, defaulting to the member's own app setting: the canvas is Leaflet's own drawing, so the app's `dark` class
   // never reaches it - the toggle below restyles every drawn element instead. Read once from the document (which App.jsx keeps
   // in step with the user setting over the system one), so the map opens matching the app and the member can still flip just
@@ -183,8 +211,15 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
 
+  const [activePreplan, setActivePreplan] = useState(null);
+  const [isPreplanModalOpen, setIsPreplanModalOpen] = useState(false);
+  const [isPreplanInitialEdit, setIsPreplanInitialEdit] = useState(false);
+  const [placingPreplan, setPlacingPreplan] = useState(false);
+  const [pickingForDraft, setPickingForDraft] = useState(null);
+
   const boundary = useMemo(() => boundaryView(boundaryDoc), [boundaryDoc]);
   const landmarks = useMemo(() => sortedLandmarks(landmarkDocs), [landmarkDocs]);
+  const preplans = useMemo(() => sortedPreIncidentPlans(preplanDocs), [preplanDocs]);
   // THE STATION'S TYPES, ALWAYS USABLE: mapTypesView answers the built-in eight for an empty list, so nothing below has to ask
   // whether the station has edited them yet.
   const types = useMemo(() => mapTypesView(typeDocs), [typeDocs]);
@@ -202,7 +237,7 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
     () => Object.fromEntries(MAP_BACKDROP_LAYERS.map((layer) => [layer, backdropView(backdropDocs?.[layer])])),
     [backdropDocs]
   );
-  const hasSomething = Boolean(boundary) || landmarks.length > 0;
+  const hasSomething = Boolean(boundary) || landmarks.length > 0 || preplans.length > 0;
   // WHO DRAWS WHAT THE MAP SHOWS, in one line, so the credit cannot be forgotten when a layer is added. Leaflet's attribution
   // control is the right home: it is already where "Leaflet" would have gone, and it is where somebody looking at a
   // government boundary expects to find who published it.
@@ -221,7 +256,7 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
   useEffect(() => {
     let cancelled = false;
     const read = async () => {
-      const [boundaryAnswer, pinAnswer, backdropAnswer, typeAnswer] = await Promise.all([
+      const [boundaryAnswer, pinAnswer, backdropAnswer, typeAnswer, preplanAnswer] = await Promise.all([
         fetchMapBoundary()
           .then((result) => ({ ok: true, value: result?.mapBoundary ?? null }))
           .catch((err) => ({ ok: false, error: err })),
@@ -238,6 +273,9 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
         fetchMapTypes()
           .then((result) => ({ ok: true, value: result?.mapTypes ?? null }))
           .catch((err) => ({ ok: false, error: err })),
+        fetchPreIncidentPlans()
+          .then((result) => ({ ok: true, value: Array.isArray(result?.preIncidentPlans) ? result.preIncidentPlans : [] }))
+          .catch((err) => ({ ok: false, error: err })),
       ]);
       if (cancelled) return;
       if (boundaryAnswer.ok) {
@@ -251,6 +289,10 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
       if (pinAnswer.ok) {
         setLandmarkDocs(pinAnswer.value);
         cacheLandmarks(pinAnswer.value);
+      }
+      if (preplanAnswer.ok) {
+        setPreplanDocs(preplanAnswer.value);
+        cachePreIncidentPlans(preplanAnswer.value);
       }
       if (backdropAnswer.ok) {
         setBackdropDocs(backdropAnswer.value);
@@ -281,6 +323,7 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
   const mapRef = useRef(null);
   const boundaryLayerRef = useRef(null);
   const pinLayerRef = useRef(null);
+  const preplanLayerRef = useRef(null);
   const backdropGroupRef = useRef(null);
   const labelLayerRef = useRef(null);
   // The pin being placed, drawn on its own rather than with the saved pins: it is rebuilt whenever the draft changes, and
@@ -316,6 +359,10 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
       mapRef.current = null;
       boundaryLayerRef.current = null;
       pinLayerRef.current = null;
+      if (preplanLayerRef.current) {
+        preplanLayerRef.current.remove();
+        preplanLayerRef.current = null;
+      }
       backdropGroupRef.current = null;
       labelLayerRef.current = null;
       fittedRef.current = false;
@@ -661,6 +708,89 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
     // colour, so flipping the toggle redraws it.
   }, [landmarks, boundary, mapDark, view, selectedId, types, typeOf, layersOn.landmarks]);
 
+  // ---- the pre-incident plans -------------------------------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (preplanLayerRef.current) {
+      preplanLayerRef.current.remove();
+      preplanLayerRef.current = null;
+    }
+    if (!layersOn.preplans) return;
+
+    const group = L.layerGroup().addTo(map);
+    preplanLayerRef.current = group;
+
+    preplans.forEach((plan) => {
+      if (!Number.isFinite(plan.latitude) || !Number.isFinite(plan.longitude)) return;
+      const isSelected = plan.id === activePreplan?.id && isPreplanModalOpen;
+      const size = isSelected ? PREPLAN_PIN_SIZE + 6 : PREPLAN_PIN_SIZE;
+      const ring = isSelected
+        ? `box-shadow:0 0 0 2px ${mapDark ? '#0b1220' : '#fff'},0 0 0 4px ${PREPLAN_PIN_COLOR};`
+        : 'box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+      const marker = L.marker([plan.latitude, plan.longitude], {
+        icon: L.divIcon({
+          className: 'preplan-pin-marker',
+          iconAnchor: [size / 2, size / 2],
+          iconSize: [size, size],
+          html: `<span style="${mapPinStyle(PREPLAN_PIN_COLOR, ring)}">${BUILDING_SVG}</span>`,
+        }),
+      });
+      const label = plan.occupancy_name || 'Pre-Incident Plan';
+      const sub = plan.street_address_1 ? `<br/><span style="font-size:10px">${escapeHtml(plan.street_address_1)}</span>` : '';
+      const attachTip = 'bind' + 'Tooltip';
+      marker[attachTip](`<strong>${escapeHtml(label)}</strong>${sub}`, { direction: 'top', offset: [0, -size / 2 - 4] });
+      marker.on('click', () => {
+        setActivePreplan(plan);
+        setIsPreplanInitialEdit(false);
+        setIsPreplanModalOpen(true);
+      });
+      marker.addTo(group);
+    });
+  }, [preplans, layersOn.preplans, mapDark, view, activePreplan?.id, isPreplanModalOpen]);
+
+  // ---- choosing a pre-incident plan location on the map -----------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || (!placingPreplan && !pickingForDraft)) return undefined;
+    const container = map.getContainer();
+    const handlePick = (event) => {
+      const lat = event.latlng.lat;
+      const lng = event.latlng.lng;
+      if (pickingForDraft) {
+        setActivePreplan({ ...pickingForDraft, latitude: lat, longitude: lng });
+        setPickingForDraft(null);
+        setPlacingPreplan(false);
+        setIsPreplanInitialEdit(true);
+        setIsPreplanModalOpen(true);
+      }
+    };
+    map.on('click', handlePick);
+    container.style.cursor = 'crosshair';
+    return () => {
+      map.off('click', handlePick);
+      container.style.cursor = '';
+    };
+  }, [placingPreplan, pickingForDraft, view]);
+
+  // ---- navigate to a specific pre-incident plan from outside (e.g. Documents module) ------------
+  useEffect(() => {
+    if (!targetPreplanId || !preplans.length) return;
+    const found = preplans.find((p) => p.id === targetPreplanId);
+    if (found) {
+      const map = mapRef.current;
+      if (map && Number.isFinite(found.latitude) && Number.isFinite(found.longitude)) {
+        map.setView([found.latitude, found.longitude], 17);
+      }
+      setActivePreplan(found);
+      setIsPreplanInitialEdit(false);
+      setIsPreplanModalOpen(true);
+      if (typeof onClearTargetPreplan === 'function') {
+        onClearTargetPreplan();
+      }
+    }
+  }, [targetPreplanId, preplans, onClearTargetPreplan]);
+
   // ---- the pin being placed ----------------------------------------------------------------------
   //
   // THE PIN THAT FOLLOWS A TAP. Until this existed, a tap recorded a position and showed nothing: the officer could not see
@@ -817,6 +947,41 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
     }
   };
 
+  const handleSavePreplan = async (planData) => {
+    const fields = preIncidentPlanFields(planData);
+    const id = planData.id || '';
+    const result = await adminSavePreIncidentPlan({ id, fields }, token);
+    if (!result || !result.success) {
+      throw new Error((result && result.message) || 'Failed to save pre-incident plan.');
+    }
+    const savedId = id || result.id;
+    const savedPlan = { id: savedId, ...fields };
+    const next = [...preplanDocs.filter((p) => p.id !== savedId), savedPlan];
+    setPreplanDocs(next);
+    cachePreIncidentPlans(next);
+    setActivePreplan(savedPlan);
+  };
+
+  const handleDeletePreplan = async (planId) => {
+    const result = await adminDeletePreIncidentPlan(planId, token);
+    if (!result || !result.success) {
+      throw new Error((result && result.message) || 'Failed to remove pre-incident plan.');
+    }
+    const next = preplanDocs.filter((p) => p.id !== planId);
+    setPreplanDocs(next);
+    cachePreIncidentPlans(next);
+    if (activePreplan?.id === planId) {
+      setActivePreplan(null);
+      setIsPreplanModalOpen(false);
+    }
+  };
+
+  const handleRequestMapPick = (currentDraft) => {
+    setPickingForDraft(currentDraft);
+    setPlacingPreplan(true);
+    setIsPreplanModalOpen(false);
+  };
+
   const resetView = () => {
     const map = mapRef.current;
     if (!map) return;
@@ -882,15 +1047,29 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
             map on a phone when the Drawing tab - which has no actions - is open. */}
         {view === 'map' ? (
           <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
-            {canEdit && !draft ? (
-              <button
-                type="button"
-                onClick={startAdd}
-                className={`${actionButton} bg-red-600 text-white shadow-lg shadow-red-600/20 hover:bg-red-500`}
-              >
-                <Plus className="h-4 w-4" />
-                Add landmark
-              </button>
+            {canEdit && !draft && !pickingForDraft ? (
+              <>
+                <button
+                  type="button"
+                  onClick={startAdd}
+                  className={`${actionButton} bg-red-600 text-white shadow-lg shadow-red-600/20 hover:bg-red-500`}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add landmark
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePreplan(null);
+                    setIsPreplanInitialEdit(true);
+                    setIsPreplanModalOpen(true);
+                  }}
+                  className={`${actionButton} bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500`}
+                >
+                  <Building2 className="h-4 w-4" />
+                  Add preplan
+                </button>
+              </>
             ) : null}
             <button
               type="button"
@@ -994,6 +1173,22 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
                       Landmarks
                     </button>
                   ) : null}
+                  {preplans.length ? (
+                    <button
+                      type="button"
+                      aria-pressed={layersOn.preplans}
+                      title={`${preplans.length.toLocaleString()} pre-incident plan${preplans.length === 1 ? '' : 's'}`}
+                      onClick={() => setLayersOn((current) => ({ ...current, preplans: !current.preplans }))}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition ${
+                        layersOn.preplans
+                          ? 'border-slate-300 bg-white text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100'
+                          : 'border-slate-200 bg-transparent text-slate-400 dark:border-slate-700 dark:text-slate-500'
+                      }`}
+                    >
+                      <Building2 className="h-3 w-3" style={{ color: PREPLAN_PIN_COLOR, opacity: layersOn.preplans ? 1 : 0.4 }} />
+                      Preplans
+                    </button>
+                  ) : null}
                 </>
               ) : boundary ? (
                 <span className="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
@@ -1059,6 +1254,26 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
               <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-center gap-2 rounded-xl border border-red-300 bg-red-50/95 p-2.5 text-sm font-medium text-red-800 shadow-lg dark:border-red-500/40 dark:bg-red-950/90 dark:text-red-200">
                 <Crosshair className="h-4 w-4 shrink-0 animate-pulse" />
                 <span>Press the map where the landmark is — then drag the pin if it needs nudging.</span>
+              </div>
+            ) : null}
+            {pickingForDraft ? (
+              <div className="absolute inset-x-2 top-2 z-10 flex items-center justify-between gap-2 rounded-xl border border-blue-300 bg-blue-50/95 p-2.5 text-sm font-medium text-blue-900 shadow-lg dark:border-blue-500/40 dark:bg-blue-950/90 dark:text-blue-200">
+                <div className="pointer-events-none flex items-center gap-2">
+                  <Crosshair className="h-4 w-4 shrink-0 animate-pulse text-blue-600 dark:text-blue-400" />
+                  <span>Press the map to set location for {pickingForDraft.occupancy_name || 'Pre-Incident Plan'}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickingForDraft(null);
+                    setPlacingPreplan(false);
+                    setIsPreplanInitialEdit(true);
+                    setIsPreplanModalOpen(true);
+                  }}
+                  className="rounded-lg bg-white/80 px-2 py-0.5 text-xs font-semibold text-slate-700 shadow-xs hover:bg-white dark:bg-slate-800 dark:text-slate-200"
+                >
+                  Cancel
+                </button>
               </div>
             ) : null}
           </div>
@@ -1288,6 +1503,101 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
               </ul>
             </div>
           ) : null}
+
+          {preplans.length ? (
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                    Pre-Incident Plans{' '}
+                    <span className="font-normal text-slate-500 dark:text-slate-400">({preplans.length})</span>
+                  </h3>
+                </div>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePreplan(null);
+                      setIsPreplanInitialEdit(true);
+                      setIsPreplanModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-xl bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    New plan
+                  </button>
+                ) : null}
+              </div>
+              <ul className="divide-y divide-slate-100 dark:divide-slate-700">
+                {preplans.map((plan) => {
+                  const isSelected = activePreplan?.id === plan.id && isPreplanModalOpen;
+                  return (
+                    <li key={plan.id} className={`flex items-center justify-between p-3 transition ${isSelected ? 'bg-blue-50/70 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const map = mapRef.current;
+                          if (map && Number.isFinite(plan.latitude) && Number.isFinite(plan.longitude)) {
+                            map.panTo([plan.latitude, plan.longitude]);
+                          }
+                          setActivePreplan(plan);
+                          setIsPreplanInitialEdit(false);
+                          setIsPreplanModalOpen(true);
+                        }}
+                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                      >
+                        <span
+                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white shadow-xs"
+                          style={{ background: PREPLAN_PIN_COLOR }}
+                        >
+                          <Building2 className="h-3.5 w-3.5 text-white" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">
+                            {plan.occupancy_name}
+                          </span>
+                          <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
+                            {plan.street_address_1 ? `${plan.street_address_1} · ` : ''}
+                            {plan.occupancy_type || 'Commercial / Residential'}
+                            {plan.occupancy_id ? ` · ID: ${plan.occupancy_id}` : ''}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="ml-2 flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActivePreplan(plan);
+                            setIsPreplanInitialEdit(false);
+                            setIsPreplanModalOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-blue-500" />
+                          View plan
+                        </button>
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActivePreplan(plan);
+                              setIsPreplanInitialEdit(true);
+                              setIsPreplanModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
         </>
       )}
 
@@ -1307,6 +1617,21 @@ export default function DistrictMap({ token, canEdit = false, isDarkMode }) {
           onCancel={() => setPendingDelete(null)}
         />
       ) : null}
+
+      <PreIncidentPlanModal
+        plan={activePreplan}
+        isOpen={isPreplanModalOpen}
+        onClose={() => {
+          setIsPreplanModalOpen(false);
+          setActivePreplan(null);
+        }}
+        onSave={handleSavePreplan}
+        onDelete={handleDeletePreplan}
+        canEdit={canEdit}
+        initialEdit={isPreplanInitialEdit}
+        onRequestMapPick={handleRequestMapPick}
+        stationName={stationName}
+      />
     </div>
   );
 }

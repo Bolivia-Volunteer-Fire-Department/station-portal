@@ -66,6 +66,8 @@ export const ADMIN_BAR_LABELS = {
   equipment: 'Equipment',
   apparatus: 'Apparatuses',
   'asset-setup': 'Asset Setup',
+  'dashboard-setup': 'Dash Setup',
+  'widget-setup': 'Widget Setup',
 };
 
 export const adminBarLabel = (subTabId) => ADMIN_BAR_LABELS[String(subTabId || '')] || '';

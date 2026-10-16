@@ -58,6 +58,7 @@ import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
 import { MOBILE_NAV_MODULES_KEY, parseMobileNavModules } from './utils/mobileNav';
 import PixelBurst from './components/PixelBurst';
+import DashboardModule from './components/DashboardModule';
 import ClockCard from './components/ClockCard';
 import OnDutyCard from './components/OnDutyCard';
 import SplashScreen from './components/SplashScreen';
@@ -232,6 +233,7 @@ export default function App() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [mapTargetPreplanId, setMapTargetPreplanId] = useState(null);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // Initial Boot Loading
@@ -466,6 +468,7 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   }, [activeTab, currentUser]);
 
   const departmentName = systemSettings.find((s) => String(s.key) === 'department_name')?.value || '';
+  const stationName = systemSettings.find((s) => String(s.key) === 'station_name')?.value || departmentName || '';
   const departmentLogo = departmentLogoUrl(systemSettings);
   const mobileNavModules = parseMobileNavModules(
     systemSettings.find((s) => String(s.key) === MOBILE_NAV_MODULES_KEY)?.value
@@ -1672,7 +1675,9 @@ const getLoadingMessage = () => {
       // Handles clock in and clock out actions.
       const locationCheck = evaluateClockLocation(coords, clockLocationConfig(systemSettings));
       if (!locationCheck.allowed) {
-        // Notice shown when clocking in outside allowed station radius.
+        // A modal, not the status banner: the banner is only rendered on the login screen, and a
+        // refusal is the answer to the button the member just pressed. See ClockBlockedModal.
+        // It specifically does not write to statusMessage here because signed-in members cannot see it.
         setClockNotice(clockLocationNotice(locationCheck, clockLocationConfig(systemSettings)));
         setGlobalLoading({ active: false, message: '' });
         return;
@@ -1716,6 +1721,7 @@ const getLoadingMessage = () => {
             'hide_events_by_default',
             'colorblind_rank_labels',
             'font_scale',
+            'dashboard_layout',
             // Missing from this list means the optimistic merge drops it, so the switch would appear not to sti...
             'is_sounds_active',
             'fcm_token',
@@ -2059,7 +2065,7 @@ const getLoadingMessage = () => {
                 moves out of the way as you read. Once it has, the app bar says which page this is.
                 On the Help screen it does NOT scroll (there is nothing to scroll) and must keep its height, or a
                 short window would squash the title instead of the guide: hence `md:shrink-0`. */}
-            <div ref={pageHeadingRef} className="mb-8 md:shrink-0">
+            <div ref={pageHeadingRef} className="mb-8 md:shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
                 {activeTab === 'dashboard' ? (
                   <img
@@ -2087,7 +2093,7 @@ const getLoadingMessage = () => {
                   </h2>
                   <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
                     {activeTab === 'dashboard' && (
-                      'Manage your hours and time tracking.'
+                      'Station overview, active clock status, and duty dashboard.'
                     )}
                     {activeTab === 'clock-history' && 'Review your previous clock-in entries, duration, and locations.'}
                     {activeTab === 'roster' && 'View active members, ranks, and current certifications.'}
@@ -2105,6 +2111,7 @@ const getLoadingMessage = () => {
                   </p>
                 </div>
               </div>
+              <div id="dashboard-header-actions" className="flex items-center gap-2 shrink-0 empty:hidden" />
             </div>
 
             {/* One boundary for every deferred screen in the chain below (see utils/deferredModules.js). It adds
@@ -2113,35 +2120,27 @@ const getLoadingMessage = () => {
                 the tab that is opening still names itself. */}
             <Suspense fallback={<DeferredScreenFallback />}>
             {activeTab === 'dashboard' && (
-              <div className="space-y-6">
-                {/* Anything about to run out, above everything else: it is the one thing on this screen that is
-                    both personal and time-critical. Nothing renders when there is nothing to say. */}
-                <CertificationNotice alerts={certificationAlerts} />
-                {/* Announcements for the crew: above the clock, below the welcome message. */}
-                <AnnouncementList
-                  announcements={announcements}
-                  location="is_visible_on_dashboard"
-                  audience={announcementAudience}
-                />
-
-                {/* Live Station Digital Clock */}
-                <DigitalClock timeFormat={activeTimeFormat} />
-
-                {/* Primary Clock In / Clock Out Action Card. Without the timeclock
-                    permission a member still sees the station clock and who is on
-                    duty, just no buttons. */}
-                {canUseTimeclock && (
-                  <ClockCard
-                    isClockedIn={isClockedIn}
-                    loading={globalLoading.active}
-                    offline={offline}
-                    onClockAction={handleClockAction}
-                  />
-                )}
-
-                {/* Who's currently working */}
-                <OnDutyCard onDutyUsers={onDutyUsers} ranks={ranks} />
-              </div>
+              <DashboardModule
+                currentUser={currentUser}
+                currentRole={currentUserRole}
+                isClockedIn={isClockedIn}
+                loading={globalLoading.active}
+                offline={offline}
+                onClockAction={handleClockAction}
+                timeFormat={activeTimeFormat}
+                canUseTimeclock={canUseTimeclock}
+                certificationAlerts={certificationAlerts}
+                announcements={announcements}
+                announcementAudience={announcementAudience}
+                onDutyUsers={onDutyUsers}
+                ranks={ranks}
+                schedule={schedule}
+                assignments={assignments}
+                systemSettings={systemSettings}
+                userSettings={currentUserSettings}
+                onSaveUserSettings={handleSaveUserSettings}
+                onNavigate={handleSidebarNavigate}
+              />
             )}
 
             {activeTab === 'clock-history' && canUseTimeclock && (
@@ -2259,6 +2258,11 @@ const getLoadingMessage = () => {
                 canVerify={canVerifyDocuments}
                 // Checks if user can record assessment test scores.
                 canAddScores={canAddAssessmentScores}
+                stationName={stationName}
+                onNavigateToMap={(plan) => {
+                  setMapTargetPreplanId(plan?.id || null);
+                  setActiveTab('district-map');
+                }}
               />
             )}
 
@@ -2317,7 +2321,14 @@ const getLoadingMessage = () => {
                 tab, the sidebar entry and the data all answer to the same flag. The token is passed for the same reason
                 every other module takes it: a new session is a new read. */}
             {activeTab === 'district-map' && canViewMap && (
-              <DistrictMap token={authToken} canEdit={canEditMap} isDarkMode={isDarkMode} />
+              <DistrictMap
+                token={authToken}
+                canEdit={canEditMap}
+                isDarkMode={isDarkMode}
+                targetPreplanId={mapTargetPreplanId}
+                onClearTargetPreplan={() => setMapTargetPreplanId(null)}
+                stationName={stationName}
+              />
             )}
 
             {/* Reports and Forms are one module behind one sidebar entry. Both screens are built here but only the one

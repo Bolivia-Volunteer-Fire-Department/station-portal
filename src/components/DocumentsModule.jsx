@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   BadgeCheck,
   BookText,
+  Building2,
   CheckCircle2,
   ExternalLink,
   FileText,
@@ -20,6 +21,7 @@ import {
   fetchDocuments,
   fetchMemberAssessmentScore,
   fetchMemberDocumentRecords,
+  fetchPreIncidentPlans,
   setAssessmentScore,
   signChecklistItems,
   signDocument,
@@ -30,6 +32,9 @@ import {
 import { toast } from '../utils/toast';
 import ConfirmModal from './ConfirmModal';
 import Markdown from './Markdown';
+import PreIncidentPlanView from './PreIncidentPlanView';
+import PrintablePreIncidentPlan from './PrintablePreIncidentPlan';
+import { cachedPreIncidentPlans, cachePreIncidentPlans } from '../utils/preIncidentPlans';
 import {
   assessmentScoreDateLabel,
   assessmentScoreLimit,
@@ -431,13 +436,32 @@ export default function DocumentsModule({
   // This HIDES the control and nothing more. The rules are what refuse a write without it - see
   // document_assessment_scores in firestore.rules - so hiding it here is a courtesy, not the protection.
   canAddScores = false,
+  onNavigateToMap,
+  stationName = '',
 }) {
   const [documents, setDocuments] = useState([]);
+  const [preplans, setPreplans] = useState(() => cachedPreIncidentPlans());
+  const [printingPreplan, setPrintingPreplan] = useState(null);
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
   const [onlyOutstanding, setOnlyOutstanding] = useState(false);
+
+  useEffect(() => {
+    let canceled = false;
+    fetchPreIncidentPlans()
+      .then((res) => {
+        if (canceled) return;
+        const list = Array.isArray(res?.preIncidentPlans) ? res.preIncidentPlans : [];
+        setPreplans(list);
+        cachePreIncidentPlans(list);
+      })
+      .catch(() => {});
+    return () => {
+      canceled = true;
+    };
+  }, []);
   // The folder the browser is showing. Empty means "not chosen yet", which resolves to the first folder that has
   // anything in it - so the module never opens on an empty column.
   const [folder, setFolder] = useState('');
@@ -523,8 +547,24 @@ export default function DocumentsModule({
   const openDocumentById = useCallback(
     async (id) => {
       setOpenId(id);
-      setOpening(true);
       setOpenError('');
+      if (String(id).startsWith('preplan_')) {
+        const planId = String(id).replace('preplan_', '');
+        const plan = preplans.find((p) => p.id === planId);
+        if (plan) {
+          setOpenDocument({
+            id,
+            title: plan.occupancy_name || 'Pre-Incident Plan',
+            folder: 'Pre-Incident Plans',
+            doc_type: 'preplan',
+            preplan: plan,
+            is_published: true,
+          });
+          setOpening(false);
+          return;
+        }
+      }
+      setOpening(true);
       try {
         const result = await fetchDocument(id, token);
         if (!result?.success) throw new Error(result?.message || 'That document could not be opened.');
@@ -549,7 +589,7 @@ export default function DocumentsModule({
         setOpening(false);
       }
     },
-    [token]
+    [token, preplans]
   );
 
   const documentIsChecklist = isChecklist(openDocument || {});
@@ -589,11 +629,27 @@ export default function DocumentsModule({
   const viewAsMember = viewableMembers.find((member) => member.id === viewAsMemberId) || null;
   const viewingSomeoneElse = Boolean(viewAsMember);
 
+  const preplanDocuments = useMemo(() => {
+    return preplans.map((p) => ({
+      id: `preplan_${p.id}`,
+      title: p.occupancy_name || 'Pre-Incident Plan',
+      folder: 'Pre-Incident Plans',
+      doc_type: 'preplan',
+      is_published: true,
+      preplan: p,
+      sort_order: 9999,
+      updated_at: p.updated_at || '',
+    }));
+  }, [preplans]);
+
   // Whose records the card is showing: the signed-in member's own, unless a verifier has asked for somebody
   // else's. Every "whose is this?" question below reads these three and nothing else, so the list, the folder
   // counts, the "to sign" filter, the item ticks and the signature block are always describing the same person.
   const recordUserId = viewingSomeoneElse ? viewAsMember.id : userId;
-  const recordDocuments = viewingSomeoneElse ? viewerDocuments : documents;
+  const baseDocuments = viewingSomeoneElse ? viewerDocuments : documents;
+  const recordDocuments = useMemo(() => {
+    return [...baseDocuments, ...preplanDocuments];
+  }, [baseDocuments, preplanDocuments]);
   const recordSignatures = viewingSomeoneElse ? viewerSignatures : signatures;
 
   // Somebody else's records, in one request: their documents (as THEY see them - the server applies their rank, not
@@ -1216,7 +1272,9 @@ export default function DocumentsModule({
                                 through a line at a time, and that is the difference a member needs to see before
                                 opening it. A link is marked for the same reason in reverse: nothing is stored here
                                 to read, the row is a way out of the app, and that should not be a surprise. */}
-                            {checklist ? (
+                            {item.preplan ? (
+                              <Building2 className={`w-4 h-4 shrink-0 ${selected ? 'text-white' : 'text-blue-500'}`} title="Pre-Incident Plan" />
+                            ) : checklist ? (
                               <ListChecks className="w-4 h-4 shrink-0" title="Checklist" />
                             ) : isLink(item) ? (
                               <ExternalLink className="w-4 h-4 shrink-0" title="Opens an external link" />
@@ -1304,16 +1362,22 @@ export default function DocumentsModule({
                     {documentUpdatedLabel(openDocument, timeFormat)
                       ? ` · ${documentUpdatedLabel(openDocument, timeFormat)}`
                       : ''}
+                    {openDocument.preplan ? ' · Pre-Incident Plan' : ''}
                     {isChecklist(openDocument) ? ' · Checklist' : ''}
                     {isLink(openDocument) ? ' · Link' : ''}
                     {documentIsAssessment ? ' · Assessment' : ''}
                   </p>
 
-                  {/* A link document has no body to render: its content IS an address, and the useful thing to do
-                      with it is open it. The address is shown as well as linked, because a reader has to be able to
-                      see where a click will take them. `rel="noreferrer"` and `target="_blank"` together are what
-                      keep the external page from reaching back into this tab. */}
-                  {isLink(openDocument) ? (
+                  {openDocument.preplan ? (
+                    <div className="mt-4">
+                      <PreIncidentPlanView
+                        plan={openDocument.preplan}
+                        stationName={stationName}
+                        onPrint={() => setPrintingPreplan(openDocument.preplan)}
+                        onNavigateToMap={onNavigateToMap}
+                      />
+                    </div>
+                  ) : isLink(openDocument) ? (
                     <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4">
                       {openLinkUrl ? (
                         <>
@@ -1720,6 +1784,14 @@ export default function DocumentsModule({
           confirmLabel={signing ? 'Signing…' : 'I have read it — sign'}
           onConfirm={handleSign}
           onCancel={() => setPendingSignature(null)}
+        />
+      )}
+
+      {printingPreplan && (
+        <PrintablePreIncidentPlan
+          plan={printingPreplan}
+          stationName={stationName}
+          onDone={() => setPrintingPreplan(null)}
         />
       )}
     </div>

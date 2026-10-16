@@ -19,7 +19,7 @@ import { DEFAULT_MOBILE_NAV_MODULES } from '../utils/mobileNav';
 import { useAuth } from '../context/AuthContext';
 
 const MODULE_META = {
-  dashboard: { label: 'Clock', icon: LayoutDashboard },
+  dashboard: { label: 'Dashboard', icon: LayoutDashboard },
   schedule: { label: 'Schedule', icon: CalendarDays },
   chat: { label: 'Chat', icon: MessagesSquare },
   availability: { label: 'Availability', icon: CalendarCheck },

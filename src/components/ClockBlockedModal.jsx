@@ -88,6 +88,13 @@ export default function ClockBlockedModal({ notice, onDismiss }) {
           </div>
         )}
 
+        {notice.details && (
+          <div className="mb-6 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-3.5 text-xs text-left">
+            <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1">Diagnostic Report:</div>
+            <p className="text-slate-600 dark:text-slate-400 font-mono break-words leading-relaxed">{notice.details}</p>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={onDismiss}

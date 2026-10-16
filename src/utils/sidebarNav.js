@@ -287,8 +287,8 @@ export const NAV_ICON_OPTIONS = [
 export const SIDEBAR_MODULE_CATALOG = [
   {
     id: 'dashboard',
-    label: 'Timeclock',
-    description: 'Timeclock and station dashboard',
+    label: 'Dashboard',
+    description: 'Station dashboard and widgets',
     permissionKey: null,
   },
   {
@@ -370,8 +370,8 @@ export function parseSidebarNavOrder(rawValue) {
     return [...DEFAULT_SIDEBAR_NAV_ORDER];
   }
   const parts = rawValue.split(',').map((s) => s.trim()).filter(Boolean);
-  const valid = parts.filter((id) => DEFAULT_SIDEBAR_NAV_ORDER.includes(id));
-  const result = [];
+  const valid = parts.filter((id) => DEFAULT_SIDEBAR_NAV_ORDER.includes(id) && id !== 'dashboard');
+  const result = ['dashboard'];
   for (const id of valid) {
     if (!result.includes(id)) {
       result.push(id);
@@ -388,8 +388,8 @@ export function parseSidebarNavOrder(rawValue) {
 
 export function formatSidebarNavOrder(moduleIds) {
   if (!Array.isArray(moduleIds)) return DEFAULT_SIDEBAR_NAV_ORDER.join(',');
-  const valid = moduleIds.filter((id) => DEFAULT_SIDEBAR_NAV_ORDER.includes(id));
-  const result = [];
+  const valid = moduleIds.filter((id) => DEFAULT_SIDEBAR_NAV_ORDER.includes(id) && id !== 'dashboard');
+  const result = ['dashboard'];
   for (const id of valid) {
     if (!result.includes(id)) {
       result.push(id);

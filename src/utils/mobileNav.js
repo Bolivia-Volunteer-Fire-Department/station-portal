@@ -8,7 +8,7 @@ export const MOBILE_NAV_MODULES_KEY = 'mobile_nav_modules';
 export const DEFAULT_MOBILE_NAV_MODULES = ['dashboard', 'schedule', 'chat'];
 
 export const AVAILABLE_MOBILE_NAV_MODULES = [
-  { id: 'dashboard', label: 'Clock', description: 'Timeclock module', permissionKey: 'canUseTimeclock' },
+  { id: 'dashboard', label: 'Dashboard', description: 'Station dashboard & widgets', permissionKey: null },
   { id: 'schedule', label: 'Schedule', description: 'Shift calendar & open shifts', permissionKey: 'canViewSchedule' },
   { id: 'chat', label: 'Chat', description: 'Station messages & chat', permissionKey: 'canUseChat' },
   { id: 'availability', label: 'Availability', description: 'Monthly availability submission', permissionKey: 'canEditAvailability' },

@@ -32,4 +32,3 @@ To create a new asset type or adjust an existing one:
 
 > [!NOTE]
 > System defaults are provided out of the box. You can customize any default type at any time or add new options that match your department standard operating procedures.
-

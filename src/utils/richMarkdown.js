@@ -16,7 +16,7 @@
 // all (scripts/verify-rich-markdown.mjs runs in node, where there is no DOM to test against).
 
 import { ALERT_KINDS, parseInline, parseMarkdown } from './markdown';
-import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, headingClass } from './markdownStyles';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, textColorClass } from './markdownStyles';
 
 // ---------------------------------------------------------------------------
 // The toolbar
@@ -33,6 +33,8 @@ import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, headingClass } from './
 export const INLINE_ACTIONS = [
   { id: 'bold', label: 'Bold', icon: 'Bold', mode: 'inline', syntax: '**' },
   { id: 'italic', label: 'Italic', icon: 'Italic', mode: 'inline', syntax: '*' },
+  { id: 'underline', label: 'Underline', icon: 'Underline', mode: 'inline', syntax: '__' },
+  { id: 'strikethrough', label: 'Strikethrough', icon: 'Strikethrough', mode: 'inline', syntax: '~~' },
   { id: 'highlight', label: 'Highlight', icon: 'Highlighter', mode: 'inline', syntax: '==' },
   { id: 'code', label: 'Inline code', icon: 'Code', mode: 'inline', syntax: '`' },
   { id: 'link', label: 'Link', icon: 'Link', mode: 'inline' },
@@ -229,6 +231,20 @@ const htmlFromToken = (token) => {
       return `<strong>${htmlFromTokens(token.children)}</strong>`;
     case 'italic':
       return `<em>${htmlFromTokens(token.children)}</em>`;
+    case 'underline':
+      return `<u class="${INLINE_CLASSES.underline}">${htmlFromTokens(token.children)}</u>`;
+    case 'strikethrough':
+      return `<del class="${INLINE_CLASSES.strikethrough}">${htmlFromTokens(token.children)}</del>`;
+    case 'textColor': {
+      const cls = textColorClass(token.color);
+      const style = cls ? '' : ` style="color:${escapeHtml(token.color)}"`;
+      return `<span data-color="${escapeHtml(token.color)}"${cls ? ` class="${cls}"` : ''}${style}>${htmlFromTokens(token.children)}</span>`;
+    }
+    case 'bgColor': {
+      const cls = bgColorClass(token.bg);
+      const style = cls ? '' : ` style="background-color:${escapeHtml(token.bg)}"`;
+      return `<mark data-bg="${escapeHtml(token.bg)}"${cls ? ` class="${cls}"` : ''}${style}>${htmlFromTokens(token.children)}</mark>`;
+    }
     case 'code':
       return `<code class="${INLINE_CLASSES.code}">${escapeHtml(token.value)}</code>`;
     case 'color':
@@ -344,7 +360,7 @@ export const blockToHtml = (block, index = 0) => {
 
 // The whole document as the editable surface's HTML.
 export const htmlFromBlocks = (blocks) =>
-  (Array.isArray(blocks) ? blocks : []).map((block, index) => blockToHtml(block, index)).join('\n');
+  (Array.isArray(blocks) ? blocks : []).map((block, index) => blockToHtml(block, index)).join('');
 
 
 // ---------------------------------------------------------------------------
@@ -479,7 +495,17 @@ const readerFor = (tokens) => ({
   },
 });
 
-const INLINE_WRAPPERS = { strong: '**', b: '**', em: '*', i: '*', mark: '==', u: '' };
+const INLINE_WRAPPERS = {
+  strong: '**',
+  b: '**',
+  em: '*',
+  i: '*',
+  mark: '==',
+  u: '__',
+  del: '~~',
+  s: '~~',
+  strike: '~~',
+};
 
 // Inline markdown from a run of tokens, stopping at a closing tag in `stops` or at the start of a block.
 const readInline = (reader, stops) => {
@@ -512,6 +538,10 @@ const readInline = (reader, stops) => {
         out += inner.includes('`') ? inner : `\`${inner}\``;
       } else if (token.name === 'a') {
         out += inner.includes(']') ? inner : `[${inner}](${token.attrs.href || ''})`;
+      } else if (token.name === 'span' && token.attrs && token.attrs['data-color']) {
+        out += `[color:${token.attrs['data-color']}]${inner}[/color]`;
+      } else if (token.name === 'mark' && token.attrs && token.attrs['data-bg']) {
+        out += `[bg:${token.attrs['data-bg']}]${inner}[/bg]`;
       } else {
         const wrapper = INLINE_WRAPPERS[token.name];
         out += wrapper ? `${wrapper}${inner}${wrapper}` : inner;
@@ -853,21 +883,58 @@ export const applyTableCommand = (table, action) => {
 // Every styling action TOGGLES: asking for the style a block already has takes it off again, which is what a
 // toolbar in a word processor does and what an author expects from a button that stays lit. Insertions are not
 // toggles - there is no sensible way to un-insert a divider - so they only ever add.
-export const applyBlockCommand = (blocks, index, action) => {
+export const applyBlockCommand = (blocks, index, action, toIndex = index) => {
   const list = Array.isArray(blocks) ? blocks : [];
   if (index < 0 || index >= list.length) return { blocks: list, index };
-  const block = list[index];
+  const startIndex = Math.max(0, Math.min(index, toIndex));
+  const endIndex = Math.min(list.length - 1, Math.max(index, toIndex));
   const id = action && action.id;
+
+  // Multi-block range handling
+  if (startIndex < endIndex) {
+    if (id === 'bullet' || id === 'numbered') {
+      const ordered = Boolean(action.ordered);
+      const items = [];
+      for (let i = startIndex; i <= endIndex; i++) {
+        const b = list[i];
+        if (b.type === 'list') {
+          items.push(...(b.items || []));
+        } else {
+          const raw = blockLineText(b);
+          const lines = String(raw ?? '')
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+          if (lines.length) items.push(...lines);
+          else if (raw) items.push(raw);
+        }
+      }
+      const next = list
+        .slice(0, startIndex)
+        .concat([{ type: 'list', ordered, items: items.length ? items : [''] }], list.slice(endIndex + 1));
+      return { blocks: next, index: startIndex };
+    }
+    if (id === 'heading' || id === 'quote' || id === 'paragraph' || id === 'codeBlock') {
+      let currentBlocks = list;
+      for (let i = startIndex; i <= endIndex; i++) {
+        const res = applyBlockCommand(currentBlocks, i, action, i);
+        currentBlocks = res.blocks;
+      }
+      return { blocks: currentBlocks, index: startIndex };
+    }
+  }
+
+  const block = list[startIndex];
 
   const replaceWith = (replacement) => {
     const next = list.slice();
-    next[index] = replacement;
-    return { blocks: next, index };
+    next[startIndex] = replacement;
+    return { blocks: next, index: startIndex };
   };
 
   switch (id) {
     case 'paragraph':
-      return block.type === 'paragraph' ? { blocks: list, index } : replaceWith(asParagraph(block));
+      return block.type === 'paragraph' ? { blocks: list, index: startIndex } : replaceWith(asParagraph(block));
 
     case 'heading': {
       const level = Math.min(6, Math.max(1, Number(action.level) || 1));
@@ -878,9 +945,18 @@ export const applyBlockCommand = (blocks, index, action) => {
     case 'bullet':
     case 'numbered': {
       const ordered = Boolean(action.ordered);
-      if (block.type === 'list' && block.ordered === ordered) return replaceWith(asParagraph(block));
+      if (block.type === 'list' && block.ordered === ordered) {
+        const paragraphs = (block.items || ['']).map((text) => ({ type: 'paragraph', text }));
+        const next = list.slice(0, startIndex).concat(paragraphs, list.slice(startIndex + 1));
+        return { blocks: next, index: startIndex };
+      }
       if (block.type === 'list') return replaceWith({ type: 'list', ordered, items: block.items });
-      return replaceWith({ type: 'list', ordered, items: [blockLineText(block)] });
+      const rawText = blockLineText(block);
+      const lines = String(rawText ?? '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      return replaceWith({ type: 'list', ordered, items: lines.length ? lines : [rawText] });
     }
 
     case 'quote':
@@ -900,7 +976,7 @@ export const applyBlockCommand = (blocks, index, action) => {
         : replaceWith({ type: 'code', language: '', value: blockLineText(block) });
 
     case 'table':
-      return inserted(list, index, newTableBlock());
+      return inserted(list, startIndex, newTableBlock());
 
     // The table's own five, which act on the CELL the caret is in. A table action anywhere else is a no-op rather than
     // an error: the toolbar only offers them inside a table, and a stale screen that sent one anyway must not reshape
@@ -910,27 +986,27 @@ export const applyBlockCommand = (blocks, index, action) => {
     case 'tableRemoveRow':
     case 'tableRemoveColumn': {
       const reshaped = applyTableCommand(block, { id, cell: action.cell });
-      return reshaped === block ? { blocks: list, index } : replaceWith(reshaped);
+      return reshaped === block ? { blocks: list, index: startIndex } : replaceWith(reshaped);
     }
 
     // Deleting the grid itself, which is what an author wants after inserting one by mistake - and which they could
     // previously only do by switching to Markdown and deleting the pipes by hand. The block goes; the document cannot
     // become empty, so the last block standing is replaced with an empty paragraph to put the caret in.
     case 'tableRemove': {
-      if (block.type !== 'table') return { blocks: list, index };
-      const next = list.filter((_, position) => position !== index);
+      if (block.type !== 'table') return { blocks: list, index: startIndex };
+      const next = list.filter((_, position) => position !== startIndex);
       return next.length
-        ? { blocks: next, index: Math.max(0, index - 1) }
+        ? { blocks: next, index: Math.max(0, startIndex - 1) }
         : { blocks: [emptyParagraph()], index: 0 };
     }
 
     case 'rule':
-      return inserted(list, index, { type: 'rule' });
+      return inserted(list, startIndex, { type: 'rule' });
 
     default:
       // Anything else - an inline action, or an action from a newer toolbar than this dispatcher - leaves the
       // document alone rather than guessing. The verifier asserts this is not reachable for today's toolbar.
-      return { blocks: list, index };
+      return { blocks: list, index: startIndex };
   }
 };
 

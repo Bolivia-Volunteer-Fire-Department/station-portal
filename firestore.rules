@@ -621,6 +621,23 @@ service cloud.firestore {
       allow delete: if permission('can_edit_map');
     }
 
+    // PRE-INCIDENT PLANS: critical occupancy and building response plans tied to map locations.
+    // Readable by members who can view the map or documents; created, updated, and deleted by map editors.
+    match /pre_incident_plans/{planId} {
+      allow read: if signedIn() && (permission('can_view_map') || permission('can_view_documents'));
+      allow create, update: if permission('can_edit_map')
+        && request.resource.data.occupancy_name is string
+        && request.resource.data.occupancy_name.size() > 0
+        && request.resource.data.occupancy_name.size() <= 150
+        && request.resource.data.latitude is number
+        && request.resource.data.latitude >= -90
+        && request.resource.data.latitude <= 90
+        && request.resource.data.longitude is number
+        && request.resource.data.longitude >= -180
+        && request.resource.data.longitude <= 180;
+      allow delete: if permission('can_edit_map');
+    }
+
     // THE MAP BACKGROUND: the roads and the waterways the district is drawn over - the county's own geometry, clipped to the
     // district and generalised by the county before it is stored, so the map draws them with no network and no third party in
     // the path (see utils/districtMap for why a tile layer was rejected).

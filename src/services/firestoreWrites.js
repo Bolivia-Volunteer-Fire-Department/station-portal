@@ -26,6 +26,11 @@ import {
   landmarkFields,
   landmarkProblem,
 } from '../utils/districtMap.js';
+import {
+  PRE_INCIDENT_PLANS_COLLECTION,
+  preIncidentPlanFields,
+  preIncidentPlanProblem,
+} from '../utils/preIncidentPlans.js';
 import { normalizeTraining, settingsRowsFrom, signatureWindowDays, trainingSignBlockedReason } from '../utils/training.js';
 import { availabilityMonthId } from '../utils/availability.js';
 import { parseSheetDateKey, stationTodayKey } from '../utils/scheduleDate.js';
@@ -899,6 +904,40 @@ export const deleteMapLandmark = async ({ id } = {}) => {
   const wanted = String(id || '').trim();
   if (!wanted) throw new Error('Which landmark?');
   await deleteDoc(doc(firestore(), MAP_LANDMARK_COLLECTION, wanted));
+  return { id: wanted };
+};
+
+// Saves a Pre-Incident Plan document.
+export const savePreIncidentPlan = async ({ id = '', fields = {}, authorId = '' } = {}) => {
+  const problem = preIncidentPlanProblem(fields);
+  if (problem) throw new Error(problem);
+
+  const normal = preIncidentPlanFields(fields);
+  const reference = String(id || '').trim()
+    ? doc(firestore(), PRE_INCIDENT_PLANS_COLLECTION, String(id).trim())
+    : doc(collection(firestore(), PRE_INCIDENT_PLANS_COLLECTION));
+  const previous = await getDoc(reference);
+  await setDoc(
+    reference,
+    {
+      ...normal,
+      created_at: previous.exists()
+        ? String(previous.get('created_at') || '') || stationTimestamp()
+        : stationTimestamp(),
+      created_by: previous.exists() ? String(previous.get('created_by') || '') : String(authorId || ''),
+      updated_at: stationTimestamp(),
+      updated_by: String(authorId || ''),
+    },
+    { merge: true }
+  );
+  return { id: reference.id };
+};
+
+// Deletes a Pre-Incident Plan document.
+export const deletePreIncidentPlan = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which pre-incident plan?');
+  await deleteDoc(doc(firestore(), PRE_INCIDENT_PLANS_COLLECTION, wanted));
   return { id: wanted };
 };
 

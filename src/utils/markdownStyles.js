@@ -42,11 +42,35 @@ export const CALLOUT_CLASSES = {
   },
 };
 
+// Text and background colors for markdown highlighting
+export const TEXT_COLORS = {
+  red: 'text-red-600 dark:text-red-400',
+  amber: 'text-amber-600 dark:text-amber-400',
+  green: 'text-emerald-600 dark:text-emerald-400',
+  blue: 'text-blue-600 dark:text-blue-400',
+  purple: 'text-purple-600 dark:text-purple-400',
+  slate: 'text-slate-500 dark:text-slate-400',
+};
+
+export const BG_COLORS = {
+  yellow: 'rounded bg-amber-200/80 dark:bg-amber-300/25 px-0.5',
+  red: 'rounded bg-red-100 dark:bg-red-950/60 text-red-900 dark:text-red-200 px-0.5',
+  green: 'rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 px-0.5',
+  blue: 'rounded bg-blue-100 dark:bg-blue-950/60 text-blue-900 dark:text-blue-200 px-0.5',
+  purple: 'rounded bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-200 px-0.5',
+  slate: 'rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-0.5',
+};
+
+export const textColorClass = (color) => TEXT_COLORS[color] || '';
+export const bgColorClass = (bg) => BG_COLORS[bg] || BG_COLORS.yellow;
+
 // Inline runs. `highlight` is the one colored mark COLOR_MARKS defines; the key is its tone.
 export const INLINE_CLASSES = {
   code: 'rounded bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 px-1 py-0.5 font-mono text-[11px]',
   link: 'text-red-600 dark:text-red-400 underline underline-offset-2',
   highlight: 'rounded bg-amber-200/80 dark:bg-amber-300/25 px-0.5',
+  underline: 'underline underline-offset-2',
+  strikethrough: 'line-through opacity-75',
 };
 
 // Blocks. `bullets` and `numbers` are the list-style classes; `list` is what both share.

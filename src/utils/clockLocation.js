@@ -149,6 +149,11 @@ export const evaluateClockLocation = (coords, config) => {
       distanceFeet: null,
       message:
         'Your location could not be determined, so this clock action was rejected. Allow location access for this site and try again.',
+      hint:
+        coords?.errorReason === 'timeout'
+          ? 'Location request timed out. Allow location access for this site, check that your device has a network/Wi-Fi connection, and try again.'
+          : 'Allow location access for this site in your browser, then try the button again. If permission is already allowed in your browser, check that Location Services is turned on in your device System Settings (e.g., macOS System Settings → Privacy & Security → Location Services).',
+      details: coords?.errorMessage || null,
     };
   }
 
@@ -194,7 +199,10 @@ export const clockLocationNotice = (outcome, config) => {
       kind: 'no-location',
       title: 'Location required',
       message: outcome.message,
-      hint: 'Allow location access for this site in your browser, then try the button again.',
+      hint:
+        outcome.hint ||
+        'Allow location access for this site in your browser, then try the button again. If permission is already allowed in your browser, check that Location Services is turned on in your device System Settings (e.g., macOS System Settings → Privacy & Security → Location Services).',
+      details: outcome.details || null,
       distanceFeet: null,
       limitFeet: null,
     };

@@ -119,10 +119,10 @@ export default function Sidebar({
                         onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
                         className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'dashboard' ? 'bg-red-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
                             }`}
-                        title={isCollapsed ? 'Timeclock' : undefined}
+                        title={isCollapsed ? 'Dashboard' : undefined}
                     >
                         <NavIcon className="w-5 h-5 shrink-0" />
-                        <span className={isCollapsed ? 'md:hidden' : ''}>Timeclock</span>
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Dashboard</span>
                     </button>
                 );
             case 'clock-history':

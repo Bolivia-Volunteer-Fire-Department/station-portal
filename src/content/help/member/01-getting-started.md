@@ -47,6 +47,9 @@ This app was originally created for the Bolivia Fire Department in Bolivia, Nort
 ### Version 1.7x
 * Added **Equipment** and **Apparatuses**
 * Revamped how Documents are organized in the Administration module.
+* Added formatting enhancements to the Markdown engine.
+* Migrated the Timeclock module to a new **Dashboard** module, which is a customizable widget-based dashboard module.
+* Added **Pre-Incident Plans** to the District Map.
 
 ### Version 1.6x
 * Added the **District Map** module.

@@ -15,4 +15,4 @@
 export const CONTENT_MAX_WIDTH = 'max-w-3xl';
 
 // Top-level modules whose content is capped and centerd.
-export const CENTERED_CONTENT_TABS = ['dashboard', 'settings'];
+export const CENTERED_CONTENT_TABS = ['settings'];

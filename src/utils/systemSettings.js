@@ -159,6 +159,10 @@ export const PUBLIC_SETTING_KEYS = [
   'mobile_nav_modules',
   'sidebar_nav_order',
   'sidebar_nav_icons',
+  // Dashboard station layout and widget configurations, public so all members' dashboards read them
+  'dashboard_default_layout',
+  'dashboard_custom_widgets',
+  'dashboard_widget_configs',
   // Database backup status indicators, public so the live settings listener delivers them to officers.
   'backup_last_run_at',
   'backup_last_status',

@@ -237,11 +237,13 @@ export const ROUTED_FEATURES = {
       'ADMIN_DELETE_MAP_BOUNDARY',
       'ADMIN_SAVE_MAP_LANDMARK',
       'ADMIN_DELETE_MAP_LANDMARK',
+      'ADMIN_SAVE_PRE_INCIDENT_PLAN',
+      'ADMIN_DELETE_PRE_INCIDENT_PLAN',
       'ADMIN_SAVE_MAP_BACKDROP',
       'ADMIN_DELETE_MAP_BACKDROP',
       'ADMIN_SAVE_MAP_TYPES',
     ],
-    reads: ['GET_MAP_LAYER', 'GET_MAP_BOUNDARY', 'GET_MAP_LANDMARKS', 'GET_MAP_BACKDROPS', 'GET_MAP_TYPES'],
+    reads: ['GET_MAP_LAYER', 'GET_MAP_BOUNDARY', 'GET_MAP_LANDMARKS', 'GET_PRE_INCIDENT_PLANS', 'GET_MAP_BACKDROPS', 'GET_MAP_TYPES'],
     switchReads: [],
   },
 
@@ -467,6 +469,17 @@ const DISPATCH = {
   ADMIN_DELETE_MAP_LANDMARK: async (body) => {
     const { deleteMapLandmark } = await writes();
     return ok(await deleteMapLandmark({ id: body?.id || body?.landmarkId }));
+  },
+
+  ADMIN_SAVE_PRE_INCIDENT_PLAN: async (body, uid) => {
+    const { savePreIncidentPlan } = await writes();
+    const request = body?.request || body || {};
+    return ok(await savePreIncidentPlan({ id: request.id || '', fields: request.fields || {}, authorId: uid }));
+  },
+
+  ADMIN_DELETE_PRE_INCIDENT_PLAN: async (body) => {
+    const { deletePreIncidentPlan } = await writes();
+    return ok(await deletePreIncidentPlan({ id: body?.id || body?.planId }));
   },
 
   ADMIN_SAVE_MAP_BACKDROP: async (body, uid) => {

@@ -201,6 +201,17 @@ export const adminSaveMapLandmark = ({ id = '', fields = {} } = {}, token) =>
 export const adminDeleteMapLandmark = (id, token) =>
   routeWrite('ADMIN_DELETE_MAP_LANDMARK', { id: String(id || ''), token });
 
+// Fetches Pre-Incident Plans for the map and documents module.
+export const fetchPreIncidentPlans = () => dispatchRequest({ action: 'GET_PRE_INCIDENT_PLANS' });
+
+// Saves a Pre-Incident Plan document.
+export const adminSavePreIncidentPlan = ({ id = '', fields = {} } = {}, token) =>
+  routeWrite('ADMIN_SAVE_PRE_INCIDENT_PLAN', { request: { id, fields }, token });
+
+// Deletes a Pre-Incident Plan document.
+export const adminDeletePreIncidentPlan = (id, token) =>
+  routeWrite('ADMIN_DELETE_PRE_INCIDENT_PLAN', { id: String(id || ''), token });
+
 // Fetches background road and waterway map layers.
 export const fetchMapBackdrops = () => dispatchRequest({ action: 'GET_MAP_BACKDROPS' });
 
@@ -417,6 +428,8 @@ export const saveUserSettings = async (updatedSettings, token) =>
       colorblind_rank_labels:
         updatedSettings.colorblind_rank_labels === undefined ? undefined : String(updatedSettings.colorblind_rank_labels),
       font_scale: updatedSettings.font_scale === undefined ? undefined : String(updatedSettings.font_scale),
+      dashboard_layout:
+        updatedSettings.dashboard_layout === undefined ? undefined : String(updatedSettings.dashboard_layout),
       ...notificationPrefFields(updatedSettings),
     },
   });

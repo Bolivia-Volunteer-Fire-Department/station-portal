@@ -2201,7 +2201,7 @@ check('and keeps its own vertical scroll on desktop', /\bmd:overflow-y-auto\b/.t
 check('the base container sets no max-width of its own', !/\bmax-w-/.test(baseMainClasses), baseMainClasses);
 
 check('the centerd-content set is exported', Array.isArray(CENTERED_CONTENT_TABS), true);
-check('it covers the Timeclock/Dashboard', CENTERED_CONTENT_TABS.includes('dashboard'), true);
+check('the Dashboard is NOT capped (fills full width for widget grid)', !CENTERED_CONTENT_TABS.includes('dashboard'), true);
 check('and User Settings', CENTERED_CONTENT_TABS.includes('settings'), true);
 check('and a width is chosen for it', /^max-w-/.test(CONTENT_MAX_WIDTH), CONTENT_MAX_WIDTH);
 check('which is a readable column rather than the full page', CONTENT_MAX_WIDTH !== 'max-w-full', true);
@@ -2346,8 +2346,8 @@ check('and the whole tab is not wrapped', !/^export default function[\s\S]{0,200
 // every assertion about a tab NOT being capped has to negate. Writing `, false)` counts a false condition
 // as a failure and inverts the meaning.
 const centeredFor = (tab) => CENTERED_CONTENT_TABS.includes(tab);
-check('the dashboard is capped at runtime', centeredFor('dashboard'), true);
-check('and User Settings', centeredFor('settings'), true);
+check('the dashboard is NOT capped at runtime', !centeredFor('dashboard'));
+check('and User Settings is capped', centeredFor('settings'), true);
 check('while Clock History is not', !centeredFor('clock-history'));
 check('nor My Schedule', !centeredFor('schedule'));
 check('nor My Availability', !centeredFor('availability'));

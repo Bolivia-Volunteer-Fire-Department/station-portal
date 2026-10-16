@@ -151,6 +151,8 @@ const browserCases = [
   ['a span is transparent', '<p><span style="color:red">still text</span></p>', { type: 'paragraph', text: 'still text' }],
   ['b tags are bold', '<p><b>bold</b></p>', { type: 'paragraph', text: '**bold**' }],
   ['i tags are italic', '<p><i>italic</i></p>', { type: 'paragraph', text: '*italic*' }],
+  ['u tags are underline', '<p><u>underlined</u></p>', { type: 'paragraph', text: '__underlined__' }],
+  ['del tags are strikethrough', '<p><del>struck</del></p>', { type: 'paragraph', text: '~~struck~~' }],
   ['a nested mark reads back as both', '<p><strong><em>both</em></strong></p>', { type: 'paragraph', text: '***both***' }],
   ['an anchor keeps its href', '<p><a href="https://x.test">x</a></p>', { type: 'paragraph', text: '[x](https://x.test)' }],
   ['a br inside a paragraph is a space', '<p>one<br>two</p>', { type: 'paragraph', text: 'one two' }],
@@ -264,6 +266,17 @@ check(
   one(applyBlockCommand([{ type: 'list', ordered: false, items: ['a', 'b'] }], 0, { id: 'numbered', ordered: true })),
   { type: 'list', ordered: true, items: ['a', 'b'] }
 );
+check('a multi-line paragraph splits into bullet items', one(applyBlockCommand([{ type: 'paragraph', text: 'Line 1\nLine 2\nLine 3' }], 0, { id: 'bullet', ordered: false })), {
+  type: 'list',
+  ordered: false,
+  items: ['Line 1', 'Line 2', 'Line 3'],
+});
+check('multiple selected paragraphs merge into one bullet list', applyBlockCommand([
+  { type: 'paragraph', text: 'First' },
+  { type: 'paragraph', text: 'Second' }
+], 0, { id: 'bullet', ordered: false }, 1).blocks, [
+  { type: 'list', ordered: false, items: ['First', 'Second'] }
+]);
 check('a quote keeps the words', one(applyBlockCommand(paragraph(), 0, { id: 'quote' })), {
   type: 'quote',
   text: 'Words',
@@ -727,7 +740,7 @@ check(
   ),
   []
 );
-check('and the inline ones carry their own syntax', syntaxIds, ['bold', 'italic', 'highlight', 'code']);
+check('and the inline ones carry their own syntax', syntaxIds, ['bold', 'italic', 'underline', 'strikethrough', 'highlight', 'code']);
 check(
   'a block knows the line of text it shows',
   ['quote', 'list', 'code', 'callout'].map((type) =>

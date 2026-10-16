@@ -1,6 +1,17 @@
-The **Timeclock** module is your dashboard. It shows the current time, your clock status, and who else is on duty right now.
+The **Dashboard** module is your station command center. It combines the station timeclock, your duty status, who else is on duty right now, and customizable widget cards.
 
-## The station clock
+## Customizing your dashboard
+
+Each member can personalize their dashboard layout to fit their daily routine:
+
+1. Click the **Customize** button in the top right corner of the Dashboard.
+2. Use the **Left** and **Right** arrow controls to reposition widgets across the grid.
+3. Toggle widget widths between 1 Column, 2 Columns, or Full Width.
+4. Add extra cards using the **Add Widget** drawer, or remove cards you do not need.
+5. Click **Save** to remember your personalized layout.
+6. Click **Reset to Station Default** at any time to restore the department standard layout.
+
+## The station clock and status
 
 The large digital clock is the station's own time, not your device's, so it is the time to trust when you are deciding whether you are on duty. Everything in the app uses that same clock: your shifts, your clock history, and the timestamps on your entries.
 

@@ -198,6 +198,18 @@ export const ADMIN_PERMISSIONS = [
     label: 'Set up equipment & apparatus',
     description: 'Configure available equipment categories, gear types, radio models, and apparatus fleet types.',
   },
+  {
+    key: 'can_manage_dashboard_setup',
+    tab: 'dashboard-setup',
+    label: 'Manage dashboard setup',
+    description: 'Configure the station default layout, card arrangements, and column sizes for the Dashboard module.',
+  },
+  {
+    key: 'can_manage_widget_setup',
+    tab: 'widget-setup',
+    label: 'Manage dashboard widgets',
+    description: 'Enable or disable built-in widgets and create custom cards, markdown notices, and web embeds for the dashboard.',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -417,7 +429,10 @@ export const ADMIN_PERMISSION_GROUPS = [
       'can_manage_asset_setup',
     ],
   },
-  { label: 'Communication', keys: ['can_make_announcements', 'can_manage_chat_rooms'] },
+  {
+    label: 'Communication',
+    keys: ['can_make_announcements', 'can_manage_chat_rooms', 'can_manage_dashboard_setup', 'can_manage_widget_setup'],
+  },
   { label: 'Reports & forms', keys: ['can_configure_reports', 'can_configure_forms'] },
   {
     label: 'Station setup',

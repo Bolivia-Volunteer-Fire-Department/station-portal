@@ -55,8 +55,13 @@ const colorMarkFor = (raw) =>
 // Kept as a SOURCE string rather than a shared /g regex: parseInline recurses into the bodies of
 // bold/italic/link tokens, and a shared global regex would have its lastIndex reset by the inner
 // call - which silently rewinds the outer loop and spins forever. Each call builds its own.
+const COLOR_TAG_SOURCE =
+  '(\\[color:([a-zA-Z0-9#_-]+)\\][^\\[]+?\\[\\/color\\])|(\\[bg:([a-zA-Z0-9#_-]+)\\][^\\[]+?\\[\\/bg\\])';
+
 const INLINE_SOURCE =
-  '(\\*\\*\\*[^*]+?\\*\\*\\*)|(\\*\\*.+?\\*\\*)|(`[^`]+`)|(\\*[^*]+\\*)|(_[^_]+_)|(\\[[^\\]]+\\]\\([^)\\s]+\\))|(' +
+  '(\\*\\*\\*[^*]+?\\*\\*\\*)|(_{3}[^_]+?_{3})|(\\*\\*.+?\\*\\*)|(__[^_]+?__)|(~~[^~]+?~~)|(`[^`]+`)|(\\*[^*]+\\*)|(_[^_]+_)|(\\[[^\\]]+\\]\\([^)\\s]+\\))|' +
+  COLOR_TAG_SOURCE +
+  '|(' +
   COLOR_MARK_SOURCE +
   ')';
 
@@ -87,9 +92,27 @@ export function parseInline(text) {
       if (delimitersHugContent(raw, 3)) {
         token = { type: 'bold', children: [{ type: 'italic', children: parseInline(raw.slice(3, -3)) }] };
       }
+    } else if (raw.startsWith('___')) {
+      const before = source[match.index - 1];
+      const after = source[match.index + raw.length];
+      const insideWord = /\w/.test(before || '') || /\w/.test(after || '');
+      if (!insideWord && delimitersHugContent(raw, 3)) {
+        token = { type: 'underline', children: [{ type: 'italic', children: parseInline(raw.slice(3, -3)) }] };
+      }
     } else if (raw.startsWith('**')) {
       if (delimitersHugContent(raw, 2)) {
         token = { type: 'bold', children: parseInline(raw.slice(2, -2)) };
+      }
+    } else if (raw.startsWith('__')) {
+      const before = source[match.index - 1];
+      const after = source[match.index + raw.length];
+      const insideWord = /\w/.test(before || '') || /\w/.test(after || '');
+      if (!insideWord && delimitersHugContent(raw, 2)) {
+        token = { type: 'underline', children: parseInline(raw.slice(2, -2)) };
+      }
+    } else if (raw.startsWith('~~')) {
+      if (delimitersHugContent(raw, 2)) {
+        token = { type: 'strikethrough', children: parseInline(raw.slice(2, -2)) };
       }
     } else if (raw.startsWith('`')) {
       token = { type: 'code', value: raw.slice(1, -1) };
@@ -100,6 +123,16 @@ export function parseInline(text) {
       const insideWord = raw.startsWith('_') && (/\w/.test(before || '') || /\w/.test(after || ''));
       if (!insideWord && delimitersHugContent(raw, 1)) {
         token = { type: 'italic', children: parseInline(raw.slice(1, -1)) };
+      }
+    } else if (raw.startsWith('[color:')) {
+      const colorMatch = /^\[color:([a-zA-Z0-9#_-]+)\]([\s\S]*?)\[\/color\]$/.exec(raw);
+      if (colorMatch) {
+        token = { type: 'textColor', color: colorMatch[1], children: parseInline(colorMatch[2]) };
+      }
+    } else if (raw.startsWith('[bg:')) {
+      const bgMatch = /^\[bg:([a-zA-Z0-9#_-]+)\]([\s\S]*?)\[\/bg\]$/.exec(raw);
+      if (bgMatch) {
+        token = { type: 'bgColor', bg: bgMatch[1], children: parseInline(bgMatch[2]) };
       }
     } else {
       const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(raw);

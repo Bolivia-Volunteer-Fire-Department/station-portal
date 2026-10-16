@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
@@ -33,6 +33,8 @@ const AdminFormsTab = lazy(() => import('./AdminFormsTab'));
 const AdminEquipmentTab = lazy(() => import('./AdminEquipmentTab'));
 const AdminApparatusTab = lazy(() => import('./AdminApparatusTab'));
 const AdminAssetSetupTab = lazy(() => import('./AdminAssetSetupTab'));
+const AdminDashboardSetupTab = lazy(() => import('./AdminDashboardSetupTab'));
+const AdminWidgetSetupTab = lazy(() => import('./AdminWidgetSetupTab'));
 
 function AdminTabLoading() {
   return (
@@ -90,6 +92,8 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
       { id: 'documents', label: 'Documents', icon: BookText },
       { id: 'training', label: 'Training', icon: GraduationCap },
+      { id: 'dashboard-setup', label: 'Dashboard Setup', icon: LayoutDashboard },
+      { id: 'widget-setup', label: 'Widget Setup', icon: Boxes },
       { id: 'chat', label: 'Chat Setup', icon: MessagesSquare },
       { id: 'map', label: 'Map Setup', icon: MapIcon },
     ],
@@ -644,6 +648,24 @@ export default function AdminPanel({
       {activeSubTab === 'asset-setup' && (
         <AdminAssetSetupTab
           token={token}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Dashboard station default layout setup tab */}
+      {activeSubTab === 'dashboard-setup' && (
+        <AdminDashboardSetupTab
+          token={token}
+          systemSettings={systemSettings}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Dashboard widgets definition & setup tab */}
+      {activeSubTab === 'widget-setup' && (
+        <AdminWidgetSetupTab
+          token={token}
+          systemSettings={systemSettings}
           onDataChanged={onDataChanged}
         />
       )}
