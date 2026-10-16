@@ -176,15 +176,26 @@ export default function PrintablePreIncidentPlan({ plan, stationName = '', onDon
                 </tr>
               </thead>
               <tbody>
-                {plan.nearby_hydrants.map((h, i) => (
-                  <tr key={i} className="border-b border-slate-200">
-                    <td className="font-bold py-0.5">{h.id || `#${i+1}`}</td>
-                    <td className="py-0.5">{h.address || '—'}</td>
-                    <td className="py-0.5">{h.distance || '—'}</td>
-                    <td className="font-bold py-0.5">{h.flow ? `${h.flow} gpm` : '—'}</td>
-                    <td className="py-0.5 uppercase text-[9px] font-semibold">{h.status || 'in-service'} ({h.type || 'dry'})</td>
-                  </tr>
-                ))}
+                  {plan.nearby_hydrants.map((h, i) => {
+                    const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
+                    return (
+                      <tr key={i} className="border-b border-slate-200">
+                        <td className="font-bold py-0.5">{h.id || `#${i+1}`}</td>
+                        <td className="py-0.5">
+                          <div>{h.address || '—'}</div>
+                          {hasCoords ? (
+                            <div className="font-mono text-[9px] text-slate-500">
+                              GPS: {h.latitude.toFixed(5)}, {h.longitude.toFixed(5)}
+                            </div>
+                          ) : null}
+                          {h.notes ? <div className="text-[9px] italic text-slate-500">{h.notes}</div> : null}
+                        </td>
+                        <td className="py-0.5">{h.distance || '—'}</td>
+                        <td className="font-bold py-0.5">{h.flow ? `${h.flow} gpm` : '—'}</td>
+                        <td className="py-0.5 uppercase text-[9px] font-semibold">{h.status || 'in-service'} ({h.type || 'dry'})</td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           ) : (
@@ -234,11 +245,45 @@ export default function PrintablePreIncidentPlan({ plan, stationName = '', onDon
 
       {/* Operational Notes */}
       {plan.prefire_plan_notes ? (
-        <div className="border border-slate-400 p-2.5">
+        <div className="border border-slate-400 p-2.5 mb-4">
           <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-1">
             Tactical & Operational Notes
           </h3>
           <p className="text-xs text-slate-900 whitespace-pre-wrap">{plan.prefire_plan_notes}</p>
+        </div>
+      ) : null}
+
+      {/* Attached Diagrams & Tactical Files */}
+      {plan.files && plan.files.length > 0 ? (
+        <div className="border border-slate-400 p-2.5">
+          <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
+            Attached Diagrams & Tactical Documents ({plan.files.length})
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            {plan.files.map((f, i) => {
+              const isImg =
+                f.contentType?.startsWith('image/') ||
+                f.type?.startsWith('image/') ||
+                /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name || '');
+              const src = f.dataUrl || f.downloadUrl;
+              return (
+                <div key={i} className="border border-slate-300 p-2 rounded text-[10px] bg-white">
+                  <div className="font-bold truncate mb-1">{f.name || 'Attached Diagram'}</div>
+                  {isImg && src ? (
+                    <div className="text-center bg-slate-50 p-1 rounded border border-slate-200">
+                      <img
+                        src={src}
+                        alt={f.name || 'Diagram'}
+                        className="max-h-48 max-w-full mx-auto object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-slate-500 italic">Document file: {f.name}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : null}
     </div>,

@@ -1,24 +1,25 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
-  AlertTriangle,
   Building2,
-  Calendar,
-  CheckCircle2,
+  Check,
+  Compass,
   Crosshair,
   Droplets,
+  Eye,
   FileText,
+  FileUp,
   Flame,
-  Layers,
   Loader2,
   LocateFixed,
-  MapPin,
+  Paperclip,
   Pencil,
-  Phone,
   Plus,
   Printer,
+  Search,
   ShieldAlert,
   Trash2,
+  Upload,
   Users,
   X,
 } from 'lucide-react';
@@ -32,11 +33,14 @@ import {
   ROOF_MATERIALS,
   ROOF_TYPES,
   US_STATES,
-  generateOccupancyId,
+  calculateDistanceFeet,
+  formatDistance,
   normalizePreIncidentPlan,
   preIncidentPlanProblem,
 } from '../utils/preIncidentPlans';
 import { getCurrentCoordinates } from '../utils/geolocation';
+import { discardPreplanFile, openPreplanFile, uploadPreplanFile } from '../services/preplanFileStorage';
+import { formatFileSize } from '../utils/apparatus';
 import ConfirmModal from './ConfirmModal';
 import PreIncidentPlanView from './PreIncidentPlanView';
 import PrintablePreIncidentPlan from './PrintablePreIncidentPlan';
@@ -52,6 +56,7 @@ export default function PreIncidentPlanModal({
   onRequestMapPick,
   stationName = '',
   onNavigateToMap,
+  existingHydrants = [],
 }) {
   const [isEditing, setIsEditing] = useState(initialEdit);
   const [activeTab, setActiveTab] = useState('occupancy');
@@ -61,6 +66,17 @@ export default function PreIncidentPlanModal({
   const [locating, setLocating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [printing, setPrinting] = useState(false);
+
+  // Existing hydrants selection & auto-distance
+  const [showHydrantPicker, setShowHydrantPicker] = useState(false);
+  const [hydrantSearch, setHydrantSearch] = useState('');
+
+  // File uploads
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [fileUploadError, setFileUploadError] = useState('');
+  const fileInputRef = useRef(null);
+
   const bodyRef = useRef(null);
 
   useEffect(() => {
@@ -69,10 +85,13 @@ export default function PreIncidentPlanModal({
       setIsEditing(initialEdit || !plan?.id);
       setActiveTab('occupancy');
       setError('');
+      setShowHydrantPicker(false);
+      setHydrantSearch('');
+      setUploadingFile(false);
+      setUploadProgress(0);
+      setFileUploadError('');
     }
   }, [isOpen, plan, initialEdit, stationName]);
-
-  if (!isOpen) return null;
 
   const handlePrint = () => {
     setPrinting(true);
@@ -151,7 +170,18 @@ export default function PreIncidentPlanModal({
       ...cur,
       nearby_hydrants: [
         ...(cur.nearby_hydrants || []),
-        { id: '', address: '', distance: '', flow: null, status: 'in-service', type: 'dry' },
+        {
+          id: '',
+          hydrant_id: '',
+          address: '',
+          distance: '',
+          flow: null,
+          status: 'in-service',
+          type: 'dry',
+          latitude: null,
+          longitude: null,
+          notes: '',
+        },
       ],
     }));
   };
@@ -159,9 +189,43 @@ export default function PreIncidentPlanModal({
   const updateHydrant = (index, field, value) => {
     setDraft((cur) => {
       const next = [...(cur.nearby_hydrants || [])];
-      next[index] = { ...next[index], [field]: value };
+      const updated = { ...next[index], [field]: value };
+
+      if (field === 'latitude' || field === 'longitude') {
+        const rawLat = field === 'latitude' ? (value !== '' ? Number(value) : null) : updated.latitude;
+        const rawLon = field === 'longitude' ? (value !== '' ? Number(value) : null) : updated.longitude;
+        if (
+          Number.isFinite(cur.latitude) &&
+          Number.isFinite(cur.longitude) &&
+          Number.isFinite(rawLat) &&
+          Number.isFinite(rawLon)
+        ) {
+          const distFeet = calculateDistanceFeet(cur.latitude, cur.longitude, rawLat, rawLon);
+          if (distFeet !== null) {
+            updated.distance = formatDistance(distFeet);
+          }
+        }
+      }
+
+      next[index] = updated;
       return { ...cur, nearby_hydrants: next };
     });
+  };
+
+  const recalculateHydrantDistance = (index) => {
+    const h = (draft.nearby_hydrants || [])[index];
+    if (!h) return;
+    if (
+      Number.isFinite(draft.latitude) &&
+      Number.isFinite(draft.longitude) &&
+      Number.isFinite(h.latitude) &&
+      Number.isFinite(h.longitude)
+    ) {
+      const distFeet = calculateDistanceFeet(draft.latitude, draft.longitude, h.latitude, h.longitude);
+      if (distFeet !== null) {
+        updateHydrant(index, 'distance', formatDistance(distFeet));
+      }
+    }
   };
 
   const removeHydrant = (index) => {
@@ -172,14 +236,144 @@ export default function PreIncidentPlanModal({
     });
   };
 
+  const selectExistingHydrant = (hydrant) => {
+    const hLat = Number.isFinite(hydrant.latitude) ? hydrant.latitude : null;
+    const hLon = Number.isFinite(hydrant.longitude) ? hydrant.longitude : null;
+    let computedDistance = hydrant.distance || '';
+    if (
+      Number.isFinite(draft.latitude) &&
+      Number.isFinite(draft.longitude) &&
+      Number.isFinite(hLat) &&
+      Number.isFinite(hLon)
+    ) {
+      const distFeet = calculateDistanceFeet(draft.latitude, draft.longitude, hLat, hLon);
+      if (distFeet !== null) {
+        computedDistance = formatDistance(distFeet);
+      }
+    }
+
+    setDraft((cur) => {
+      const existing = cur.nearby_hydrants || [];
+      const tagOrId = hydrant.hydrant_id || hydrant.id;
+      if (tagOrId && existing.some((h) => (h.hydrant_id || h.id) === tagOrId)) {
+        return cur;
+      }
+      return {
+        ...cur,
+        nearby_hydrants: [
+          ...existing,
+          {
+            id: hydrant.id || hydrant.hydrant_id || '',
+            hydrant_id: hydrant.hydrant_id || hydrant.id || '',
+            address: hydrant.address || '',
+            distance: computedDistance,
+            flow: hydrant.flow ?? null,
+            status: hydrant.status || 'in-service',
+            type: hydrant.type || 'dry',
+            latitude: hLat,
+            longitude: hLon,
+            notes: hydrant.notes || '',
+          },
+        ],
+      };
+    });
+    setShowHydrantPicker(false);
+  };
+
+  const attachedHydrantIds = useMemo(() => {
+    return new Set(
+      (draft.nearby_hydrants || [])
+        .map((h) => (h.hydrant_id || h.id || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [draft.nearby_hydrants]);
+
+  const availableExistingHydrants = useMemo(() => {
+    return (existingHydrants || [])
+      .map((h) => {
+        let distFt = null;
+        if (
+          Number.isFinite(draft.latitude) &&
+          Number.isFinite(draft.longitude) &&
+          Number.isFinite(h.latitude) &&
+          Number.isFinite(h.longitude)
+        ) {
+          distFt = calculateDistanceFeet(draft.latitude, draft.longitude, h.latitude, h.longitude);
+        }
+        return { ...h, calculatedDistanceFeet: distFt };
+      })
+      .filter((h) => {
+        const q = hydrantSearch.trim().toLowerCase();
+        if (!q) return true;
+        return (
+          (h.id && h.id.toLowerCase().includes(q)) ||
+          (h.address && h.address.toLowerCase().includes(q)) ||
+          (h.notes && h.notes.toLowerCase().includes(q))
+        );
+      })
+      .sort((a, b) => {
+        if (a.calculatedDistanceFeet !== null && b.calculatedDistanceFeet !== null) {
+          return a.calculatedDistanceFeet - b.calculatedDistanceFeet;
+        }
+        if (a.calculatedDistanceFeet !== null) return -1;
+        if (b.calculatedDistanceFeet !== null) return 1;
+        return (a.id || '').localeCompare(b.id || '');
+      });
+  }, [existingHydrants, draft.latitude, draft.longitude, hydrantSearch]);
+
+  // File Upload Helpers
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingFile(true);
+    setFileUploadError('');
+    setUploadProgress(0);
+    try {
+      const planId = draft.id || draft._tempId || (draft.occupancy_id ? draft.occupancy_id : `temp_${Date.now()}`);
+      if (!draft._tempId && !draft.id) {
+        setDraft((cur) => ({ ...cur, _tempId: planId }));
+      }
+      const uploaded = await uploadPreplanFile({
+        planId,
+        file,
+        onProgress: (p) => setUploadProgress(Math.round(p * 100)),
+      });
+      setDraft((cur) => ({
+        ...cur,
+        files: [...(cur.files || []), uploaded],
+      }));
+    } catch (err) {
+      setFileUploadError(err?.message || 'Failed to upload document or diagram.');
+    } finally {
+      setUploadingFile(false);
+      setUploadProgress(0);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveFile = async (index) => {
+    const fileToRemove = (draft.files || [])[index];
+    if (fileToRemove?.storagePath) {
+      void discardPreplanFile(fileToRemove.storagePath);
+    }
+    setDraft((cur) => {
+      const next = [...(cur.files || [])];
+      next.splice(index, 1);
+      return { ...cur, files: next };
+    });
+  };
+
   const editTabs = [
     { id: 'occupancy', label: '1. Occupancy & Location', icon: Building2 },
     { id: 'prefire', label: '2. Prefire & Building', icon: Flame },
     { id: 'fireprotection', label: '3. Water & Systems', icon: Droplets },
-    { id: 'hydrants', label: '4. Nearby Hydrants', icon: Droplets },
+    { id: 'hydrants', label: `4. Nearby Hydrants (${draft.nearby_hydrants?.length || 0})`, icon: Droplets },
     { id: 'chemicals', label: '5. HazMat & Chemicals', icon: ShieldAlert },
-    { id: 'contacts', label: '6. Emergency Contacts', icon: Users },
+    { id: 'contacts', label: `6. Emergency Contacts (${draft.contacts?.length || 0})`, icon: Users },
+    { id: 'files', label: `7. Diagrams & Files (${draft.files?.length || 0})`, icon: Paperclip },
   ];
+
+  if (!isOpen) return null;
 
   return (
     <>
@@ -1024,112 +1218,280 @@ export default function PreIncidentPlanModal({
                 {/* TAB 4: Nearby Hydrants */}
                 {activeTab === 'hydrants' ? (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Record hydrants surrounding this occupancy, with distance and flow ratings.
+                        Record hydrants surrounding this occupancy, with GPS coordinates, distance, and flow ratings.
                       </p>
-                      <button
-                        type="button"
-                        onClick={addHydrant}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Add Hydrant
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {existingHydrants && existingHydrants.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowHydrantPicker((v) => !v)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-xs transition hover:bg-blue-50 dark:border-blue-900/50 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700"
+                          >
+                            <Compass className="h-3.5 w-3.5" />
+                            {showHydrantPicker ? 'Hide Hydrant Picker' : `Select Existing Hydrant (${existingHydrants.length})`}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={addHydrant}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Hydrant
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Shared District Hydrants Picker Drawer */}
+                    {showHydrantPicker ? (
+                      <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 dark:border-blue-900/40 dark:bg-blue-950/30">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
+                          <div>
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-blue-950 dark:text-blue-200">
+                              District Hydrant Pool
+                            </h4>
+                            <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                              Select existing district hydrants. Hydrants are sorted by proximity to this occupancy when coordinates are available.
+                            </p>
+                          </div>
+                          <div className="relative w-full sm:w-64">
+                            <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+                            <input
+                              type="text"
+                              value={hydrantSearch}
+                              onChange={(e) => setHydrantSearch(e.target.value)}
+                              placeholder="Search tag, street address, notes..."
+                              className="w-full rounded-lg border border-blue-200 bg-white py-1.5 pl-8 pr-3 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        {availableExistingHydrants.length > 0 ? (
+                          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                            {availableExistingHydrants.map((h, hIdx) => {
+                              const tag = h.id || h.hydrant_id || `Hydrant #${hIdx + 1}`;
+                              const isAdded = attachedHydrantIds.has(tag.trim().toLowerCase());
+                              const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
+
+                              return (
+                                <div
+                                  key={h.hydrant_id || h.id || hIdx}
+                                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-white p-2.5 text-xs shadow-xs dark:border-slate-800 dark:bg-slate-900"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-bold text-slate-900 dark:text-white">
+                                        {tag}
+                                      </span>
+                                      <span
+                                        className={`rounded px-1.5 py-0.2 uppercase text-[9px] font-semibold ${
+                                          h.status === 'out-of-service'
+                                            ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
+                                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                        }`}
+                                      >
+                                        {h.status === 'out-of-service' ? 'Out of service' : 'In service'}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">
+                                        ({h.type || 'dry'})
+                                      </span>
+                                      {h.flow ? (
+                                        <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                          {h.flow} GPM
+                                        </span>
+                                      ) : null}
+                                      {h.calculatedDistanceFeet !== null ? (
+                                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                                          {formatDistance(h.calculatedDistanceFeet)} away
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div className="mt-0.5 truncate text-[11px] text-slate-600 dark:text-slate-300">
+                                      {h.address || 'No street address specified'}
+                                      {hasCoords ? ` · GPS: ${h.latitude.toFixed(5)}, ${h.longitude.toFixed(5)}` : ''}
+                                      {h.notes ? ` · Note: ${h.notes}` : ''}
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    {isAdded ? (
+                                      <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                        Already Added
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => selectExistingHydrant(h)}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-blue-500 shadow-xs"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                        Add to Plan
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="rounded-xl bg-white p-4 text-center text-xs text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                            No district hydrants match your search.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
 
                     {draft.nearby_hydrants && draft.nearby_hydrants.length > 0 ? (
                       <div className="space-y-3">
                         {draft.nearby_hydrants.map((h, i) => (
                           <div
                             key={i}
-                            className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-700 dark:bg-slate-800/60"
+                            className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5 dark:border-slate-700 dark:bg-slate-800/60"
                           >
-                            <div className="w-24">
-                              <span className="block text-[10px] font-semibold uppercase text-slate-500">ID / Tag</span>
-                              <input
-                                type="text"
-                                value={h.id}
-                                onChange={(e) => updateHydrant(i, 'id', e.target.value)}
-                                placeholder="H-104"
-                                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                              />
+                            <div className="flex flex-wrap items-center gap-3">
+                              <div className="w-28">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">ID / Tag</span>
+                                <input
+                                  type="text"
+                                  value={h.id}
+                                  onChange={(e) => updateHydrant(i, 'id', e.target.value)}
+                                  placeholder="H-104"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
+
+                              <div className="min-w-[140px] flex-1">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Closest Address</span>
+                                <input
+                                  type="text"
+                                  value={h.address}
+                                  onChange={(e) => updateHydrant(i, 'address', e.target.value)}
+                                  placeholder="Main St & 3rd Ave"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
+
+                              <div className="w-24">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Flow (GPM)</span>
+                                <input
+                                  type="number"
+                                  value={h.flow ?? ''}
+                                  onChange={(e) => updateHydrant(i, 'flow', e.target.value ? Number(e.target.value) : null)}
+                                  placeholder="1250"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
+
+                              <div className="w-28">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Status</span>
+                                <select
+                                  value={h.status}
+                                  onChange={(e) => updateHydrant(i, 'status', e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                >
+                                  {HYDRANT_STATUSES.map((s) => (
+                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="w-24">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Barrel Type</span>
+                                <select
+                                  value={h.type}
+                                  onChange={(e) => updateHydrant(i, 'type', e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                >
+                                  {HYDRANT_TYPES.map((t) => (
+                                    <option key={t.value} value={t.value}>{t.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="pt-4">
+                                <button
+                                  type="button"
+                                  onClick={() => removeHydrant(i)}
+                                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                  title="Remove hydrant from plan"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
                             </div>
 
-                            <div className="min-w-[140px] flex-1">
-                              <span className="block text-[10px] font-semibold uppercase text-slate-500">Closest Address</span>
-                              <input
-                                type="text"
-                                value={h.address}
-                                onChange={(e) => updateHydrant(i, 'address', e.target.value)}
-                                placeholder="Main St & 3rd Ave"
-                                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                              />
-                            </div>
+                            {/* Row 2: GPS Coordinates, Auto-Distance, and Notes */}
+                            <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                              <div className="w-32">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Latitude</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={h.latitude ?? ''}
+                                  onChange={(e) => updateHydrant(i, 'latitude', e.target.value)}
+                                  placeholder="e.g. 33.918234"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-mono dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
 
-                            <div className="w-24">
-                              <span className="block text-[10px] font-semibold uppercase text-slate-500">Distance</span>
-                              <input
-                                type="text"
-                                value={h.distance}
-                                onChange={(e) => updateHydrant(i, 'distance', e.target.value)}
-                                placeholder="150 ft"
-                                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                              />
-                            </div>
+                              <div className="w-32">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Longitude</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={h.longitude ?? ''}
+                                  onChange={(e) => updateHydrant(i, 'longitude', e.target.value)}
+                                  placeholder="e.g. -78.129482"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-mono dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
 
-                            <div className="w-24">
-                              <span className="block text-[10px] font-semibold uppercase text-slate-500">Flow (GPM)</span>
-                              <input
-                                type="number"
-                                value={h.flow ?? ''}
-                                onChange={(e) => updateHydrant(i, 'flow', e.target.value ? Number(e.target.value) : null)}
-                                placeholder="1250"
-                                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                              />
-                            </div>
+                              <div className="w-36">
+                                <div className="flex items-center justify-between">
+                                  <span className="block text-[10px] font-semibold uppercase text-slate-500">Distance</span>
+                                  {Number.isFinite(draft.latitude) &&
+                                  Number.isFinite(draft.longitude) &&
+                                  Number.isFinite(h.latitude) &&
+                                  Number.isFinite(h.longitude) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => recalculateHydrantDistance(i)}
+                                      className="text-[10px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                                      title="Recalculate distance between building and hydrant coordinates"
+                                    >
+                                      Auto-calc
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <input
+                                  type="text"
+                                  value={h.distance}
+                                  onChange={(e) => updateHydrant(i, 'distance', e.target.value)}
+                                  placeholder="e.g. 150 ft"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
 
-                            <div className="w-28">
-                              <span className="block text-[10px] font-semibold uppercase text-slate-500">Status</span>
-                              <select
-                                value={h.status}
-                                onChange={(e) => updateHydrant(i, 'status', e.target.value)}
-                                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                              >
-                                {HYDRANT_STATUSES.map((s) => (
-                                  <option key={s.value} value={s.value}>{s.label}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div className="w-24">
-                              <span className="block text-[10px] font-semibold uppercase text-slate-500">Barrel Type</span>
-                              <select
-                                value={h.type}
-                                onChange={(e) => updateHydrant(i, 'type', e.target.value)}
-                                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                              >
-                                {HYDRANT_TYPES.map((t) => (
-                                  <option key={t.value} value={t.value}>{t.label}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div className="pt-4">
-                              <button
-                                type="button"
-                                onClick={() => removeHydrant(i)}
-                                className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              <div className="min-w-[140px] flex-1">
+                                <span className="block text-[10px] font-semibold uppercase text-slate-500">Location Notes / Couplings</span>
+                                <input
+                                  type="text"
+                                  value={h.notes || ''}
+                                  onChange={(e) => updateHydrant(i, 'notes', e.target.value)}
+                                  placeholder="e.g. 5-inch Storz on North side of road"
+                                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400 dark:border-slate-700">
-                        No nearby hydrants listed. Click "Add Hydrant" above to record one.
+                        No nearby hydrants listed. Click "Select Existing Hydrant" or "Add Hydrant" above to record one.
                       </div>
                     )}
                   </div>
@@ -1249,6 +1611,126 @@ export default function PreIncidentPlanModal({
                     ) : (
                       <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400 dark:border-slate-700">
                         No contacts listed. Click "Add Contact" above to add one.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {/* TAB 7: Diagrams & Attached Files */}
+                {activeTab === 'files' ? (
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                          Building Diagrams & Tactical Files
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Upload floor plans, aerial views, utility shut-off diagrams, and emergency action plans (PDFs or images up to 25MB).
+                        </p>
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        onChange={handleFileUpload}
+                        accept="image/*,.pdf,.doc,.docx,.txt"
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        disabled={uploadingFile}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:opacity-50"
+                      >
+                        {uploadingFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {uploadingFile ? `Uploading ${uploadProgress}%...` : 'Upload File / Diagram'}
+                      </button>
+                    </div>
+
+                    {fileUploadError ? (
+                      <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                        <span>{fileUploadError}</span>
+                      </div>
+                    ) : null}
+
+                    {/* Drag & Drop / Click Upload Target */}
+                    <div
+                      onClick={() => !uploadingFile && fileInputRef.current?.click()}
+                      className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 p-6 text-center cursor-pointer transition hover:border-blue-400 hover:bg-blue-50/30 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:border-blue-500"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+                        <FileUp className="h-6 w-6" />
+                      </div>
+                      <span className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        Click to browse or drop tactical files here
+                      </span>
+                      <span className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        Supports floor plan images (PNG, JPG, WebP), CAD exports, and PDF documents
+                      </span>
+                    </div>
+
+                    {/* Attached Files Grid */}
+                    {draft.files && draft.files.length > 0 ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {draft.files.map((file, i) => {
+                          const isImg =
+                            file.contentType?.startsWith('image/') ||
+                            file.type?.startsWith('image/') ||
+                            /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name || '');
+                          const previewSrc = file.dataUrl || file.downloadUrl;
+
+                          return (
+                            <div
+                              key={file.fileId || file.storagePath || i}
+                              className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs dark:border-slate-700 dark:bg-slate-800/70"
+                            >
+                              <div className="flex min-w-0 items-center gap-3">
+                                {isImg && previewSrc ? (
+                                  <img
+                                    src={previewSrc}
+                                    alt={file.name}
+                                    className="h-14 w-14 shrink-0 rounded-xl border border-slate-200 object-cover dark:border-slate-700"
+                                  />
+                                ) : (
+                                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                                    <FileText className="h-7 w-7" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-bold text-slate-900 dark:text-white" title={file.name}>
+                                    {file.name || 'Unnamed File'}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {file.size ? formatFileSize(file.size) : 'File'}
+                                    {file.uploadedAt ? ` · ${new Date(file.uploadedAt).toLocaleDateString()}` : ''}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => openPreplanFile(file)}
+                                    className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                                  >
+                                    <Eye className="h-3 w-3" /> View / Preview
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFile(i)}
+                                  className="rounded-xl p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                  title="Remove file"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 dark:border-slate-700">
+                        No diagrams or files attached yet.
                       </div>
                     )}
                   </div>

@@ -28,6 +28,8 @@ import {
 } from '../utils/districtMap.js';
 import {
   PRE_INCIDENT_PLANS_COLLECTION,
+  HYDRANTS_COLLECTION,
+  normalizeHydrant,
   preIncidentPlanFields,
   preIncidentPlanProblem,
 } from '../utils/preIncidentPlans.js';
@@ -930,6 +932,17 @@ export const savePreIncidentPlan = async ({ id = '', fields = {}, authorId = '' 
     },
     { merge: true }
   );
+
+  // Synchronize any hydrants on this preplan into the shared hydrants collection in parallel
+  if (Array.isArray(normal.nearby_hydrants) && normal.nearby_hydrants.length > 0) {
+    const hydrantsToSync = normal.nearby_hydrants.filter((h) => h && (h.id || h.address || h.latitude));
+    if (hydrantsToSync.length > 0) {
+      await Promise.allSettled(
+        hydrantsToSync.map((h) => saveHydrant({ id: h.hydrant_id || h.id, fields: h, authorId }))
+      );
+    }
+  }
+
   return { id: reference.id };
 };
 
@@ -938,6 +951,39 @@ export const deletePreIncidentPlan = async ({ id } = {}) => {
   const wanted = String(id || '').trim();
   if (!wanted) throw new Error('Which pre-incident plan?');
   await deleteDoc(doc(firestore(), PRE_INCIDENT_PLANS_COLLECTION, wanted));
+  return { id: wanted };
+};
+
+// Saves or updates a Hydrant document in the shared collection.
+export const saveHydrant = async ({ id = '', fields = {}, authorId = '' } = {}) => {
+  const normal = normalizeHydrant(fields);
+  const tag = normal.id || 'Hydrant';
+  const wantedId = String(id || normal.hydrant_id || '').trim();
+  const reference = wantedId
+    ? doc(firestore(), HYDRANTS_COLLECTION, wantedId)
+    : doc(collection(firestore(), HYDRANTS_COLLECTION));
+
+  const dataToSave = {
+    ...normal,
+    id: tag,
+    hydrant_id: reference.id,
+    updated_at: stationTimestamp(),
+    updated_by: String(authorId || ''),
+  };
+  if (!wantedId) {
+    dataToSave.created_at = stationTimestamp();
+    dataToSave.created_by = String(authorId || '');
+  }
+
+  await setDoc(reference, dataToSave, { merge: true });
+  return { id: reference.id };
+};
+
+// Deletes a Hydrant document from the shared collection.
+export const deleteHydrant = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which hydrant?');
+  await deleteDoc(doc(firestore(), HYDRANTS_COLLECTION, wanted));
   return { id: wanted };
 };
 

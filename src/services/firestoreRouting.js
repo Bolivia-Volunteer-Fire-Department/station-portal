@@ -482,6 +482,17 @@ const DISPATCH = {
     return ok(await deletePreIncidentPlan({ id: body?.id || body?.planId }));
   },
 
+  ADMIN_SAVE_HYDRANT: async (body, uid) => {
+    const { saveHydrant } = await writes();
+    const request = body?.request || body || {};
+    return ok(await saveHydrant({ id: request.id || '', fields: request.fields || {}, authorId: uid }));
+  },
+
+  ADMIN_DELETE_HYDRANT: async (body) => {
+    const { deleteHydrant } = await writes();
+    return ok(await deleteHydrant({ id: body?.id || body?.hydrantId }));
+  },
+
   ADMIN_SAVE_MAP_BACKDROP: async (body, uid) => {
     const { saveMapBackdrop } = await writes();
     const request = body?.request || body || {};

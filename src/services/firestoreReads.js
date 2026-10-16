@@ -21,7 +21,7 @@ import {
   MAP_LANDMARK_LIMIT,
 } from '../utils/districtMap.js';
 import { MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID } from '../utils/mapTypes.js';
-import { PRE_INCIDENT_PLANS_COLLECTION } from '../utils/preIncidentPlans.js';
+import { PRE_INCIDENT_PLANS_COLLECTION, HYDRANTS_COLLECTION } from '../utils/preIncidentPlans.js';
 
 // Reads who is currently on duty directly from the server.
 const onDutyRows = async (_uid) => {
@@ -719,6 +719,11 @@ export const READERS = {
   GET_PRE_INCIDENT_PLANS: async () => {
     const rows = await getDocs(query(collection(firestore(), PRE_INCIDENT_PLANS_COLLECTION)));
     return { preIncidentPlans: rows.docs.map((row) => ({ id: row.id, ...row.data() })) };
+  },
+  // Reads district hydrants directory.
+  GET_HYDRANTS: async () => {
+    const rows = await getDocs(query(collection(firestore(), HYDRANTS_COLLECTION)));
+    return { hydrants: rows.docs.map((row) => ({ id: row.id, ...row.data() })) };
   },
   // Reads background map visual layers.
   GET_MAP_BACKDROPS: async () => {

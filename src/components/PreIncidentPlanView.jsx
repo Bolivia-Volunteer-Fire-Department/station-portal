@@ -2,22 +2,20 @@ import React from 'react';
 import {
   AlertTriangle,
   Building2,
-  Calendar,
-  CheckCircle2,
   Compass,
   Droplets,
-  ExternalLink,
+  Eye,
   FileText,
   Flame,
-  Hash,
-  Layers,
-  Mail,
   MapPin,
+  Paperclip,
   Phone,
   Printer,
   ShieldAlert,
   Users,
 } from 'lucide-react';
+import { openPreplanFile } from '../services/preplanFileStorage';
+import { formatFileSize } from '../utils/apparatus';
 
 export default function PreIncidentPlanView({
   plan,
@@ -408,31 +406,41 @@ export default function PreIncidentPlanView({
                     <th className="py-1.5 font-semibold">Distance</th>
                     <th className="py-1.5 font-semibold">Flow</th>
                     <th className="py-1.5 font-semibold">Status / Type</th>
+                    <th className="py-1.5 font-semibold">Coordinates</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                  {plan.nearby_hydrants.map((h, i) => (
-                    <tr key={h.id || i}>
-                      <td className="py-2 font-mono font-medium text-slate-900 dark:text-white">{h.id || `#${i + 1}`}</td>
-                      <td className="py-2 text-slate-600 dark:text-slate-300">{h.address || '—'}</td>
-                      <td className="py-2 text-slate-600 dark:text-slate-300">{h.distance || '—'}</td>
-                      <td className="py-2 font-semibold text-blue-600 dark:text-blue-400">
-                        {h.flow ? `${h.flow} gpm` : '—'}
-                      </td>
-                      <td className="py-2">
-                        <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                            h.status === 'out-of-service'
-                              ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
-                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          }`}
-                        >
-                          {h.status === 'out-of-service' ? 'Out of service' : 'In service'}
-                        </span>
-                        <span className="ml-1 text-[10px] text-slate-400">({h.type || 'dry'})</span>
-                      </td>
-                    </tr>
-                  ))}
+                  {plan.nearby_hydrants.map((h, i) => {
+                    const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
+                    return (
+                      <tr key={h.id || i}>
+                        <td className="py-2 font-mono font-medium text-slate-900 dark:text-white">{h.id || `#${i + 1}`}</td>
+                        <td className="py-2 text-slate-600 dark:text-slate-300">
+                          <div>{h.address || '—'}</div>
+                          {h.notes ? <div className="text-[10px] italic text-slate-400">{h.notes}</div> : null}
+                        </td>
+                        <td className="py-2 text-slate-600 dark:text-slate-300">{h.distance || '—'}</td>
+                        <td className="py-2 font-semibold text-blue-600 dark:text-blue-400">
+                          {h.flow ? `${h.flow} gpm` : '—'}
+                        </td>
+                        <td className="py-2">
+                          <span
+                            className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                              h.status === 'out-of-service'
+                                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
+                                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            }`}
+                          >
+                            {h.status === 'out-of-service' ? 'Out of service' : 'In service'}
+                          </span>
+                          <span className="ml-1 text-[10px] text-slate-400">({h.type || 'dry'})</span>
+                        </td>
+                        <td className="py-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          {hasCoords ? `${h.latitude.toFixed(5)}, ${h.longitude.toFixed(5)}` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -507,6 +515,58 @@ export default function PreIncidentPlanView({
           </p>
         </div>
       ) : null}
+
+      {/* SECTION 7: Diagrams & Attached Files */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-700 dark:bg-slate-800">
+        <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-sm font-bold uppercase tracking-wider text-slate-900 dark:border-slate-700 dark:text-white">
+          <Paperclip className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          Tactical Diagrams & Attached Documents ({plan.files?.length || 0})
+        </h3>
+        {plan.files && plan.files.length > 0 ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {plan.files.map((file, i) => {
+              const isImg =
+                file.contentType?.startsWith('image/') ||
+                file.type?.startsWith('image/') ||
+                /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name || '');
+              const previewSrc = file.dataUrl || file.downloadUrl;
+
+              return (
+                <div
+                  key={file.fileId || file.storagePath || i}
+                  onClick={() => openPreplanFile(file)}
+                  className="group flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-blue-600"
+                >
+                  {isImg && previewSrc ? (
+                    <img
+                      src={previewSrc}
+                      alt={file.name}
+                      className="h-16 w-16 shrink-0 rounded-xl border border-slate-200 object-cover shadow-xs dark:border-slate-700"
+                    />
+                  ) : (
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+                      <FileText className="h-8 w-8" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-bold text-slate-900 group-hover:text-blue-600 dark:text-white dark:group-hover:text-blue-400">
+                      {file.name || 'Unnamed Document'}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      {file.size ? formatFileSize(file.size) : 'File'}
+                    </p>
+                    <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                      <Eye className="h-3 w-3" /> View Document
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs italic text-slate-400">No building diagrams or files attached.</p>
+        )}
+      </div>
     </div>
   );
 }

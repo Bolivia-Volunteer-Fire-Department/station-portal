@@ -48,6 +48,15 @@ export const BUILTIN_WIDGETS = [
     category: 'Scheduling',
   },
   {
+    id: 'apparatus-status',
+    label: 'Apparatus Fleet Status',
+    description: 'Fleet readiness, unit callsigns, vehicle types, and in-service status.',
+    defaultColSpan: 2,
+    minColSpan: 1,
+    maxColSpan: 3,
+    category: 'Operations',
+  },
+  {
     id: 'quick-links',
     label: 'Quick Action Links',
     description: 'Department links to CAD dispatch, county GIS, and active resources.',
@@ -70,13 +79,14 @@ export const BUILTIN_WIDGETS = [
 // Factory default station layout:
 // Row 1: [Station Announcements (3 col)]
 // Row 2: [Time & Status (1 col)] [Who Is On Duty (2 col)]
-// Row 3: [Upcoming Shifts (2 col)] [Quick Links (1 col)]
-// Row 4: [Live Weather & Radar (1 col)]
+// Row 3: [Upcoming Shifts (2 col)] [Apparatus Status (1 col)]
+// Row 4: [Quick Links (1 col)] [Live Weather & Radar (1 col)]
 export const FACTORY_DEFAULT_LAYOUT = [
   { id: 'announcements', colSpan: 3 },
   { id: 'time-status', colSpan: 1 },
   { id: 'on-duty', colSpan: 2 },
   { id: 'upcoming-shifts', colSpan: 2 },
+  { id: 'apparatus-status', colSpan: 1 },
   { id: 'quick-links', colSpan: 1 },
   { id: 'weather-radar', colSpan: 1 },
 ];

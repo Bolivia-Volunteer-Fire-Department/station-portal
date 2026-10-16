@@ -15,6 +15,7 @@ import {
   fetchMapLandmarks,
   fetchMapTypes,
   fetchPreIncidentPlans,
+  fetchHydrants,
 } from '../services/api';
 import {
   LANDMARK_LABEL_MAX,
@@ -42,6 +43,9 @@ import {
 import {
   cachedPreIncidentPlans,
   cachePreIncidentPlans,
+  cachedHydrants,
+  cacheHydrants,
+  normalizeHydrant,
   preIncidentPlanFields,
   sortedPreIncidentPlans,
 } from '../utils/preIncidentPlans';
@@ -151,6 +155,7 @@ export default function DistrictMap({
   const [boundaryDoc, setBoundaryDoc] = useState(() => cachedBoundary());
   const [landmarkDocs, setLandmarkDocs] = useState(() => cachedLandmarks());
   const [preplanDocs, setPreplanDocs] = useState(() => cachedPreIncidentPlans());
+  const [hydrantDocs, setHydrantDocs] = useState(() => cachedHydrants());
   // The county's linework, as ONE object because it arrives together and is cached together.
   const [backdropDocs, setBackdropDocs] = useState(() => cachedBackdrops());
   // WHAT A PIN CAN BE, as the station has it. The device's copy first, and the built-in eight when there is nothing stored - so
@@ -220,6 +225,26 @@ export default function DistrictMap({
   const boundary = useMemo(() => boundaryView(boundaryDoc), [boundaryDoc]);
   const landmarks = useMemo(() => sortedLandmarks(landmarkDocs), [landmarkDocs]);
   const preplans = useMemo(() => sortedPreIncidentPlans(preplanDocs), [preplanDocs]);
+  const allHydrants = useMemo(() => {
+    const mapById = new Map();
+    (Array.isArray(hydrantDocs) ? hydrantDocs : []).forEach((h) => {
+      const norm = normalizeHydrant(h);
+      const key = norm.hydrant_id || norm.id;
+      if (key) mapById.set(key, norm);
+    });
+    preplans.forEach((p) => {
+      if (Array.isArray(p.nearby_hydrants)) {
+        p.nearby_hydrants.forEach((h) => {
+          const norm = normalizeHydrant(h);
+          const key = norm.hydrant_id || norm.id;
+          if (key && !mapById.has(key)) {
+            mapById.set(key, norm);
+          }
+        });
+      }
+    });
+    return Array.from(mapById.values());
+  }, [hydrantDocs, preplans]);
   // THE STATION'S TYPES, ALWAYS USABLE: mapTypesView answers the built-in eight for an empty list, so nothing below has to ask
   // whether the station has edited them yet.
   const types = useMemo(() => mapTypesView(typeDocs), [typeDocs]);
@@ -256,7 +281,7 @@ export default function DistrictMap({
   useEffect(() => {
     let cancelled = false;
     const read = async () => {
-      const [boundaryAnswer, pinAnswer, backdropAnswer, typeAnswer, preplanAnswer] = await Promise.all([
+      const results = await Promise.all([
         fetchMapBoundary()
           .then((result) => ({ ok: true, value: result?.mapBoundary ?? null }))
           .catch((err) => ({ ok: false, error: err })),
@@ -276,8 +301,12 @@ export default function DistrictMap({
         fetchPreIncidentPlans()
           .then((result) => ({ ok: true, value: Array.isArray(result?.preIncidentPlans) ? result.preIncidentPlans : [] }))
           .catch((err) => ({ ok: false, error: err })),
+        fetchHydrants()
+          .then((result) => ({ ok: true, value: Array.isArray(result?.hydrants) ? result.hydrants : [] }))
+          .catch((err) => ({ ok: false, error: err })),
       ]);
       if (cancelled) return;
+      const [boundaryAnswer, pinAnswer, backdropAnswer, typeAnswer, preplanAnswer, hydrantAnswer] = results;
       if (boundaryAnswer.ok) {
         // Only a real change replaces it: the object's identity is what redraws the boundary layer, and re-adding an
         // identical polygon would flicker the map at the moment the read lands.
@@ -293,6 +322,10 @@ export default function DistrictMap({
       if (preplanAnswer.ok) {
         setPreplanDocs(preplanAnswer.value);
         cachePreIncidentPlans(preplanAnswer.value);
+      }
+      if (hydrantAnswer.ok) {
+        setHydrantDocs(hydrantAnswer.value);
+        cacheHydrants(hydrantAnswer.value);
       }
       if (backdropAnswer.ok) {
         setBackdropDocs(backdropAnswer.value);
@@ -1631,6 +1664,7 @@ export default function DistrictMap({
         initialEdit={isPreplanInitialEdit}
         onRequestMapPick={handleRequestMapPick}
         stationName={stationName}
+        existingHydrants={allHydrants}
       />
     </div>
   );

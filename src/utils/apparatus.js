@@ -78,6 +78,43 @@ export function evaluateServiceDue(nextServiceDate) {
   return { status: 'good', days: diffDays, label: `${diffDays}d remaining` };
 }
 
+export const MAINTENANCE_TYPES = [
+  { value: 'routine_service', label: 'Routine Service / Oil & Lube', color: 'emerald' },
+  { value: 'repair', label: 'Mechanical / Electrical Repair', color: 'amber' },
+  { value: 'annual_inspection', label: 'Annual DOT / Safety Inspection', color: 'sky' },
+  { value: 'pump_test', label: 'Annual Pump Test & Certification', color: 'blue' },
+  { value: 'ladder_test', label: 'Aerial / Ladder Testing & Certification', color: 'indigo' },
+  { value: 'tires_brakes', label: 'Tires & Brakes', color: 'purple' },
+  { value: 'fluid_service', label: 'Transmission / Coolant / Hydraulic Service', color: 'cyan' },
+  { value: 'emergency_repair', label: 'Emergency Out-of-Service Repair', color: 'rose' },
+  { value: 'body_upfit', label: 'Body Work / Equipment Upfitting', color: 'slate' },
+  { value: 'other', label: 'Other Service / Maintenance', color: 'zinc' },
+];
+
+export function maintenanceTypeMeta(type) {
+  const found = MAINTENANCE_TYPES.find((t) => t.value === type);
+  return found || { value: type || 'other', label: type || 'Maintenance', color: 'zinc' };
+}
+
+export function formatCurrency(amount) {
+  const num = Number(amount) || 0;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+}
+
+export function normalizeMaintenanceRecord(record, defaultUser = null) {
+  return {
+    id: record?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `maint_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`),
+    description: String(record?.description || '').trim(),
+    type: record?.type || 'routine_service',
+    cost: typeof record?.cost === 'number' ? record.cost : (parseFloat(record?.cost) || 0),
+    date: record?.date || new Date().toISOString().slice(0, 10),
+    recorded_by_id: record?.recorded_by_id || defaultUser?.id || '',
+    recorded_by_name: record?.recorded_by_name || defaultUser?.name || defaultUser?.full_name || 'Staff',
+    created_at: record?.created_at || new Date().toISOString(),
+    files: Array.isArray(record?.files) ? record.files : [],
+  };
+}
+
 export function normalizeApparatusRecord(row) {
   return {
     id: row?.id || '',
@@ -98,6 +135,17 @@ export function normalizeApparatusRecord(row) {
     next_service_due: row?.next_service_due || '',
     last_pump_test: row?.last_pump_test || '',
     notes: row?.notes || '',
+    show_on_widget: Boolean(row?.show_on_widget),
+    maintenance_records: Array.isArray(row?.maintenance_records)
+      ? row.maintenance_records.map((r) => normalizeMaintenanceRecord(r))
+      : [],
   };
+}
+
+export function formatFileSize(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 

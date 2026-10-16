@@ -313,7 +313,9 @@ service cloud.firestore {
     // this collection at all - the FCM credentials moved to function secret storage.
     match /settings/{settingId} {
       allow read: if settingId == 'public' || permission('can_edit_system_settings');
-      allow write: if permission('can_edit_system_settings');
+      allow write: if permission('can_edit_system_settings')
+        || permission('can_manage_dashboard_setup')
+        || permission('can_manage_widget_setup');
     }
 
     match /shifts/{shiftId} {
@@ -636,6 +638,13 @@ service cloud.firestore {
         && request.resource.data.longitude >= -180
         && request.resource.data.longitude <= 180;
       allow delete: if permission('can_edit_map');
+    }
+
+    // HYDRANTS: shared municipal and private fire hydrants placed on the district map.
+    // Readable by members who can view the map or documents; created, updated, and deleted by map editors.
+    match /hydrants/{hydrantId} {
+      allow read: if signedIn() && (permission('can_view_map') || permission('can_view_documents'));
+      allow write: if permission('can_edit_map');
     }
 
     // THE MAP BACKGROUND: the roads and the waterways the district is drawn over - the county's own geometry, clipped to the

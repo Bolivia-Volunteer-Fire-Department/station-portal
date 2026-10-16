@@ -26,6 +26,7 @@ import UpcomingShiftsWidget from './widgets/UpcomingShiftsWidget';
 import QuickLinksWidget from './widgets/QuickLinksWidget';
 import WeatherRadarWidget from './widgets/WeatherRadarWidget';
 import CustomMarkdownWidget from './widgets/CustomMarkdownWidget';
+import ApparatusStatusWidget from './widgets/ApparatusStatusWidget';
 import WidgetResizeHandle from './widgets/WidgetResizeHandle';
 import {
   DASHBOARD_DEFAULT_LAYOUT_KEY,
@@ -60,6 +61,7 @@ export default function DashboardModule({
   userSettings = {},
   onSaveUserSettings,
   onNavigate,
+  token,
 }) {
   // Read station default layout, custom widgets, and widget configurations
   const rawStationDefaultLayout = getSettingValue(systemSettings, DASHBOARD_DEFAULT_LAYOUT_KEY, '');
@@ -314,6 +316,9 @@ export default function DashboardModule({
             radarUrl={widgetConfigs['weather-radar']?.radarUrl || 'https://radar.weather.gov'}
           />
         );
+
+      case 'apparatus-status':
+        return <ApparatusStatusWidget token={token} onNavigate={onNavigate} />;
 
       default: {
         // Custom widget lookup

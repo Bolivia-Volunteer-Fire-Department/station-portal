@@ -212,6 +212,17 @@ export const adminSavePreIncidentPlan = ({ id = '', fields = {} } = {}, token) =
 export const adminDeletePreIncidentPlan = (id, token) =>
   routeWrite('ADMIN_DELETE_PRE_INCIDENT_PLAN', { id: String(id || ''), token });
 
+// Fetches the district hydrants directory.
+export const fetchHydrants = () => dispatchRequest({ action: 'GET_HYDRANTS' });
+
+// Saves or updates a Hydrant document.
+export const adminSaveHydrant = ({ id = '', fields = {} } = {}, token) =>
+  routeWrite('ADMIN_SAVE_HYDRANT', { request: { id, fields }, token });
+
+// Deletes a Hydrant document.
+export const adminDeleteHydrant = (id, token) =>
+  routeWrite('ADMIN_DELETE_HYDRANT', { id: String(id || ''), token });
+
 // Fetches background road and waterway map layers.
 export const fetchMapBackdrops = () => dispatchRequest({ action: 'GET_MAP_BACKDROPS' });
 

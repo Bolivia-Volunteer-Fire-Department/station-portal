@@ -148,6 +148,8 @@ export default function AdminPanel({
   timeFormat,
   onDataChanged,
   currentUserId = '',
+  currentUser = null,
+  currentUserName = '',
   onAvailabilityChanged,
   onLogsChanged,
   onAdminDataChanged,
@@ -640,6 +642,17 @@ export default function AdminPanel({
       {activeSubTab === 'apparatus' && (
         <AdminApparatusTab
           token={token}
+          currentUserId={currentUserId}
+          currentUser={currentUser}
+          currentUserName={
+            currentUserName ||
+            currentUser?.name ||
+            currentUser?.full_name ||
+            currentUser?.user_name ||
+            nameRows.find((u) => String(u?.id ?? u?.user_id) === String(currentUserId || currentUser?.id))?.name ||
+            ''
+          }
+          users={nameRows}
           onDataChanged={onDataChanged}
         />
       )}

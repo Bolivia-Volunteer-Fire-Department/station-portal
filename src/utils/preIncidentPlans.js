@@ -2,6 +2,8 @@
 
 export const PRE_INCIDENT_PLANS_COLLECTION = 'pre_incident_plans';
 export const PRE_INCIDENT_PLANS_CACHE_KEY = 'sp_pre_incident_plans';
+export const HYDRANTS_COLLECTION = 'hydrants';
+export const HYDRANTS_CACHE_KEY = 'sp_hydrants';
 
 export const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -119,10 +121,6 @@ const numOrNull = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
-const numOrZero = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
 
 // Coordinate precision matching districtMap: 6 decimal places (~11cm)
 export const roundCoordinate = (value) => {
@@ -141,14 +139,58 @@ export const normalizeContact = (c) => ({
   description: str(c?.description, 200),
 });
 
-export const normalizeHydrant = (h) => ({
-  id: str(h?.id, 50),
-  address: str(h?.address, 200),
-  distance: str(h?.distance, 50),
-  flow: numOrNull(h?.flow),
-  status: h?.status === 'out-of-service' ? 'out-of-service' : 'in-service',
-  type: h?.type === 'wet' ? 'wet' : 'dry',
-});
+export const normalizeHydrant = (h) => {
+  const lat = numOrNull(h?.latitude ?? h?.lat);
+  const lng = numOrNull(h?.longitude ?? h?.lng);
+  const validPos = Number.isFinite(lat) && Number.isFinite(lng);
+
+  return {
+    id: str(h?.id, 50),
+    hydrant_id: str(h?.hydrant_id || h?.id, 50),
+    address: str(h?.address, 200),
+    latitude: validPos ? roundCoordinate(lat) : null,
+    longitude: validPos ? roundCoordinate(lng) : null,
+    distance: str(h?.distance, 50),
+    flow: numOrNull(h?.flow),
+    status: h?.status === 'out-of-service' ? 'out-of-service' : 'in-service',
+    type: h?.type === 'wet' ? 'wet' : 'dry',
+    notes: str(h?.notes, 500),
+  };
+};
+
+/**
+ * Calculates straight-line distance in feet between two lat/lng coordinates (Haversine formula).
+ */
+export const calculateDistanceFeet = (lat1, lon1, lat2, lon2) => {
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+  if (!Number.isFinite(nLat1) || !Number.isFinite(nLon1) || !Number.isFinite(nLat2) || !Number.isFinite(nLon2)) {
+    return null;
+  }
+  const R = 20902231; // Mean radius of the Earth in feet (~6,371,000 meters * 3.28084)
+  const dLat = ((nLat2 - nLat1) * Math.PI) / 180;
+  const dLon = ((nLon2 - nLon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((nLat1 * Math.PI) / 180) *
+      Math.cos((nLat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+};
+
+export const formatDistance = (feet) => {
+  if (feet === null || feet === undefined || !Number.isFinite(Number(feet))) return '';
+  const num = Number(feet);
+  if (num < 1000) {
+    return `${num} ft`;
+  }
+  const miles = (num / 5280).toFixed(1);
+  return `${miles} mi (${num} ft)`;
+};
 
 export const preIncidentPlanProblem = (plan = {}) => {
   const name = str(plan.occupancy_name, 150);
@@ -240,6 +282,9 @@ export const normalizePreIncidentPlan = (raw = {}, defaultStation = '') => {
     // Chemical Inventory (long text)
     chemical_inventory: str(source.chemical_inventory, 10000),
 
+    // Attached Diagrams & Documents (array of file objects)
+    files: Array.isArray(source.files) ? source.files : [],
+
     created_at: str(source.created_at, 50),
     updated_at: str(source.updated_at, 50),
     created_by: str(source.created_by, 100),
@@ -309,6 +354,7 @@ export const preIncidentPlanFields = (input = {}, defaultStation = '') => {
 
     nearby_hydrants: norm.nearby_hydrants,
     chemical_inventory: norm.chemical_inventory,
+    files: norm.files,
   };
 };
 
@@ -342,6 +388,31 @@ export const cachePreIncidentPlans = (rows) => {
       return true;
     }
     localStorage.setItem(PRE_INCIDENT_PLANS_CACHE_KEY, JSON.stringify(rows));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const cachedHydrants = () => {
+  if (!cacheAvailable()) return [];
+  try {
+    const raw = localStorage.getItem(HYDRANTS_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map((h) => normalizeHydrant(h)) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const cacheHydrants = (rows) => {
+  if (!cacheAvailable()) return false;
+  try {
+    if (!rows || !Array.isArray(rows)) {
+      localStorage.removeItem(HYDRANTS_CACHE_KEY);
+      return true;
+    }
+    localStorage.setItem(HYDRANTS_CACHE_KEY, JSON.stringify(rows));
     return true;
   } catch {
     return false;

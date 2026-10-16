@@ -2140,6 +2140,7 @@ const getLoadingMessage = () => {
                 userSettings={currentUserSettings}
                 onSaveUserSettings={handleSaveUserSettings}
                 onNavigate={handleSidebarNavigate}
+                token={authToken}
               />
             )}
 
@@ -2396,6 +2397,8 @@ const getLoadingMessage = () => {
                 currentRole={currentUserRole}
                 isAdmin={isAdmin}
                 currentUserId={String(currentUser?.id ?? '')}
+                currentUser={currentUser}
+                currentUserName={currentUser?.name || currentUser?.full_name || currentUser?.user_name || ''}
                 users={users}
                 roles={roles}
                 ranks={ranks}
