@@ -1467,6 +1467,30 @@ exports.approveOffer = onCall(async (request) => {
       }
     }
 
+    // Query pending sibling offers to decline (ALL READS MUST PRECEDE ALL WRITES)
+    const templateId = String(data.schedule_template_id || '').trim();
+    const dateFrom = normalizeDateKey(data.date_from);
+    const pendingOffersSnap = await transaction.get(
+      db.collection('schedule_offers').where('status', '==', 'pending')
+    );
+
+    const siblingOffersToDecline = [];
+    for (const docSnap of pendingOffersSnap.docs) {
+      if (docSnap.id === offerId) continue;
+      const sibData = docSnap.data() || {};
+      const matchesSlotKey = Boolean(data.slot_key && String(sibData.slot_key || '') === String(data.slot_key));
+      const matchesScheduleId = Boolean(scheduleId && String(sibData.schedule_id || '') === scheduleId);
+      const matchesTemplateAndDate = Boolean(
+        templateId && dateFrom &&
+        String(sibData.schedule_template_id || '').trim() === templateId &&
+        normalizeDateKey(sibData.date_from) === dateFrom
+      );
+      if (matchesSlotKey || matchesScheduleId || matchesTemplateAndDate) {
+        siblingOffersToDecline.push(docSnap);
+      }
+    }
+
+    // PHASE 2: WRITES (NO READS AFTER THIS POINT)
     transaction.set(scheduleRef, scheduleRow, { merge: true });
     transaction.update(offerRef, {
       status: 'approved',
@@ -1474,57 +1498,13 @@ exports.approveOffer = onCall(async (request) => {
       schedule_id: scheduleId,
     });
 
-    // Close out sibling pending offers for the same shift / slot
     const declinedIds = [];
-    const siblingQueries = [];
-    if (data.slot_key) {
-      siblingQueries.push(
-        transaction.get(
-          db
-            .collection('schedule_offers')
-            .where('slot_key', '==', String(data.slot_key))
-            .where('status', '==', 'pending')
-        )
-      );
-    }
-    if (scheduleId) {
-      siblingQueries.push(
-        transaction.get(
-          db
-            .collection('schedule_offers')
-            .where('schedule_id', '==', scheduleId)
-            .where('status', '==', 'pending')
-        )
-      );
-    }
-    const templateId = String(data.schedule_template_id || '').trim();
-    const dateFrom = normalizeDateKey(data.date_from);
-    if (templateId && dateFrom) {
-      siblingQueries.push(
-        transaction.get(
-          db
-            .collection('schedule_offers')
-            .where('schedule_template_id', '==', templateId)
-            .where('date_from', '==', dateFrom)
-            .where('status', '==', 'pending')
-        )
-      );
-    }
-
-    const querySnapshots = await Promise.all(siblingQueries);
-    const seenSiblingIds = new Set([offerId]);
-
-    for (const snap of querySnapshots) {
-      for (const docSnap of snap.docs) {
-        if (!seenSiblingIds.has(docSnap.id)) {
-          seenSiblingIds.add(docSnap.id);
-          transaction.update(docSnap.ref, {
-            status: 'declined',
-            declined_by: caller.uid,
-          });
-          declinedIds.push(docSnap.id);
-        }
-      }
+    for (const sibSnap of siblingOffersToDecline) {
+      transaction.update(sibSnap.ref, {
+        status: 'declined',
+        declined_by: caller.uid,
+      });
+      declinedIds.push(sibSnap.id);
     }
 
     return {
