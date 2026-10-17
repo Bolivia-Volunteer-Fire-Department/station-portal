@@ -56,4 +56,28 @@
   .print-training-row {
     break-inside: avoid;
   }
+
+  /* Document text and markdown printed on paper */
+  .print-sheet h1,
+  .print-sheet h2,
+  .print-sheet h3,
+  .print-sheet h4,
+  .print-sheet h5,
+  .print-sheet h6,
+  .print-sheet p,
+  .print-sheet li,
+  .print-sheet td,
+  .print-sheet th {
+    color: #000 !important;
+  }
+
+  /* Ensure e-signatures always print with authentic black ink and no inversion filters */
+  .signature-invert-dark,
+  html.dark .signature-invert-dark,
+  img[alt*="signature" i],
+  img[alt*="Signature" i] {
+    filter: none !important;
+    -webkit-filter: none !important;
+  }
 }
+

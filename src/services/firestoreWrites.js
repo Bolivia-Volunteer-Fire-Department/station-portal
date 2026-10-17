@@ -823,6 +823,57 @@ export const deleteFormTemplate = async ({ id } = {}) => {
   return { id: wanted };
 };
 
+// Submits a completed entered form instance.
+export const submitFormResponse = async ({
+  id = '',
+  submissionId = '',
+  formTemplateId,
+  formTemplateName = '',
+  data = {},
+  submittedByUid = '',
+  submittedByName = '',
+} = {}) => {
+  const templateId = String(formTemplateId || '').trim();
+  if (!templateId) throw new Error('Form template ID is required.');
+  const uid = String(submittedByUid || '').trim();
+  if (!uid) throw new Error('Submitter UID is required.');
+
+  const existingId = String(id || submissionId || '').trim();
+  const submissionRef = existingId
+    ? doc(firestore(), 'form_submissions', existingId)
+    : doc(collection(firestore(), 'form_submissions'));
+
+  const timestamp = stationTimestamp();
+  const dateKey = timestamp.slice(0, 10);
+
+  const payload = {
+    form_template_id: templateId,
+    form_template_name: String(formTemplateName || '').trim(),
+    submitted_by_uid: uid,
+    submitted_by_name: String(submittedByName || '').trim() || 'Member',
+    date_key: dateKey,
+    data: data && typeof data === 'object' ? data : {},
+  };
+
+  if (existingId) {
+    payload.updated_at = timestamp;
+    await setDoc(submissionRef, payload, { merge: true });
+  } else {
+    payload.submitted_at = timestamp;
+    await setDoc(submissionRef, payload);
+  }
+
+  return { id: submissionRef.id, ...payload };
+};
+
+// Deletes a form submission.
+export const deleteFormSubmission = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which submission?');
+  await deleteDoc(doc(firestore(), 'form_submissions', wanted));
+  return { id: wanted };
+};
+
 // Saves the drawing layer SVG for the district map.
 export const saveMapLayer = async ({ svg, authorId = '' } = {}) => {
   const text = String(svg ?? '');

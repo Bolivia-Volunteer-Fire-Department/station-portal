@@ -128,17 +128,264 @@ export const formAudienceKeys = ({ all = false, roleIds = [], rankIds = [] } = {
 
 const text = (value) => String(value ?? '').trim();
 
+export const FORM_TYPES = ['generated', 'entered'];
+
+export const ENTERED_FIELD_KINDS = [
+  'text',
+  'textarea',
+  'tel',
+  'number',
+  'date',
+  'time',
+  'select',
+  'checkbox',
+  'radio',
+  'signature',
+  'signature_stamp',
+  'divider',
+  'markdown',
+];
+
+export const isNonDataField = (fieldType) => ['markdown', 'divider'].includes(fieldType);
+
+export const formatPhoneNumber = (val) => {
+  if (!val) return '';
+  const str = String(val);
+  const extMatch = str.match(/(?:x|ext|\#|\*)\s*(\d*)/i);
+  const hasExtTrigger = Boolean(extMatch);
+  let ext = extMatch ? extMatch[1] : '';
+
+  const baseStr = extMatch ? str.slice(0, extMatch.index) : str;
+  const digits = baseStr.replace(/\D/g, '');
+
+  let mainDigits = digits;
+  if (!ext && digits.length > 10) {
+    mainDigits = digits.slice(0, 10);
+    ext = digits.slice(10);
+  } else if (digits.length > 10) {
+    mainDigits = digits.slice(0, 10);
+  }
+
+  let formatted = '';
+  if (mainDigits.length === 0) {
+    formatted = '';
+  } else if (mainDigits.length <= 3) {
+    formatted = `(${mainDigits}`;
+  } else if (mainDigits.length <= 6) {
+    formatted = `(${mainDigits.slice(0, 3)}) ${mainDigits.slice(3)}`;
+  } else {
+    formatted = `(${mainDigits.slice(0, 3)}) ${mainDigits.slice(3, 6)}-${mainDigits.slice(6, 10)}`;
+  }
+
+  if (hasExtTrigger || ext) {
+    formatted += ` x${ext || ''}`;
+  }
+  return formatted;
+};
+
+export const sanitizeDataName = (raw) =>
+  String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 50);
+
+export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
+  const id = text(item.id) || `field_${Date.now()}_${index}`;
+  const rawType = text(item.field_type || item.type).toLowerCase();
+  const fieldType = ENTERED_FIELD_KINDS.includes(rawType) ? rawType : 'text';
+  const isNonData = isNonDataField(fieldType);
+  const isMarkdown = fieldType === 'markdown';
+  const isDivider = fieldType === 'divider';
+
+  let dataName = sanitizeDataName(item.data_name || item.name || '');
+  if (!isNonData && !dataName) {
+    dataName = `field_${index + 1}`;
+  }
+
+  const caption = text(item.caption || item.label);
+  if (!isNonData && !caption) {
+    throw new Error(`Field #${index + 1} needs a caption/label.`);
+  }
+
+  const rawSpan = Number.parseInt(item.col_span ?? item.colSpan ?? 3, 10);
+  const colSpan = Number.isFinite(rawSpan) && rawSpan >= 1 && rawSpan <= 3 ? rawSpan : 3;
+
+  const rawOptions = Array.isArray(item.options)
+    ? item.options
+    : typeof item.options === 'string'
+    ? item.options.split('\n')
+    : [];
+  const options = rawOptions.map((opt) => String(opt ?? '').trim()).filter(Boolean);
+
+  const validation = {};
+  if (item.validation && typeof item.validation === 'object') {
+    if (Number.isFinite(item.validation.min)) validation.min = Number(item.validation.min);
+    if (Number.isFinite(item.validation.max)) validation.max = Number(item.validation.max);
+    if (text(item.validation.pattern)) validation.pattern = text(item.validation.pattern);
+    if (text(item.validation.custom_hint)) validation.custom_hint = text(item.validation.custom_hint);
+  }
+
+  return {
+    id,
+    data_name: isNonData ? '' : dataName,
+    caption: isMarkdown ? 'Instructions' : isDivider ? (caption || 'Divider') : caption,
+    field_type: fieldType,
+    col_span: colSpan,
+    required: isNonData ? false : Boolean(item.required),
+    default_value: isNonData ? '' : item.default_value !== undefined ? item.default_value : '',
+    placeholder: text(item.placeholder),
+    instructions: isMarkdown ? '' : text(item.instructions || item.help_text || item.instruction_text),
+    options,
+    validation,
+    markdown_content: isMarkdown ? String(item.markdown_content || item.content || '') : '',
+  };
+};
+
+// Normalizes signature values from either raw data URL strings or objects with timestamp metadata
+export const parseSignatureValue = (value) => {
+  if (!value) return { image: '', signed_at: null, readable_time: '' };
+  if (typeof value === 'string') {
+    return { image: value, signed_at: null, readable_time: '' };
+  }
+  if (typeof value === 'object') {
+    const image = value.image || value.dataUrl || '';
+    const signed_at = value.signed_at || value.timestamp || null;
+    let readable_time = value.readable_time || '';
+    if (!readable_time && signed_at) {
+      try {
+        readable_time = new Date(signed_at).toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+      } catch {
+        readable_time = '';
+      }
+    }
+    return { image, signed_at, readable_time };
+  }
+  return { image: '', signed_at: null, readable_time: '' };
+};
+
+export const validateFormSubmission = (layout = [], answers = {}) => {
+  const errors = {};
+  const data = {};
+  const items = Array.isArray(layout) ? layout : Array.isArray(layout?.layout) ? layout.layout : [];
+
+  items.forEach((item, index) => {
+    if (isNonDataField(item.field_type)) return;
+    const name = item.data_name || `field_${index + 1}`;
+    const value = answers[name];
+
+    if (item.required) {
+      const isEmpty =
+        value === undefined ||
+        value === null ||
+        (typeof value === 'string' && value.trim() === '') ||
+        (item.field_type === 'checkbox' && value !== true) ||
+        (item.field_type === 'signature' &&
+          (typeof value === 'object'
+            ? !value?.image && !value?.dataUrl
+            : typeof value === 'string'
+            ? value.trim() === ''
+            : !value)) ||
+        (item.field_type === 'signature_stamp' &&
+          (!value || typeof value !== 'object' || (!value.stamped && !value.signed))) ||
+        (Array.isArray(value) && value.length === 0);
+      if (isEmpty) {
+        errors[name] = `${item.caption || name} is required.`;
+        return;
+      }
+    }
+
+    if (value !== undefined && value !== null && value !== '') {
+      if (item.field_type === 'number') {
+        const num = Number(value);
+        if (!Number.isFinite(num)) {
+          errors[name] = `${item.caption} must be a valid number.`;
+        } else {
+          if (item.validation?.min !== undefined && num < item.validation.min) {
+            errors[name] = `${item.caption} must be at least ${item.validation.min}.`;
+          }
+          if (item.validation?.max !== undefined && num > item.validation.max) {
+            errors[name] = `${item.caption} must be at most ${item.validation.max}.`;
+          }
+        }
+      }
+
+      if (item.validation?.pattern && typeof value === 'string') {
+        try {
+          const regex = new RegExp(item.validation.pattern);
+          if (!regex.test(value)) {
+            errors[name] = item.validation.custom_hint || `${item.caption} is not in the required format.`;
+          }
+        } catch {
+          // ignore invalid pattern regex
+        }
+      }
+    }
+
+    data[name] = value ?? '';
+  });
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+    data,
+  };
+};
+
 // Validate and normalise a definition, throwing on the first problem with a message that names it - the same contract
 // report definitions have, so an admin screen shows `error.message` unchanged.
 export const normalizeFormDefinition = (input = {}) => {
   const name = text(input.name);
   const description = text(input.description);
+  const formType = text(input.form_type).toLowerCase() === 'entered' ? 'entered' : 'generated';
+
+  if (name.length < 2 || name.length > 80) throw new Error('A form name is 2 to 80 characters.');
+  if (description.length > 300) throw new Error('A form description is 300 characters or fewer.');
+
+  const audienceAll = input.audience_all === true;
+  const audienceRoleIds = audienceAll ? [] : [...new Set((input.audience_role_ids || []).map((id) => String(id)))];
+  const audienceRankIds = audienceAll ? [] : [...new Set((input.audience_rank_ids || []).map((id) => String(id)))];
+  const audienceKeys = formAudienceKeys({ all: audienceAll, roleIds: audienceRoleIds, rankIds: audienceRankIds });
+  if (!audienceKeys.length) throw new Error('Choose who may generate this form.');
+
+  if (formType === 'entered') {
+    const rawLayout = Array.isArray(input.layout) ? input.layout : [];
+    if (!rawLayout.length) throw new Error('An entered form needs at least one field or instruction.');
+
+    const layout = rawLayout.map((item, idx) => normalizeEnteredFieldItem(item, idx));
+    const fieldsSchema = {};
+    layout.forEach((item) => {
+      if (item.data_name) fieldsSchema[item.data_name] = item;
+    });
+
+    return {
+      name,
+      description,
+      form_type: 'entered',
+      layout,
+      fields_schema: fieldsSchema,
+      fields: fieldsSchema, // satisfy rules checking fields.size() > 0 if required
+      enabled: input.enabled !== false,
+      allow_editing_after_submission: Boolean(input.allow_editing_after_submission),
+      audience_all: audienceAll,
+      audience_role_ids: audienceRoleIds,
+      audience_rank_ids: audienceRankIds,
+      audience_keys: audienceKeys,
+    };
+  }
+
+  // Generated form
   const source = text(input.source);
   const templateId = text(input.template && input.template.id);
   const fields = input.fields && typeof input.fields === 'object' && !Array.isArray(input.fields) ? input.fields : null;
 
-  if (name.length < 2 || name.length > 80) throw new Error('A form name is 2 to 80 characters.');
-  if (description.length > 300) throw new Error('A form description is 300 characters or fewer.');
   if (!sourceFor(source)) throw new Error('Choose a data source for this form.');
   if (!templateId) throw new Error('Choose the blank PDF this form fills.');
   if (!fields || !Object.keys(fields).length) throw new Error('Map at least one PDF field to a value.');
@@ -153,15 +400,10 @@ export const normalizeFormDefinition = (input = {}) => {
     mapped[fieldName] = { from, as, ...(spec.fallback === undefined ? {} : { fallback: String(spec.fallback) }) };
   });
 
-  const audienceAll = input.audience_all === true;
-  const audienceRoleIds = audienceAll ? [] : [...new Set((input.audience_role_ids || []).map((id) => String(id)))];
-  const audienceRankIds = audienceAll ? [] : [...new Set((input.audience_rank_ids || []).map((id) => String(id)))];
-  const audienceKeys = formAudienceKeys({ all: audienceAll, roleIds: audienceRoleIds, rankIds: audienceRankIds });
-  if (!audienceKeys.length) throw new Error('Choose who may generate this form.');
-
   return {
     name,
     description,
+    form_type: 'generated',
     source,
     template: { id: templateId },
     fields: mapped,

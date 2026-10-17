@@ -19,7 +19,18 @@ import reporting from '../functions/reporting.js';
 import { summarizeTrainingByCategory, categoryPairsFrom } from '../src/utils/trainingSummary.js';
 import { readFrom, resolveFormValues } from '../src/utils/formValues.js';
 import { listFormFields, fillPdfForm } from '../src/utils/formFill.js';
-import { normalizeFormDefinition, formAudienceKeys, groupLinkages, sourceFor, sourceLinkages } from '../src/utils/formDefinition.js';
+import {
+  normalizeFormDefinition,
+  formAudienceKeys,
+  groupLinkages,
+  sourceFor,
+  sourceLinkages,
+  formatPhoneNumber,
+  isNonDataField,
+  normalizeEnteredFieldItem,
+  parseSignatureValue,
+  validateFormSubmission,
+} from '../src/utils/formDefinition.js';
 import { generateForm, buildFormContext } from '../src/utils/generateForm.js';
 import { findFormBlank, loadBundledBlank } from '../src/utils/formCatalog.js';
 import { formPdfFileName } from '../src/utils/formExport.js';
@@ -390,6 +401,124 @@ check(
   new Set(groupLinkages(offered).map((group) => group.group)).size
 );
 checkIs('every path carries a label to show beside it', offered.every((linkage) => !!linkage.label));
+
+// --- entered forms enhancements: telephone, divider, signatures ---
+console.log('\n--- entered forms: telephone, divider, signatures ---');
+
+// Telephone formatting
+check('formats a 10-digit number', formatPhoneNumber('5551234567'), '(555) 123-4567');
+check('formats number with extension', formatPhoneNumber('5551234567x890'), '(555) 123-4567 x890');
+check('formats number with ext keyword', formatPhoneNumber('555-123-4567 ext 12345'), '(555) 123-4567 x12345');
+check('leaves short number partially formatted', formatPhoneNumber('55512'), '(555) 12');
+
+// Non-data fields
+checkIs('divider is a non-data field', isNonDataField('divider'), true);
+checkIs('markdown is a non-data field', isNonDataField('markdown'), true);
+checkIs('text is a data field', !isNonDataField('text'), true);
+checkIs('tel is a data field', !isNonDataField('tel'), true);
+checkIs('signature is a data field', !isNonDataField('signature'), true);
+checkIs('signature_stamp is a data field', !isNonDataField('signature_stamp'), true);
+
+// Field normalization
+const normalizedDivider = normalizeEnteredFieldItem({ field_type: 'divider', caption: 'Section A' });
+check('divider allows empty data_name', normalizedDivider.data_name, '');
+check('divider preserves caption', normalizedDivider.caption, 'Section A');
+
+const normalizedTel = normalizeEnteredFieldItem({ field_type: 'tel', caption: 'Callback #', data_name: 'phone' });
+check('tel normalizes field type', normalizedTel.field_type, 'tel');
+
+const normalizedSig = normalizeEnteredFieldItem({ field_type: 'signature', caption: 'Member Sig', data_name: 'sig_1' });
+check('signature normalizes field type', normalizedSig.field_type, 'signature');
+
+// Validation
+const formWithSignatures = {
+  layout: [
+    { field_type: 'divider', caption: 'Header', col_span: 3 },
+    { field_type: 'tel', caption: 'Phone', data_name: 'phone', required: true },
+    { field_type: 'signature', caption: 'Drawn Sig', data_name: 'signature_draw', required: true },
+    { field_type: 'signature_stamp', caption: 'Digital Stamp', data_name: 'sig_stamp', required: true },
+  ],
+};
+
+const emptySubmission = validateFormSubmission(formWithSignatures, {});
+checkIs('validates required phone', Boolean(emptySubmission.errors.phone));
+checkIs('validates required signature', Boolean(emptySubmission.errors.signature_draw));
+checkIs('validates required stamp', Boolean(emptySubmission.errors.sig_stamp));
+checkIs('divider has no validation error', emptySubmission.errors.divider === undefined);
+
+const validSubmission = validateFormSubmission(formWithSignatures, {
+  phone: '(555) 123-4567',
+  signature_draw: 'data:image/png;base64,iVBORw0KGgo...',
+  sig_stamp: { stamped: true, name: 'Chief Test', timestamp: new Date().toISOString() },
+});
+check('valid submission has zero errors', Object.keys(validSubmission.errors).length, 0);
+
+// Signature with automatic date timestamp metadata
+const validSubmissionWithObjectSig = validateFormSubmission(formWithSignatures, {
+  phone: '(555) 123-4567',
+  signature_draw: {
+    image: 'data:image/png;base64,iVBORw0KGgo...',
+    signed_at: '2026-10-17T17:45:00.000Z',
+    readable_time: 'Oct 17, 2026, 1:45 PM',
+  },
+  sig_stamp: { stamped: true, name: 'Chief Test', timestamp: new Date().toISOString() },
+});
+check('valid submission with signature object has zero errors', Object.keys(validSubmissionWithObjectSig.errors).length, 0);
+
+// parseSignatureValue handles null, string, and object formats
+check('parseSignatureValue on null', parseSignatureValue(null), { image: '', signed_at: null, readable_time: '' });
+check('parseSignatureValue on string', parseSignatureValue('data:image/png;base64,abc'), {
+  image: 'data:image/png;base64,abc',
+  signed_at: null,
+  readable_time: '',
+});
+const parsedSigObj = parseSignatureValue({
+  image: 'data:image/png;base64,abc',
+  signed_at: '2026-10-17T17:45:00.000Z',
+  readable_time: 'Oct 17, 2026, 1:45 PM',
+});
+check('parseSignatureValue on object', parsedSigObj, {
+  image: 'data:image/png;base64,abc',
+  signed_at: '2026-10-17T17:45:00.000Z',
+  readable_time: 'Oct 17, 2026, 1:45 PM',
+});
+
+// Instructions on fields
+const fieldWithInstructions = normalizeEnteredFieldItem({
+  field_type: 'text',
+  caption: 'Asset Tag',
+  data_name: 'asset_tag',
+  instructions: 'Scan or type the barcode located on the side of the unit.',
+});
+check(
+  'field normalizes instruction text',
+  fieldWithInstructions.instructions,
+  'Scan or type the barcode located on the side of the unit.'
+);
+
+// Editable after submission option on form definition
+const editableFormDef = normalizeFormDefinition({
+  name: 'Pre-Trip Inspection',
+  form_type: 'entered',
+  layout: [{ field_type: 'text', caption: 'Odometer', data_name: 'odometer' }],
+  allow_editing_after_submission: true,
+  audience_all: true,
+});
+checkIs(
+  'entered form preserves allow_editing_after_submission = true',
+  editableFormDef.allow_editing_after_submission === true
+);
+
+const lockedFormDef = normalizeFormDefinition({
+  name: 'Disciplinary Incident',
+  form_type: 'entered',
+  layout: [{ field_type: 'text', caption: 'Details', data_name: 'details' }],
+  audience_all: true,
+});
+checkIs(
+  'entered form defaults allow_editing_after_submission to false',
+  lockedFormDef.allow_editing_after_submission === false
+);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

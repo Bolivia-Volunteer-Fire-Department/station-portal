@@ -214,8 +214,8 @@ export const ROUTED_FEATURES = {
   // Customizable electronic form templates.
   forms: {
     requires: ['memberPayload'],
-    writes: ['SAVE_FORM_TEMPLATE', 'DELETE_FORM_TEMPLATE'],
-    reads: ['GET_FORM_TEMPLATES', 'ADMIN_GET_FORM_TEMPLATES', 'GET_MEMBER_TRAINING'],
+    writes: ['SAVE_FORM_TEMPLATE', 'DELETE_FORM_TEMPLATE', 'SUBMIT_FORM_RESPONSE', 'DELETE_FORM_SUBMISSION'],
+    reads: ['GET_FORM_TEMPLATES', 'ADMIN_GET_FORM_TEMPLATES', 'GET_MEMBER_TRAINING', 'GET_FORM_SUBMISSIONS'],
     switchReads: [],
   },
 
@@ -447,6 +447,24 @@ const DISPATCH = {
   DELETE_FORM_TEMPLATE: async (body) => {
     const { deleteFormTemplate } = await writes();
     return ok(await deleteFormTemplate({ id: body?.id || body?.formId }));
+  },
+
+  SUBMIT_FORM_RESPONSE: async (body, uid) => {
+    const { submitFormResponse } = await writes();
+    return ok(
+      await submitFormResponse({
+        id: body?.id || body?.submissionId,
+        formTemplateId: body?.formTemplateId || body?.form_template_id,
+        formTemplateName: body?.formTemplateName || body?.form_template_name,
+        data: body?.data,
+        submittedByUid: uid,
+        submittedByName: body?.submittedByName || body?.submitted_by_name,
+      })
+    );
+  },
+  DELETE_FORM_SUBMISSION: async (body) => {
+    const { deleteFormSubmission } = await writes();
+    return ok(await deleteFormSubmission({ id: body?.id || body?.submissionId }));
   },
 
   ADMIN_SAVE_MAP_LAYER: async (body, uid) => {

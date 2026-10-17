@@ -11,6 +11,7 @@ import {
   ListChecks,
   Loader2,
   PenLine,
+  Printer,
   Save,
   Search,
   ShieldCheck,
@@ -33,6 +34,7 @@ import { toast } from '../utils/toast';
 import ConfirmModal from './ConfirmModal';
 import Markdown from './Markdown';
 import PreIncidentPlanView from './PreIncidentPlanView';
+import PrintableDocument from './PrintableDocument';
 import PrintablePreIncidentPlan from './PrintablePreIncidentPlan';
 import { cachedPreIncidentPlans, cachePreIncidentPlans } from '../utils/preIncidentPlans';
 import {
@@ -442,6 +444,7 @@ export default function DocumentsModule({
   const [documents, setDocuments] = useState([]);
   const [preplans, setPreplans] = useState(() => cachedPreIncidentPlans());
   const [printingPreplan, setPrintingPreplan] = useState(null);
+  const [printingDocument, setPrintingDocument] = useState(null);
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -1356,17 +1359,33 @@ export default function DocumentsModule({
                       {viewerError && <p className="mt-0.5 font-medium">{viewerError}</p>}
                     </div>
                   )}
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">{openDocument.title}</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {openDocument.folder || 'Unfiled'}
-                    {documentUpdatedLabel(openDocument, timeFormat)
-                      ? ` · ${documentUpdatedLabel(openDocument, timeFormat)}`
-                      : ''}
-                    {openDocument.preplan ? ' · Pre-Incident Plan' : ''}
-                    {isChecklist(openDocument) ? ' · Checklist' : ''}
-                    {isLink(openDocument) ? ' · Link' : ''}
-                    {documentIsAssessment ? ' · Assessment' : ''}
-                  </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white">{openDocument.title}</h2>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {openDocument.folder || 'Unfiled'}
+                        {documentUpdatedLabel(openDocument, timeFormat)
+                          ? ` · ${documentUpdatedLabel(openDocument, timeFormat)}`
+                          : ''}
+                        {openDocument.preplan ? ' · Pre-Incident Plan' : ''}
+                        {isChecklist(openDocument) ? ' · Checklist' : ''}
+                        {isLink(openDocument) ? ' · Link' : ''}
+                        {documentIsAssessment ? ' · Assessment' : ''}
+                      </p>
+                    </div>
+
+                    {!openDocument.preplan && !isLink(openDocument) && (
+                      <button
+                        type="button"
+                        onClick={() => setPrintingDocument(openDocument)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition shadow-sm shrink-0"
+                        title="Print document"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                        <span>Print</span>
+                      </button>
+                    )}
+                  </div>
 
                   {openDocument.preplan ? (
                     <div className="mt-4">
@@ -1792,6 +1811,15 @@ export default function DocumentsModule({
           plan={printingPreplan}
           stationName={stationName}
           onDone={() => setPrintingPreplan(null)}
+        />
+      )}
+
+      {printingDocument && (
+        <PrintableDocument
+          document={printingDocument}
+          departmentName={stationName}
+          timeFormat={timeFormat}
+          onDone={() => setPrintingDocument(null)}
         />
       )}
     </div>

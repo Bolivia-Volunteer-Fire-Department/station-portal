@@ -714,3 +714,11 @@ html.dark .splash-shimmer::before {
     top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
   }
 }
+
+/* E-signatures drawn in black ink inverted for dark mode readability, preserving black ink for exports/prints */
+.signature-invert-dark {
+  filter: none;
+}
+html.dark .signature-invert-dark {
+  filter: invert(1);
+}

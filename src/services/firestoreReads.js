@@ -686,6 +686,29 @@ export const READERS = {
       String(left.name || '').localeCompare(String(right.name || ''))
     ),
   }),
+  // Reads submitted entered forms.
+  GET_FORM_SUBMISSIONS: async (uid) => {
+    let docs = [];
+    try {
+      const snapshot = await getDocs(collection(firestore(), 'form_submissions'));
+      docs = snapshot.docs;
+    } catch {
+      try {
+        const userQuery = query(
+          collection(firestore(), 'form_submissions'),
+          where('submitted_by_uid', '==', String(uid || ''))
+        );
+        const userSnap = await getDocs(userQuery);
+        docs = userSnap.docs;
+      } catch {
+        docs = [];
+      }
+    }
+    const submissions = docs
+      .map((row) => ({ id: row.id, ...row.data() }))
+      .sort((a, b) => String(b.submitted_at || '').localeCompare(String(a.submitted_at || '')));
+    return { submissions };
+  },
   // Reads a member's completed training records.
   GET_MEMBER_TRAINING: async (uid, body) => {
     const subject = String((body && body.userId) || '').trim() || uid;

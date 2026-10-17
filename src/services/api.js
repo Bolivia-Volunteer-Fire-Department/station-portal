@@ -170,6 +170,20 @@ export const saveFormTemplate = (request) => routeWrite('SAVE_FORM_TEMPLATE', re
 // Deletes a form template.
 export const deleteFormTemplate = (formId) => routeWrite('DELETE_FORM_TEMPLATE', { id: String(formId || '') });
 
+// Submits an entered form response.
+export const submitFormResponse = (request) => routeWrite('SUBMIT_FORM_RESPONSE', request || {});
+
+// Fetches all form submissions for administrators.
+export const fetchFormSubmissions = async () => {
+  const response = await routeRead('GET_FORM_SUBMISSIONS');
+  if (!response?.success) throw await notAnswered('GET_FORM_SUBMISSIONS');
+  return Array.isArray(response.submissions) ? response.submissions : [];
+};
+
+// Deletes a form submission.
+export const deleteFormSubmission = (submissionId) =>
+  routeWrite('DELETE_FORM_SUBMISSION', { id: String(submissionId || '') });
+
 // Fetches the custom SVG drawing of the district boundary.
 export const fetchMapLayer = () => dispatchRequest({ action: 'GET_MAP_LAYER' });
 

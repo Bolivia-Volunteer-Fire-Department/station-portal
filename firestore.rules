@@ -520,10 +520,28 @@ service cloud.firestore {
           || (resource != null && resource.data.get('audience_keys', []).hasAny(viewerKeys())));
       allow create, update: if permission('can_configure_forms')
         && request.resource.data.get('name', '') != ''
-        && request.resource.data.get('fields', {}).size() > 0
+        && (request.resource.data.get('fields', {}).size() > 0
+          || request.resource.data.get('layout', []).size() > 0
+          || request.resource.data.get('fields_schema', {}).size() > 0)
         // A form aims at someone: an empty audience would be readable by nobody, which is a definition to fix rather
         // than to save.
         && request.resource.data.get('audience_keys', []).size() > 0;
+      allow delete: if permission('can_configure_forms');
+    }
+
+    match /form_submissions/{submissionId} {
+      allow read: if signedIn()
+        && (permission('can_configure_forms')
+          || (resource != null && resource.data.submitted_by_uid == request.auth.uid));
+      allow create: if signedIn()
+        && (permission('can_generate_forms') || permission('can_configure_forms'))
+        && request.resource.data.submitted_by_uid == request.auth.uid
+        && request.resource.data.get('form_template_id', '') != '';
+      allow update: if signedIn()
+        && (permission('can_configure_forms')
+          || (resource != null
+            && resource.data.submitted_by_uid == request.auth.uid
+            && request.resource.data.submitted_by_uid == request.auth.uid));
       allow delete: if permission('can_configure_forms');
     }
 

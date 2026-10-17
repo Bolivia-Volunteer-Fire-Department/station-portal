@@ -42,10 +42,9 @@ To see what you have access to, click your name at the top of the sidebar to ope
 
 ## About this app
 
-This app was originally created for the Bolivia Fire Department in Bolivia, North Carolina.
 
 ### Version 1.7x
-* Added **Equipment** and **Apparatuses**
+* Added **Equipment** and **Apparatuses**.
 * Revamped how Documents are organized in the Administration module.
 * Added formatting enhancements to the Markdown engine.
 * Migrated the Timeclock module to a new **Dashboard** module, which is a customizable widget-based dashboard module.
@@ -55,6 +54,7 @@ This app was originally created for the Bolivia Fire Department in Bolivia, Nort
 * Set sibling shift offers to automatically decline when one is accepted.
 * Added **Work Orders**.
 * Refined what text was selectable in the app overall.
+* Added **configurable forms** that administrators can design for end users to complete.
 
 ### Version 1.6x
 * Added the **District Map** module.
