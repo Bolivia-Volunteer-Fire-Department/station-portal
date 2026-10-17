@@ -35,7 +35,15 @@ const FIELD_CLASS =
 const toggleId = (values, id) =>
   values.includes(id) ? values.filter((value) => value !== id) : [...values, id];
 
-export default function AdminFormsTab({ roles = [], ranks = [] }) {
+export default function AdminFormsTab({
+  roles = [],
+  ranks = [],
+  departmentName = '',
+  departmentLogoUrl = '',
+  currentUser = null,
+  currentUserName = '',
+  currentUserId = '',
+}) {
   const [activeSubTab, setActiveSubTab] = useState('templates');
   const [forms, setForms] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -223,7 +231,14 @@ export default function AdminFormsTab({ roles = [], ranks = [] }) {
       </div>
 
       {activeSubTab === 'submissions' ? (
-        <AdminSubmissionsTab formTemplates={forms} />
+        <AdminSubmissionsTab
+          formTemplates={forms}
+          departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
+          currentUser={currentUser}
+          currentUserName={currentUserName}
+          currentUserId={currentUserId}
+        />
       ) : (
         <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">

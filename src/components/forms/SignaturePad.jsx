@@ -32,6 +32,9 @@ export default function SignaturePad({
     if (canvas.width === targetWidth && canvas.height === targetHeight) {
       return;
     }
+    if (hasDrawn && canvas.width > 0) {
+      return;
+    }
 
     canvas.width = targetWidth;
     canvas.height = targetHeight;
@@ -117,9 +120,16 @@ export default function SignaturePad({
     lastPointRef.current = { x, y };
   };
 
+  // Pointer lift stops the current stroke without saving so the member
+  // can draw cursive letters, cross t's, and lift their stylus freely.
   const handlePointerUp = () => {
     if (!isDrawing) return;
     setIsDrawing(false);
+  };
+
+  // Explicit save action triggered by the button
+  const handleSave = () => {
+    if (disabled || !hasDrawn) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -196,9 +206,9 @@ export default function SignaturePad({
         )}
       </div>
 
-      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
-        <span className="flex items-center gap-1.5">
-          {signatureImage || hasDrawn ? (
+      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1 min-h-[32px]">
+        {signatureImage ? (
+          <>
             <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
               <Check className="h-3.5 w-3.5" />
               <span>
@@ -206,21 +216,45 @@ export default function SignaturePad({
                 {signedDate ? ` • Signed on ${signedDate}` : ''}
               </span>
             </span>
-          ) : (
-            <span className="inline-flex items-center gap-1">
-              <Edit3 className="h-3.5 w-3.5" /> Draw using finger, stylus, or mouse
-            </span>
-          )}
-        </span>
 
-        {!disabled && (signatureImage || hasDrawn) && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-semibold"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Clear / Redraw
-          </button>
+            {!disabled && (
+              <button
+                type="button"
+                onClick={handleClear}
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-semibold"
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Clear / Redraw
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="inline-flex items-center gap-1.5">
+              <Edit3 className={`h-3.5 w-3.5 ${hasDrawn ? 'text-blue-500' : 'text-slate-400'}`} />
+              <span className={hasDrawn ? 'text-slate-700 dark:text-slate-200 font-medium' : ''}>
+                {hasDrawn ? 'Click Save to apply signature' : 'Draw using finger, stylus, or mouse'}
+              </span>
+            </span>
+
+            {!disabled && hasDrawn && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-medium"
+                >
+                  <RotateCcw className="h-3 w-3" /> Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 text-xs font-semibold shadow-xs transition"
+                >
+                  <Check className="h-3.5 w-3.5" /> Save Signature
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

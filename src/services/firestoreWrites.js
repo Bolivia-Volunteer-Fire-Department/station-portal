@@ -874,6 +874,45 @@ export const deleteFormSubmission = async ({ id } = {}) => {
   return { id: wanted };
 };
 
+// Sets administrative lock on a form submission to prevent further edits.
+export const setFormSubmissionLock = async ({
+  id,
+  locked = true,
+  lockedByUid = '',
+  lockedByName = '',
+} = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which submission?');
+  const submissionRef = doc(firestore(), 'form_submissions', wanted);
+  const timestamp = stationTimestamp();
+  const readableTime = new Date().toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  const payload = locked
+    ? {
+        locked: true,
+        locked_by_uid: String(lockedByUid || '').trim(),
+        locked_by_name: String(lockedByName || '').trim() || 'Administrator',
+        locked_at: timestamp,
+        locked_readable_time: readableTime,
+      }
+    : {
+        locked: false,
+        unlocked_by_uid: String(lockedByUid || '').trim(),
+        unlocked_by_name: String(lockedByName || '').trim() || 'Administrator',
+        unlocked_at: timestamp,
+      };
+
+  await setDoc(submissionRef, payload, { merge: true });
+  return { id: wanted, ...payload };
+};
+
+
 // Saves the drawing layer SVG for the district map.
 export const saveMapLayer = async ({ svg, authorId = '' } = {}) => {
   const text = String(svg ?? '');

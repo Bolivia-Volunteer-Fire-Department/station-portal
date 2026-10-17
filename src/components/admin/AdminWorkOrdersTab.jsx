@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Wrench,
   Plus,
@@ -90,6 +90,9 @@ export default function AdminWorkOrdersTab({
   users = [],
   roles = [],
   onDataChanged,
+  initialWorkOrderId = null,
+  initialWorkOrder = null,
+  onClearInitialWorkOrder = null,
 }) {
   const [internalUsers, setInternalUsers] = useState([]);
   const [internalRoles, setInternalRoles] = useState([]);
@@ -345,6 +348,57 @@ export default function AdminWorkOrdersTab({
     setNewNoteText('');
     setEditorOpen(true);
   };
+
+  // Automatically open the editor if an initial work order or ID was requested
+  const lastOpenedWorkOrderIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!initialWorkOrder && !initialWorkOrderId) {
+      lastOpenedWorkOrderIdRef.current = null;
+      return;
+    }
+
+    if (initialWorkOrder && initialWorkOrder.id) {
+      if (lastOpenedWorkOrderIdRef.current !== initialWorkOrder.id) {
+        lastOpenedWorkOrderIdRef.current = initialWorkOrder.id;
+        openEditor(initialWorkOrder);
+        onClearInitialWorkOrder?.();
+      }
+      return;
+    }
+
+    if (initialWorkOrderId && workOrdersList.length > 0) {
+      if (lastOpenedWorkOrderIdRef.current !== initialWorkOrderId) {
+        const found = workOrdersList.find((wo) => String(wo.id) === String(initialWorkOrderId));
+        if (found) {
+          lastOpenedWorkOrderIdRef.current = initialWorkOrderId;
+          openEditor(found);
+          onClearInitialWorkOrder?.();
+        }
+      }
+    }
+  }, [initialWorkOrder, initialWorkOrderId, workOrdersList, onClearInitialWorkOrder]);
+
+  // Keep editor formData updated if fresh notes or files load for the open ticket
+  useEffect(() => {
+    if (editorOpen && formData.id && workOrdersList.length > 0) {
+      const match = workOrdersList.find((wo) => String(wo.id) === String(formData.id));
+      if (match) {
+        const matchNotesLen = Array.isArray(match.notes) ? match.notes.length : 0;
+        const formNotesLen = Array.isArray(formData.notes) ? formData.notes.length : 0;
+        const matchFilesLen = Array.isArray(match.files) ? match.files.length : 0;
+        const formFilesLen = Array.isArray(formData.files) ? formData.files.length : 0;
+        if (matchNotesLen > formNotesLen || matchFilesLen > formFilesLen) {
+          setFormData((prev) => ({
+            ...prev,
+            ...match,
+            notes: Array.isArray(match.notes) ? match.notes : prev.notes,
+            files: Array.isArray(match.files) ? match.files : prev.files,
+          }));
+        }
+      }
+    }
+  }, [workOrdersList, editorOpen, formData.id]);
 
   // Save full form
   const handleSaveForm = async (e) => {

@@ -184,6 +184,15 @@ export const fetchFormSubmissions = async () => {
 export const deleteFormSubmission = (submissionId) =>
   routeWrite('DELETE_FORM_SUBMISSION', { id: String(submissionId || '') });
 
+// Sets or clears the administrative lock on a form submission.
+export const lockFormSubmission = ({ id, locked = true, lockedByName = '' } = {}) =>
+  routeWrite('ADMIN_LOCK_FORM_SUBMISSION', {
+    id: String(id || ''),
+    locked: locked !== false,
+    lockedByName: String(lockedByName || '').trim(),
+  });
+
+
 // Fetches the custom SVG drawing of the district boundary.
 export const fetchMapLayer = () => dispatchRequest({ action: 'GET_MAP_LAYER' });
 

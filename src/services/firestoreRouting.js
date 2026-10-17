@@ -214,7 +214,13 @@ export const ROUTED_FEATURES = {
   // Customizable electronic form templates.
   forms: {
     requires: ['memberPayload'],
-    writes: ['SAVE_FORM_TEMPLATE', 'DELETE_FORM_TEMPLATE', 'SUBMIT_FORM_RESPONSE', 'DELETE_FORM_SUBMISSION'],
+    writes: [
+      'SAVE_FORM_TEMPLATE',
+      'DELETE_FORM_TEMPLATE',
+      'SUBMIT_FORM_RESPONSE',
+      'DELETE_FORM_SUBMISSION',
+      'ADMIN_LOCK_FORM_SUBMISSION',
+    ],
     reads: ['GET_FORM_TEMPLATES', 'ADMIN_GET_FORM_TEMPLATES', 'GET_MEMBER_TRAINING', 'GET_FORM_SUBMISSIONS'],
     switchReads: [],
   },
@@ -465,6 +471,17 @@ const DISPATCH = {
   DELETE_FORM_SUBMISSION: async (body) => {
     const { deleteFormSubmission } = await writes();
     return ok(await deleteFormSubmission({ id: body?.id || body?.submissionId }));
+  },
+  ADMIN_LOCK_FORM_SUBMISSION: async (body, uid) => {
+    const { setFormSubmissionLock } = await writes();
+    return ok(
+      await setFormSubmissionLock({
+        id: body?.id || body?.submissionId,
+        locked: body?.locked !== false,
+        lockedByUid: uid,
+        lockedByName: body?.lockedByName || body?.locked_by_name || 'Administrator',
+      })
+    );
   },
 
   ADMIN_SAVE_MAP_LAYER: async (body, uid) => {

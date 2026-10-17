@@ -172,6 +172,9 @@ export default function AdminPanel({
   hideEventsByDefault = false,
   colorblindRankLabels = false,
   workOrders = [],
+  initialWorkOrderId = null,
+  initialWorkOrder = null,
+  onClearInitialWorkOrder = null,
 }) {
   const pendingApprovalsCount = pendingOffersOnly(offers).length;
   const activeWorkOrdersCount = useMemo(
@@ -554,7 +557,15 @@ export default function AdminPanel({
       )}
 
       {activeSubTab === 'forms-config' && (
-        <AdminFormsTab roles={roles} ranks={ranks} />
+        <AdminFormsTab
+          roles={roles}
+          ranks={ranks}
+          departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
+          currentUser={currentUser}
+          currentUserName={currentUserName}
+          currentUserId={currentUserId}
+        />
       )}
 
       {activeSubTab === 'notifications' && (
@@ -688,6 +699,9 @@ export default function AdminPanel({
           users={nameRows}
           roles={roles}
           onDataChanged={onDataChanged}
+          initialWorkOrderId={initialWorkOrderId}
+          initialWorkOrder={initialWorkOrder}
+          onClearInitialWorkOrder={onClearInitialWorkOrder}
         />
       )}
 

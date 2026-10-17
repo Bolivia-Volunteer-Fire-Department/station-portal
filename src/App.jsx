@@ -359,6 +359,8 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   const [showPageLabel, setShowPageLabel] = useState(false);
   // The open Administration sub-tab, reported up by AdminPanel so the bar can say "Admin: Schedule Mgt"
   const [adminSubTab, setAdminSubTab] = useState('');
+  const [initialWorkOrderId, setInitialWorkOrderId] = useState(null);
+  const [initialWorkOrder, setInitialWorkOrder] = useState(null);
 
   // Determines whether the current screen fits within the viewport.
   const boundedScreen = activeTab === 'help' || activeTab === 'documents' || (activeTab === 'admin' && adminSubTab === 'help');
@@ -1511,10 +1513,21 @@ const getLoadingMessage = () => {
     resetSoundVolumes();
   };
 
-  // Every navigation through the sidebar
-  const handleSidebarNavigate = (tab) => {
-    if (tab === 'admin') setAdminSubTab('');
-    setActiveTab(tab);
+  // Every navigation through the sidebar or dashboard widgets
+  const handleSidebarNavigate = (tab, subTab = '', options = null) => {
+    const targetTab = tab === 'administration' ? 'admin' : tab;
+    if (targetTab === 'admin') {
+      setAdminSubTab(subTab || '');
+    }
+    const resolvedOpts = typeof options === 'object' && options !== null ? options : {};
+    if (resolvedOpts.workOrderId || resolvedOpts.initialWorkOrderId || resolvedOpts.initialWorkOrder) {
+      setInitialWorkOrderId(resolvedOpts.workOrderId || resolvedOpts.initialWorkOrderId || resolvedOpts.initialWorkOrder?.id || null);
+      setInitialWorkOrder(resolvedOpts.initialWorkOrder || null);
+    } else {
+      setInitialWorkOrderId(null);
+      setInitialWorkOrder(null);
+    }
+    setActiveTab(targetTab);
   };
 
   // Ends the session with an explanation, which is the only difference from a normal sign-out
@@ -2501,6 +2514,12 @@ const getLoadingMessage = () => {
                 onRowSaved={applySavedRow}
                 departmentLogoUrl={departmentLogo}
                 workOrders={workOrders}
+                initialWorkOrderId={initialWorkOrderId}
+                initialWorkOrder={initialWorkOrder}
+                onClearInitialWorkOrder={() => {
+                  setInitialWorkOrderId(null);
+                  setInitialWorkOrder(null);
+                }}
               />
             )}
 

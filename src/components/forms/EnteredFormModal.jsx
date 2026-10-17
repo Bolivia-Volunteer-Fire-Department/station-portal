@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { AlertCircle, BadgeCheck, Calendar, CheckCircle2, FileEdit, Loader2, Send, X } from 'lucide-react';
+import { AlertCircle, BadgeCheck, Calendar, CheckCircle2, FileEdit, Loader2, Lock, Printer, Send, X } from 'lucide-react';
 import Markdown from '../Markdown';
 import SignaturePad from './SignaturePad';
+import PrintableFormSubmission from './PrintableFormSubmission';
 import { formatPhoneNumber, parseSignatureValue, validateFormSubmission } from '../../utils/formDefinition';
 import { submitFormResponse } from '../../services/api';
 import { toast } from '../../utils/toast';
@@ -11,10 +12,12 @@ export default function EnteredFormModal({
   form,
   currentUser,
   submission = null,
-  isReadOnly = false,
+  isReadOnly: propIsReadOnly = false,
+  departmentName = '',
   onClose,
   onSubmitted,
 }) {
+  const isReadOnly = Boolean(propIsReadOnly || submission?.locked);
   const [answers, setAnswers] = useState(() => {
     const initial = {};
     (form.layout || []).forEach((item) => {
@@ -33,6 +36,7 @@ export default function EnteredFormModal({
   const [submitting, setSubmitting] = useState(false);
   const [generalError, setGeneralError] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const handleFieldChange = (dataName, value) => {
     if (isReadOnly) return;
@@ -113,13 +117,24 @@ export default function EnteredFormModal({
               )}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPrinting(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+              title="Print form"
+            >
+              <Printer className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+              <span>Print</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         {/* Form Body */}
@@ -136,7 +151,15 @@ export default function EnteredFormModal({
                 ? 'Your updated responses have been safely saved to your record.'
                 : 'Your response has been recorded and safely stored with your member record.'}
             </p>
-            <div className="pt-4">
+            <div className="pt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsPrinting(true)}
+                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+              >
+                <Printer className="h-4 w-4" />
+                Print Submission
+              </button>
               <button
                 type="button"
                 onClick={onClose}
@@ -154,7 +177,14 @@ export default function EnteredFormModal({
               </div>
             )}
 
-            {isReadOnly ? (
+            {submission?.locked ? (
+              <div className="rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/30 p-3.5 flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                <Lock className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>
+                  This form submission was locked by an administrator{submission.locked_by_name ? ` (${submission.locked_by_name}${submission.locked_readable_time ? ` on ${submission.locked_readable_time}` : ''})` : ''}. Further edits are disabled. You are viewing saved responses in read-only mode.
+                </span>
+              </div>
+            ) : isReadOnly ? (
               <div className="rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/30 p-3.5 flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-200">
                 <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
@@ -426,6 +456,16 @@ export default function EnteredFormModal({
 
             {/* Footer actions */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+              {isReadOnly && (
+                <button
+                  type="button"
+                  onClick={() => setIsPrinting(true)}
+                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                >
+                  <Printer className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                  Print
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}
@@ -445,6 +485,24 @@ export default function EnteredFormModal({
               )}
             </div>
           </form>
+        )}
+
+        {isPrinting && (
+          <PrintableFormSubmission
+            submission={
+              submission || {
+                id: 'preview',
+                form_template_id: form?.id,
+                form_template_name: form?.name,
+                submitted_at: new Date().toISOString(),
+                submitted_by_name: currentUser?.name || 'Member',
+                data: answers,
+              }
+            }
+            form={form}
+            departmentName={departmentName}
+            onDone={() => setIsPrinting(false)}
+          />
         )}
       </div>
     </div>

@@ -4,6 +4,7 @@ import {
   Clock,
   AlertTriangle,
   ArrowRight,
+  ChevronRight,
   Loader2,
   CheckCircle2,
   Truck,
@@ -60,6 +61,15 @@ export default function AssignedWorkOrdersWidget({
     loadAssigned();
   }, [loadAssigned]);
 
+  const handleOpenWorkOrder = (wo) => {
+    if (onNavigate) {
+      onNavigate('admin', 'work-orders', {
+        initialWorkOrderId: wo.id,
+        initialWorkOrder: wo,
+      });
+    }
+  };
+
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-xl flex flex-col justify-between h-full">
       <div>
@@ -108,9 +118,12 @@ export default function AssignedWorkOrdersWidget({
               const isUrgent = wo.priority === 'urgent';
 
               return (
-                <div
+                <button
+                  type="button"
                   key={wo.id}
-                  className="py-2.5 first:pt-2 last:pb-1 flex items-start justify-between gap-3 text-xs"
+                  onClick={() => handleOpenWorkOrder(wo)}
+                  className="w-full text-left py-2.5 px-2 first:pt-2 last:pb-1 flex items-start justify-between gap-3 text-xs rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/40 transition cursor-pointer group"
+                  title="Open work order in Administrator view"
                 >
                   <div className="space-y-1 flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -138,7 +151,7 @@ export default function AssignedWorkOrdersWidget({
                       </span>
                     </div>
 
-                    <p className="font-semibold text-slate-900 dark:text-white truncate">
+                    <p className="font-semibold text-slate-900 dark:text-white truncate group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors">
                       {wo.title}
                     </p>
 
@@ -163,7 +176,11 @@ export default function AssignedWorkOrdersWidget({
                       )}
                     </div>
                   </div>
-                </div>
+
+                  <div className="shrink-0 self-center pl-1 text-slate-300 dark:text-slate-600 group-hover:text-red-500 dark:group-hover:text-red-400 group-hover:translate-x-0.5 transition">
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </button>
               );
             })}
           </div>
@@ -174,7 +191,7 @@ export default function AssignedWorkOrdersWidget({
       <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 mt-2">
         <button
           type="button"
-          onClick={() => onNavigate?.('work-orders')}
+          onClick={() => onNavigate?.('admin', 'work-orders')}
           className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition py-1"
         >
           <span>View All Work Orders</span>

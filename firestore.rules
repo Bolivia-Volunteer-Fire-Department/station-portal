@@ -541,7 +541,8 @@ service cloud.firestore {
         && (permission('can_configure_forms')
           || (resource != null
             && resource.data.submitted_by_uid == request.auth.uid
-            && request.resource.data.submitted_by_uid == request.auth.uid));
+            && request.resource.data.submitted_by_uid == request.auth.uid
+            && resource.data.get('locked', false) == false));
       allow delete: if permission('can_configure_forms');
     }
 
