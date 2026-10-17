@@ -361,93 +361,95 @@ export default function PreIncidentPlanView({
             ) : null}
           </dl>
         </div>
+      </div>
 
-        {/* SECTION 3: Fire Protection Systems & Water Supply */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-700 dark:bg-slate-800">
-          <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-sm font-bold uppercase tracking-wider text-slate-900 dark:border-slate-700 dark:text-white">
-            <Droplets className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
-            Fire Protection Systems & Water Supply
-          </h3>
-          <dl className="mt-3 divide-y divide-slate-100 text-xs dark:divide-slate-700/60">
-            <div className="py-2 flex justify-between gap-2">
-              <dt className="text-slate-500 dark:text-slate-400">FDC Locations</dt>
-              <dd className="font-bold text-blue-700 dark:text-blue-300 text-right">{plan.fdc_locations || '—'}</dd>
+      {/* SECTION 3: Fire Protection Systems & Water Supply */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-700 dark:bg-slate-800">
+        <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-sm font-bold uppercase tracking-wider text-slate-900 dark:border-slate-700 dark:text-white">
+          <Droplets className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+          Fire Protection Systems & Water Supply
+        </h3>
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">FDC Locations</div>
+            <div className="mt-1 font-bold text-blue-700 dark:text-blue-300">{plan.fdc_locations || '—'}</div>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Sprinkler Room Location</div>
+            <div className="mt-1 font-semibold text-slate-900 dark:text-white">{plan.sprinkler_room_location || '—'}</div>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Water Supply Information</div>
+            <div className="mt-1 font-medium text-slate-900 dark:text-white">{plan.water_supply_info || '—'}</div>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Needed Fire Flow</div>
+            <div className="mt-1 text-sm font-bold text-slate-900 dark:text-white">
+              {plan.needed_fire_flow ? `${plan.needed_fire_flow.toLocaleString()} GPM` : '—'}
             </div>
-            <div className="py-2 flex justify-between gap-2">
-              <dt className="text-slate-500 dark:text-slate-400">Sprinkler Room Location</dt>
-              <dd className="font-semibold text-slate-900 dark:text-white text-right">{plan.sprinkler_room_location || '—'}</dd>
-            </div>
-            <div className="py-2 flex justify-between gap-2">
-              <dt className="text-slate-500 dark:text-slate-400">Water Supply Information</dt>
-              <dd className="font-medium text-slate-900 dark:text-white text-right">{plan.water_supply_info || '—'}</dd>
-            </div>
-            <div className="py-2 flex justify-between gap-2">
-              <dt className="text-slate-500 dark:text-slate-400">Needed Fire Flow</dt>
-              <dd className="font-bold text-slate-900 dark:text-white">
-                {plan.needed_fire_flow ? `${plan.needed_fire_flow.toLocaleString()} GPM` : '—'}
-              </dd>
-            </div>
-          </dl>
+          </div>
         </div>
+      </div>
 
-        {/* SECTION 4: Nearby Hydrants */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-700 dark:bg-slate-800">
-          <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-sm font-bold uppercase tracking-wider text-slate-900 dark:border-slate-700 dark:text-white">
-            <Droplets className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            Nearby Hydrants ({plan.nearby_hydrants?.length || 0})
-          </h3>
-          {plan.nearby_hydrants && plan.nearby_hydrants.length > 0 ? (
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                    <th className="py-1.5 font-semibold">ID / Tag</th>
-                    <th className="py-1.5 font-semibold">Closest Address</th>
-                    <th className="py-1.5 font-semibold">Distance</th>
-                    <th className="py-1.5 font-semibold">Flow</th>
-                    <th className="py-1.5 font-semibold">Status / Type</th>
-                    <th className="py-1.5 font-semibold">Coordinates</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                  {plan.nearby_hydrants.map((h, i) => {
-                    const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
-                    return (
-                      <tr key={h.id || i}>
-                        <td className="py-2 font-mono font-medium text-slate-900 dark:text-white">{h.id || `#${i + 1}`}</td>
-                        <td className="py-2 text-slate-600 dark:text-slate-300">
-                          <div>{h.address || '—'}</div>
-                          {h.notes ? <div className="text-[10px] italic text-slate-400">{h.notes}</div> : null}
-                        </td>
-                        <td className="py-2 text-slate-600 dark:text-slate-300">{h.distance || '—'}</td>
-                        <td className="py-2 font-semibold text-blue-600 dark:text-blue-400">
-                          {h.flow ? `${h.flow} gpm` : '—'}
-                        </td>
-                        <td className="py-2">
-                          <span
-                            className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                              h.status === 'out-of-service'
-                                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
-                                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            }`}
-                          >
-                            {h.status === 'out-of-service' ? 'Out of service' : 'In service'}
-                          </span>
-                          <span className="ml-1 text-[10px] text-slate-400">({h.type || 'dry'})</span>
-                        </td>
-                        <td className="py-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                          {hasCoords ? `${h.latitude.toFixed(5)}, ${h.longitude.toFixed(5)}` : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="mt-3 text-xs italic text-slate-400">No nearby hydrants listed.</p>
-          )}
-        </div>
+      {/* SECTION 4: Nearby Hydrants */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-700 dark:bg-slate-800">
+        <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-sm font-bold uppercase tracking-wider text-slate-900 dark:border-slate-700 dark:text-white">
+          <Droplets className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          Nearby Hydrants ({plan.nearby_hydrants?.length || 0})
+        </h3>
+        {plan.nearby_hydrants && plan.nearby_hydrants.length > 0 ? (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  <th className="py-2 pr-4 font-semibold whitespace-nowrap">ID / Tag</th>
+                  <th className="py-2 pr-4 font-semibold min-w-[200px]">Closest Address</th>
+                  <th className="py-2 pr-4 font-semibold whitespace-nowrap">Distance</th>
+                  <th className="py-2 pr-4 font-semibold whitespace-nowrap">Flow</th>
+                  <th className="py-2 pr-4 font-semibold whitespace-nowrap">Status / Type</th>
+                  <th className="py-2 font-semibold whitespace-nowrap">Coordinates</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                {plan.nearby_hydrants.map((h, i) => {
+                  const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
+                  return (
+                    <tr key={h.id || i} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                      <td className="py-2.5 pr-4 font-mono font-medium text-slate-900 dark:text-white whitespace-nowrap">{h.id || `#${i + 1}`}</td>
+                      <td className="py-2.5 pr-4 text-slate-600 dark:text-slate-300">
+                        <div>{h.address || '—'}</div>
+                        {h.notes ? <div className="text-[10px] italic text-slate-400">{h.notes}</div> : null}
+                      </td>
+                      <td className="py-2.5 pr-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                        {h.distance ? (typeof h.distance === 'number' ? `${h.distance.toLocaleString()} ft` : `${h.distance}`) : '—'}
+                      </td>
+                      <td className="py-2.5 pr-4 font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                        {h.flow ? `${h.flow} gpm` : '—'}
+                      </td>
+                      <td className="py-2.5 pr-4 whitespace-nowrap">
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                            h.status === 'out-of-service'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
+                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          }`}
+                        >
+                          {h.status === 'out-of-service' ? 'Out of service' : 'In service'}
+                        </span>
+                        <span className="ml-1 text-[10px] text-slate-400">({h.type || 'dry'})</span>
+                      </td>
+                      <td className="py-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {hasCoords ? `${h.latitude.toFixed(5)}, ${h.longitude.toFixed(5)}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-3 text-xs italic text-slate-400">No nearby hydrants listed.</p>
+        )}
       </div>
 
       {/* SECTION 5: Chemical Inventory & Contacts */}

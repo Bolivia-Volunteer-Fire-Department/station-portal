@@ -143,65 +143,63 @@ export default function PrintablePreIncidentPlan({ plan, stationName = '', onDon
         </div>
       </div>
 
-      {/* Fire Protection & Nearby Hydrants */}
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        {/* Fire Protection */}
-        <div className="border border-slate-400 p-2.5">
-          <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
-            Fire Protection Systems
-          </h3>
-          <table className="w-full text-xs">
+      {/* Fire Protection Systems */}
+      <div className="border border-slate-400 p-2.5 mb-4">
+        <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
+          Fire Protection Systems
+        </h3>
+        <table className="w-full text-xs">
+          <tbody>
+            <tr><td className="font-semibold text-slate-600 w-36 py-0.5">FDC Locations:</td><td className="font-bold text-blue-900">{plan.fdc_locations || '—'}</td></tr>
+            <tr><td className="font-semibold text-slate-600 py-0.5">Sprinkler Room:</td><td className="font-medium text-black">{plan.sprinkler_room_location || '—'}</td></tr>
+            <tr><td className="font-semibold text-slate-600 py-0.5">Water Supply Info:</td><td className="font-medium text-black">{plan.water_supply_info || '—'}</td></tr>
+            <tr><td className="font-semibold text-slate-600 py-0.5">Needed Fire Flow:</td><td className="font-bold text-black">{plan.needed_fire_flow ? `${plan.needed_fire_flow.toLocaleString()} GPM` : '—'}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Nearby Hydrants */}
+      <div className="border border-slate-400 p-2.5 mb-4">
+        <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
+          Nearby Hydrants ({plan.nearby_hydrants?.length || 0})
+        </h3>
+        {plan.nearby_hydrants && plan.nearby_hydrants.length > 0 ? (
+          <table className="w-full text-[11px] text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-300 font-bold">
+                <th className="py-0.5 pr-2">ID</th>
+                <th className="py-0.5 pr-2">Address</th>
+                <th className="py-0.5 pr-2">Dist.</th>
+                <th className="py-0.5 pr-2">Flow</th>
+                <th className="py-0.5">Status</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr><td className="font-semibold text-slate-600 w-36 py-0.5">FDC Locations:</td><td className="font-bold text-blue-900">{plan.fdc_locations || '—'}</td></tr>
-              <tr><td className="font-semibold text-slate-600 py-0.5">Sprinkler Room:</td><td className="font-medium text-black">{plan.sprinkler_room_location || '—'}</td></tr>
-              <tr><td className="font-semibold text-slate-600 py-0.5">Water Supply Info:</td><td className="font-medium text-black">{plan.water_supply_info || '—'}</td></tr>
+                {plan.nearby_hydrants.map((h, i) => {
+                  const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
+                  return (
+                    <tr key={i} className="border-b border-slate-200">
+                      <td className="font-bold py-0.5 pr-2">{h.id || `#${i+1}`}</td>
+                      <td className="py-0.5 pr-2">
+                        <div>{h.address || '—'}</div>
+                        {hasCoords ? (
+                          <div className="font-mono text-[9px] text-slate-500">
+                            GPS: {h.latitude.toFixed(5)}, {h.longitude.toFixed(5)}
+                          </div>
+                        ) : null}
+                        {h.notes ? <div className="text-[9px] italic text-slate-500">{h.notes}</div> : null}
+                      </td>
+                      <td className="py-0.5 pr-2">{h.distance || '—'}</td>
+                      <td className="font-bold py-0.5 pr-2">{h.flow ? `${h.flow} gpm` : '—'}</td>
+                      <td className="py-0.5 uppercase text-[9px] font-semibold">{h.status || 'in-service'} ({h.type || 'dry'})</td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
-        </div>
-
-        {/* Nearby Hydrants */}
-        <div className="border border-slate-400 p-2.5">
-          <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
-            Nearby Hydrants ({plan.nearby_hydrants?.length || 0})
-          </h3>
-          {plan.nearby_hydrants && plan.nearby_hydrants.length > 0 ? (
-            <table className="w-full text-[11px] text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-300 font-bold">
-                  <th className="py-0.5">ID</th>
-                  <th className="py-0.5">Address</th>
-                  <th className="py-0.5">Dist.</th>
-                  <th className="py-0.5">Flow</th>
-                  <th className="py-0.5">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                  {plan.nearby_hydrants.map((h, i) => {
-                    const hasCoords = Number.isFinite(h.latitude) && Number.isFinite(h.longitude);
-                    return (
-                      <tr key={i} className="border-b border-slate-200">
-                        <td className="font-bold py-0.5">{h.id || `#${i+1}`}</td>
-                        <td className="py-0.5">
-                          <div>{h.address || '—'}</div>
-                          {hasCoords ? (
-                            <div className="font-mono text-[9px] text-slate-500">
-                              GPS: {h.latitude.toFixed(5)}, {h.longitude.toFixed(5)}
-                            </div>
-                          ) : null}
-                          {h.notes ? <div className="text-[9px] italic text-slate-500">{h.notes}</div> : null}
-                        </td>
-                        <td className="py-0.5">{h.distance || '—'}</td>
-                        <td className="font-bold py-0.5">{h.flow ? `${h.flow} gpm` : '—'}</td>
-                        <td className="py-0.5 uppercase text-[9px] font-semibold">{h.status || 'in-service'} ({h.type || 'dry'})</td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          ) : (
-            <p className="italic text-slate-500 text-xs">No nearby hydrants listed.</p>
-          )}
-        </div>
+        ) : (
+          <p className="italic text-slate-500 text-xs">No nearby hydrants listed.</p>
+        )}
       </div>
 
       {/* Emergency Contacts & Chemical Inventory */}
