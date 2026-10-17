@@ -218,6 +218,19 @@ service firebase.storage {
       allow delete: if signedIn();
     }
 
+    // WORK ORDERS: work_orders/{workOrderId}/{fileId}
+    // Holds photos of damaged equipment, facility issues, and receipts.
+    match /work_orders/{workOrderId}/{fileId} {
+      function acceptableWorkOrderFile() {
+        return request.resource.size <= 25 * 1024 * 1024
+          && request.resource.contentType.matches('(?i)(application/pdf|image/.*|application/msword|application/vnd.openxmlformats-officedocument.*|text/.*|application/octet-stream)');
+      }
+
+      allow read: if signedIn();
+      allow create, update: if signedIn() && acceptableWorkOrderFile();
+      allow delete: if signedIn();
+    }
+
     // Everything else in this bucket is closed, which is the rule the console writes when a bucket is created in
     // Production mode. It is kept rather than loosened by the addition above: nothing else in the app needs a
     // file, and a bucket that only ever holds one kind of thing is a bucket whose rules can be read at a glance.

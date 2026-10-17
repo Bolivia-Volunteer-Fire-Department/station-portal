@@ -15,6 +15,7 @@ export const AVAILABLE_MOBILE_NAV_MODULES = [
   { id: 'roster', label: 'Roster', description: 'Crew member roster directory', permissionKey: 'canViewRoster' },
   { id: 'training', label: 'Trainings', description: 'Training sessions & logs', permissionKey: 'canSignTrainings' },
   { id: 'documents', label: 'Documents', description: 'Standard operating guidelines', permissionKey: 'canViewDocuments' },
+  { id: 'work-orders', label: 'Work Orders', description: 'Work orders & repair requests', permissionKey: 'canViewWorkOrders' },
   { id: 'district-map', label: 'Map', description: 'The department boundary drawing', permissionKey: 'canViewMap' },
   { id: 'reports', label: 'Reports', description: 'Reports & forms module', permissionKey: 'canViewReports' },
   { id: 'clock-history', label: 'History', description: 'Member clock-in history', permissionKey: 'canUseTimeclock' },

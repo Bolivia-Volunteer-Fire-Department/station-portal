@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Clock, Loader2 } from 'lucide-react';
 // Shows toast notification popups on screen.
 import { Toaster } from 'sonner';
@@ -40,7 +40,8 @@ import {
   loginUser,
   registerPushDevice,
   unregisterPushDevice,
-  fetchMyPushDevices
+  fetchMyPushDevices,
+  fetchWorkOrders,
 } from './services/api';
 import { signInAlongside, signOutAlongside, watchAccount } from './services/firebaseAuth.js';
 import { firebaseConfigured } from './services/firebase';
@@ -91,6 +92,7 @@ import {
   prefetchDeferredModules,
   prefetchableFor,
 } from './utils/deferredModules';
+const WorkOrdersModule = lazy(() => import('./components/WorkOrdersModule'));
 // Chat component available across all screens.
 import ChatHost from './components/Chat/ChatHost';
 import ScheduleFreshness from './components/ScheduleFreshness';
@@ -198,6 +200,7 @@ export default function App() {
   // Shift coverage requests and trade offers.
   const [offers, setOffers] = useState([]);
   const [adminOffers, setAdminOffers] = useState([]);
+  const [workOrders, setWorkOrders] = useState([]);
   const [authToken, setAuthToken] = useState(null);
   // Prompts the user to re-enter their password when expired.
   const [needsReauth, setNeedsReauth] = useState(false);
@@ -341,6 +344,8 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   const canEditMap = can('can_edit_map');
   const canViewReports = can('can_view_reports');
   const canGenerateForms = can('can_generate_forms');
+  const canViewWorkOrders = isAdmin || can('can_view_work_orders') || can('can_manage_work_orders');
+  const canManageWorkOrders = isAdmin || can('can_manage_work_orders');
 
   // Modules that render a seven-column calendar get the wider container
   const runnerSoundProfile = currentUser?.runner_sound_profile || '';
@@ -700,10 +705,17 @@ const getLoadingMessage = () => {
 
   // AFTER A SAVE, re-read only what that save could have changed
   const refreshAdminCollections = async (names, token = authToken) => {
-    const wanted = (Array.isArray(names) ? names : [names])
+    const list = Array.isArray(names) ? names : [names].filter(Boolean);
+    if (list.includes('workOrders') || list.includes('work-orders')) {
+      void refreshWorkOrders(token);
+    }
+    const wanted = list
       .filter(Boolean)
       .filter((name) => ADMIN_SECTION_SETTERS[name]);
-    if (!wanted.length) return refreshAdminData(token);
+    if (!wanted.length) {
+      if (canViewWorkOrders || canManageWorkOrders) void refreshWorkOrders(token);
+      return refreshAdminData(token);
+    }
     const rosterSections = ['users', 'certificationSetup', 'certificationRecords'];
     const invalidateRoster = () => {
       if (wanted.some((name) => rosterSections.includes(name))) {
@@ -905,6 +917,7 @@ const getLoadingMessage = () => {
       announcements: ['directory'],
       events: ['directory'],
       training: ['trainings', 'directory'],
+      'work-orders': ['directory', 'roles'],
     };
     const wanted = (sectionsForTab[adminSubTab] || []).filter((section) => !adminSectionLoaded[section]);
     if (!wanted.length) return;
@@ -1003,6 +1016,22 @@ const getLoadingMessage = () => {
       return REFRESH_FAILED;
     }
   };
+
+  const refreshWorkOrders = useCallback(async (token = authToken) => {
+    if (!token) return;
+    try {
+      const data = await fetchWorkOrders(token);
+      if (data && data.code === 'UNAUTHORIZED') {
+        sessionExpired(token);
+        return;
+      }
+      if (data && data.workOrders) {
+        setWorkOrders(data.workOrders);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch work orders:', err);
+    }
+  }, [authToken]);
 
   // Handles clock in and clock out actions.
   const [logsScope, setLogsScope] = useState(null);
@@ -1236,6 +1265,13 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, activeTab, adminSubTab, trainingLoaded]);
 
+  // Work orders list for member module and administration badge/tab
+  useEffect(() => {
+    if (!authToken) return;
+    if (!canViewWorkOrders && !canManageWorkOrders) return;
+    void refreshWorkOrders(authToken);
+  }, [authToken, canViewWorkOrders, canManageWorkOrders, refreshWorkOrders]);
+
   // THE DOCUMENTS MODULE'S MEMBER LIST, read when that module is open and the reader is somebody who ...
   useEffect(() => {
     if (!authToken || activeTab !== 'documents') return;
@@ -1435,7 +1471,9 @@ const getLoadingMessage = () => {
                       : activeTab === 'reports'
                         // Reports and Forms share one tab id now, so this is the same OR the sidebar and the prefetch use
                         ? canViewReports || canGenerateForms
-                        : true; // the dashboard, help, settings and the easter egg are always open
+                        : activeTab === 'work-orders'
+                          ? canViewWorkOrders
+                          : true; // the dashboard, help, settings and the easter egg are always open
     if (!allowed) setActiveTab('dashboard');
   }, [
     activeTab,
@@ -1450,6 +1488,7 @@ const getLoadingMessage = () => {
     canViewRoster,
     canViewReports,
     canGenerateForms,
+    canViewWorkOrders,
   ]);
 
   const handleLogout = () => {
@@ -2048,6 +2087,7 @@ const getLoadingMessage = () => {
             canViewReports={canViewReports}
             canGenerateForms={canGenerateForms}
             canViewRoster={canViewRoster}
+            canViewWorkOrders={canViewWorkOrders}
             canUseChat={canUseChat}
             ranks={ranks}
             systemSettings={systemSettings}
@@ -2065,8 +2105,9 @@ const getLoadingMessage = () => {
                 moves out of the way as you read. Once it has, the app bar says which page this is.
                 On the Help screen it does NOT scroll (there is nothing to scroll) and must keep its height, or a
                 short window would squash the title instead of the guide: hence `md:shrink-0`. */}
-            <div ref={pageHeadingRef} className="mb-8 md:shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center gap-3">
+            <div ref={pageHeadingRef} className="mb-8 md:shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center gap-3">
                 {activeTab === 'dashboard' ? (
                   <img
                     src={departmentLogo || stationLogoUrl()}
@@ -2112,6 +2153,7 @@ const getLoadingMessage = () => {
                 </div>
               </div>
               <div id="dashboard-header-actions" className="flex items-center gap-2 shrink-0 empty:hidden" />
+              </div>
             </div>
 
             {/* One boundary for every deferred screen in the chain below (see utils/deferredModules.js). It adds
@@ -2291,6 +2333,7 @@ const getLoadingMessage = () => {
                 userSettings={userSettings}
                 systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
                 canApproveShifts={canApproveShifts}
+                canManageWorkOrders={canManageWorkOrders}
                 canUseChat={canUseChat}
                 onSaveSettings={handleSaveUserSettings}
                 onFontScalePreview={setFontScalePreview}
@@ -2310,6 +2353,7 @@ const getLoadingMessage = () => {
                 userSettings={userSettings}
                 systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
                 canApproveShifts={canApproveShifts}
+                canManageWorkOrders={canManageWorkOrders}
                 canUseChat={canUseChat}
                 onSaveSettings={handleSaveUserSettings}
                 onFontScalePreview={setFontScalePreview}
@@ -2358,6 +2402,21 @@ const getLoadingMessage = () => {
               />
             )}
 
+            {activeTab === 'work-orders' && canViewWorkOrders && (
+              <WorkOrdersModule
+                token={authToken}
+                currentUser={currentUser}
+                currentUserId={String(currentUser?.id ?? '')}
+                currentUserName={currentUser?.name || currentUser?.full_name || currentUser?.user_name || ''}
+                canManageWorkOrders={canManageWorkOrders}
+                onNavigateToAdmin={() => {
+                  setActiveTab('admin');
+                  setAdminSubTab('work-orders');
+                }}
+                onChanged={refreshWorkOrders}
+              />
+            )}
+
             {activeTab === 'settings' && (
               <UserProfile
                 initialTab="settings"
@@ -2369,6 +2428,7 @@ const getLoadingMessage = () => {
                 userSettings={userSettings}
                 systemSettings={systemSettings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {})}
                 canApproveShifts={canApproveShifts}
+                canManageWorkOrders={canManageWorkOrders}
                 canUseChat={canUseChat}
                 onSaveSettings={handleSaveUserSettings}
                 onFontScalePreview={setFontScalePreview}
@@ -2440,6 +2500,7 @@ const getLoadingMessage = () => {
                 // Lets any admin tab show a saved row immediately instead of waiting for the background refresh wav...
                 onRowSaved={applySavedRow}
                 departmentLogoUrl={departmentLogo}
+                workOrders={workOrders}
               />
             )}
 

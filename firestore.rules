@@ -349,6 +349,13 @@ service cloud.firestore {
       allow write: if permission('can_manage_asset_setup') || permission('can_manage_equipment') || permission('can_manage_apparatus');
     }
 
+    match /work_orders/{workOrderId} {
+      allow read: if signedIn() && (permission('can_view_work_orders') || permission('can_manage_work_orders'));
+      allow create: if signedIn() && (permission('can_view_work_orders') || permission('can_manage_work_orders'));
+      allow update: if signedIn() && (permission('can_manage_work_orders') || (permission('can_view_work_orders') && resource.data.submitted_by_id == request.auth.uid));
+      allow delete: if permission('can_manage_work_orders');
+    }
+
     // The split that keeps an officer's private note off a member's screen: the fields members draw are in
     // `assignments`, and the note is in a document only officers may read. Not a copy - two disjoint halves.
     match /assignments/{assignmentId} {

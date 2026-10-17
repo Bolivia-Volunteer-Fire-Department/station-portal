@@ -1121,3 +1121,19 @@ export const reactToChatMessage = async ({ conversationId, messageId, emoji }, t
 // Updates the member's read marker and mute setting for a chat room.
 export const setChatRead = async ({ conversationId, readCount, muted, readAt }, token) =>
   dispatchRequest({ action: 'SET_CHAT_READ', token, conversation_id: conversationId, read_count: readCount, muted, read_at: readAt });
+
+// Saves a work order (from member submission or officer edit).
+export const saveWorkOrder = async (workOrder, token) =>
+  dispatchRequest({ action: 'SAVE_WORK_ORDER', token, id: workOrder.id, ...workOrder });
+
+// Saves a work order from administrative panel.
+export const adminSaveWorkOrder = async (workOrder, token) =>
+  dispatchRequest({ action: 'ADMIN_SAVE_WORK_ORDER', token, id: workOrder.id, ...workOrder });
+
+// Deletes a work order.
+export const adminDeleteWorkOrder = async (id, token) =>
+  dispatchRequest({ action: 'ADMIN_DELETE_WORK_ORDER', token, id });
+
+// Fetches work orders.
+export const fetchWorkOrders = async (token) =>
+  dispatchRequest({ action: 'GET_WORK_ORDERS', token });

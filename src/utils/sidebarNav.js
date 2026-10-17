@@ -96,6 +96,7 @@ export const DEFAULT_SIDEBAR_NAV_ORDER = [
   'availability',
   'training',
   'documents',
+  'work-orders',
   'district-map',
   'reports',
   'help',
@@ -112,6 +113,7 @@ export const DEFAULT_MODULE_ICONS = {
   training: 'GraduationCap',
   certifications: 'BadgeCheck',
   documents: 'BookText',
+  'work-orders': 'Wrench',
   'district-map': 'Map',
   reports: 'BarChart3',
   help: 'BookOpen',
@@ -338,6 +340,12 @@ export const SIDEBAR_MODULE_CATALOG = [
     label: 'Documents',
     description: 'Standard operating guidelines',
     permissionKey: 'canViewDocuments',
+  },
+  {
+    id: 'work-orders',
+    label: 'Work Orders',
+    description: 'Maintenance and repair ticket requests',
+    permissionKey: 'canViewWorkOrders',
   },
   {
     id: 'district-map',

@@ -40,6 +40,7 @@ export default function UserSettings({
   canApproveShifts = false,
   // Whether this member's role grants Chat. The chat notification switches are hidden without it - see utils/notificationPrefs.js.
   canUseChat = false,
+  canManageWorkOrders = false,
   onSaveSettings,
   onFontScalePreview,
   onPasswordChange,
@@ -335,6 +336,7 @@ export default function UserSettings({
         systemSettings={systemSettings}
         canApproveShifts={canApproveShifts}
         canUseChat={canUseChat}
+        canManageWorkOrders={canManageWorkOrders}
         onSaveSettings={onSaveSettings}
         pushDeviceApi={pushDeviceApi}
       />
@@ -464,6 +466,7 @@ function NotificationsCard({
   systemSettings = {},
   canApproveShifts = false,
   canUseChat = false,
+  canManageWorkOrders = false,
   onSaveSettings,
   pushDeviceApi,
 }) {
@@ -882,7 +885,7 @@ function NotificationsCard({
 
         {/* Per-type preferences */}
         <div>
-          {visibleNotificationTypes(canApproveShifts, canUseChat).map((type) => (
+          {visibleNotificationTypes(canApproveShifts, canUseChat, canManageWorkOrders).map((type) => (
             <div key={type.key}>
               <ToggleSwitch
                 label={type.label}

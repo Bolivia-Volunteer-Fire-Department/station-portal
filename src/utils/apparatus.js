@@ -106,7 +106,9 @@ export function normalizeMaintenanceRecord(record, defaultUser = null) {
     id: record?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `maint_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`),
     description: String(record?.description || '').trim(),
     type: record?.type || 'routine_service',
-    cost: typeof record?.cost === 'number' ? record.cost : (parseFloat(record?.cost) || 0),
+    cost: typeof record?.cost === 'number'
+      ? (Number.isFinite(record.cost) && record.cost >= 0 ? record.cost : 0)
+      : (Number.isFinite(parseFloat(record?.cost)) && parseFloat(record?.cost) >= 0 ? parseFloat(record?.cost) : 0),
     date: record?.date || new Date().toISOString().slice(0, 10),
     recorded_by_id: record?.recorded_by_id || defaultUser?.id || '',
     recorded_by_name: record?.recorded_by_name || defaultUser?.name || defaultUser?.full_name || 'Staff',

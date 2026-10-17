@@ -114,7 +114,6 @@ export const openApparatusMaintenanceFile = async (fileObj) => {
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       console.warn('Could not retrieve file download URL:', err);
-      alert('Could not open file from storage.');
     }
   }
 };

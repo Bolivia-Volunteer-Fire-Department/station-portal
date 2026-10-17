@@ -754,4 +754,9 @@ export const READERS = {
     const snapshot = await getDocs(collection(firestore(), 'asset_types'));
     return { assetTypes: snapshot.docs.map((row) => ({ id: row.id, ...row.data() })) };
   },
+  // Reads work order requests.
+  GET_WORK_ORDERS: async () => {
+    const snapshot = await getDocs(collection(firestore(), 'work_orders'));
+    return { workOrders: snapshot.docs.map((row) => ({ id: row.id, ...row.data() })) };
+  },
 };

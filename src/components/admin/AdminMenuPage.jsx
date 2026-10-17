@@ -8,6 +8,8 @@ export default function AdminMenuPage({
   pendingTabId = 'approvals',
   documentVerificationCount = 0,
   verificationTabId = 'documents',
+  workOrdersCount = 0,
+  workOrdersTabId = 'work-orders',
 }) {
   if (categories.length === 0) {
     return (
@@ -57,7 +59,9 @@ export default function AdminMenuPage({
                       ? pendingCount
                       : itemId === verificationTabId
                         ? documentVerificationCount
-                        : 0;
+                        : itemId === workOrdersTabId
+                          ? workOrdersCount
+                          : 0;
                   return (
                     <button
                       key={itemId}

@@ -148,7 +148,7 @@ function ChatBubble({ message, mine, flags, currentUser, timeFormat, delivery, r
                 )}
               </div>
             )}
-            <span className="whitespace-pre-wrap break-words">{row.body}</span>
+            <span className="whitespace-pre-wrap break-words select-text">{row.body}</span>
           </>
         )}
       </div>

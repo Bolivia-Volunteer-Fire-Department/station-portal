@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes, Wrench } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
 import { pendingOffersOnly } from '../../utils/shiftOfferRow';
 import { fetchAdminDocumentVerificationSummary } from '../../services/api';
 import { allowedAdminTabs, permissionGranted, shouldFocusApprovals } from '../../utils/permissions';
+import { isActiveWorkOrder } from '../../utils/workOrders';
 import AdminMenuPage from './AdminMenuPage';
 
 const AdminRolesTab = lazy(() => import('./AdminRolesTab'));
@@ -35,6 +36,7 @@ const AdminApparatusTab = lazy(() => import('./AdminApparatusTab'));
 const AdminAssetSetupTab = lazy(() => import('./AdminAssetSetupTab'));
 const AdminDashboardSetupTab = lazy(() => import('./AdminDashboardSetupTab'));
 const AdminWidgetSetupTab = lazy(() => import('./AdminWidgetSetupTab'));
+const AdminWorkOrdersTab = lazy(() => import('./AdminWorkOrdersTab'));
 
 function AdminTabLoading() {
   return (
@@ -66,6 +68,7 @@ export const ADMIN_NAV_CATEGORIES = [
     items: [
       { id: 'equipment', label: 'Equipment', icon: ShieldAlert },
       { id: 'apparatus', label: 'Apparatuses', icon: Truck },
+      { id: 'work-orders', label: 'Work Orders', icon: Wrench },
       { id: 'asset-setup', label: 'Asset Setup', icon: SlidersHorizontal },
     ],
   },
@@ -168,8 +171,13 @@ export default function AdminPanel({
   departmentLogoUrl = '',
   hideEventsByDefault = false,
   colorblindRankLabels = false,
+  workOrders = [],
 }) {
   const pendingApprovalsCount = pendingOffersOnly(offers).length;
+  const activeWorkOrdersCount = useMemo(
+    () => (Array.isArray(workOrders) ? workOrders : []).filter(isActiveWorkOrder).length,
+    [workOrders]
+  );
   const [documentVerificationBadge, setDocumentVerificationBadge] = useState({ userId: '', count: 0, byDocument: {} });
   const documentVerificationCount =
     documentVerificationBadge.userId === currentUserId ? documentVerificationBadge.count : 0;
@@ -301,6 +309,7 @@ export default function AdminPanel({
         onSelectTab={selectItem}
         pendingCount={pendingApprovalsCount}
         documentVerificationCount={canViewDocumentVerificationCount ? documentVerificationCount : 0}
+        workOrdersCount={activeWorkOrdersCount}
       />
     );
   }
@@ -340,7 +349,12 @@ export default function AdminPanel({
               {isOpen && (
                                 <div className="absolute left-0 top-full mt-1 z-30 w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl overflow-hidden py-1 origin-top-left animate-popoverIn">
                   {items.map(({ id: itemId, label: itemLabel, icon: ItemIcon }) => {
-                        const badge = itemId === 'approvals' ? pendingApprovalsCount : undefined;
+                        const badge =
+                          itemId === 'approvals'
+                            ? pendingApprovalsCount
+                            : itemId === 'work-orders'
+                              ? activeWorkOrdersCount
+                              : undefined;
                         return (
                     <button
                       key={itemId}
@@ -653,6 +667,26 @@ export default function AdminPanel({
             ''
           }
           users={nameRows}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Work Orders management tab */}
+      {activeSubTab === 'work-orders' && (
+        <AdminWorkOrdersTab
+          token={token}
+          currentUserId={currentUserId}
+          currentUser={currentUser}
+          currentUserName={
+            currentUserName ||
+            currentUser?.name ||
+            currentUser?.full_name ||
+            currentUser?.user_name ||
+            nameRows.find((u) => String(u?.id ?? u?.user_id) === String(currentUserId || currentUser?.id))?.name ||
+            ''
+          }
+          users={nameRows}
+          roles={roles}
           onDataChanged={onDataChanged}
         />
       )}

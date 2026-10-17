@@ -210,6 +210,12 @@ export const ADMIN_PERMISSIONS = [
     label: 'Manage dashboard widgets',
     description: 'Enable or disable built-in widgets and create custom cards, markdown notices, and web embeds for the dashboard.',
   },
+  {
+    key: 'can_manage_work_orders',
+    tab: 'work-orders',
+    label: 'Manage work orders',
+    description: 'Review, prioritize, schedule, assign, and resolve apparatus, station facility, and equipment work orders in Assets.',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -386,6 +392,11 @@ export const MEMBER_PERMISSIONS = [
     description: 'Remove anybody\'s message from the conversation, where it stays as "Deleted by [name]" rather than disappearing - so a message removed by an officer says who removed it. Requires "Chat".',
     requires: 'can_use_chat',
   },
+  {
+    key: 'can_view_work_orders',
+    label: 'Work orders',
+    description: 'Open the Work Orders module to submit tickets for apparatus repairs, facility issues, and equipment needs, and track submitted work orders.',
+  },
 ];
 
 // Every permission, for the Roles editor, in display order.
@@ -427,6 +438,7 @@ export const ADMIN_PERMISSION_GROUPS = [
       'can_manage_equipment',
       'can_manage_apparatus',
       'can_manage_asset_setup',
+      'can_manage_work_orders',
     ],
   },
   {
@@ -456,6 +468,7 @@ export const MEMBER_PERMISSION_GROUPS = [
       'can_verify_documents',
       'can_add_assessment_scores',
       'can_generate_forms',
+      'can_view_work_orders',
     ],
   },
   {

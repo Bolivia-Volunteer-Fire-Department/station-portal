@@ -249,6 +249,14 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // Work orders module for apparatus, facility, and equipment maintenance requests.
+  workOrders: {
+    requires: ['memberPayload'],
+    writes: ['SAVE_WORK_ORDER', 'ADMIN_SAVE_WORK_ORDER', 'ADMIN_DELETE_WORK_ORDER'],
+    reads: ['GET_WORK_ORDERS'],
+    switchReads: [],
+  },
+
   // Initial member data bundle loaded right after signing in.
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
 
@@ -856,6 +864,8 @@ const DOCUMENT_SAVES = {
   ADMIN_SAVE_EQUIPMENT: 'equipment',
   ADMIN_SAVE_APPARATUS: 'apparatus',
   ADMIN_SAVE_ASSET_TYPE: 'asset_types',
+  ADMIN_SAVE_WORK_ORDER: 'work_orders',
+  SAVE_WORK_ORDER: 'work_orders',
 };
 
 // Certification saves that trigger recalculation of roster badges.
@@ -880,6 +890,7 @@ const DOCUMENT_DELETES = {
   ADMIN_DELETE_EQUIPMENT: 'equipment',
   ADMIN_DELETE_APPARATUS: 'apparatus',
   ADMIN_DELETE_ASSET_TYPE: 'asset_types',
+  ADMIN_DELETE_WORK_ORDER: 'work_orders',
 };
 
 // Collections that save audience keys for rank or role visibility filtering.

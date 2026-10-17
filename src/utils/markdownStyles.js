@@ -75,8 +75,8 @@ export const INLINE_CLASSES = {
 
 // Blocks. `bullets` and `numbers` are the list-style classes; `list` is what both share.
 export const BLOCK_CLASSES = {
-  body: 'space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200',
-  code: 'overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-3 text-[11px] leading-relaxed',
+  body: 'space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200 select-text',
+  code: 'overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-3 text-[11px] leading-relaxed select-text',
   list: 'pl-5 space-y-1',
   bullets: 'list-disc',
   numbers: 'list-decimal',

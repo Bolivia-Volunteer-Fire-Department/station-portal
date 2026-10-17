@@ -12,7 +12,7 @@
 //
 // Kept dependency-free (and out of the component) so the rule can be exercised
 // without React - see scripts/verify-notification-prefs.mjs.
-import { isTruthyFlag } from './rankEligibility';
+import { isTruthyFlag } from './rankEligibility.js';
 
 export const NOTIFICATION_TYPES = [
   {
@@ -68,6 +68,14 @@ export const NOTIFICATION_TYPES = [
     stationDescription: 'Push room messages to members\u2019 devices. The message still arrives in the app either way.',
     chatOnly: true,
   },
+  {
+    key: 'notify_work_orders',
+    label: 'Work orders',
+    description: 'Push notifications for new work orders, updates, and tickets assigned to you.',
+    stationLabel: 'Work order alerts',
+    stationDescription: 'Notify managers when work orders are submitted, assigned, or updated.',
+    workOrderManagerOnly: true,
+  },
 ];
 
 // The switches to show this member.
@@ -83,9 +91,10 @@ export const NOTIFICATION_TYPES = [
 // `canUseChat` DEFAULTS TO TRUE, deliberately: it is the permissive direction, and a caller that has not been taught the new
 // argument yet shows a member one extra switch rather than hiding a switch they were meant to have. The two callers that
 // must pass it - My Settings and the admin tab - both do (see verify-notification-prefs.mjs, which asserts it).
-export const visibleNotificationTypes = (canApproveShifts, canUseChat = true) =>
+export const visibleNotificationTypes = (canApproveShifts, canUseChat = true, canManageWorkOrders = false) =>
   NOTIFICATION_TYPES.filter((type) => {
     if (type.approverOnly && !isTruthyFlag(canApproveShifts)) return false;
     if (type.chatOnly && !isTruthyFlag(canUseChat)) return false;
+    if (type.workOrderManagerOnly && !isTruthyFlag(canManageWorkOrders)) return false;
     return true;
   });

@@ -23,6 +23,7 @@ export default function UserProfile({
   systemSettings: propSystemSettings,
   canApproveShifts: propCanApproveShifts,
   canUseChat: propCanUseChat,
+  canManageWorkOrders: propCanManageWorkOrders,
   onSaveSettings,
   onFontScalePreview,
   onPasswordChange,
@@ -39,6 +40,7 @@ export default function UserProfile({
   const systemSettings = propSystemSettings || station.systemSettingsMap || {};
   const canApproveShifts = propCanApproveShifts !== undefined ? propCanApproveShifts : Boolean(auth.permissions?.canApproveShifts);
   const canUseChat = propCanUseChat !== undefined ? propCanUseChat : Boolean(auth.permissions?.canUseChat);
+  const canManageWorkOrders = propCanManageWorkOrders !== undefined ? propCanManageWorkOrders : Boolean(auth.permissions?.canManageWorkOrders);
   const currentRank = propRank;
   const [activeTab, setActiveTab] = useState(initialTab);
 
@@ -114,6 +116,7 @@ export default function UserProfile({
           currentRole={currentRole}
           canApproveShifts={canApproveShifts}
           canUseChat={canUseChat}
+          canManageWorkOrders={canManageWorkOrders}
           onSaveSettings={onSaveSettings}
           onFontScalePreview={onFontScalePreview}
           pushDeviceApi={pushDeviceApi}

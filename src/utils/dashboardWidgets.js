@@ -74,6 +74,15 @@ export const BUILTIN_WIDGETS = [
     maxColSpan: 3,
     category: 'Resources',
   },
+  {
+    id: 'assigned-work-orders',
+    label: 'Assigned Work Orders',
+    description: 'Maintenance and repair tickets assigned to you for action.',
+    defaultColSpan: 2,
+    minColSpan: 1,
+    maxColSpan: 3,
+    category: 'Operations',
+  },
 ];
 
 // Factory default station layout:

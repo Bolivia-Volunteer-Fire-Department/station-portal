@@ -15,8 +15,8 @@
 // contenteditable surface is deliberately thin because of it - and this file is why the editor can be tested at
 // all (scripts/verify-rich-markdown.mjs runs in node, where there is no DOM to test against).
 
-import { ALERT_KINDS, parseInline, parseMarkdown } from './markdown';
-import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, textColorClass } from './markdownStyles';
+import { ALERT_KINDS, parseInline, parseMarkdown } from './markdown.js';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, textColorClass } from './markdownStyles.js';
 
 // ---------------------------------------------------------------------------
 // The toolbar

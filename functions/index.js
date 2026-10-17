@@ -33,6 +33,8 @@ const {
   text,
   isTruthy,
   notificationEnabled,
+  workOrderManagerIds,
+  workOrderNoteRecipients,
   offerEventFromStatus,
   offerRecipients,
   offerCopy,
@@ -2064,6 +2066,148 @@ exports.onShiftOfferDecided = onDocumentUpdated('schedule_offers/{offerId}', asy
     });
   } catch (error) {
     console.error(`[push] the decision notification failed: ${(error && error.message) || error}`);
+  }
+});
+
+// The managers who hear about work orders: roles with can_manage_work_orders (or is_admin) and their members.
+const workOrderAudience = async () => {
+  const rolesSnapshot = await db.collection('roles').get();
+  const roles = rolesSnapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  const managerRoleIds = roles
+    .filter((role) => isTruthy(role.is_admin) || isTruthy(role.can_manage_work_orders))
+    .map((role) => text(role.id))
+    .filter(Boolean);
+
+  const users = [];
+  const seen = new Set();
+  for (let start = 0; start < managerRoleIds.length; start += 30) {
+    const batch = managerRoleIds.slice(start, start + 30);
+    const [snap1, snap2] = await Promise.all([
+      db.collection('users').where('role_id', 'in', batch).get(),
+      db.collection('users').where('role', 'in', batch).get(),
+    ]);
+    [...snap1.docs, ...snap2.docs].forEach((entry) => {
+      if (!seen.has(entry.id)) {
+        seen.add(entry.id);
+        users.push({ id: entry.id, ...entry.data() });
+      }
+    });
+  }
+  return { roles, users };
+};
+
+// A new work order submitted: notify administrators and officers with can_manage_work_orders
+exports.onWorkOrderCreated = onDocumentCreated('work_orders/{workOrderId}', async (event) => {
+  try {
+    const workOrder = (event.data && event.data.data()) || {};
+    const { roles, users } = await workOrderAudience();
+    const submitterId = text(workOrder.submitted_by_id);
+    const recipients = workOrderManagerIds(roles, users).filter((id) => id !== submitterId);
+
+    const ticketNumber = text(workOrder.ticket_number);
+    const title = text(workOrder.title) || 'New Work Order';
+    const desc = text(workOrder.description);
+    const body = desc.length > 160 ? `${desc.slice(0, 157)}...` : (desc || 'A new work order was submitted.');
+
+    await deliverPush({
+      action: 'WORK_ORDER_CREATED',
+      actor: submitterId,
+      recipients,
+      preference: 'notify_work_orders',
+      title: ticketNumber ? `[Work Order #${ticketNumber}] ${title}` : `[Work Order] ${title}`,
+      body,
+      data: {
+        event: 'WORK_ORDER_CREATED',
+        work_order_id: event.params.workOrderId,
+        ticket_number: ticketNumber,
+      },
+    });
+  } catch (error) {
+    console.error(`[push] the work-order notification failed: ${(error && error.message) || error}`);
+  }
+});
+
+// A work order updated: notify assignee when assigned, submitter when resolved/completed, or parties when a note is added
+exports.onWorkOrderUpdated = onDocumentUpdated('work_orders/{workOrderId}', async (event) => {
+  try {
+    const before = (event.data && event.data.before && event.data.before.data()) || {};
+    const after = (event.data && event.data.after && event.data.after.data()) || {};
+
+    const beforeAssignee = text(before.assigned_to_id);
+    const afterAssignee = text(after.assigned_to_id);
+    const beforeStatus = text(before.status);
+    const afterStatus = text(after.status);
+    const ticketNumber = text(after.ticket_number);
+    const title = text(after.title) || 'Work Order';
+    const updaterId = text(after.last_updated_by_id || after.updated_by || after.submitted_by_id);
+
+    // 1. Newly assigned to a member
+    if (afterAssignee && afterAssignee !== beforeAssignee && afterAssignee !== updaterId) {
+      await deliverPush({
+        action: 'WORK_ORDER_ASSIGNED',
+        actor: updaterId,
+        recipients: [afterAssignee],
+        preference: 'notify_work_orders',
+        title: ticketNumber ? `[Work Order Assigned] #${ticketNumber}` : '[Work Order Assigned]',
+        body: `You were assigned to: ${title}`,
+        data: {
+          event: 'WORK_ORDER_ASSIGNED',
+          work_order_id: event.params.workOrderId,
+          ticket_number: ticketNumber,
+        },
+      });
+    }
+
+    // 2. Completed / resolved: notify the submitter
+    if (afterStatus === 'complete' && beforeStatus !== 'complete') {
+      const submitterId = text(after.submitted_by_id);
+      if (submitterId && submitterId !== updaterId) {
+        await deliverPush({
+          action: 'WORK_ORDER_COMPLETED',
+          actor: updaterId,
+          recipients: [submitterId],
+          preference: 'notify_work_orders',
+          title: ticketNumber ? `[Work Order Completed] #${ticketNumber}` : '[Work Order Completed]',
+          body: `Work order "${title}" has been marked complete.`,
+          data: {
+            event: 'WORK_ORDER_COMPLETED',
+            work_order_id: event.params.workOrderId,
+            ticket_number: ticketNumber,
+          },
+        });
+      }
+    }
+
+    // 3. New note added: notify submitter if officer/admin entered it; notify assigned officer if submitter entered it
+    const beforeNotes = Array.isArray(before.notes) ? before.notes : [];
+    const afterNotes = Array.isArray(after.notes) ? after.notes : [];
+    if (afterNotes.length > beforeNotes.length) {
+      const newNotes = afterNotes.slice(beforeNotes.length);
+      const latestNote = newNotes[newNotes.length - 1];
+      const authorId = text(latestNote && (latestNote.author_id || latestNote.authorId || after.updated_by || updaterId));
+      const authorName = text(latestNote && (latestNote.author_name || latestNote.authorName)) || 'A member';
+      const rawText = text(latestNote && latestNote.text);
+      const snippet = rawText.length > 120 ? `${rawText.slice(0, 117)}...` : (rawText || 'Added a note to the work order.');
+
+      const recipients = workOrderNoteRecipients({ note: latestNote, workOrder: after });
+      if (recipients.length > 0) {
+        await deliverPush({
+          action: 'WORK_ORDER_NOTE_ADDED',
+          actor: authorId,
+          recipients,
+          preference: 'notify_work_orders',
+          title: ticketNumber ? `[Work Order #${ticketNumber}] New Note` : '[Work Order] New Note',
+          body: `${authorName}: ${snippet}`,
+          data: {
+            event: 'WORK_ORDER_NOTE_ADDED',
+            work_order_id: event.params.workOrderId,
+            ticket_number: ticketNumber,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error(`[push] work order update notification failed: ${(error && error.message) || error}`);
   }
 });
 

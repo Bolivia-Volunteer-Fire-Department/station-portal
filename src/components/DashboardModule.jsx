@@ -27,6 +27,7 @@ import QuickLinksWidget from './widgets/QuickLinksWidget';
 import WeatherRadarWidget from './widgets/WeatherRadarWidget';
 import CustomMarkdownWidget from './widgets/CustomMarkdownWidget';
 import ApparatusStatusWidget from './widgets/ApparatusStatusWidget';
+import AssignedWorkOrdersWidget from './widgets/AssignedWorkOrdersWidget';
 import WidgetResizeHandle from './widgets/WidgetResizeHandle';
 import {
   DASHBOARD_DEFAULT_LAYOUT_KEY,
@@ -319,6 +320,15 @@ export default function DashboardModule({
 
       case 'apparatus-status':
         return <ApparatusStatusWidget token={token} onNavigate={onNavigate} />;
+
+      case 'assigned-work-orders':
+        return (
+          <AssignedWorkOrdersWidget
+            token={token}
+            currentUser={currentUser}
+            onNavigate={onNavigate}
+          />
+        );
 
       default: {
         // Custom widget lookup

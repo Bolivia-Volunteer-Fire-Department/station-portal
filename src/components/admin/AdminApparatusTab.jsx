@@ -134,7 +134,7 @@ export default function AdminApparatusTab({
     id: '',
     description: '',
     type: 'routine_service',
-    cost: '',
+    cost: '0.00',
     date: new Date().toISOString().slice(0, 10),
     files: [],
   });
@@ -212,7 +212,7 @@ export default function AdminApparatusTab({
       id: crypto.randomUUID ? crypto.randomUUID() : `maint_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       description: '',
       type: 'routine_service',
-      cost: '',
+      cost: '0.00',
       date: new Date().toISOString().slice(0, 10),
       files: [],
     });
@@ -226,7 +226,7 @@ export default function AdminApparatusTab({
       id: rec.id,
       description: rec.description || '',
       type: rec.type || 'routine_service',
-      cost: rec.cost !== undefined ? String(rec.cost) : '',
+      cost: rec.cost !== undefined && rec.cost !== null ? String(rec.cost) : '0.00',
       date: rec.date || new Date().toISOString().slice(0, 10),
       files: Array.isArray(rec.files) ? [...rec.files] : [],
     });
@@ -291,10 +291,14 @@ export default function AdminApparatusTab({
       setRecordError('Maintenance type is required.');
       return;
     }
-    const costNum = parseFloat(recordDraft.cost);
-    if (isNaN(costNum) || costNum < 0) {
-      setRecordError('Cost must be a valid dollar amount (0 or greater).');
-      return;
+    const costRaw = String(recordDraft.cost ?? '').trim();
+    let costNum = 0;
+    if (costRaw !== '') {
+      costNum = parseFloat(costRaw);
+      if (isNaN(costNum) || costNum < 0) {
+        setRecordError('Cost must be a valid dollar amount ($0.00 or greater).');
+        return;
+      }
     }
 
     const savedRecord = {
@@ -394,7 +398,6 @@ export default function AdminApparatusTab({
       setPendingDelete(null);
     } catch (err) {
       console.error('Failed to delete apparatus:', err);
-      alert(err?.message || 'Failed to delete apparatus.');
     } finally {
       setDeletingId(null);
     }
@@ -1242,7 +1245,7 @@ export default function AdminApparatusTab({
 
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Cost Amount ($) *
+                          Cost Amount ($)
                         </label>
                         <div className="relative mt-1">
                           <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -1250,7 +1253,6 @@ export default function AdminApparatusTab({
                             type="number"
                             step="0.01"
                             min="0"
-                            required
                             placeholder="0.00"
                             value={recordDraft.cost}
                             onChange={(e) => setRecordDraft({ ...recordDraft, cost: e.target.value })}

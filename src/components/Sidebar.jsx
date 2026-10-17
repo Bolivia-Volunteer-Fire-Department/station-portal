@@ -38,6 +38,7 @@ export default function Sidebar({
     canGenerateForms: propForms = false,
     canViewRoster: propRoster = false,
     canUseChat: propChat = false,
+    canViewWorkOrders: propWorkOrders = false,
     ranks: propRanks = [],
     // The member's own announcements for the sidebar, and who to filter them for.
     announcements = [],
@@ -61,6 +62,7 @@ export default function Sidebar({
     const canGenerateForms = propForms || Boolean(auth.permissions?.canGenerateForms);
     const canViewRoster = propRoster || Boolean(auth.permissions?.canViewRoster);
     const canUseChat = propChat || Boolean(auth.permissions?.canUseChat);
+    const canViewWorkOrders = propWorkOrders || Boolean(auth.permissions?.canViewWorkOrders);
     const ranks = propRanks && propRanks.length ? propRanks : (station.ranks || []);
     const systemSettings = propSettings && propSettings.length ? propSettings : (station.systemSettings || []);
     const [easterEggCount, setEasterEggCount] = React.useState(0);
@@ -251,6 +253,21 @@ export default function Sidebar({
                         )}
                     </React.Fragment>
                 );
+            case 'work-orders':
+                return canViewWorkOrders ? (
+                    <button
+                        key="work-orders"
+                        onClick={() => { setActiveTab('work-orders'); setIsSidebarOpen(false); }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'work-orders'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Work Orders' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Work Orders</span>
+                    </button>
+                ) : null;
             case 'district-map':
                 return (
                     <React.Fragment key="district-map">

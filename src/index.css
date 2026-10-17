@@ -41,6 +41,13 @@ html.dark {
   color-scheme: dark;
 }
 
+/* Make application chrome and UI non-selectable by default, matching native app feel.
+// Text selection is explicitly enabled in content areas (documents, editors, chat messages, etc.) below. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* A control is not text.
 //
 // Press-and-hold on a button, a tab or a table heading used to offer the browser's text-selection menu
@@ -101,6 +108,21 @@ select,
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+}
+
+/* Explicit text selection carve-outs:
+// Documents, guides, markdown readers, chat messages, and code snippets. */
+.selectable,
+.select-text,
+[data-selectable='true'],
+.prose,
+.markdown-body,
+.chat-bubble-text,
+article,
+pre,
+code {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* THE FINGER, WHERE THE THING UNDER IT ACTUALLY DOES SOMETHING.

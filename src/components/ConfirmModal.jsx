@@ -96,7 +96,7 @@ export default function ConfirmModal({
             </h2>
             {/* A node is allowed: some of these need to name the thing being deleted in bold. */}
             {message && (
-              <div id={messageId} className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
+              <div id={messageId} className="mt-1.5 text-sm text-slate-600 dark:text-slate-300 select-text">
                 {message}
               </div>
             )}

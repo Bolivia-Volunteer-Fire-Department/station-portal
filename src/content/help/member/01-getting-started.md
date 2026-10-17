@@ -53,6 +53,8 @@ This app was originally created for the Bolivia Fire Department in Bolivia, Nort
 * Added **Maintenance Records** to Apparatuses.
 * Fixed an issue where shift offers ironically didn't do anything anymore.
 * Set sibling shift offers to automatically decline when one is accepted.
+* Added **Work Orders**.
+* Refined what text was selectable in the app overall.
 
 ### Version 1.6x
 * Added the **District Map** module.

@@ -50,6 +50,42 @@ const approverIds = (roles = [], users = []) => {
     .filter(Boolean);
 };
 
+// Everyone whose role can manage work orders (or is an administrator).
+const workOrderManagerIds = (roles = [], users = []) => {
+  const managerRoles = new Set(
+    roles.filter((role) => isTruthy(role.is_admin) || isTruthy(role.can_manage_work_orders)).map((role) => text(role.id))
+  );
+  return users
+    .filter((user) => managerRoles.has(text(user.role_id || user.role)))
+    .map((user) => text(user.id))
+    .filter(Boolean);
+};
+
+// Recipients for a work order note:
+// - If the submitter entered the note, notify the assigned officer (if assigned). If unassigned, notifies nobody.
+// - If an officer/admin entered the note, notify the submitter.
+const workOrderNoteRecipients = ({ note, workOrder } = {}) => {
+  const authorId = text(note && (note.author_id || note.authorId));
+  const submitterId = text(workOrder && (workOrder.submitted_by_id || workOrder.submittedById));
+  const assignedOfficerId = text(workOrder && (workOrder.assigned_to_id || workOrder.assignedToId));
+
+  if (!authorId) return [];
+
+  if (authorId === submitterId) {
+    // Submitter wrote the note -> notify assigned officer if present
+    if (assignedOfficerId && assignedOfficerId !== authorId) {
+      return [assignedOfficerId];
+    }
+    return [];
+  }
+
+  // Officer / admin wrote the note -> notify submitter
+  if (submitterId && submitterId !== authorId) {
+    return [submitterId];
+  }
+  return [];
+};
+
 // An offer's status turned into an event, and only when it MOVES. An offer saved twice while still pending - or any
 // other field edited after it was decided - must not tell anybody anything.
 const offerEventFromStatus = (status) => {
@@ -130,6 +166,8 @@ module.exports = {
   viewerKeys,
   notificationEnabled,
   approverIds,
+  workOrderManagerIds,
+  workOrderNoteRecipients,
   offerEventFromStatus,
   offerRecipients,
   offerCopy,

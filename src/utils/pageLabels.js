@@ -14,6 +14,7 @@ export const PAGE_BAR_LABELS = {
   availability: 'Availability',
   training: 'Training',
   documents: 'Documents',
+  'work-orders': 'Work Orders',
   'district-map': 'District Map',
   // Chat is a module AND a floating panel: the tab is the same component full-width, so a member who would rather have
   // it in the page than over it can have it there.
@@ -65,6 +66,7 @@ export const ADMIN_BAR_LABELS = {
   help: 'Help',
   equipment: 'Equipment',
   apparatus: 'Apparatuses',
+  'work-orders': 'Work Orders',
   'asset-setup': 'Asset Setup',
   'dashboard-setup': 'Dash Setup',
   'widget-setup': 'Widget Setup',

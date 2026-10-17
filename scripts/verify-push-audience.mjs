@@ -18,6 +18,8 @@ const {
   viewerKeys,
   notificationEnabled,
   approverIds,
+  workOrderManagerIds,
+  workOrderNoteRecipients,
   offerEventFromStatus,
   offerRecipients,
   offerCopy,
@@ -82,6 +84,23 @@ const users = [
 check('an administrator counts as an approver without the column being set', approverIds(roles, users), ['u1', 'u2']);
 check('and a role that can approve counts through whoever holds it', approverIds([roles[1]], [users[1], users[2]]), ['u2']);
 check('a role nobody holds reaches nobody', approverIds([{ id: 'r9', can_approve_shifts: true }], users), []);
+
+console.log('\n--- who can manage work orders ---');
+const woRoles = [
+  { id: 'r1', is_admin: true, can_manage_work_orders: false },
+  { id: 'r2', is_admin: false, can_manage_work_orders: true },
+  { id: 'r3', is_admin: false, can_manage_work_orders: false },
+];
+check('administrators and can_manage_work_orders members are managers', workOrderManagerIds(woRoles, users), ['u1', 'u2']);
+check('regular members cannot manage work orders', workOrderManagerIds([woRoles[2]], [users[2]]), []);
+
+console.log('\n--- who hears about work order notes ---');
+const woAssigned = { submitted_by_id: 'u3', assigned_to_id: 'u2' };
+const woUnassigned = { submitted_by_id: 'u3', assigned_to_id: '' };
+check('submitter note notifies assigned officer', workOrderNoteRecipients({ note: { author_id: 'u3' }, workOrder: woAssigned }), ['u2']);
+check('submitter note with no assigned officer notifies nobody', workOrderNoteRecipients({ note: { author_id: 'u3' }, workOrder: woUnassigned }), []);
+check('officer note notifies submitter', workOrderNoteRecipients({ note: { author_id: 'u2' }, workOrder: woAssigned }), ['u3']);
+check('author commenting on own assigned ticket notifies nobody', workOrderNoteRecipients({ note: { author_id: 'u3' }, workOrder: { submitted_by_id: 'u3', assigned_to_id: 'u3' } }), []);
 
 console.log('\n--- a new offer goes to the approvers, a decision goes to the member ---');
 check('submitted', offerRecipients({ event: 'SUBMITTED', offer: { user_id: 'u2' }, roles, users }), ['u1', 'u2']);

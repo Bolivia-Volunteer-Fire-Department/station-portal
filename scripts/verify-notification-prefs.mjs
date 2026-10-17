@@ -31,12 +31,16 @@ const EVERYONE_KEYS = ['notify_announcements'];
 // such a member is ever sent a chat push (see utils/notificationPrefs.js). Being hidden is therefore not a courtesy - it is
 // the switch matching what the sender can actually do.
 const CHAT_KEYS = ['notify_chat_direct', 'notify_chat_rooms'];
-const ALL_KEYS = ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS, ...CHAT_KEYS];
+const WORK_ORDER_KEYS = ['notify_work_orders'];
+const ALL_KEYS = ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS, ...CHAT_KEYS, ...WORK_ORDER_KEYS];
 
 console.log('--- the catalog itself ---');
-check('six switches exist', NOTIFICATION_TYPES.length, 6);
+check('seven switches exist', NOTIFICATION_TYPES.length, 7);
 check('exactly one is approver-only', NOTIFICATION_TYPES.filter((t) => t.approverOnly).map((t) => t.key), [
   'notify_new_offer'
+]);
+check('exactly one is work-order-only', NOTIFICATION_TYPES.filter((t) => t.workOrderManagerOnly).map((t) => t.key), [
+  'notify_work_orders'
 ]);
 check('exactly two are chat-only', NOTIFICATION_TYPES.filter((t) => t.chatOnly).map((t) => t.key).sort(), [...CHAT_KEYS].sort());
 check('every switch has a label and description', NOTIFICATION_TYPES.every((t) => t.label && t.description), true);
@@ -56,13 +60,13 @@ check(
   true
 );
 
-console.log('\n--- a role that CAN approve shifts sees everything ---');
-check('boolean true', keys(visibleNotificationTypes(true, true)), ALL_KEYS);
-check('the sheet string "TRUE"', keys(visibleNotificationTypes('TRUE', 'TRUE')), ALL_KEYS);
-check('a padded/lowercase " true "', keys(visibleNotificationTypes(' true ', ' true ')), ALL_KEYS);
+console.log('\n--- a role that CAN approve shifts and manage work orders sees everything ---');
+check('boolean true', keys(visibleNotificationTypes(true, true, true)), ALL_KEYS);
+check('the sheet string "TRUE"', keys(visibleNotificationTypes('TRUE', 'TRUE', 'TRUE')), ALL_KEYS);
+check('a padded/lowercase " true "', keys(visibleNotificationTypes(' true ', ' true ', ' true ')), ALL_KEYS);
 // The second argument defaults to TRUE on purpose - a caller not yet taught about it shows an extra switch rather than
 // hiding one - so a one-argument call keeps chaffing the way it always did.
-check('a one-argument call still shows the chat switches', keys(visibleNotificationTypes(true)), ALL_KEYS);
+check('a one-argument call still shows the chat switches', keys(visibleNotificationTypes(true)), ['notify_new_offer', ...OWN_OFFER_KEYS, ...EVERYONE_KEYS, ...CHAT_KEYS]);
 
 console.log('\n--- everyone else does NOT see the approver-only switch ---');
 const WITHOUT_APPROVER = [...OWN_OFFER_KEYS, ...EVERYONE_KEYS, ...CHAT_KEYS];
@@ -92,7 +96,7 @@ console.log('\n--- the member\'s own offer switches are never hidden ---');
 
 console.log('\n--- the filter does not mutate the catalog ---');
 visibleNotificationTypes(false, false);
-check('catalog still has six entries', NOTIFICATION_TYPES.length, 6);
+check('catalog still has seven entries', NOTIFICATION_TYPES.length, 7);
 
 // Every switch must be savable. This is the drift guard for a bug that shipped: the Announcements
 // switch was added to the catalog but not to the sender, so flipping it produced an empty
