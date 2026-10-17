@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AlertCircle, BadgeCheck, Calendar, CheckCircle2, FileEdit, Loader2, Lock, Printer, Send, X } from 'lucide-react';
 import Markdown from '../Markdown';
 import SignaturePad from './SignaturePad';
+import MultiSelectDropdown from './MultiSelectDropdown';
 import PrintableFormSubmission from './PrintableFormSubmission';
 import { formatPhoneNumber, parseSignatureValue, validateFormSubmission } from '../../utils/formDefinition';
 import { submitFormResponse } from '../../services/api';
@@ -24,6 +25,12 @@ export default function EnteredFormModal({
       if (item.field_type !== 'markdown' && item.data_name) {
         if (submission?.data?.[item.data_name] !== undefined) {
           initial[item.data_name] = submission.data[item.data_name];
+        } else if (item.field_type === 'multiselect') {
+          initial[item.data_name] = Array.isArray(item.default_value)
+            ? item.default_value
+            : item.default_value
+            ? [item.default_value]
+            : [];
         } else {
           initial[item.data_name] = item.default_value !== undefined ? item.default_value : '';
         }
@@ -403,6 +410,16 @@ export default function EnteredFormModal({
                           </option>
                         ))}
                       </select>
+                    ) : item.field_type === 'multiselect' ? (
+                      <MultiSelectDropdown
+                        id={fieldId}
+                        options={item.options || []}
+                        value={Array.isArray(val) ? val : val ? [val] : []}
+                        disabled={isReadOnly}
+                        onChange={(newVal) => handleFieldChange(fieldId, newVal)}
+                        placeholder={item.placeholder || 'Select one or more options…'}
+                        error={Boolean(err)}
+                      />
                     ) : item.field_type === 'radio' ? (
                       <div className="space-y-1.5 pt-1">
                         {(item.options || []).map((opt) => (

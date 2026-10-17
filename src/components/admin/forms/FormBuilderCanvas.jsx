@@ -12,6 +12,7 @@ import {
   GripVertical,
   Hash,
   List,
+  ListFilter,
   Pencil,
   PenTool,
   Phone,
@@ -21,6 +22,7 @@ import {
   Type,
 } from 'lucide-react';
 import FormFieldConfigModal from './FormFieldConfigModal';
+import WidgetResizeHandle from '../../widgets/WidgetResizeHandle';
 import { normalizeEnteredFieldItem } from '../../../utils/formDefinition';
 
 const generateFieldId = (index) =>
@@ -28,10 +30,12 @@ const generateFieldId = (index) =>
 
 export default function FormBuilderCanvas({ layout = [], onChange }) {
   const [editingItemIndex, setEditingItemIndex] = useState(null);
+  const [pendingNewItem, setPendingNewItem] = useState(null);
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const addField = (fieldType) => {
+    setEditingItemIndex(null);
     const isMarkdown = fieldType === 'markdown';
     const isDivider = fieldType === 'divider';
     const isNonData = isMarkdown || isDivider;
@@ -43,6 +47,7 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
     if (fieldType === 'signature') defaultCaption = 'Member Signature';
     if (fieldType === 'signature_stamp') defaultCaption = 'Acknowledge & Sign';
     if (fieldType === 'tel') defaultCaption = 'Phone Number';
+    if (fieldType === 'multiselect') defaultCaption = 'Select Options';
 
     const defaultDataName = isNonData ? '' : `field_${nextIndex + 1}`;
 
@@ -59,9 +64,13 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
       nextIndex
     );
 
-    const updated = [...layout, newItem];
+    setPendingNewItem(newItem);
+  };
+
+  const handleSavePendingItem = (savedItem) => {
+    const updated = [...layout, savedItem];
     onChange?.(updated);
-    setEditingItemIndex(updated.length - 1);
+    setPendingNewItem(null);
   };
 
   const handleUpdateItem = (updatedItem) => {
@@ -146,6 +155,7 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
     { type: 'date', label: 'Date', icon: Calendar },
     { type: 'time', label: 'Time', icon: Clock },
     { type: 'select', label: 'Dropdown', icon: List },
+    { type: 'multiselect', label: 'Multi-Select', icon: ListFilter },
     { type: 'checkbox', label: 'Checkbox', icon: CheckSquare },
     { type: 'radio', label: 'Radio', icon: Radio },
     { type: 'signature', label: 'E-Signature', icon: PenTool },
@@ -158,9 +168,14 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
     <div className="space-y-4">
       {/* Toolbox Bar */}
       <div className="sticky top-0 z-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-md p-3 shadow-md">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-          Add Fields & Instructions
-        </p>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Add Fields & Instructions
+          </p>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:inline">
+            Drag cards to reorder • Drag corner handle to resize width
+          </span>
+        </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {TOOLBAR_BUTTONS.map(({ type, label, icon: Icon }) => (
             <button
@@ -201,7 +216,7 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                   onDragOver={(e) => handleDragOver(e, index)}
                   onDrop={(e) => handleDrop(e, index)}
                   onDragEnd={handleDragEnd}
-                  className={`${colSpanClass(item.col_span || 3)} rounded-xl border transition-all ${
+                  className={`relative ${colSpanClass(item.col_span || 3)} rounded-xl border transition-all ${
                     isDragOver
                       ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-50/40 dark:bg-blue-950/20'
                       : isDragging
@@ -229,17 +244,6 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <select
-                        value={item.col_span || 3}
-                        onChange={(e) => handleColSpanChange(index, e.target.value)}
-                        className="h-7 text-[11px] rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 px-1.5"
-                        title="Change field width"
-                      >
-                        <option value={1}>1/3 W</option>
-                        <option value={2}>2/3 W</option>
-                        <option value={3}>Full W</option>
-                      </select>
-
                       <button
                         type="button"
                         onClick={() => handleMove(index, index - 1)}
@@ -262,7 +266,10 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
 
                       <button
                         type="button"
-                        onClick={() => setEditingItemIndex(index)}
+                        onClick={() => {
+                          setPendingNewItem(null);
+                          setEditingItemIndex(index);
+                        }}
                         className="p-1 rounded text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/50"
                         title="Edit properties"
                       >
@@ -282,7 +289,10 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
 
                   {/* Body Preview */}
                   <div
-                    onClick={() => setEditingItemIndex(index)}
+                    onClick={() => {
+                      setPendingNewItem(null);
+                      setEditingItemIndex(index);
+                    }}
                     className="cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-700/20 rounded p-1 transition"
                   >
                     {item.field_type === 'divider' ? (
@@ -299,7 +309,7 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                         )}
                       </div>
                     ) : isMarkdown ? (
-                      <div className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 font-mono">
+                      <div className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 font-mono pr-14">
                         {item.markdown_content || 'Empty markdown instructions'}
                       </div>
                     ) : item.field_type === 'signature' ? (
@@ -309,14 +319,14 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                           {item.caption}
                         </div>
                         {item.instructions && (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5 pr-14">
                             Note: {item.instructions}
                           </p>
                         )}
                         <div className="mt-1.5 h-12 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center text-[10px] text-slate-400">
                           Finger / Stylus Drawing Area
                         </div>
-                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-1">
+                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-1 pr-14">
                           Firestore field: <span className="text-blue-600 dark:text-blue-400">{item.data_name}</span>
                         </div>
                       </div>
@@ -327,7 +337,7 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                           {item.caption}
                         </div>
                         {item.instructions && (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5 pr-14">
                             Note: {item.instructions}
                           </p>
                         )}
@@ -335,8 +345,41 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                           <BadgeCheck className="w-3.5 h-3.5" />
                           <span>Digital Signature Stamp Button</span>
                         </div>
-                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-1">
+                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-1 pr-14">
                           Firestore field: <span className="text-blue-600 dark:text-blue-400">{item.data_name}</span>
+                        </div>
+                      </div>
+                    ) : item.field_type === 'multiselect' ? (
+                      <div>
+                        <div className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <ListFilter className="w-3.5 h-3.5 text-blue-500" />
+                          {item.caption}
+                        </div>
+                        {item.instructions && (
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5 pr-14">
+                            Note: {item.instructions}
+                          </p>
+                        )}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                          {(item.options && item.options.length > 0
+                            ? item.options.slice(0, 3)
+                            : ['Option 1', 'Option 2']
+                          ).map((opt, oIdx) => (
+                            <span
+                              key={oIdx}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                            >
+                              {opt}
+                            </span>
+                          ))}
+                          {item.options && item.options.length > 3 && (
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              +{item.options.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-1 pr-14">
+                          Multi-select • Firestore field: <span className="text-blue-600 dark:text-blue-400">{item.data_name}</span>
                         </div>
                       </div>
                     ) : item.field_type === 'tel' ? (
@@ -346,11 +389,11 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                           {item.caption}
                         </div>
                         {item.instructions && (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5 pr-14">
                             Note: {item.instructions}
                           </p>
                         )}
-                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5">
+                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 pr-14">
                           Format: (XXX) XXX-XXXX • Firestore field: <span className="text-blue-600 dark:text-blue-400">{item.data_name}</span>
                         </div>
                       </div>
@@ -360,16 +403,25 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
                           {item.caption}
                         </div>
                         {item.instructions && (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 italic line-clamp-1 mt-0.5 pr-14">
                             Note: {item.instructions}
                           </p>
                         )}
-                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5">
+                        <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 pr-14">
                           Firestore field: <span className="text-blue-600 dark:text-blue-400">{item.data_name}</span>
                         </div>
                       </div>
                     )}
                   </div>
+
+                  {/* Grabbable Corner Resize Handle */}
+                  <WidgetResizeHandle
+                    colSpan={item.col_span || 3}
+                    onResize={(newSpan) => handleColSpanChange(index, newSpan)}
+                    minColSpan={1}
+                    maxColSpan={3}
+                    ariaLabel="Resize field width (click to cycle or drag to snap between 1, 2, and 3 columns)"
+                  />
                 </div>
               );
             })}
@@ -377,12 +429,23 @@ export default function FormBuilderCanvas({ layout = [], onChange }) {
         )}
       </div>
 
-      {/* Field Customization Modal */}
+      {/* Field Customization Modal for Existing Field */}
       {editingItemIndex !== null && layout[editingItemIndex] && (
         <FormFieldConfigModal
           item={layout[editingItemIndex]}
+          isNew={false}
           onSave={handleUpdateItem}
           onClose={() => setEditingItemIndex(null)}
+        />
+      )}
+
+      {/* Field Customization Modal for New Field */}
+      {pendingNewItem && (
+        <FormFieldConfigModal
+          item={pendingNewItem}
+          isNew={true}
+          onSave={handleSavePendingItem}
+          onClose={() => setPendingNewItem(null)}
         />
       )}
     </div>

@@ -628,6 +628,21 @@ export default function AdminSubmissionsTab({
                             ? 'Yes / Checked'
                             : val === false
                             ? 'No / Unchecked'
+                            : Array.isArray(val)
+                            ? (val.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {val.map((item, vIdx) => (
+                                    <span
+                                      key={vIdx}
+                                      className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                    >
+                                      {item}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic font-normal">None selected</span>
+                              ))
                             : val !== undefined && val !== ''
                             ? String(val)
                             : <span className="text-slate-400 italic font-normal">No response provided</span>}
@@ -665,6 +680,21 @@ export default function AdminSubmissionsTab({
                                 {val.readable_time || val.timestamp || 'Verified'})
                               </span>
                             </div>
+                          ) : Array.isArray(val) ? (
+                            val.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {val.map((item, vIdx) => (
+                                  <span
+                                    key={vIdx}
+                                    className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                  >
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic font-normal">None selected</span>
+                            )
                           ) : (
                             String(val ?? '—')
                           )}

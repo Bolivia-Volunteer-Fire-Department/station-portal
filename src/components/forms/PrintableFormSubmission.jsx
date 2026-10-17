@@ -292,6 +292,25 @@ export default function PrintableFormSubmission({
             );
           }
 
+          if (Array.isArray(val)) {
+            return (
+              <div
+                key={item.id || idx}
+                className={`${spanClass(item.col_span || 1)} print-form-item border border-slate-300 rounded p-2.5 bg-white`}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                  {item.caption}
+                </div>
+                {item.instructions && (
+                  <p className="text-[10px] text-slate-500 italic mt-0.5">{item.instructions}</p>
+                )}
+                <div className="mt-1 text-xs font-semibold text-black">
+                  {val.length > 0 ? val.join(', ') : '—'}
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div
               key={item.id || idx}
@@ -323,7 +342,11 @@ export default function PrintableFormSubmission({
                     {key.replace(/_/g, ' ')}
                   </div>
                   <div className="text-xs font-semibold text-black mt-0.5">
-                    {typeof value === 'object' ? JSON.stringify(value) : String(value || '—')}
+                    {Array.isArray(value)
+                      ? (value.length > 0 ? value.join(', ') : '—')
+                      : typeof value === 'object'
+                      ? JSON.stringify(value)
+                      : String(value || '—')}
                   </div>
                 </div>
               ))}

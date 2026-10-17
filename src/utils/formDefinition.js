@@ -138,6 +138,7 @@ export const ENTERED_FIELD_KINDS = [
   'date',
   'time',
   'select',
+  'multiselect',
   'checkbox',
   'radio',
   'signature',
@@ -193,11 +194,13 @@ export const sanitizeDataName = (raw) =>
 
 export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
   const id = text(item.id) || `field_${Date.now()}_${index}`;
-  const rawType = text(item.field_type || item.type).toLowerCase();
+  let rawType = text(item.field_type || item.type).toLowerCase();
+  if (rawType === 'multi_select') rawType = 'multiselect';
   const fieldType = ENTERED_FIELD_KINDS.includes(rawType) ? rawType : 'text';
   const isNonData = isNonDataField(fieldType);
   const isMarkdown = fieldType === 'markdown';
   const isDivider = fieldType === 'divider';
+  const isMultiSelect = fieldType === 'multiselect';
 
   let dataName = sanitizeDataName(item.data_name || item.name || '');
   if (!isNonData && !dataName) {
@@ -227,6 +230,19 @@ export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
     if (text(item.validation.custom_hint)) validation.custom_hint = text(item.validation.custom_hint);
   }
 
+  let defaultValue = '';
+  if (!isNonData) {
+    if (isMultiSelect) {
+      defaultValue = Array.isArray(item.default_value)
+        ? item.default_value
+        : item.default_value
+        ? [item.default_value]
+        : [];
+    } else {
+      defaultValue = item.default_value !== undefined ? item.default_value : '';
+    }
+  }
+
   return {
     id,
     data_name: isNonData ? '' : dataName,
@@ -234,7 +250,7 @@ export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
     field_type: fieldType,
     col_span: colSpan,
     required: isNonData ? false : Boolean(item.required),
-    default_value: isNonData ? '' : item.default_value !== undefined ? item.default_value : '',
+    default_value: defaultValue,
     placeholder: text(item.placeholder),
     instructions: isMarkdown ? '' : text(item.instructions || item.help_text || item.instruction_text),
     options,
@@ -329,7 +345,7 @@ export const validateFormSubmission = (layout = [], answers = {}) => {
       }
     }
 
-    data[name] = value ?? '';
+    data[name] = value ?? (item.field_type === 'multiselect' ? [] : '');
   });
 
   return {

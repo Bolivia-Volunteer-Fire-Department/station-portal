@@ -12,6 +12,7 @@ export default function WidgetResizeHandle({
   disabled = false,
   minColSpan = 1,
   maxColSpan = 3,
+  ariaLabel = 'Resize width (click to cycle or drag to snap between 1, 2, and 3 columns)',
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [previewSpan, setPreviewSpan] = useState(colSpan);
@@ -121,7 +122,7 @@ export default function WidgetResizeHandle({
   return (
     <div
       role="slider"
-      aria-label="Resize widget width (click to cycle or drag to snap between 1, 2, and 3 columns)"
+      aria-label={ariaLabel}
       aria-valuemin={minColSpan}
       aria-valuemax={maxColSpan}
       aria-valuenow={colSpan}

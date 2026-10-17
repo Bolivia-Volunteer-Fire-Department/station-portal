@@ -520,6 +520,41 @@ checkIs(
   lockedFormDef.allow_editing_after_submission === false
 );
 
+// Multiselect field tests
+const multiselectField = normalizeEnteredFieldItem({
+  field_type: 'multiselect',
+  caption: 'Selected Tools',
+  data_name: 'selected_tools',
+  options: ['Halligan', 'Axe', 'TIC'],
+  default_value: ['Halligan'],
+  required: true,
+});
+check('multiselect normalizes field type', multiselectField.field_type, 'multiselect');
+check('multiselect preserves options array', multiselectField.options, ['Halligan', 'Axe', 'TIC']);
+check('multiselect default_value is an array', multiselectField.default_value, ['Halligan']);
+
+const multiselectAliasField = normalizeEnteredFieldItem({
+  type: 'multi_select',
+  caption: 'Hazards',
+  default_value: 'Power Lines',
+});
+check('multi_select alias normalizes to multiselect', multiselectAliasField.field_type, 'multiselect');
+check('multiselect single string default_value wraps in array', multiselectAliasField.default_value, ['Power Lines']);
+
+// Multiselect validation in validateFormSubmission
+const msLayout = [
+  { field_type: 'multiselect', caption: 'Required Tools', data_name: 'req_tools', required: true },
+  { field_type: 'multiselect', caption: 'Optional Tools', data_name: 'opt_tools', required: false },
+];
+const emptyMsResult = validateFormSubmission(msLayout, { req_tools: [], opt_tools: [] });
+checkIs('multiselect empty array fails required validation', !emptyMsResult.valid && Boolean(emptyMsResult.errors.req_tools));
+checkIs('multiselect optional empty array has no error', !emptyMsResult.errors.opt_tools);
+
+const validMsResult = validateFormSubmission(msLayout, { req_tools: ['Axe', 'TIC'] });
+checkIs('multiselect non-empty array passes validation', validMsResult.valid);
+check('multiselect populates data array', validMsResult.data.req_tools, ['Axe', 'TIC']);
+check('multiselect missing optional defaults to empty array', validMsResult.data.opt_tools, []);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
 
