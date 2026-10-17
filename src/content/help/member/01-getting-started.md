@@ -42,7 +42,6 @@ To see what you have access to, click your name at the top of the sidebar to ope
 
 ## About this app
 
-
 ### Version 1.7x
 * Added **Equipment** and **Apparatuses**.
 * Revamped how Documents are organized in the Administration module.
@@ -56,6 +55,8 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Refined what text was selectable in the app overall.
 * Added **configurable forms** that administrators can design for end users to complete.
 * Added a Monthly/Weekly/Daily/Auto button group to the Schedule so members (i.e. Cody) with trash phones can see their schedule easier.
+* Fixed Heading display issues in the areas where Markdown is used.
+* Fixed text color not working in the Markdown Editor.
 
 ### Version 1.6x
 * Added the **District Map** module.

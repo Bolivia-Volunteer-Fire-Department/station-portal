@@ -108,7 +108,7 @@ console.log('\n--- bold and italic together ---');
 check('three asterisks are one token', types(parseInline('***both***')), ['bold']);
 check('whose child is italic', parseInline('***both***')[0].children[0].type, 'italic');
 check('with the words inside', plain(parseInline('***both***')), 'both');
-check('and it renders as both tags', renderToString(React.createElement(Markdown, { markdown: '***both***' })), '<div class="space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200"><p><strong><em>both</em></strong></p></div>');
+check('and it renders as both tags', renderToString(React.createElement(Markdown, { markdown: '***both***' })), '<div class="space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200 select-text"><p><strong><em>both</em></strong></p></div>');
 check('unhugged triple asterisks stay literal', types(parseInline('*** spaced ***')), ['text']);
 check('two asterisks are still bold', types(parseInline('**bold**')), ['bold']);
 

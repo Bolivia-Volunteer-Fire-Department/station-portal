@@ -10,7 +10,14 @@ export const HEADING_CLASSES = {
   3: 'text-sm font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300',
 };
 
+export const HEADING_TOP_SPACING = {
+  1: 'pt-6',
+  2: 'pt-5',
+  3: 'pt-4',
+};
+
 export const headingClass = (level) => HEADING_CLASSES[level] || HEADING_CLASSES[3];
+export const headingTopSpacing = (level) => HEADING_TOP_SPACING[level] || 'pt-2';
 
 // The five callouts, styled like GitHub's: a colored left rule, the type's name, and a color nobody has to be
 // able to see - the label is the signal, not the hue.

@@ -109,23 +109,23 @@ const applySurfaceHtml = (element, markdown) => {
 };
 
 const TEXT_COLOR_OPTIONS = [
-  { id: 'default', label: 'Default', dotClass: 'bg-slate-700 dark:bg-slate-300' },
-  { id: 'red', label: 'Red', dotClass: 'bg-red-600' },
-  { id: 'amber', label: 'Amber / Orange', dotClass: 'bg-amber-600' },
-  { id: 'green', label: 'Green', dotClass: 'bg-emerald-600' },
-  { id: 'blue', label: 'Blue', dotClass: 'bg-blue-600' },
-  { id: 'purple', label: 'Purple', dotClass: 'bg-purple-600' },
-  { id: 'slate', label: 'Slate Gray', dotClass: 'bg-slate-500' },
+  { id: 'default', color: 'default', label: 'Default', dotClass: 'bg-slate-700 dark:bg-slate-300' },
+  { id: 'red', color: 'red', label: 'Red', dotClass: 'bg-red-600' },
+  { id: 'amber', color: 'amber', label: 'Amber / Orange', dotClass: 'bg-amber-600' },
+  { id: 'green', color: 'green', label: 'Green', dotClass: 'bg-emerald-600' },
+  { id: 'blue', color: 'blue', label: 'Blue', dotClass: 'bg-blue-600' },
+  { id: 'purple', color: 'purple', label: 'Purple', dotClass: 'bg-purple-600' },
+  { id: 'slate', color: 'slate', label: 'Slate Gray', dotClass: 'bg-slate-500' },
 ];
 
 const BG_COLOR_OPTIONS = [
-  { id: 'none', label: 'Clear highlight', dotClass: 'border border-slate-300 dark:border-slate-600 bg-transparent' },
-  { id: 'yellow', label: 'Yellow (Standard)', dotClass: 'bg-amber-300' },
-  { id: 'red', label: 'Red', dotClass: 'bg-red-300' },
-  { id: 'green', label: 'Green', dotClass: 'bg-emerald-300' },
-  { id: 'blue', label: 'Blue', dotClass: 'bg-blue-300' },
-  { id: 'purple', label: 'Purple', dotClass: 'bg-purple-300' },
-  { id: 'slate', label: 'Gray', dotClass: 'bg-slate-300' },
+  { id: 'none', bg: 'none', label: 'Clear highlight', dotClass: 'border border-slate-300 dark:border-slate-600 bg-transparent' },
+  { id: 'yellow', bg: 'yellow', label: 'Yellow (Standard)', dotClass: 'bg-amber-300' },
+  { id: 'red', bg: 'red', label: 'Red', dotClass: 'bg-red-300' },
+  { id: 'green', bg: 'green', label: 'Green', dotClass: 'bg-emerald-300' },
+  { id: 'blue', bg: 'blue', label: 'Blue', dotClass: 'bg-blue-300' },
+  { id: 'purple', bg: 'purple', label: 'Purple', dotClass: 'bg-purple-300' },
+  { id: 'slate', bg: 'slate', label: 'Gray', dotClass: 'bg-slate-300' },
 ];
 
 export default function MarkdownEditor({
@@ -149,6 +149,8 @@ export default function MarkdownEditor({
   const [activeBlock, setActiveBlock] = useState('paragraph');
   const [activeBlockMeta, setActiveBlockMeta] = useState({ level: null, ordered: false });
   const [activeInline, setActiveInline] = useState([]);
+  const [activeTextColor, setActiveTextColor] = useState(null);
+  const [activeBgColor, setActiveBgColor] = useState(null);
 
   const surfaceRef = useRef(null);
   const textareaRef = useRef(null);
@@ -235,6 +237,8 @@ export default function MarkdownEditor({
     setActiveBlockMeta({ level, ordered: isOrdered });
 
     const marks = [];
+    let foundTextColor = null;
+    let foundBgColor = null;
     let node = element;
     while (node && node !== surface) {
       if (node.tagName === 'STRONG' || node.tagName === 'B') marks.push('bold');
@@ -244,9 +248,17 @@ export default function MarkdownEditor({
       if (node.tagName === 'MARK') marks.push('highlight');
       if (node.tagName === 'CODE') marks.push('code');
       if (node.tagName === 'A') marks.push('link');
+      if (!foundTextColor && node.getAttribute?.('data-color')) {
+        foundTextColor = node.getAttribute('data-color');
+      }
+      if (!foundBgColor && node.getAttribute?.('data-bg')) {
+        foundBgColor = node.getAttribute('data-bg');
+      }
       node = node.parentElement;
     }
     setActiveInline(marks);
+    setActiveTextColor(foundTextColor);
+    setActiveBgColor(foundBgColor);
   }, []);
 
   useEffect(() => {
@@ -605,16 +617,64 @@ export default function MarkdownEditor({
       if (!textarea) return;
       const start = textarea.selectionStart ?? 0;
       const end = textarea.selectionEnd ?? 0;
+      const before = draft.slice(0, start);
+      const selected = draft.slice(start, end);
+      const after = draft.slice(end);
+
       if (colorId === 'default' || !colorId) {
+        if (selected) {
+          const stripped = selected.replace(/\[color:[a-zA-Z0-9#_-]+\]([\s\S]*?)\[\/color\]/g, '$1');
+          if (stripped !== selected) {
+            const next = before + stripped + after;
+            setDraft(next);
+            onChange?.(next);
+            setTimeout(() => {
+              textarea.focus({ preventScroll: true });
+              textarea.setSelectionRange(start, start + stripped.length);
+            }, 0);
+          }
+        } else {
+          // Check if cursor is inside [color:...]...[/color]
+          const lastOpen = before.lastIndexOf('[color:');
+          const lastClose = before.lastIndexOf('[/color]');
+          if (lastOpen !== -1 && lastOpen > lastClose) {
+            const nextClose = after.indexOf('[/color]');
+            if (nextClose !== -1) {
+              const openEnd = draft.indexOf(']', lastOpen);
+              if (openEnd !== -1 && openEnd < start) {
+                const fullClose = end + nextClose;
+                const content = draft.slice(openEnd + 1, fullClose);
+                const next = draft.slice(0, lastOpen) + content + draft.slice(fullClose + 8);
+                setDraft(next);
+                onChange?.(next);
+                setTimeout(() => {
+                  textarea.focus({ preventScroll: true });
+                  textarea.setSelectionRange(lastOpen, lastOpen + content.length);
+                }, 0);
+              }
+            }
+          }
+        }
         setShowTextColorMenu(false);
         return;
       }
-      const selected = draft.slice(start, end);
-      const wrapped = `[color:${colorId}]${selected}[/color]`;
-      const next = draft.slice(0, start) + wrapped + draft.slice(end);
+
+      const existingMatch = /^\[color:[a-zA-Z0-9#_-]+\]([\s\S]*?)\[\/color\]$/.exec(selected);
+      const innerText = existingMatch ? existingMatch[1] : selected;
+      const wrapped = `[color:${colorId}]${innerText}[/color]`;
+      const next = before + wrapped + after;
       setDraft(next);
       onChange?.(next);
       setShowTextColorMenu(false);
+      setTimeout(() => {
+        textarea.focus({ preventScroll: true });
+        if (start === end) {
+          const caretPos = start + `[color:${colorId}]`.length;
+          textarea.setSelectionRange(caretPos, caretPos);
+        } else {
+          textarea.setSelectionRange(start, start + wrapped.length);
+        }
+      }, 0);
       return;
     }
 
@@ -632,12 +692,14 @@ export default function MarkdownEditor({
         parent.removeChild(existing);
         scheduleCommit();
         setShowTextColorMenu(false);
+        refreshActiveFormats();
         return;
       }
       existing.setAttribute('data-color', colorId);
       existing.className = textColorClass(colorId);
       scheduleCommit();
       setShowTextColorMenu(false);
+      refreshActiveFormats();
       return;
     }
 
@@ -658,6 +720,11 @@ export default function MarkdownEditor({
       selection.addRange(inner);
     } else {
       span.appendChild(range.extractContents());
+      span.querySelectorAll('[data-color]').forEach((child) => {
+        const parent = child.parentNode;
+        while (child.firstChild) parent.insertBefore(child.firstChild, child);
+        parent.removeChild(child);
+      });
       range.insertNode(span);
       const after = document.createRange();
       after.selectNodeContents(span);
@@ -666,6 +733,7 @@ export default function MarkdownEditor({
     }
     scheduleCommit();
     setShowTextColorMenu(false);
+    refreshActiveFormats();
   };
 
   // Apply background / highlight color to selection
@@ -675,16 +743,66 @@ export default function MarkdownEditor({
       if (!textarea) return;
       const start = textarea.selectionStart ?? 0;
       const end = textarea.selectionEnd ?? 0;
+      const before = draft.slice(0, start);
+      const selected = draft.slice(start, end);
+      const after = draft.slice(end);
+
       if (bgId === 'none' || !bgId) {
+        if (selected) {
+          const stripped = selected
+            .replace(/==([^=]+)==/g, '$1')
+            .replace(/\[bg:[a-zA-Z0-9#_-]+\]([\s\S]*?)\[\/bg\]/g, '$1');
+          if (stripped !== selected) {
+            const next = before + stripped + after;
+            setDraft(next);
+            onChange?.(next);
+            setTimeout(() => {
+              textarea.focus({ preventScroll: true });
+              textarea.setSelectionRange(start, start + stripped.length);
+            }, 0);
+          }
+        } else {
+          // Check if cursor is inside [bg:...]...[/bg] or ==...==
+          const lastOpen = before.lastIndexOf('[bg:');
+          const lastClose = before.lastIndexOf('[/bg]');
+          if (lastOpen !== -1 && lastOpen > lastClose) {
+            const nextClose = after.indexOf('[/bg]');
+            if (nextClose !== -1) {
+              const openEnd = draft.indexOf(']', lastOpen);
+              if (openEnd !== -1 && openEnd < start) {
+                const fullClose = end + nextClose;
+                const content = draft.slice(openEnd + 1, fullClose);
+                const next = draft.slice(0, lastOpen) + content + draft.slice(fullClose + 5);
+                setDraft(next);
+                onChange?.(next);
+                setTimeout(() => {
+                  textarea.focus({ preventScroll: true });
+                  textarea.setSelectionRange(lastOpen, lastOpen + content.length);
+                }, 0);
+              }
+            }
+          }
+        }
         setShowBgColorMenu(false);
         return;
       }
-      const selected = draft.slice(start, end);
-      const wrapped = bgId === 'yellow' ? `==${selected}==` : `[bg:${bgId}]${selected}[/bg]`;
-      const next = draft.slice(0, start) + wrapped + draft.slice(end);
+
+      const existingMatch = /^\[bg:[a-zA-Z0-9#_-]+\]([\s\S]*?)\[\/bg\]$/.exec(selected) || /^==([^=]+)==$/.exec(selected);
+      const innerText = existingMatch ? existingMatch[1] : selected;
+      const wrapped = bgId === 'yellow' ? `==${innerText}==` : `[bg:${bgId}]${innerText}[/bg]`;
+      const next = before + wrapped + after;
       setDraft(next);
       onChange?.(next);
       setShowBgColorMenu(false);
+      setTimeout(() => {
+        textarea.focus({ preventScroll: true });
+        if (start === end) {
+          const caretPos = start + (bgId === 'yellow' ? 2 : `[bg:${bgId}]`.length);
+          textarea.setSelectionRange(caretPos, caretPos);
+        } else {
+          textarea.setSelectionRange(start, start + wrapped.length);
+        }
+      }, 0);
       return;
     }
 
@@ -702,12 +820,14 @@ export default function MarkdownEditor({
         parent.removeChild(existing);
         scheduleCommit();
         setShowBgColorMenu(false);
+        refreshActiveFormats();
         return;
       }
       existing.setAttribute('data-bg', bgId);
       existing.className = bgColorClass(bgId);
       scheduleCommit();
       setShowBgColorMenu(false);
+      refreshActiveFormats();
       return;
     }
 
@@ -728,6 +848,11 @@ export default function MarkdownEditor({
       selection.addRange(inner);
     } else {
       mark.appendChild(range.extractContents());
+      mark.querySelectorAll('[data-bg]').forEach((child) => {
+        const parent = child.parentNode;
+        while (child.firstChild) parent.insertBefore(child.firstChild, child);
+        parent.removeChild(child);
+      });
       range.insertNode(mark);
       const after = document.createRange();
       after.selectNodeContents(mark);
@@ -736,6 +861,7 @@ export default function MarkdownEditor({
     }
     scheduleCommit();
     setShowBgColorMenu(false);
+    refreshActiveFormats();
   };
 
   // Keyboard shortcuts in Write mode
@@ -923,13 +1049,19 @@ export default function MarkdownEditor({
               aria-haspopup="true"
               title="Text color"
               aria-label="Text color"
-              className={`${toolbarButtonClass(false)} relative`}
+              className={`${toolbarButtonClass(Boolean(activeTextColor))} relative`}
             >
               <Baseline className="w-4 h-4" />
-              <span className="absolute bottom-1 w-3 h-0.5 rounded-full bg-red-600" />
+              <span
+                className={`absolute bottom-1 w-3 h-0.5 rounded-full ${
+                  activeTextColor && activeTextColor !== 'default'
+                    ? (TEXT_COLOR_OPTIONS.find((o) => o.id === activeTextColor)?.dotClass || 'bg-red-600')
+                    : 'bg-red-600'
+                }`}
+              />
             </button>
             {showTextColorMenu && (
-              <div className="absolute left-0 top-9 z-30 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1.5 origin-top-left animate-popoverIn">
+              <div className="absolute left-0 top-9 z-30 w-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl p-1.5 origin-top-left animate-popoverIn">
                 <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                   Text Color
                 </div>
@@ -938,11 +1070,20 @@ export default function MarkdownEditor({
                     key={opt.id}
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => applyTextColor(opt.color)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                    onClick={() => applyTextColor(opt.color || opt.id)}
+                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                      (activeTextColor || 'default') === opt.id
+                        ? 'bg-slate-100 dark:bg-slate-700 font-medium text-slate-900 dark:text-white'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                    }`}
                   >
-                    <span className={`w-3.5 h-3.5 rounded-full ${opt.dotClass} shrink-0`} />
-                    <span>{opt.label}</span>
+                    <span className="flex items-center gap-2">
+                      <span className={`w-3.5 h-3.5 rounded-full ${opt.dotClass} shrink-0`} />
+                      <span>{opt.label}</span>
+                    </span>
+                    {(activeTextColor || 'default') === opt.id && (
+                      <Check className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 shrink-0" />
+                    )}
                   </button>
                 ))}
               </div>
@@ -963,7 +1104,7 @@ export default function MarkdownEditor({
               aria-haspopup="true"
               title="Highlight background color"
               aria-label="Highlight background color"
-              className={`${toolbarButtonClass(false)} relative`}
+              className={`${toolbarButtonClass(Boolean(activeBgColor && activeBgColor !== 'none'))} relative`}
             >
               <Highlighter className="w-4 h-4 text-amber-500 dark:text-amber-400" />
             </button>
@@ -977,11 +1118,20 @@ export default function MarkdownEditor({
                     key={opt.id}
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => applyBgColor(opt.bg)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                    onClick={() => applyBgColor(opt.bg || opt.id)}
+                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                      (activeBgColor || 'none') === opt.id
+                        ? 'bg-slate-100 dark:bg-slate-700 font-medium text-slate-900 dark:text-white'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                    }`}
                   >
-                    <span className={`w-3.5 h-3.5 rounded-full ${opt.dotClass} shrink-0`} />
-                    <span>{opt.label}</span>
+                    <span className="flex items-center gap-2">
+                      <span className={`w-3.5 h-3.5 rounded-full ${opt.dotClass} shrink-0`} />
+                      <span>{opt.label}</span>
+                    </span>
+                    {(activeBgColor || 'none') === opt.id && (
+                      <Check className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 shrink-0" />
+                    )}
                   </button>
                 ))}
               </div>

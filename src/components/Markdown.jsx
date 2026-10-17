@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { CircleAlert, Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
 import { parseMarkdown } from '../utils/markdown';
-import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, textColorClass } from '../utils/markdownStyles';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, headingTopSpacing, textColorClass } from '../utils/markdownStyles';
 
 // Renders the parsed markdown tree as React elements.
 //
@@ -89,8 +89,9 @@ const renderBlock = (block, index) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${Math.min(Math.max(block.level, 1), 6)}`;
+      const topSpace = index === 0 ? '' : headingTopSpacing(block.level);
       return (
-        <Tag key={key} className={`${headingClass(block.level)} ${index === 0 ? '' : 'pt-2'}`}>
+        <Tag key={key} className={`${headingClass(block.level)} ${topSpace}`.trim()}>
           {inlineChildren(block.children, key)}
         </Tag>
       );
@@ -190,8 +191,9 @@ const renderBlock = (block, index) => {
   }
 };
 
-export default function Markdown({ markdown }) {
-  const blocks = useMemo(() => parseMarkdown(markdown), [markdown]);
+export default function Markdown({ markdown, content }) {
+  const raw = markdown ?? content ?? '';
+  const blocks = useMemo(() => parseMarkdown(raw), [raw]);
 
   return <div className={BLOCK_CLASSES.body}>{blocks.map(renderBlock)}</div>;
 }

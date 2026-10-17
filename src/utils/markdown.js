@@ -56,12 +56,12 @@ const colorMarkFor = (raw) =>
 // bold/italic/link tokens, and a shared global regex would have its lastIndex reset by the inner
 // call - which silently rewinds the outer loop and spins forever. Each call builds its own.
 const COLOR_TAG_SOURCE =
-  '(\\[color:([a-zA-Z0-9#_-]+)\\][^\\[]+?\\[\\/color\\])|(\\[bg:([a-zA-Z0-9#_-]+)\\][^\\[]+?\\[\\/bg\\])';
+  '(\\[color:([a-zA-Z0-9#_-]+)\\](?:(?!\\[color:)[\\s\\S])*?\\[\\/color\\])|(\\[bg:([a-zA-Z0-9#_-]+)\\](?:(?!\\[bg:)[\\s\\S])*?\\[\\/bg\\])';
 
 const INLINE_SOURCE =
-  '(\\*\\*\\*[^*]+?\\*\\*\\*)|(_{3}[^_]+?_{3})|(\\*\\*.+?\\*\\*)|(__[^_]+?__)|(~~[^~]+?~~)|(`[^`]+`)|(\\*[^*]+\\*)|(_[^_]+_)|(\\[[^\\]]+\\]\\([^)\\s]+\\))|' +
   COLOR_TAG_SOURCE +
-  '|(' +
+  '|(\\*\\*\\*[^*]+?\\*\\*\\*)|(_{3}[^_]+?_{3})|(\\*\\*.+?\\*\\*)|(__[^_]+?__)|(~~[^~]+?~~)|(`[^`]+`)|(\\*[^*]+\\*)|(_[^_]+_)|(\\[[^\\]]+\\]\\([^)\\s]+\\))|' +
+  '(' +
   COLOR_MARK_SOURCE +
   ')';
 

@@ -16,7 +16,7 @@
 // all (scripts/verify-rich-markdown.mjs runs in node, where there is no DOM to test against).
 
 import { ALERT_KINDS, parseInline, parseMarkdown } from './markdown.js';
-import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, textColorClass } from './markdownStyles.js';
+import { BLOCK_CLASSES, CALLOUT_CLASSES, INLINE_CLASSES, bgColorClass, headingClass, headingTopSpacing, textColorClass } from './markdownStyles.js';
 
 // ---------------------------------------------------------------------------
 // The toolbar
@@ -270,8 +270,9 @@ const blockAttrs = (index, kind) => ` data-block="${kind}" data-index="${index}"
 
 const headingHtml = (block, index) => {
   const level = Math.min(6, Math.max(1, Number(block.level) || 1));
+  const topSpace = index === 0 ? '' : ` ${headingTopSpacing(level)}`;
   return (
-    `<p${blockAttrs(index, 'heading')} data-level="${level}" class="${headingClass(level)}">` +
+    `<p${blockAttrs(index, 'heading')} data-level="${level}" class="${headingClass(level)}${topSpace}">` +
     `${inlineHtml(block.text) || '<br>'}</p>`
   );
 };
