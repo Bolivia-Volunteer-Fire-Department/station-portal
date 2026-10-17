@@ -5,7 +5,7 @@ import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
 import RankIcon from './RankIcon';
 import { rowTimeText, templateTimeText, timeToMinutes, prettyRange, shiftTimeLabel } from '../utils/shiftTime';
-import { MONTHS, DAY_ORDER, MONTH_VIEW, monthGridCells, dayViewSpan, spanDayDates, weekdayLabels } from '../utils/calendarConstants';
+import { MONTHS, DAY_ORDER, MONTH_VIEW, monthGridCells, dayViewSpan, spanDayDates, weekdayLabels, calendarWeekStart } from '../utils/calendarConstants';
 import {
   desktopViewport,
   phoneViewport,
@@ -37,6 +37,14 @@ import { unnamedLabel } from '../utils/displayLabel';
 
 // Identity used for an unfilled shift wherever a member's name would go.
 const OPEN_SHIFT_LABEL = 'Open';
+
+const VIEW_MODES = [
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+  { id: 'auto', label: 'Auto' },
+];
+const SCHEDULE_VIEW_MODE_STORAGE_KEY = 'fireClock.scheduleViewMode';
 
 // Shift-window formatting lives in utils/shiftTime so every schedule view renders
 // times identically (the pending-approvals table uses the same helpers).
@@ -88,9 +96,37 @@ export default function ScheduleCalendar({
   // board asks the same function rather than repeating the bands - so "the same narrow-view logic in both places" stays a
   // fact rather than a coincidence. The band that is new is the middle one: below the sidebar's 768px but above a phone's
   // 640px there is room for TWO days side by side, which answers "what have I got, and what is tomorrow" in one look.
+  const [viewMode, setViewMode] = useState(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = window.localStorage.getItem(SCHEDULE_VIEW_MODE_STORAGE_KEY);
+        if (VIEW_MODES.some((m) => m.id === saved)) return saved;
+      }
+    } catch {}
+    return 'auto';
+  });
+
+  const handleViewModeChange = (mode) => {
+    setViewMode(mode);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(SCHEDULE_VIEW_MODE_STORAGE_KEY, mode);
+      }
+    } catch {}
+  };
+
   const isDesktop = useSyncExternalStore(subscribeViewport, desktopViewport, desktopViewport);
   const isPhone = useSyncExternalStore(subscribePhoneViewport, phoneViewport, phoneViewport);
-  const span = dayViewSpan({ isDesktop, isPhone });
+  const autoSpan = dayViewSpan({ isDesktop, isPhone });
+  const isWeekView = viewMode === 'week';
+  const span =
+    viewMode === 'day'
+      ? 1
+      : viewMode === 'week'
+        ? 7
+        : viewMode === 'month'
+          ? MONTH_VIEW
+          : autoSpan;
   const dayView = span !== MONTH_VIEW;
   // A day count for anything that has to MEASURE the view rather than draw it: the arrows step this far, the read
   // covers this many days. Zero in the month view, so a stray `span * 2` cannot quietly walk two months.
@@ -134,16 +170,24 @@ export default function ScheduleCalendar({
   const viewDayKey = toDateKey(viewDate);
   // THE DAYS ON SCREEN IN A DAY VIEW, and every measurement below is taken off these rather than off `viewDayKey` alone -
   // so a two-day span cannot title itself after its first day, or report a range one day short of what it draws.
-  const spanDates = dayView ? spanDayDates(viewDate, dayCount) : [];
+  const currentWeekday = viewDate.getDay();
+  const weekDiff = (currentWeekday - calendarWeekStart() + 7) % 7;
+  const weekStart = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate() - weekDiff);
+  const spanDates = dayView
+    ? (isWeekView ? spanDayDates(weekStart, 7) : spanDayDates(viewDate, dayCount))
+    : [];
   const spanKeys = spanDates.map(toDateKey);
-  // "Sat, Oct 3" for one day, "Sat, Oct 3 – Sun, Oct 4" for two. The SECOND date is what tells a member which day the
-  // arrows moved, and dropping it would leave a two-column grid under a one-day title.
-  const dayLabel = spanKeys.map(displayDate).join(' – ');
+  // "Sat, Oct 3" for one day, "Sat, Oct 3 – Sun, Oct 4" for two, or week range for week view.
+  const dayLabel = isWeekView
+    ? `${displayDate(spanKeys[0])} – ${displayDate(spanKeys[6])}`
+    : spanKeys.map(displayDate).join(' – ');
   const viewLabel = dayView ? dayLabel : monthLabel;
   // Whether the view is ALREADY on today, which is what the Today button goes by. Asked in the view's own unit: in the
   // month view "today" is the month today falls in, and in a two-day span it is TODAY BEING THE FIRST DAY - a span that
   // starts yesterday and runs into today is not standing on today, and Today should still take the member there.
-  const atToday = dayView ? spanKeys[0] === todayKey : viewDayKey.slice(0, 7) === todayKey.slice(0, 7);
+  const atToday = dayView
+    ? (isWeekView ? spanKeys.includes(todayKey) : spanKeys[0] === todayKey)
+    : viewDayKey.slice(0, 7) === todayKey.slice(0, 7);
 
   const assignmentById = (id) => assignments.find((a) => String(a.id) === String(id));
   const assignmentInfo = (id) => assignmentById(id)?.description || '';
@@ -584,7 +628,15 @@ export default function ScheduleCalendar({
           <button
             type="button"
             onClick={goPrev}
-            aria-label={dayView ? (dayCount > 1 ? `Previous ${dayCount} days` : 'Previous day') : 'Previous month'}
+            aria-label={
+              dayView
+                ? isWeekView
+                  ? 'Previous week'
+                  : dayCount > 1
+                    ? `Previous ${dayCount} days`
+                    : 'Previous day'
+                : 'Previous month'
+            }
             className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -597,7 +649,15 @@ export default function ScheduleCalendar({
           <button
             type="button"
             onClick={goNext}
-            aria-label={dayView ? (dayCount > 1 ? `Next ${dayCount} days` : 'Next day') : 'Next month'}
+            aria-label={
+              dayView
+                ? isWeekView
+                  ? 'Next week'
+                  : dayCount > 1
+                    ? `Next ${dayCount} days`
+                    : 'Next day'
+                : 'Next month'
+            }
             className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <ChevronRight className="w-5 h-5" />
@@ -661,35 +721,54 @@ export default function ScheduleCalendar({
           </button>
         </div>
 
-        {/* Crew view toggle - only for roles allowed to see the whole crew, and
-            off by default so the month opens on your own shifts. */}
-        {/* One strip for both view switches, so they read as a pair of view options rather than as two
-            separate settings. They wrap onto their own line on a narrow screen. */}
-        {(canViewFullSchedule || events.length > 0) && (
-          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 flex flex-wrap items-center gap-3">
-            {canViewFullSchedule && (
-              <ViewToggle
-                noun="everyone"
-                description="Include every member's shifts on the calendar, not just yours."
-                icon={Users}
-                enabled={showEveryone}
-                onChange={setShowEveryone}
-              />
-            )}
-
-            {/* Shown only when there is something to show, so a station that uses no events never sees a
-                control for them. Not persisted: a temporary view choice, like Show everyone. */}
-            {events.length > 0 && (
-              <ViewToggle
-                noun="events"
-                description="Include non-shift entries such as trainings. Shifts are not affected."
-                icon={Eye}
-                enabled={showEvents}
-                onChange={setShowEvents}
-              />
-            )}
+        {/* View mode switcher (Day / Week / Month / Auto) and crew / event toggles */}
+        <div className="px-4 py-2.5 sm:py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex p-0.5 sm:p-1 bg-slate-200/70 dark:bg-slate-700/60 rounded-xl">
+            {VIEW_MODES.map((mode) => {
+              const isSelected = viewMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => handleViewModeChange(mode.id)}
+                  className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-lg transition ${
+                    isSelected
+                      ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
           </div>
-        )}
+
+          {(canViewFullSchedule || events.length > 0) && (
+            <div className="flex flex-wrap items-center gap-3">
+              {canViewFullSchedule && (
+                <ViewToggle
+                  noun="everyone"
+                  description="Include every member's shifts on the calendar, not just yours."
+                  icon={Users}
+                  enabled={showEveryone}
+                  onChange={setShowEveryone}
+                />
+              )}
+
+              {/* Shown only when there is something to show, so a station that uses no events never sees a
+                  control for them. Not persisted: a temporary view choice, like Show everyone. */}
+              {events.length > 0 && (
+                <ViewToggle
+                  noun="events"
+                  description="Include non-shift entries such as trainings. Shifts are not affected."
+                  icon={Eye}
+                  enabled={showEvents}
+                  onChange={setShowEvents}
+                />
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="px-4 py-3 space-y-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
@@ -725,25 +804,27 @@ export default function ScheduleCalendar({
 
           {/* The weekday names belong to the calendar, so they go with it: the day view's single cell names its own
               weekday and date instead, which is more useful than a row of seven abbreviations over one column. */}
-          {!dayView && (
-            <div className="grid grid-cols-7 gap-1 text-center">
-              {weekdayLabels().map((label) => (
-                <div
-                  key={label}
-                  className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 py-1.5"
-                >
-                  {label}
+          <div className={!dayView || isWeekView ? 'overflow-x-auto' : ''}>
+            <div className={!dayView || isWeekView ? 'min-w-[520px] sm:min-w-0' : ''}>
+              {(!dayView || isWeekView) && (
+                <div className="grid grid-cols-7 gap-1 text-center">
+                  {weekdayLabels().map((label) => (
+                    <div
+                      key={label}
+                      className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 py-1.5"
+                    >
+                      {label}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
 
-          <div
-            // ONE LEFT-ALIGNED COLUMN IN THE DAY VIEW, two when the span is two days, seven equal ones in the calendar.
-            // The `gridClass` that drives the slide is applied either way, so the two views travel the same way.
-            className={`${dayView ? (dayCount > 1 ? 'grid grid-cols-2 gap-1' : '') : 'grid grid-cols-7 gap-1'} ${gridClass}`}
-            onAnimationEnd={onAnimationEnd}
-          >
+              <div
+                // ONE LEFT-ALIGNED COLUMN IN THE DAY VIEW, two when the span is two days, seven equal ones in the calendar.
+                // The `gridClass` that drives the slide is applied either way, so the two views travel the same way.
+                className={`${dayView && !isWeekView ? (dayCount > 1 ? 'grid grid-cols-2 gap-1' : '') : 'grid grid-cols-7 gap-1'} ${gridClass}`}
+                onAnimationEnd={onAnimationEnd}
+              >
             {cells.map((day, i) => {
               const isWeekStart = !dayView && i % 7 === 0;
               const weekNumber = Math.floor(i / 7) + 1;
@@ -799,7 +880,7 @@ export default function ScheduleCalendar({
                   // month cell can afford, and one day gets the window. The calendar's string is kept contiguous and
                   // unchanged on purpose - the availability calendar's server-rendered harness splits its cells by a
                   // class of this shape (verify-admin-render), and a screen rendered with no window is in the month view.
-                  className={`${dayView ? 'min-h-[60vh]' : 'min-h-[76px]'} rounded-lg flex flex-col items-stretch ${
+                  className={`${dayView && !isWeekView ? 'min-h-[60vh]' : isWeekView ? 'min-h-[240px]' : 'min-h-[76px]'} rounded-lg flex flex-col items-stretch ${
                   isToday ? 'ring-2 ring-red-500/80 dark:ring-red-400/80 ring-offset-1 dark:ring-offset-slate-900 ' : ''
                 }${
                   hasMine
@@ -814,7 +895,7 @@ export default function ScheduleCalendar({
                 <div className="flex items-center justify-between p-1 pb-0.5">
                   <span
                     className={`leading-none flex items-center justify-center ${
-                      dayView ? 'text-sm font-semibold' : 'text-xs'
+                      dayView && !isWeekView ? 'text-sm font-semibold' : 'text-xs'
                     } ${
                       isToday
                         ? 'bg-red-600 text-white rounded-full h-5 min-w-5 px-1 font-bold shadow-xs'
@@ -823,11 +904,11 @@ export default function ScheduleCalendar({
                   >
                     {/* The day view has no weekday row above it (that row is the calendar's), so its one cell has to name
                         its own weekday and date - a bare day number would be the only thing on the screen. */}
-                    {dayView
+                    {dayView && !isWeekView
                       ? day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
                       : day.getDate()}
                   </span>
-                  {isToday && !dayView && (
+                  {isToday && (!dayView || isWeekView) && (
                     <span className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mr-0.5">
                       Today
                     </span>
@@ -912,9 +993,9 @@ export default function ScheduleCalendar({
                         : a.timeLabel;
                     const lines = (
                       <>
-                        <span className={dayView ? 'block' : 'block truncate'}>{line1}</span>
+                        <span className={dayView && !isWeekView ? 'block' : 'block truncate'}>{line1}</span>
                         {line2 && (
-                          <span className={`block ${dayView ? 'text-[11px]' : 'truncate text-[9px]'} font-normal opacity-90`}>
+                          <span className={`block ${dayView && !isWeekView ? 'text-[11px]' : 'truncate text-[9px]'} font-normal opacity-90`}>
                             {/* Assignment icon (Administration → Assignments). Inherits
                                 the pill's text color so an arbitrary assignment color
                                 can never make it unreadable. */}
@@ -927,7 +1008,7 @@ export default function ScheduleCalendar({
                     // A MONTH CELL IS 76px TALL AND HOLDS A WHOLE DAY, so a pill there is two clipped lines of 10px text.
                     // A day has the window to itself, so the pill becomes a readable block and NOTHING is truncated - the
                     // whole point of the extra room is that a name and the shift's window are not cut off to fit.
-                    const baseClass = dayView
+                    const baseClass = dayView && !isWeekView
                       ? 'mt-1.5 w-full px-2.5 py-1.5 rounded-xl text-xs leading-tight font-semibold'
                       : 'mt-0.5 w-full overflow-hidden px-1.5 py-0.5 rounded-md text-[10px] leading-tight font-semibold';
 
@@ -986,6 +1067,8 @@ export default function ScheduleCalendar({
               </React.Fragment>
             );
           })}
+          </div>
+            </div>
           </div>
         </div>
       </div>
