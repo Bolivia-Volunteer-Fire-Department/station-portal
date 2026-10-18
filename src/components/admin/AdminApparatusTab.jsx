@@ -28,6 +28,7 @@ import {
   adminDeleteApparatus,
   fetchApparatus,
   fetchAssetTypes,
+  fetchAdminSections,
 } from '../../services/api';
 import {
   APPARATUS_TYPES,
@@ -35,6 +36,7 @@ import {
   apparatusStatusBadge,
   evaluateServiceDue,
   normalizeApparatusRecord,
+  sortApparatusByIdentifier,
   MAINTENANCE_TYPES,
   maintenanceTypeMeta,
   formatCurrency,
@@ -82,10 +84,15 @@ export default function AdminApparatusTab({
 }) {
   const [apparatusList, setApparatusList] = useState([]);
   const [assetTypes, setAssetTypes] = useState([]);
+  const [internalUsers, setInternalUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  const effectiveUsers = useMemo(() => {
+    return Array.isArray(users) && users.length > 0 ? users : internalUsers;
+  }, [users, internalUsers]);
 
   const currentUserName = useMemo(() => {
     if (currentUserNameProp && String(currentUserNameProp).trim()) {
@@ -106,7 +113,7 @@ export default function AdminApparatusTab({
 
     const targetId = String(currentUserId || currentUser?.id || currentUser?.user_id || '').trim();
     if (targetId) {
-      const match = users.find(
+      const match = effectiveUsers.find(
         (u) =>
           String(u?.id ?? '').trim() === targetId ||
           String(u?.user_id ?? '').trim() === targetId ||
@@ -117,7 +124,7 @@ export default function AdminApparatusTab({
       }
     }
     return 'Staff';
-  }, [currentUserNameProp, currentUser, currentUserId, users]);
+  }, [currentUserNameProp, currentUser, currentUserId, effectiveUsers]);
 
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -141,17 +148,26 @@ export default function AdminApparatusTab({
   const [recordError, setRecordError] = useState(null);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const fileInputRef = useRef(null);
+  const internalUsersRef = useRef(internalUsers);
+  internalUsersRef.current = internalUsers;
 
   // Load apparatus records and configured asset types from backend
   const loadApparatus = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, typesRes] = await Promise.all([
+      const missingSections = [];
+      if (!users?.length && !internalUsersRef.current.length) missingSections.push('directory');
+
+      const [response, typesRes, adminSections] = await Promise.all([
         fetchApparatus(token),
         fetchAssetTypes(token).catch(() => null),
+        missingSections.length ? fetchAdminSections(missingSections).catch(() => null) : null,
       ]);
+      if (adminSections?.directory) {
+        setInternalUsers(adminSections.directory);
+      }
       if (response?.apparatus) {
-        setApparatusList(response.apparatus.map(normalizeApparatusRecord));
+        setApparatusList(response.apparatus.map(normalizeApparatusRecord).sort(sortApparatusByIdentifier));
       }
       if (typesRes?.assetTypes) {
         setAssetTypes(typesRes.assetTypes);
@@ -161,7 +177,7 @@ export default function AdminApparatusTab({
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, users]);
 
   useEffect(() => {
     loadApparatus();
@@ -424,7 +440,7 @@ export default function AdminApparatusTab({
         (item.vin && item.vin.toLowerCase().includes(q)) ||
         (item.license_plate && item.license_plate.toLowerCase().includes(q))
       );
-    });
+    }).sort(sortApparatusByIdentifier);
   }, [apparatusList, searchQuery, typeFilter, statusFilter]);
 
   // KPI counts
@@ -1411,7 +1427,7 @@ export default function AdminApparatusTab({
                                   {rec.recorded_by_name && rec.recorded_by_name !== 'Staff'
                                     ? rec.recorded_by_name
                                     : (rec.recorded_by_id &&
-                                        users.find((u) => String(u?.id ?? u?.user_id) === String(rec.recorded_by_id))?.name) ||
+                                        effectiveUsers.find((u) => String(u?.id ?? u?.user_id) === String(rec.recorded_by_id))?.name) ||
                                       (currentUserName !== 'Staff' ? currentUserName : 'Staff')}
                                 </p>
                               </div>

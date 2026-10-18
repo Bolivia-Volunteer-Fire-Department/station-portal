@@ -26,13 +26,30 @@ export default function QuickLinksWidget({ links = DEFAULT_QUICK_LINKS, onNaviga
   };
 
   return (
-    <div className="h-full flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 md:p-6 shadow-xl transition-all">
-      <div>
-        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-semibold text-sm mb-3">
-          <Link2 className="w-4 h-4 text-red-600 dark:text-red-500" />
-          <span>Quick Links & CAD</span>
+    <div className="h-full max-h-[500px] flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 md:p-6 shadow-xl transition-all">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700/60 mb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center font-bold shrink-0">
+            <Link2 className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              Quick Links
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Department portals & operational resources
+            </p>
+          </div>
         </div>
 
+        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300">
+          {activeLinks.length}
+        </span>
+      </div>
+
+      {/* Content */}
+      <div className="overflow-y-auto min-h-0 flex-1 pr-1">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 gap-2">
           {activeLinks.map((link) => {
             const Icon = ICON_MAP[link.id] || ExternalLink;
@@ -62,10 +79,12 @@ export default function QuickLinksWidget({ links = DEFAULT_QUICK_LINKS, onNaviga
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-400 dark:text-slate-500 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60">
-        Station operational portals & external emergency resources.
-      </p>
+      {/* Footer */}
+      <div className="shrink-0 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
+        <span className="text-[11px] text-slate-400">
+          {activeLinks.length} portal{activeLinks.length === 1 ? '' : 's'} & resource{activeLinks.length === 1 ? '' : 's'}
+        </span>
+      </div>
     </div>
   );
 }
-

@@ -10,18 +10,20 @@ export default function WeatherRadarWidget({
   stationZip = '',
 }) {
   return (
-    <div className="h-full flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 md:p-6 shadow-xl transition-all">
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-semibold text-sm">
-            <CloudRain className="w-4 h-4 text-sky-500" />
-            <span>District Weather & Radar</span>
-          </div>
-          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300">
-            NWS Live
-          </span>
+    <div className="h-full max-h-[500px] flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 md:p-6 shadow-xl transition-all">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-semibold text-sm">
+          <CloudRain className="w-4 h-4 text-sky-500" />
+          <span>District Weather & Radar</span>
         </div>
+        <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300">
+          NWS Live
+        </span>
+      </div>
 
+      {/* Content */}
+      <div className="overflow-y-auto min-h-0 flex-1 pr-1">
         {/* Radar Graphic Card */}
         <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700/80 bg-gradient-to-br from-slate-900 to-sky-950 p-4 text-white shadow-inner mb-3">
           <div className="flex items-center justify-between">
@@ -65,7 +67,8 @@ export default function WeatherRadarWidget({
         </div>
       </div>
 
-      <div className="pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+      {/* Footer */}
+      <div className="shrink-0 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
         <span className="text-[11px] text-slate-400 dark:text-slate-500">NOAA National Weather Service</span>
         <a
           href={radarUrl}

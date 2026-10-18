@@ -168,13 +168,18 @@ export default function AdminWorkOrdersTab({
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   }, [effectiveUsers, effectiveRoles]);
 
+  const internalUsersRef = useRef(internalUsers);
+  internalUsersRef.current = internalUsers;
+  const internalRolesRef = useRef(internalRoles);
+  internalRolesRef.current = internalRoles;
+
   // Load work orders and assets
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const missingSections = [];
-      if (!users?.length && !internalUsers.length) missingSections.push('directory');
-      if (!roles?.length && !internalRoles.length) missingSections.push('roles');
+      if (!users?.length && !internalUsersRef.current.length) missingSections.push('directory');
+      if (!roles?.length && !internalRolesRef.current.length) missingSections.push('roles');
 
       const [woRes, appRes, eqRes, adminSections] = await Promise.all([
         fetchWorkOrders(token).catch(() => null),
@@ -203,7 +208,7 @@ export default function AdminWorkOrdersTab({
     } finally {
       setLoading(false);
     }
-  }, [token, currentUser, users, roles, internalUsers.length, internalRoles.length]);
+  }, [token, currentUser, users, roles]);
 
   useEffect(() => {
     loadData();

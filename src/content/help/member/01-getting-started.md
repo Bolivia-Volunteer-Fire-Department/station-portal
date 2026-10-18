@@ -58,6 +58,8 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Fixed Heading display issues in the areas where Markdown is used.
 * Fixed text color not working in the Markdown Editor.
 * Added a toggle to the Schedule module to show and hide open shifts.
+* Removed the Clock History module as a module, and migrated it into the Station Time widget as a "History" button.
+* Did a Firebase/Firestore review and improved read/write efficiencies.
 
 ### Version 1.6x
 * Added the **District Map** module.

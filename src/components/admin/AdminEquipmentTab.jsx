@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   ShieldAlert,
   Radio,
@@ -24,6 +24,7 @@ import {
   adminDeleteEquipment,
   fetchEquipment,
   fetchAssetTypes,
+  fetchAdminSections,
 } from '../../services/api';
 import {
   EQUIPMENT_CATEGORIES,
@@ -65,6 +66,7 @@ export default function AdminEquipmentTab({
 }) {
   const [equipmentList, setEquipmentList] = useState([]);
   const [assetTypes, setAssetTypes] = useState([]);
+  const [internalUsers, setInternalUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState('turnout_gear');
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,14 +80,29 @@ export default function AdminEquipmentTab({
   const [pendingDelete, setPendingDelete] = useState(null);
   const [error, setError] = useState(null);
 
+  // Combine parent-provided users with defensive self-loaded directory so member dropdowns never stay empty
+  const effectiveUsers = useMemo(() => {
+    return Array.isArray(users) && users.length > 0 ? users : internalUsers;
+  }, [users, internalUsers]);
+
+  const internalUsersRef = useRef(internalUsers);
+  internalUsersRef.current = internalUsers;
+
   // Load equipment records and configured asset types from backend
   const loadEquipment = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, typesRes] = await Promise.all([
+      const missingSections = [];
+      if (!users?.length && !internalUsersRef.current.length) missingSections.push('directory');
+
+      const [response, typesRes, adminSections] = await Promise.all([
         fetchEquipment(token),
         fetchAssetTypes(token).catch(() => null),
+        missingSections.length ? fetchAdminSections(missingSections).catch(() => null) : null,
       ]);
+      if (adminSections?.directory) {
+        setInternalUsers(adminSections.directory);
+      }
       if (response?.equipment) {
         setEquipmentList(response.equipment);
       }
@@ -97,7 +114,7 @@ export default function AdminEquipmentTab({
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, users]);
 
   useEffect(() => {
     loadEquipment();
@@ -207,15 +224,37 @@ export default function AdminEquipmentTab({
     }
   };
 
-  // Map user ID to display name
+  // Map user ID to display name with support for string and numeric IDs
   const memberNameMap = useMemo(() => {
     const map = new Map();
-    (users || []).forEach((u) => {
-      const name = String(u.name || u.user_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.id);
-      map.set(String(u.id), name);
+    (effectiveUsers || []).forEach((u) => {
+      const idStr = String(u.id ?? u.user_id ?? u.uid ?? '').trim();
+      const name = String(u.name || u.user_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || idStr);
+      if (idStr) map.set(idStr, name);
+      if (u.id !== undefined && u.id !== null) map.set(u.id, name);
+      if (u.user_id !== undefined && u.user_id !== null) map.set(u.user_id, name);
     });
     return map;
-  }, [users]);
+  }, [effectiveUsers]);
+
+  // Resolves a member name safely, falling back to ID if not yet mapped
+  const getMemberName = useCallback(
+    (userId) => {
+      if (!userId) return '';
+      const key = String(userId).trim();
+      return memberNameMap.get(key) || memberNameMap.get(userId) || key;
+    },
+    [memberNameMap]
+  );
+
+  // Alphabetically sorted list of members for dropdown
+  const sortedUsers = useMemo(() => {
+    return [...effectiveUsers].sort((a, b) => {
+      const nameA = memberNameMap.get(String(a.id ?? a.user_id ?? '')) || a.name || '';
+      const nameB = memberNameMap.get(String(b.id ?? b.user_id ?? '')) || b.name || '';
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
+  }, [effectiveUsers, memberNameMap]);
 
   // Filter equipment by active category, search query, and filters
   const filteredEquipment = useMemo(() => {
@@ -228,7 +267,7 @@ export default function AdminEquipmentTab({
         const serial = (item.serial_number || '').toLowerCase();
         const tag = (item.identifier || '').toLowerCase();
         const model = (item.make_model || '').toLowerCase();
-        const assignedName = (memberNameMap.get(item.assigned_to) || '').toLowerCase();
+        const assignedName = (item.assigned_to ? getMemberName(item.assigned_to) : '').toLowerCase();
         const notes = (item.notes || '').toLowerCase();
         if (!serial.includes(q) && !tag.includes(q) && !model.includes(q) && !assignedName.includes(q) && !notes.includes(q)) {
           return false;
@@ -236,7 +275,7 @@ export default function AdminEquipmentTab({
       }
       return true;
     });
-  }, [equipmentList, activeCategory, conditionFilter, typeFilter, searchQuery, memberNameMap]);
+  }, [equipmentList, activeCategory, conditionFilter, typeFilter, searchQuery, getMemberName]);
 
   // Category counts and alerts
   const summaryStats = useMemo(() => {
@@ -583,7 +622,7 @@ export default function AdminEquipmentTab({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredEquipment.map((item) => {
-                  const assignedMemberName = memberNameMap.get(item.assigned_to) || '';
+                  const assignedMemberName = item.assigned_to ? getMemberName(item.assigned_to) : '';
                   const turnoutRetirement = activeCategory === 'turnout_gear' ? evaluateTurnoutRetirement(item.manufacture_date) : null;
                   const turnoutInspection = activeCategory === 'turnout_gear' ? evaluateInspectionCycle(item.last_inspection_date) : null;
                   const scba = activeCategory === 'scba_cylinders' ? evaluateScbaLifecycles(item.last_hydro_date, item.manufacture_date) : null;
@@ -611,10 +650,10 @@ export default function AdminEquipmentTab({
                       </td>
 
                       <td className="px-4 py-3">
-                        {assignedMemberName ? (
+                        {item.assigned_to ? (
                           <div className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-800 dark:bg-slate-800 dark:text-slate-200">
                             <User className="h-3 w-3 text-slate-400" />
-                            <span>{assignedMemberName}</span>
+                            <span>{assignedMemberName || item.assigned_to}</span>
                           </div>
                         ) : (
                           <span className="text-xs text-slate-400 italic">Unassigned (Pool)</span>
@@ -956,14 +995,24 @@ export default function AdminEquipmentTab({
                   className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
                   <option value="">Unassigned (Station Pool / Spare)</option>
-                  {(users || []).map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {memberNameMap.get(u.id) || u.id}
+                  {/* Keep current assignment selectable even if directory is still loading or user is archived */}
+                  {formData.assigned_to && !effectiveUsers.some((u) => String(u.id ?? u.user_id ?? '') === String(formData.assigned_to)) && (
+                    <option value={formData.assigned_to}>
+                      {getMemberName(formData.assigned_to)}
                     </option>
-                  ))}
+                  )}
+                  {sortedUsers.map((u) => {
+                    const uid = String(u.id ?? u.user_id ?? '');
+                    return (
+                      <option key={uid} value={uid}>
+                        {getMemberName(uid)}
+                      </option>
+                    );
+                  })}
                 </select>
                 <p className="mt-1 text-[11px] text-slate-400">
                   Assigned gear & radios appear on the member's My Profile page.
+                  {effectiveUsers.length === 0 && ' (Loading member directory…)'}
                 </p>
               </div>
 

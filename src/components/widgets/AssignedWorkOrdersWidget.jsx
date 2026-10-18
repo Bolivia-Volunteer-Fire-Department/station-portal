@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Wrench,
   Clock,
@@ -24,12 +24,30 @@ export default function AssignedWorkOrdersWidget({
   token,
   currentUser = null,
   onNavigate = null,
+  workOrders: workOrdersProp = null,
 }) {
   const currentUserId = String(currentUser?.id || '');
-  const [workOrders, setWorkOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [fetchedWorkOrders, setFetchedWorkOrders] = useState([]);
+  const [loading, setLoading] = useState(!Array.isArray(workOrdersProp));
+
+  const myAssignedFromProps = useMemo(() => {
+    if (!Array.isArray(workOrdersProp) || !currentUserId) return null;
+    return workOrdersProp
+      .map((row) => normalizeWorkOrder(row, currentUser))
+      .filter((wo) => String(wo.assigned_to_id) === currentUserId && isActiveWorkOrder(wo))
+      .sort((a, b) => {
+        const pA = a.priority === 'urgent' ? 4 : a.priority === 'high' ? 3 : a.priority === 'medium' ? 2 : 1;
+        const pB = b.priority === 'urgent' ? 4 : b.priority === 'high' ? 3 : b.priority === 'medium' ? 2 : 1;
+        if (pB !== pA) return pB - pA;
+        return new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0);
+      });
+  }, [workOrdersProp, currentUserId, currentUser]);
 
   const loadAssigned = useCallback(async () => {
+    if (Array.isArray(workOrdersProp)) {
+      setLoading(false);
+      return;
+    }
     if (!token || !currentUserId) {
       setLoading(false);
       return;
@@ -48,18 +66,22 @@ export default function AssignedWorkOrdersWidget({
             if (pB !== pA) return pB - pA;
             return new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0);
           });
-        setWorkOrders(myAssigned);
+        setFetchedWorkOrders(myAssigned);
       }
     } catch (err) {
       console.warn('Failed to load assigned work orders:', err);
     } finally {
       setLoading(false);
     }
-  }, [token, currentUserId, currentUser]);
+  }, [token, currentUserId, currentUser, workOrdersProp]);
 
   useEffect(() => {
-    loadAssigned();
-  }, [loadAssigned]);
+    if (!Array.isArray(workOrdersProp)) {
+      loadAssigned();
+    }
+  }, [loadAssigned, workOrdersProp]);
+
+  const workOrders = myAssignedFromProps !== null ? myAssignedFromProps : fetchedWorkOrders;
 
   const handleOpenWorkOrder = (wo) => {
     if (onNavigate) {
@@ -71,30 +93,30 @@ export default function AssignedWorkOrdersWidget({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-xl flex flex-col justify-between h-full">
-      <div>
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700/60">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center font-bold">
-              <Wrench className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Assigned Work Orders
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                Tickets assigned to you for maintenance & repairs
-              </p>
-            </div>
+    <div className="h-full max-h-[500px] flex flex-col justify-between overflow-hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-xl">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700/60">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center font-bold">
+            <Wrench className="w-4 h-4" />
           </div>
-
-          <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
-            {workOrders.length}
-          </span>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              Assigned Work Orders
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Tickets assigned to you for maintenance & repairs
+            </p>
+          </div>
         </div>
 
-        {/* Content */}
+        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+          {workOrders.length}
+        </span>
+      </div>
+
+      {/* Content */}
+      <div className="overflow-y-auto min-h-0 flex-1 pr-0.5">
         {loading ? (
           <div className="flex items-center justify-center py-8 text-slate-400">
             <Loader2 className="w-5 h-5 animate-spin text-red-600" />
@@ -111,7 +133,7 @@ export default function AssignedWorkOrdersWidget({
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100 dark:divide-slate-700/40 mt-1 max-h-64 overflow-y-auto pr-0.5">
+          <div className="divide-y divide-slate-100 dark:divide-slate-700/40 mt-1 pr-0.5">
             {workOrders.map((wo) => {
               const statusMeta = getStatusMeta(wo.status);
               const priorityMeta = getPriorityMeta(wo.priority);
@@ -188,7 +210,7 @@ export default function AssignedWorkOrdersWidget({
       </div>
 
       {/* Footer link to Work Orders */}
-      <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 mt-2">
+      <div className="shrink-0 pt-3 border-t border-slate-100 dark:border-slate-700/60 mt-2">
         <button
           type="button"
           onClick={() => onNavigate?.('admin', 'work-orders')}

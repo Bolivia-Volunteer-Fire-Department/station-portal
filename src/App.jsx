@@ -876,8 +876,8 @@ const getLoadingMessage = () => {
 
   // Handles clock in and clock out actions.
   const [scheduleSetupLoaded, setScheduleSetupLoaded] = useState(false);
-  // The TWO screens of a member's own that draw a shift or label an entry with one
-  const wantsScheduleSetup = activeTab === 'schedule' || activeTab === 'clock-history';
+  // The screens of a member's own that draw a shift or label an entry with one
+  const wantsScheduleSetup = activeTab === 'schedule' || activeTab === 'clock-history' || activeTab === 'dashboard';
   useEffect(() => {
     if (!authToken || scheduleSetupLoaded || !wantsScheduleSetup) return;
     let cancelled = false;
@@ -920,6 +920,9 @@ const getLoadingMessage = () => {
       events: ['directory'],
       training: ['trainings', 'directory'],
       'work-orders': ['directory', 'roles'],
+      equipment: ['directory'],
+      apparatus: ['directory'],
+      'asset-setup': ['directory'],
     };
     const wanted = (sectionsForTab[adminSubTab] || []).filter((section) => !adminSectionLoaded[section]);
     if (!wanted.length) return;
@@ -2190,7 +2193,11 @@ const getLoadingMessage = () => {
                 onDutyUsers={onDutyUsers}
                 ranks={ranks}
                 schedule={schedule}
+                scheduleWindow={scheduleWindow}
+                onNeedSchedule={loadScheduleWindow}
+                scheduleTemplates={scheduleTemplates}
                 assignments={assignments}
+                workOrders={workOrders}
                 systemSettings={systemSettings}
                 userSettings={currentUserSettings}
                 onSaveUserSettings={handleSaveUserSettings}
@@ -2213,6 +2220,7 @@ const getLoadingMessage = () => {
                   if (!logsScope || !logsScope.from) return undefined;
                   return loadLogs(payPeriodWindow(payPeriod, logsScope.from).from, logsScope.from);
                 }}
+                onBack={() => handleSidebarNavigate('dashboard')}
               />
             )}
 

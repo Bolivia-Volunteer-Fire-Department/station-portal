@@ -89,7 +89,6 @@ export const SIDEBAR_NAV_ICONS_KEY = 'sidebar_nav_icons';
 
 export const DEFAULT_SIDEBAR_NAV_ORDER = [
   'dashboard',
-  'clock-history',
   'chat',
   'roster',
   'schedule',
@@ -292,12 +291,6 @@ export const SIDEBAR_MODULE_CATALOG = [
     label: 'Dashboard',
     description: 'Station dashboard and widgets',
     permissionKey: null,
-  },
-  {
-    id: 'clock-history',
-    label: 'Clock History',
-    description: 'Member clock-in history',
-    permissionKey: 'canUseTimeclock',
   },
   {
     id: 'chat',

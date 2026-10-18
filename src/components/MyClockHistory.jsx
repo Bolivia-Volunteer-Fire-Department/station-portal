@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import ClockHistoryTable from './clock/ClockHistoryTable';
-import { Clock, CheckCircle2, ArrowUpDown, FilterX, History } from 'lucide-react';
+import { Clock, CheckCircle2, ArrowUpDown, FilterX, History, ArrowLeft } from 'lucide-react';
 import {
   CLOCK_LOG_SORT_OPTIONS,
   CLOCK_LOG_STATUS_OPTIONS,
@@ -17,7 +17,7 @@ const SELECT_CLASS =
 
 const LABEL_CLASS = 'block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 mb-1.5';
 
-export default function MyClockHistory({ currentUser, logs = [], timeFormat, shifts = [], systemSettings = [], loadedFrom = '', onLoadOlder }) {
+export default function MyClockHistory({ currentUser, logs = [], timeFormat, shifts = [], systemSettings = [], loadedFrom = '', onLoadOlder, onBack }) {
   const [filters, setFilters] = useState(emptyClockLogFilters);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
@@ -44,6 +44,19 @@ export default function MyClockHistory({ currentUser, logs = [], timeFormat, shi
 
   return (
     <div className="space-y-6">
+      {onBack && (
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-white shadow-xs transition active:scale-[0.98]"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+            <span>Back to Dashboard</span>
+          </button>
+        </div>
+      )}
       {/* Filter & Sort Controls */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-4 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

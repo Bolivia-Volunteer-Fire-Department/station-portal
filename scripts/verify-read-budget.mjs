@@ -505,6 +505,8 @@ const NAME_DRAWING_TABS = [
   // With no directory it renders EMPTY rather than wrong, so the tab looks complete and one dropdown simply has
   // nothing in it. A tab belongs here the moment it renders a member's name, which is the rule this list is.
   'documents',
+  'equipment',
+  'apparatus',
 ];
 check(
   'every tab that draws member names reads the directory',

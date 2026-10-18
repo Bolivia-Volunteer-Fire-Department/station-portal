@@ -42,6 +42,9 @@ import {
   splitEventsByRecurrence,
   filterEvents,
   emptyEventFilters,
+  defaultEventFilters,
+  EVENT_WINDOW_PRESETS,
+  resolveEventWindowPreset,
   eventFiltersActive,
   EVENT_SORT_OPTIONS,
   DEFAULT_EVENT_SORT,
@@ -490,17 +493,15 @@ check(
 );
 check('and passes showEvents straight through', /enabled=\{showEvents\}/.test(calendarSource), true);
 check('so no label inverts it', /enabled=\{!showEvents\}/.test(calendarSource), false);
-// Both view toggles share one container on My Schedule, rather than two separate rows.
-check('the two view toggles share a container', /canViewFullSchedule \|\| events\.length > 0/.test(calendarSource), true);
+// The view toggles share one container on My Schedule, rather than separate rows.
+check('the view toggles share a container', /flex flex-wrap items-center gap-3/.test(calendarSource), true);
 check(
   'and are laid out side by side',
   /flex flex-wrap items-center gap-3[\s\S]{0,900}noun="everyone"[\s\S]{0,900}noun="events"/.test(calendarSource),
   true
 );
-// Both are the shared chip, so neither can drift into a different treatment - which is what the request was
-// about. The board and the availability grid use the same component, checked further down once their sources
-// are read.
-check('and both use the shared view toggle', viewToggleCalls(calendarSource), 2);
+// All are the shared chip, so none can drift into a different treatment.
+check('and all use the shared view toggle', viewToggleCalls(calendarSource), 3);
 check('and it is shown only when there are events', /events\.length > 0 && \(/.test(calendarSource), true);
 check('and it is not persisted', /localStorage[\s\S]{0,200}showEvents/.test(calendarSource), false);
 // An event must not be offerable: the offer machinery keys off assignments, and events must not reach it.
@@ -733,8 +734,26 @@ check('and both ends together are a range', idsOf(filterEvents(filterable, { fro
 check('an undated event is excluded once a range is set', idsOf(filterEvents(filterable, { from: '2026-01-01' })), ['jan', 'mar', 'may']);
 check('the default filters are all empty', Object.values(emptyEventFilters()).every((v) => v === ''), true);
 check('and are reported as inactive', eventFiltersActive(emptyEventFilters()), false);
-check('until one is set', eventFiltersActive({ from: '2026-01-01' }), true);
 check('the sort is not a filter', eventFiltersActive({ audience: '' }), false);
+
+// Default window and preset resolution
+const octDefault = defaultEventFilters('2026-10-18');
+check('default filters start at the first of the current month', octDefault.from, '2026-10-01');
+check('default filters leave to date open for upcoming events', octDefault.to, '');
+check('default filters are active window filters', eventFiltersActive(octDefault), true);
+check('resolveEventWindowPreset current_upcoming', resolveEventWindowPreset('current_upcoming', '2026-10-18'), { from: '2026-10-01', to: '' });
+check('resolveEventWindowPreset this_month', resolveEventWindowPreset('this_month', '2026-10-18'), { from: '2026-10-01', to: '2026-10-31' });
+check('resolveEventWindowPreset this_year', resolveEventWindowPreset('this_year', '2026-10-18'), { from: '2026-01-01', to: '2026-12-31' });
+check('resolveEventWindowPreset all', resolveEventWindowPreset('all', '2026-10-18'), { from: '', to: '' });
+
+// Filter window handling with repeating events
+const rOngoing = normalizeEvent({ id: 'r_ongoing', title: 'Ongoing', is_recurring: true, recurring_start: '2025-01-01', recurring_end: '' });
+const rPast = normalizeEvent({ id: 'r_past', title: 'Past', is_recurring: true, recurring_start: '2024-01-01', recurring_end: '2025-12-31' });
+const rFuture = normalizeEvent({ id: 'r_future', title: 'Future', is_recurring: true, recurring_start: '2027-01-01', recurring_end: '' });
+const rWindowed = filterEvents([rOngoing, rPast, rFuture], { from: '2026-10-01', to: '2026-12-31' });
+check('filterEvents keeps active repeating events in window', rWindowed.some((e) => e.id === 'r_ongoing'), true);
+check('filterEvents excludes past repeating events that ended before window', rWindowed.some((e) => e.id === 'r_past'), false);
+check('filterEvents excludes future repeating events starting after window', rWindowed.some((e) => e.id === 'r_future'), false);
 
 // The audience filter, which is the one that speaks to targeting.
 const targetedFixture = anchorEvent({ id: 'targeted', role_id: '1', startsAt: { dateKey: '2026-03-10', minutes: 600 } });
@@ -862,21 +881,21 @@ check('the shared card pages its own rows', (eventsListSource.match(/pageRangeLa
 // A filter change must not leave you on a page the new result does not have, and should start you at the
 // beginning of a result you have not seen. The clamp handles the first, updateFilters the second.
 check('changing a filter returns to the first page', /setFilters\(next\);\s*\n\s*setOneOffPage\(1\);\s*\n\s*setRecurringPage\(1\);/.test(eventsListSource), true);
-// Four call sites: the three filter controls plus Clear filters. Sort is deliberately excluded - re-sorting keeps
+// Five call sites: the four filter controls (Window, From, To, Shows to) plus Clear filters. Sort is deliberately excluded - re-sorting keeps
 // the same rows, so there is nothing to send you back to page one for.
-check('every filter control uses it', (eventsListSource.match(/updateFilters\(/g) || []).length, 4);
+check('every filter control uses it', (eventsListSource.match(/updateFilters\(/g) || []).length, 5);
 
 console.log('\n--- one shared view toggle ---');
-// All four view toggles ("Show everyone" and the three "Show events") render through ViewToggle, so they are
+// All five view toggles ("Show everyone", "Show/Hide open shifts", and the three "Show events") render through ViewToggle, so they are
 // identical by construction rather than by three people keeping three copies in step.
 check('the toggle is a button', /<button/.test(viewToggleCode), true);
 // The verb follows the STATE, derived in this one place: "Show events" while hidden, "Hide events" while shown.
 // A call site passes the noun only, so it cannot pair the wrong verb with the wrong state.
 check('the verb follows the state', /\{enabled \? 'Hide' : 'Show'\} \{noun\}/.test(viewToggleCode), true);
 check('and the tooltip is unchanged by it', /title=\{description\}/.test(viewToggleCode), true);
-check('no call site hard-codes a verb', viewToggleCalls(calendarSource) + viewToggleCalls(availabilitySource) + viewToggleCalls(boardSource), 4);
+check('no call site hard-codes a verb', viewToggleCalls(calendarSource) + viewToggleCalls(availabilitySource) + viewToggleCalls(boardSource), 5);
 ['src/components/ScheduleCalendar.jsx', 'src/components/AvailabilityCalendar.jsx', 'src/components/admin/AdminScheduleManagementTab.jsx'].forEach((file) => {
-  check(`${file} passes a noun, not a label`, /noun="(events|everyone)"/.test(readFileSync(file, 'utf8')), true);
+  check(`${file} passes a noun, not a label`, /noun="(events|everyone|open shifts)"/.test(readFileSync(file, 'utf8')), true);
 });
 check('with a pressed state for assistive tech', /aria-pressed=\{enabled\}/.test(viewToggleCode), true);
 check('it flips the value it was given', /onChange\(!enabled\)/.test(viewToggleCode), true);
@@ -887,12 +906,12 @@ check('an icon is optional', /\{Icon && <Icon/.test(viewToggleCode), true);
 // Every screen that offers a view toggle uses this component, so the three are identical by construction.
 check('the availability grid uses it too', viewToggleCalls(availabilitySource), 1);
 check('and so does the board', viewToggleCalls(boardSource), 1);
-check('and My Schedule uses it twice', viewToggleCalls(calendarSource), 2);
+check('and My Schedule uses it three times', viewToggleCalls(calendarSource), 3);
 // Settings keep the switch, because those persist. A pressed chip would read as a temporary filter.
 check('preference switches are left alone', /<ToggleSwitch/.test(readFileSync('src/components/MySettings.jsx', 'utf8')), true);
 // The rendered controls must carry the pressed state, not just the source. Rendered with the crew permission so
-// BOTH toggles appear - that is the pairing the request was about. "Show everyone" starts OFF and "Show events"
-// starts ON, so both states are represented: that is the assertion, not merely "a chip appeared".
+// ALL toggles appear. "Show everyone" starts OFF while "Show open shifts" and "Show events"
+// start ON, so both states are represented: that is the assertion, not merely "a chip appeared".
 const renderedWithCrew = renderToString(
   React.createElement(ScheduleCalendar, {
     currentUser: { id: '1', name: 'Member 1', rank_id: '10' },
@@ -905,12 +924,12 @@ const renderedWithCrew = renderToString(
   })
 );
 check('the rendered events toggle is pressed by default', /aria-pressed="true"/.test(renderedCalendar), true);
-// The two toggles start in OPPOSITE states (everyone off, events on), so their verbs must differ - and this is
+// The toggles start in OPPOSITE states (everyone off, events and open shifts on), so their verbs must differ - and this is
 // what proves the verb follows the state rather than being a fixed string: "Show everyone" beside
 // "Hide events".
 check('the rendered everyone toggle reads Show while hidden', plain(renderedWithCrew).includes('Show everyone'), true);
 check('and the rendered events toggle reads Hide while shown', plain(renderedWithCrew).includes('Hide events'), true);
-check('both rendered toggles are chips', (renderedWithCrew.match(/aria-pressed="/g) || []).length, 2);
+check('all rendered toggles are chips', (renderedWithCrew.match(/aria-pressed="/g) || []).length, 3);
 
 // Each chip's OWN attributes, taken from its opening <button> tag.
 //
@@ -971,7 +990,7 @@ check('the events tab renders', renderedTab.length > 500, true);
 check('with the New event button', renderedTab.includes('New event') && !renderedTab.includes('event-editor-form'), true);
 // The filter and sort bar. Its own count line is the one thing that proves the bar rendered with data bound to
 // it, and it is readable before any rows arrive.
-['From', 'To', 'Shows to', 'Sort by'].forEach((label) => {
+['Window', 'From', 'To', 'Shows to', 'Sort by'].forEach((label) => {
   check(`the filter bar has ${label}`, renderedTab.includes(label), true);
 });
 check('and says how much it is showing', renderedTab.includes('Showing'), true);

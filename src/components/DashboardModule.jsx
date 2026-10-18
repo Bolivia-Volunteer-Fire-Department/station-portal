@@ -57,7 +57,11 @@ export default function DashboardModule({
   onDutyUsers = [],
   ranks = [],
   schedule = [],
+  scheduleWindow = null,
+  onNeedSchedule = null,
+  scheduleTemplates = [],
   assignments = [],
+  workOrders = [],
   systemSettings = [],
   userSettings = {},
   onSaveUserSettings,
@@ -265,6 +269,7 @@ export default function DashboardModule({
             onClockAction={onClockAction}
             timeFormat={timeFormat}
             isCustomizing={isCustomizing}
+            onNavigate={onNavigate}
           />
         );
 
@@ -285,17 +290,22 @@ export default function DashboardModule({
           );
         }
         return (
-          <AnnouncementList
-            announcements={announcements}
-            location="is_visible_on_dashboard"
-            audience={announcementAudience}
-          />
+          <div className="max-h-[500px] overflow-y-auto pr-0.5">
+            <AnnouncementList
+              announcements={announcements}
+              location="is_visible_on_dashboard"
+              audience={announcementAudience}
+            />
+          </div>
         );
 
       case 'upcoming-shifts':
         return (
           <UpcomingShiftsWidget
             schedule={schedule}
+            scheduleWindow={scheduleWindow}
+            onNeedSchedule={onNeedSchedule}
+            scheduleTemplates={scheduleTemplates}
             currentUser={currentUser}
             assignments={assignments}
             timeFormat={timeFormat}
@@ -327,6 +337,7 @@ export default function DashboardModule({
             token={token}
             currentUser={currentUser}
             onNavigate={onNavigate}
+            workOrders={workOrders}
           />
         );
 
@@ -345,7 +356,7 @@ export default function DashboardModule({
           );
         }
         return (
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6 shadow-xl text-center">
+          <div className="h-full max-h-[500px] flex flex-col justify-between overflow-y-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6 shadow-xl text-center">
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
               {allWidgetsMap.get(item.id)?.label || item.id}
             </p>
@@ -580,7 +591,7 @@ export default function DashboardModule({
               )}
 
               {/* Render the actual widget */}
-              <div className="h-full">{renderWidgetContent(item, index)}</div>
+              <div className="h-full min-h-0">{renderWidgetContent(item, index)}</div>
 
               {/* Grabbable Corner Resize Handle */}
               {isCustomizing && !isFixedTop && (

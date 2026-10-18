@@ -4,7 +4,7 @@ export const APPARATUS_TYPES = [
   { value: 'Engine', label: 'Engine / Pumper' },
   { value: 'Ladder', label: 'Ladder / Tower / Aerial' },
   { value: 'Rescue', label: 'Heavy Rescue / Squad' },
-  { value: 'Brush Truck', label: 'Brush Truck / Wildland' },
+  { value: 'Brush', label: 'Brush Truck / Wildland' },
   { value: 'Tanker', label: 'Tanker / Water Tender' },
   { value: 'Ambulance', label: 'Ambulance / Medic Unit' },
   { value: 'Command', label: 'Chief / Command Vehicle' },
@@ -150,4 +150,31 @@ export function formatFileSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/**
+ * Comparator to organize apparatuses alphanumerically ascending by unit identifier
+ * (e.g. Brush 4, E-1, Engine 2, Engine 10, Ladder 1, Squad 2).
+ * Falls back to description if unit identifier is missing or identical.
+ */
+export function sortApparatusByIdentifier(a, b) {
+  const idA = String(a?.identifier || a?.unit_number || '').trim();
+  const idB = String(b?.identifier || b?.unit_number || '').trim();
+
+  if (idA && idB) {
+    const cmp = idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+    if (cmp !== 0) return cmp;
+  } else if (idA && !idB) {
+    return -1;
+  } else if (!idA && idB) {
+    return 1;
+  }
+
+  const descA = String(a?.description || a?.name || '').trim();
+  const descB = String(b?.description || b?.name || '').trim();
+  const descCmp = descA.localeCompare(descB, undefined, { numeric: true, sensitivity: 'base' });
+  if (descCmp !== 0) return descCmp;
+
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
 

@@ -377,6 +377,52 @@ export const EVENT_AUDIENCE_OPTIONS = [
 
 export const emptyEventFilters = () => ({ from: '', to: '', audience: '' });
 
+// Defaults to the current and upcoming date window: from the start of the current month onward,
+// so administrators aren't overwhelmed by historical events from years ago while keeping current
+// month events visible.
+export const defaultEventFilters = (anchorDate = new Date()) => {
+  const key = typeof anchorDate === 'string' ? anchorDate : toDateKey(anchorDate);
+  const currentMonthStart = `${key.slice(0, 7)}-01`;
+  return { from: currentMonthStart, to: '', audience: '' };
+};
+
+// Window presets offered in the administration filter bar.
+export const EVENT_WINDOW_PRESETS = [
+  { value: 'current_upcoming', label: 'Current & upcoming' },
+  { value: 'this_month', label: 'This month' },
+  { value: 'next_30_days', label: 'Next 30 days' },
+  { value: 'next_90_days', label: 'Next 90 days' },
+  { value: 'this_year', label: 'This year' },
+  { value: 'all', label: 'All (including history)' },
+];
+
+export const resolveEventWindowPreset = (preset, anchorKey = toDateKey(new Date())) => {
+  const key = typeof anchorKey === 'string' ? anchorKey : toDateKey(anchorKey);
+  const [yearStr, monthStr] = key.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const pad = (n) => String(n).padStart(2, '0');
+
+  switch (preset) {
+    case 'current_upcoming':
+      return { from: `${yearStr}-${monthStr}-01`, to: '' };
+    case 'this_month': {
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      return { from: `${yearStr}-${monthStr}-01`, to: `${yearStr}-${monthStr}-${pad(lastDay)}` };
+    }
+    case 'next_30_days':
+      return { from: key, to: addDays(key, 30) || '' };
+    case 'next_90_days':
+      return { from: key, to: addDays(key, 90) || '' };
+    case 'this_year':
+      return { from: `${yearStr}-01-01`, to: `${yearStr}-12-31` };
+    case 'all':
+      return { from: '', to: '' };
+    default:
+      return null;
+  }
+};
+
 export const eventFiltersActive = (filters = {}) =>
   Boolean(text(filters.from) || text(filters.to) || text(filters.audience));
 
@@ -393,10 +439,20 @@ export const filterEvents = (events, filters = {}) => {
     if (!event) return false;
 
     if (from || to) {
-      const key = eventAnchorKey(event);
-      if (!key) return false;
-      if (from && key < from) return false;
-      if (to && key > to) return false;
+      if (event.isRecurring) {
+        // A repeating event is active in the window if it hasn't ended before 'from',
+        // and didn't start after 'to'.
+        const recStart = event.recurringStart ? text(event.recurringStart) : '';
+        const recEnd = event.recurringEnd ? text(event.recurringEnd) : '';
+        if (from && recEnd && recEnd < from) return false;
+        if (to && recStart && recStart > to) return false;
+      } else {
+        const key = eventAnchorKey(event);
+        if (!key) return false;
+        const endKey = event.endsAt?.dateKey ? text(event.endsAt.dateKey) : key;
+        if (from && endKey < from) return false;
+        if (to && key > to) return false;
+      }
     }
 
     if (audience === 'everyone' && !eventShowsToEveryone(event)) return false;

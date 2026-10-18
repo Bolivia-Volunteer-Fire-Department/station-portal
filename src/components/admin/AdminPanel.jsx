@@ -205,8 +205,15 @@ export default function AdminPanel({
 
   // Combines directory records with full user rows so all members have names.
   const nameRows = useMemo(() => {
-    const byId = new Map((Array.isArray(directory) ? directory : []).map((user) => [String(user?.id), user]));
-    (Array.isArray(users) ? users : []).forEach((user) => byId.set(String(user?.id), user));
+    const byId = new Map();
+    (Array.isArray(directory) ? directory : []).forEach((user) => {
+      const id = String(user?.id ?? user?.user_id ?? user?.uid ?? '').trim();
+      if (id) byId.set(id, user);
+    });
+    (Array.isArray(users) ? users : []).forEach((user) => {
+      const id = String(user?.id ?? user?.user_id ?? user?.uid ?? '').trim();
+      if (id) byId.set(id, { ...byId.get(id), ...user });
+    });
     return [...byId.values()];
   }, [directory, users]);
 

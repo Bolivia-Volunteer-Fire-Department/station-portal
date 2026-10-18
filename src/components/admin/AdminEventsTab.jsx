@@ -15,9 +15,10 @@ import ConfirmModal from '../ConfirmModal';
 import { recordHeading, unnamedLabel, userLabel } from '../../utils/displayLabel';
 import {
   DEFAULT_EVENT_SORT, EVENTS_PAGE_SIZE, EVENT_AUDIENCE_OPTIONS, EVENT_DEFAULT_COLOR, EVENT_FREQUENCIES,
-  EVENT_SORT_OPTIONS, EVENT_WEEKDAYS, emptyEventFilters, eventFiltersActive, eventNextOccurrenceLabel,
-  eventRecurrenceLabel, eventTimesLabel, eventValidation, eventVisibilityLabel, eventWindowLabel,
-  filterEvents, normalizeEvent, normalizeEventColor, normalizeEventList, sortEvents, splitEventsByRecurrence,
+  EVENT_SORT_OPTIONS, EVENT_WEEKDAYS, EVENT_WINDOW_PRESETS, defaultEventFilters, emptyEventFilters,
+  eventFiltersActive, eventNextOccurrenceLabel, eventRecurrenceLabel, eventTimesLabel, eventValidation,
+  eventVisibilityLabel, eventWindowLabel, filterEvents, normalizeEvent, normalizeEventColor,
+  normalizeEventList, resolveEventWindowPreset, sortEvents, splitEventsByRecurrence,
 } from '../../utils/events';
 
 // List card showing events with pagination controls.
@@ -204,7 +205,8 @@ export default function AdminEventsTab({
 }) {
   const [rows, setRows] = useState([]);
   const [sort, setSort] = useState(DEFAULT_EVENT_SORT);
-  const [filters, setFilters] = useState(emptyEventFilters);
+  const [filters, setFilters] = useState(() => defaultEventFilters(todayKey()));
+  const [windowPreset, setWindowPreset] = useState('current_upcoming');
   // Pagination state for one-off and recurring event lists.
   const [oneOffPage, setOneOffPage] = useState(1);
   const [recurringPage, setRecurringPage] = useState(1);
@@ -366,6 +368,19 @@ export default function AdminEventsTab({
     setFilters(next);
     setOneOffPage(1);
     setRecurringPage(1);
+  };
+
+  const handleWindowPresetChange = (preset) => {
+    setWindowPreset(preset);
+    const resolved = resolveEventWindowPreset(preset, todayKey());
+    if (resolved) {
+      updateFilters({ ...filters, from: resolved.from, to: resolved.to });
+    }
+  };
+
+  const handleClearFilters = () => {
+    setWindowPreset('all');
+    updateFilters(emptyEventFilters());
   };
 
   const isWeekly = form.is_recurring && form.recurring_frequency === 'weekly';
@@ -664,11 +679,29 @@ export default function AdminEventsTab({
             New event
           </button>
           <div>
+            <label className={labelClass}>Window</label>
+            <select
+              value={windowPreset}
+              onChange={(event) => handleWindowPresetChange(event.target.value)}
+              className={selectClass}
+            >
+              {EVENT_WINDOW_PRESETS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+              {windowPreset === 'custom' && <option value="custom">Custom</option>}
+            </select>
+          </div>
+          <div>
             <label className={labelClass}>From</label>
             <input
               type="date"
               value={filters.from}
-              onChange={(event) => updateFilters({ ...filters, from: event.target.value })}
+              onChange={(event) => {
+                setWindowPreset('custom');
+                updateFilters({ ...filters, from: event.target.value });
+              }}
               className={selectClass}
             />
           </div>
@@ -677,7 +710,10 @@ export default function AdminEventsTab({
             <input
               type="date"
               value={filters.to}
-              onChange={(event) => updateFilters({ ...filters, to: event.target.value })}
+              onChange={(event) => {
+                setWindowPreset('custom');
+                updateFilters({ ...filters, to: event.target.value });
+              }}
               className={selectClass}
             />
           </div>
@@ -708,7 +744,7 @@ export default function AdminEventsTab({
 
           <button
             type="button"
-            onClick={() => updateFilters(emptyEventFilters())}
+            onClick={handleClearFilters}
             disabled={!filtersOn}
             className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 transition"
           >
@@ -728,7 +764,14 @@ export default function AdminEventsTab({
 
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Showing {matchingRows.length} of {rows.length} event{rows.length === 1 ? '' : 's'}
-          {filtersOn ? ' (filters on)' : ''}
+          {filtersOn ? (
+            <span>
+              {' '}(windowed: <strong className="font-semibold text-slate-700 dark:text-slate-300">{windowPreset && windowPreset !== 'custom' ? EVENT_WINDOW_PRESETS.find((p) => p.value === windowPreset)?.label : 'Custom'}</strong>
+              {filters.audience ? ` · ${filters.audience}` : ''})
+            </span>
+          ) : (
+            ' (all historical and future events)'
+          )}
         </p>
       </div>
 

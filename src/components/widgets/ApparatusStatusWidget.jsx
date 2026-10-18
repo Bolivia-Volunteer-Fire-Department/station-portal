@@ -10,9 +10,15 @@ import {
   Layers,
 } from 'lucide-react';
 import { fetchApparatus } from '../../services/api';
-import { apparatusStatusBadge, normalizeApparatusRecord } from '../../utils/apparatus';
+import {
+  apparatusStatusBadge,
+  normalizeApparatusRecord,
+  sortApparatusByIdentifier,
+} from '../../utils/apparatus';
+import { FRESHNESS_STALE_MS } from '../../utils/freshness';
 
 const CACHE_KEY = 'fire_clock_cached_apparatus';
+const CACHE_TS_KEY = 'fire_clock_cached_apparatus_at';
 
 export default function ApparatusStatusWidget({ token, onNavigate }) {
   const [apparatusList, setApparatusList] = useState(() => {
@@ -21,7 +27,7 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed)) {
-          return parsed.map(normalizeApparatusRecord);
+          return parsed.map(normalizeApparatusRecord).sort(sortApparatusByIdentifier);
         }
       }
     } catch {
@@ -35,19 +41,36 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
 
   const loadApparatus = useCallback(
     async (isManual = false) => {
+      if (!token) return;
+
+      // On automatic mount, check if cached data is still fresh (< 5 mins)
+      if (!isManual) {
+        try {
+          const cachedAt = Number(localStorage.getItem(CACHE_TS_KEY)) || 0;
+          if (cachedAt && Date.now() - cachedAt < FRESHNESS_STALE_MS) {
+            return;
+          }
+        } catch {
+          // Ignore cache error
+        }
+      }
+
       if (isManual) {
         setRefreshing(true);
-      } else if (apparatusList.length === 0) {
+      } else {
         setLoading(true);
       }
 
       try {
         const response = await fetchApparatus(token);
         if (response?.apparatus) {
-          const normalized = response.apparatus.map(normalizeApparatusRecord);
+          const normalized = response.apparatus
+            .map(normalizeApparatusRecord)
+            .sort(sortApparatusByIdentifier);
           setApparatusList(normalized);
           try {
             localStorage.setItem(CACHE_KEY, JSON.stringify(normalized));
+            localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
           } catch {
             // Local storage may be full or blocked
           }
@@ -59,16 +82,16 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
         setRefreshing(false);
       }
     },
-    [token, apparatusList.length]
+    [token]
   );
 
   useEffect(() => {
     loadApparatus();
   }, [loadApparatus]);
 
-  // Filter apparatus with show_on_widget checked
+  // Filter apparatus with show_on_widget checked, organized alphanumerically by unit identifier
   const widgetApparatus = useMemo(
-    () => apparatusList.filter((item) => Boolean(item.show_on_widget)),
+    () => apparatusList.filter((item) => Boolean(item.show_on_widget)).sort(sortApparatusByIdentifier),
     [apparatusList]
   );
 
@@ -125,48 +148,48 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
   };
 
   return (
-    <div className="h-full flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 md:p-6 shadow-xl transition-all">
-      <div>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3.5 pb-2 border-b border-slate-100 dark:border-slate-700/60">
-          <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-bold text-sm">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
-              <Truck className="w-4 h-4" />
-            </span>
-            <span>Apparatus Fleet Status</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {widgetApparatus.length > 0 && (
-              <span
-                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                  inServiceCount === widgetApparatus.length
-                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                    : 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    inServiceCount === widgetApparatus.length ? 'bg-emerald-500' : 'bg-amber-500'
-                  }`}
-                />
-                {inServiceCount} / {widgetApparatus.length} Ready
-              </span>
-            )}
-
-            <button
-              type="button"
-              onClick={() => loadApparatus(true)}
-              disabled={refreshing}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-700 transition"
-              title="Refresh apparatus status"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-red-500' : ''}`} />
-            </button>
-          </div>
+    <div className="h-full max-h-[500px] flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 md:p-6 shadow-xl transition-all">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between mb-3.5 pb-2 border-b border-slate-100 dark:border-slate-700/60">
+        <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-bold text-sm">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
+            <Truck className="w-4 h-4" />
+          </span>
+          <span>Apparatus Fleet Status</span>
         </div>
 
-        {/* Content */}
+        <div className="flex items-center gap-2">
+          {widgetApparatus.length > 0 && (
+            <span
+              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                inServiceCount === widgetApparatus.length
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                  : 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  inServiceCount === widgetApparatus.length ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+              {inServiceCount} / {widgetApparatus.length} Ready
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={() => loadApparatus(true)}
+            disabled={refreshing}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-700 transition"
+            title="Refresh apparatus status"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-red-500' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="overflow-y-auto min-h-0 flex-1 pr-1">
         {loading && widgetApparatus.length === 0 ? (
           <div className="space-y-2.5 py-2">
             {[1, 2, 3].map((i) => (
@@ -252,7 +275,7 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
 
       {/* Footer link to full apparatus management if user can navigate */}
       {onNavigate && (
-        <div className="pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
+        <div className="shrink-0 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
           <span className="text-[11px] text-slate-400">
             {widgetApparatus.length} unit{widgetApparatus.length === 1 ? '' : 's'} on watch
           </span>
