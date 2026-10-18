@@ -9,6 +9,7 @@
 export const PAGE_BAR_LABELS = {
   dashboard: 'Dashboard',
   'clock-history': 'Clock History',
+  apparatus: 'Apparatus Registry',
   roster: 'Roster',
   schedule: 'Schedule',
   availability: 'Availability',

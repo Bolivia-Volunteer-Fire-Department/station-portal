@@ -705,7 +705,9 @@ service cloud.firestore {
     match /training_signatures/{signatureId} {
       allow read: if signedIn()
         && (resource.data.user_id == uid() || permission('can_administer_trainings'));
-      allow create: if signedIn() && request.resource.data.user_id == uid() && permission('can_sign_trainings');
+      allow create: if signedIn()
+        && ((request.resource.data.user_id == uid() && permission('can_sign_trainings'))
+          || permission('can_administer_trainings'));
       // OFFICER-ONLY, and this is narrower than it used to be. The member's own row was deletable by the member, which
       // is the opposite of what the sheet's handler did: it REFUSED a removal outright ("signatures cannot be removed,
       // ask an administrator to correct a signature"), because a signature is an acknowledgment of attendance rather

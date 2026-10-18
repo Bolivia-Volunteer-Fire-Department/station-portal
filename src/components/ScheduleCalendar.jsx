@@ -865,6 +865,7 @@ export default function ScheduleCalendar({
                 .filter((a) => isShiftDay(a.from, key))
                 .sort(byStartTime);
               const isToday = key === todayKey;
+              const isPast = key < todayKey;
               const scheduled = dayAssignments.length > 0;
               // In everyone's view the day is tinted red only when one of the
               // signed-in user's own shifts falls on it; other people's shifts
@@ -892,13 +893,19 @@ export default function ScheduleCalendar({
                   className={`${dayView && !isWeekView ? 'min-h-[60vh]' : isWeekView ? 'min-h-[240px]' : 'min-h-[76px]'} rounded-lg flex flex-col items-stretch ${
                   isToday ? 'ring-2 ring-red-500/80 dark:ring-red-400/80 ring-offset-1 dark:ring-offset-slate-900 ' : ''
                 }${
-                  hasMine
-                    ? 'bg-red-600/10 border border-red-300 dark:border-red-800'
-                    : hasFilled
-                      ? 'bg-slate-100 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700'
-                      : scheduled
-                        ? 'border border-dashed border-slate-300 dark:border-slate-600'
-                        : 'bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/40'
+                  isPast
+                    ? hasMine
+                      ? 'bg-red-600/5 border border-red-200/50 dark:border-red-900/30'
+                      : hasFilled
+                        ? 'bg-slate-100/50 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800/40'
+                        : 'bg-slate-50/40 dark:bg-slate-900/30 border border-slate-200/50 dark:border-slate-800/30'
+                    : hasMine
+                      ? 'bg-red-600/10 border border-red-300 dark:border-red-800'
+                      : hasFilled
+                        ? 'bg-slate-100 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700'
+                        : scheduled
+                          ? 'border border-dashed border-slate-300 dark:border-slate-600'
+                          : 'bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/40'
                 }`}
               >
                 <div className="flex items-center justify-between p-1 pb-0.5">
@@ -908,7 +915,9 @@ export default function ScheduleCalendar({
                     } ${
                       isToday
                         ? 'bg-red-600 text-white rounded-full h-5 min-w-5 px-1 font-bold shadow-xs'
-                        : 'text-slate-700 dark:text-slate-300 font-semibold'
+                        : isPast
+                          ? 'text-slate-400 dark:text-slate-500 font-medium'
+                          : 'text-slate-700 dark:text-slate-300 font-semibold'
                     }`}
                   >
                     {/* The day view has no weekday row above it (that row is the calendar's), so its one cell has to name
@@ -935,7 +944,7 @@ export default function ScheduleCalendar({
                           key={`event-${segment.eventId}-${segment.dateKey}`}
                           segment={segment}
                           timeFormat={timeFormat}
-                          className="mx-0.5 mt-0.5"
+                          className={`mx-0.5 mt-0.5 ${isPast ? 'opacity-40 saturate-50' : ''}`}
                           onClick={() => setDetailTarget({ kind: 'event', item: segment, event: eventFor(segment) })}
                         />
                       );
@@ -1021,6 +1030,8 @@ export default function ScheduleCalendar({
                       ? 'mt-1.5 w-full px-2.5 py-1.5 rounded-xl text-xs leading-tight font-semibold'
                       : 'mt-0.5 w-full overflow-hidden px-1.5 py-0.5 rounded-md text-[10px] leading-tight font-semibold';
 
+                    const occurred = isPast || Boolean(a.to && a.to < todayKey);
+
                     if (!a.isOpen) {
                       // A filled shift has no action, but it still has facts the tooltip cannot hold - so it
                       // opens the same detail modal as an event.
@@ -1034,9 +1045,9 @@ export default function ScheduleCalendar({
                             onClick={() => setDetailTarget({ kind: 'shift', item: a })}
                             className={`${baseClass} block text-left text-white transition hover:brightness-110 ${
                               showEveryone && a.isMine ? 'ring-1 ring-white/70 dark:ring-red-300' : ''
-                            }`}
+                            } ${occurred ? 'opacity-40 saturate-50' : ''}`}
                             style={{ backgroundColor: a.color }}
-                            title={`${describe(a)} — click for details`}
+                            title={`${describe(a)}${occurred ? ' (past)' : ''} — click for details`}
                           >
                             {lines}
                           </button>
@@ -1051,17 +1062,19 @@ export default function ScheduleCalendar({
                         )}
                         <button
                           type="button"
-                          disabled={offerState !== '' || !canMakeOffers}
+                          disabled={offerState !== '' || !canMakeOffers || occurred}
                           onClick={() => openOfferModal(a)}
-                          title={offerTitleFor(a, offerState)}
+                          title={occurred ? `${a.label || 'Open shift'} (past — closed)` : offerTitleFor(a, offerState)}
                           className={`${baseClass} text-left transition ${
-                            !canMakeOffers
-                              ? 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-default'
-                              : offerState === 'pending'
-                                ? 'border border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 cursor-default'
-                                : offerState === 'declined'
-                                  ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-default'
-                                  : 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-pointer hover:ring-1 hover:ring-slate-400/70'
+                            occurred
+                              ? 'opacity-40 saturate-50 border border-dashed border-slate-300 dark:border-slate-700 bg-white/40 dark:bg-slate-900/40 cursor-default'
+                              : !canMakeOffers
+                                ? 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-default'
+                                : offerState === 'pending'
+                                  ? 'border border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 cursor-default'
+                                  : offerState === 'declined'
+                                    ? 'border border-dashed border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 cursor-default'
+                                    : 'border border-dashed bg-white/70 dark:bg-slate-900/60 cursor-pointer hover:ring-1 hover:ring-slate-400/70'
                           }`}
                           // Open pills carry the assignment color; pending/declined
                           // pills use their state colors instead.

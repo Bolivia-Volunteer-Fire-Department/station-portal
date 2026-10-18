@@ -1231,6 +1231,84 @@ export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
   return { saved: rows.length, deleted: deleteIds.length };
 };
 
+// Bulk imports grouped training sessions and member attendance signatures in batches.
+export const bulkImportTrainingsAndSignatures = async ({ sessions = [], onProgress }) => {
+  const db = firestore();
+  const BATCH_LIMIT = 400;
+  const now = new Date().toISOString();
+
+  let batch = writeBatch(db);
+  let opCount = 0;
+  let trainingsCreated = 0;
+  let signaturesCreated = 0;
+  let batchesCommitted = 0;
+
+  for (let i = 0; i < sessions.length; i++) {
+    const session = sessions[i];
+    const trainingRef = doc(collection(db, 'trainings'));
+    const trainingData = {
+      id: trainingRef.id,
+      date: session.date,
+      date_key: session.date_key,
+      title: session.title,
+      duration: session.duration,
+      location: '',
+      instructors: '',
+      narrative: '',
+      is_company_training: Boolean(session.is_company_training),
+      is_hazmat: Boolean(session.is_hazmat),
+      is_ems: Boolean(session.is_ems),
+      is_fire_prevention: Boolean(session.is_fire_prevention),
+      is_multicompany: Boolean(session.is_multicompany),
+      is_training_facility: Boolean(session.is_training_facility),
+      is_officer_training: Boolean(session.is_officer_training),
+      is_driver_training: Boolean(session.is_driver_training),
+      is_entered_into_external: false,
+      signature_count: 0,
+    };
+
+    batch.set(trainingRef, trainingData);
+    opCount++;
+    trainingsCreated++;
+
+    if (opCount >= BATCH_LIMIT) {
+      await batch.commit();
+      batchesCommitted++;
+      onProgress?.({ batchesCommitted, trainingsCreated, signaturesCreated });
+      batch = writeBatch(db);
+      opCount = 0;
+    }
+
+    for (const attendee of session.attendees || []) {
+      if (!attendee.user || !attendee.user.id) continue;
+      const sigRef = doc(collection(db, 'training_signatures'));
+      batch.set(sigRef, {
+        training_id: trainingRef.id,
+        user_id: String(attendee.user.id),
+        signed_at: now,
+      });
+      opCount++;
+      signaturesCreated++;
+
+      if (opCount >= BATCH_LIMIT) {
+        await batch.commit();
+        batchesCommitted++;
+        onProgress?.({ batchesCommitted, trainingsCreated, signaturesCreated });
+        batch = writeBatch(db);
+        opCount = 0;
+      }
+    }
+  }
+
+  if (opCount > 0) {
+    await batch.commit();
+    batchesCommitted++;
+    onProgress?.({ batchesCommitted, trainingsCreated, signaturesCreated });
+  }
+
+  return { success: true, trainingsCreated, signaturesCreated, batchesCommitted };
+};
+
 // Saves certification records in bulk.
 export const saveCertificationRows = async ({ records = [], updates = [], deleteIds = [] }) => {
   const db = firestore();

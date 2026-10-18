@@ -71,6 +71,7 @@ export const ROUTED_FEATURES = {
       'ADMIN_DELETE_SCHEDULE_TEMPLATE',
       'ADMIN_DELETE_CERTIFICATION',
       'ADMIN_BULK_SAVE_TRAINING',
+      'ADMIN_BULK_IMPORT_TRAININGS',
       'ADMIN_BULK_SAVE_CERTIFICATION',
       'ADMIN_SAVE_SYSTEM_SETTING',
       'ADMIN_SAVE_SYSTEM_SETTINGS',
@@ -847,6 +848,12 @@ const DISPATCH = {
     const { saveTrainingRows } = await writes();
     const request = body.payload || body;
     return ok(await saveTrainingRows({ rows: request.trainings || [], deleteIds: request.deleteIds || [] }));
+  },
+
+  ADMIN_BULK_IMPORT_TRAININGS: async (body) => {
+    const { bulkImportTrainingsAndSignatures } = await writes();
+    const request = body.payload || body;
+    return ok(await bulkImportTrainingsAndSignatures({ sessions: request.sessions || [] }));
   },
 
   ADMIN_BULK_SAVE_CERTIFICATION: async (body) => {

@@ -80,6 +80,7 @@ import {
   HelpGuides,
   MyAvailability,
   MyClockHistory,
+  ApparatusModule,
   ScheduleCalendar,
   RosterModule,
   ReportsAndFormsModule,
@@ -316,6 +317,7 @@ export default function App() {
   const canAdminister = roleHasAdministration(currentUserRole);
   // One reader for every role flag, so each check below names the permission it depends on rather tha...
   const can = (key) => permissionGranted(currentUserRole, key);
+  const canAccessDashboard = isAdmin || can('can_access_dashboard');
   // Checks specific feature permissions for the current user.
   const canApproveShifts = can('can_approve_shifts');
   // Checks specific feature permissions for the current user.
@@ -1478,11 +1480,29 @@ const getLoadingMessage = () => {
                         ? canViewReports || canGenerateForms
                         : activeTab === 'work-orders'
                           ? canViewWorkOrders
-                          : true; // the dashboard, help, settings and the easter egg are always open
-    if (!allowed) setActiveTab('dashboard');
+                          : activeTab === 'dashboard'
+                            ? canAccessDashboard
+                            : true; // help, settings and the easter egg are always open
+    if (!allowed) {
+      const fallbackTab = canAccessDashboard
+        ? 'dashboard'
+        : canViewSchedule
+          ? 'schedule'
+          : canViewRoster
+            ? 'roster'
+            : canSignTrainings
+              ? 'training'
+              : canViewDocuments
+                ? 'documents'
+                : canAdminister
+                  ? 'admin'
+                  : 'help';
+      setActiveTab(fallbackTab);
+    }
   }, [
     activeTab,
     currentUser,
+    canAccessDashboard,
     canAdminister,
     canViewSchedule,
     canEditOwnAvailability,
@@ -2093,6 +2113,7 @@ const getLoadingMessage = () => {
             setIsSidebarOpen={setIsSidebarOpen}
             onLogout={handleLogout}
             // Module visibility, all driven by the role's permissions.
+            canAccessDashboard={canAccessDashboard}
             canAdminister={canAdminister}
             canViewSchedule={canViewSchedule}
             canEditAvailability={canEditOwnAvailability}
@@ -2135,6 +2156,7 @@ const getLoadingMessage = () => {
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                     {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
                     {activeTab === 'clock-history' && 'Clock History'}
+                    {activeTab === 'apparatus' && 'Apparatus Registry'}
                     {activeTab === 'roster' && 'Roster'}
                     {activeTab === 'schedule' && 'Schedule'}
                     {activeTab === 'availability' && 'Availability'}
@@ -2153,6 +2175,7 @@ const getLoadingMessage = () => {
                       'Station overview, active clock status, and duty dashboard.'
                     )}
                     {activeTab === 'clock-history' && 'Review your previous clock-in entries, duration, and locations.'}
+                    {activeTab === 'apparatus' && 'Review department apparatus fleet status, specifications, and maintenance history.'}
                     {activeTab === 'roster' && 'View active members, ranks, and current certifications.'}
                     {activeTab === 'schedule' && 'Review your assigned shifts, or switch on "Show everyone" to see the whole crew.'}
                     {activeTab === 'availability' && 'Mark the shifts you could work, and administrators will see it when they build the schedule.'}
@@ -2178,32 +2201,34 @@ const getLoadingMessage = () => {
                 the tab that is opening still names itself. */}
             <Suspense fallback={<DeferredScreenFallback />}>
             {activeTab === 'dashboard' && (
-              <DashboardModule
-                currentUser={currentUser}
-                currentRole={currentUserRole}
-                isClockedIn={isClockedIn}
-                loading={globalLoading.active}
-                offline={offline}
-                onClockAction={handleClockAction}
-                timeFormat={activeTimeFormat}
-                canUseTimeclock={canUseTimeclock}
-                certificationAlerts={certificationAlerts}
-                announcements={announcements}
-                announcementAudience={announcementAudience}
-                onDutyUsers={onDutyUsers}
-                ranks={ranks}
-                schedule={schedule}
-                scheduleWindow={scheduleWindow}
-                onNeedSchedule={loadScheduleWindow}
-                scheduleTemplates={scheduleTemplates}
-                assignments={assignments}
-                workOrders={workOrders}
-                systemSettings={systemSettings}
-                userSettings={currentUserSettings}
-                onSaveUserSettings={handleSaveUserSettings}
-                onNavigate={handleSidebarNavigate}
-                token={authToken}
-              />
+              canAccessDashboard ? (
+                <DashboardModule
+                  currentUser={currentUser}
+                  currentRole={currentUserRole}
+                  isClockedIn={isClockedIn}
+                  loading={globalLoading.active}
+                  offline={offline}
+                  onClockAction={handleClockAction}
+                  timeFormat={activeTimeFormat}
+                  canUseTimeclock={canUseTimeclock}
+                  certificationAlerts={certificationAlerts}
+                  announcements={announcements}
+                  announcementAudience={announcementAudience}
+                  onDutyUsers={onDutyUsers}
+                  ranks={ranks}
+                  schedule={schedule}
+                  scheduleWindow={scheduleWindow}
+                  onNeedSchedule={loadScheduleWindow}
+                  scheduleTemplates={scheduleTemplates}
+                  assignments={assignments}
+                  workOrders={workOrders}
+                  systemSettings={systemSettings}
+                  userSettings={currentUserSettings}
+                  onSaveUserSettings={handleSaveUserSettings}
+                  onNavigate={handleSidebarNavigate}
+                  token={authToken}
+                />
+              ) : null
             )}
 
             {activeTab === 'clock-history' && canUseTimeclock && (
@@ -2220,6 +2245,14 @@ const getLoadingMessage = () => {
                   if (!logsScope || !logsScope.from) return undefined;
                   return loadLogs(payPeriodWindow(payPeriod, logsScope.from).from, logsScope.from);
                 }}
+                onBack={() => handleSidebarNavigate('dashboard')}
+              />
+            )}
+
+            {activeTab === 'apparatus' && (
+              <ApparatusModule
+                token={authToken}
+                currentUser={currentUser}
                 onBack={() => handleSidebarNavigate('dashboard')}
               />
             )}
@@ -2574,6 +2607,7 @@ const getLoadingMessage = () => {
             onSelectTab={handleSidebarNavigate}
             onOpenMore={() => setIsSidebarOpen(true)}
             modules={mobileNavModules}
+            canAccessDashboard={canAccessDashboard}
             canViewSchedule={canViewSchedule}
             canUseChat={canUseChat}
             canUseTimeclock={canUseTimeclock}

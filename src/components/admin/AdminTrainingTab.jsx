@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, Printer, Trash2, UserMinus } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, Printer, Trash2, Upload, UserMinus } from 'lucide-react';
 import { adminBulkSaveTraining, adminRemoveTrainingSignature } from '../../services/api';
 import TrainingBadges from '../training/TrainingBadges';
 import ConfirmModal from '../ConfirmModal';
@@ -7,6 +7,7 @@ import PrintableTraining from '../PrintableTraining';
 import TrainingFilters from '../training/TrainingFilters';
 import TrainingForm from '../training/TrainingForm';
 import TrainingTotals from '../training/TrainingTotals';
+import AdminTrainingImportModal from './AdminTrainingImportModal';
 import { displayDate } from '../../utils/scheduleDate';
 import { unnamedLabel, userLabel } from '../../utils/displayLabel';
 import {
@@ -46,6 +47,8 @@ export default function AdminTrainingTab({
   const [pending, setPending] = useState(null);
   // Holds state for the printable view.
   const [printing, setPrinting] = useState(null);
+  // Controls whether the training CSV import modal is open.
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   const allRows = useMemo(() => normalizeTrainingList(trainings), [trainings]);
 
@@ -206,6 +209,28 @@ export default function AdminTrainingTab({
         />
       )}
 
+      {/* Training CSV import modal */}
+      {importModalOpen && (
+        <AdminTrainingImportModal
+          isOpen={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          users={users}
+          token={token}
+          onImportSuccess={({ trainingsCreated, signaturesCreated }) => {
+            void onDataChanged?.('trainings');
+            void onDataChanged?.('training_signatures');
+            setMessage({
+              type: 'success',
+              text: `Successfully imported ${trainingsCreated} training session${
+                trainingsCreated === 1 ? '' : 's'
+              } and ${signaturesCreated} attendance signature${
+                signaturesCreated === 1 ? '' : 's'
+              }.`,
+            });
+          }}
+        />
+      )}
+
       {message && (
         <div
           className={`p-3 rounded-xl flex items-start gap-2 text-sm font-medium border ${
@@ -257,6 +282,16 @@ export default function AdminTrainingTab({
           >
             <Plus className="h-3.5 w-3.5" />
             Add training
+          </button>
+          {/* Button to import historical training from CSV */}
+          <button
+            type="button"
+            onClick={() => setImportModalOpen(true)}
+            title="Import historical training sessions and attendee records from CSV"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 transition"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Import CSV
           </button>
           {/* Button to print the filtered training list */}
           <button

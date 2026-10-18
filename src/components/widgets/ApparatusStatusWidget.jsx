@@ -273,7 +273,7 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
         )}
       </div>
 
-      {/* Footer link to full apparatus management if user can navigate */}
+      {/* Footer link to member apparatus registry if user can navigate */}
       {onNavigate && (
         <div className="shrink-0 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
           <span className="text-[11px] text-slate-400">
@@ -281,7 +281,7 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
           </span>
           <button
             type="button"
-            onClick={() => onNavigate('administration', 'apparatus')}
+            onClick={() => onNavigate('apparatus')}
             className="text-xs font-semibold text-red-600 dark:text-red-400 hover:text-red-500 flex items-center gap-0.5 transition"
           >
             <span>Apparatus Registry</span>

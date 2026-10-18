@@ -13,6 +13,7 @@ import {
   Map as MapIcon,
   // Settings,
   ShieldCheck,
+  Truck,
   Menu,
 } from 'lucide-react';
 import { DEFAULT_MOBILE_NAV_MODULES } from '../utils/mobileNav';
@@ -29,6 +30,7 @@ const MODULE_META = {
   'district-map': { label: 'Map', icon: MapIcon },
   reports: { label: 'Reports', icon: BarChart3 },
   'clock-history': { label: 'History', icon: History },
+  apparatus: { label: 'Apparatus', icon: Truck },
   help: { label: 'Help', icon: BookOpen },
   // settings: { label: 'Settings', icon: Settings },
   admin: { label: 'Admin', icon: ShieldCheck },
@@ -50,9 +52,11 @@ export default function MobileBottomNav({
   canGenerateForms: propForms,
   canViewMap: propMap,
   canAdminister: propAdmin,
+  canAccessDashboard: propDashboard,
   unreadChatCount = 0,
 }) {
   const auth = useAuth();
+  const canAccessDashboard = propDashboard !== undefined ? propDashboard : (auth.permissions?.canAccessDashboard ?? true);
   const canViewSchedule = propSchedule !== undefined ? propSchedule : (auth.permissions?.canViewSchedule ?? true);
   const canUseChat = propChat !== undefined ? propChat : (auth.permissions?.canUseChat ?? true);
   const canUseTimeclock = propClock !== undefined ? propClock : (auth.permissions?.canUseTimeclock ?? true);
@@ -67,6 +71,7 @@ export default function MobileBottomNav({
   const isPermitted = (id) => {
     switch (id) {
       case 'dashboard':
+        return Boolean(canAccessDashboard);
       case 'clock-history':
         return Boolean(canUseTimeclock);
       case 'schedule':

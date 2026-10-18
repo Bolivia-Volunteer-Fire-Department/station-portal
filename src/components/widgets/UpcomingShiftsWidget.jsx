@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calendar, Clock, ChevronRight, Loader2 } from 'lucide-react';
-import { displayDate, parseSheetDateKey, stationTodayKey } from '../../utils/scheduleDate';
+import {
+  displayDate,
+  parseSheetDateKey,
+  stationTodayKey,
+  dateKeyDaysAhead,
+} from '../../utils/scheduleDate';
 import { monthKeyFor, scheduleWindowFor, windowCoversMonth } from '../../utils/scheduleWindow';
 import { formatClockRange, rowTimeText, templateTimeText } from '../../utils/shiftTime';
 import { assignmentColor } from '../../utils/assignmentColor';
 
 /**
  * Upcoming Shifts Widget.
- * Shows member's next scheduled shifts and duty assignments.
+ * Shows member's next scheduled shifts and duty assignments in the next 7 days.
  */
 export default function UpcomingShiftsWidget({
   schedule = [],
@@ -36,6 +41,7 @@ export default function UpcomingShiftsWidget({
 
   const currentUserId = String(currentUser?.id ?? currentUser?.userId ?? '').trim();
   const todayKey = stationTodayKey();
+  const next7DaysKey = dateKeyDaysAhead(7, todayKey);
 
   const templateMap = useMemo(
     () => new Map((scheduleTemplates || []).map((t) => [String(t.id), t])),
@@ -46,7 +52,7 @@ export default function UpcomingShiftsWidget({
     [assignments]
   );
 
-  // Find user's upcoming shifts from today onward
+  // Find user's upcoming shifts in the next 7 days
   const userShifts = useMemo(() => {
     if (!currentUserId || !Array.isArray(schedule)) return [];
     return schedule
@@ -58,17 +64,18 @@ export default function UpcomingShiftsWidget({
       .filter((row) => {
         if (String(row.user_id ?? row.userId ?? '').trim() !== currentUserId) return false;
         if (!row._fromDateKey) return false;
-        // Keep shifts that either end today or in the future
-        return row._toDateKey >= todayKey || row._fromDateKey >= todayKey;
+        // Keep shifts that are either active today or upcoming, bounded within the next 7 days
+        const isActiveOrUpcoming = row._toDateKey >= todayKey || row._fromDateKey >= todayKey;
+        const isWithinNext7Days = row._fromDateKey <= next7DaysKey;
+        return isActiveOrUpcoming && isWithinNext7Days;
       })
       .sort((a, b) => {
         if (a._fromDateKey !== b._fromDateKey) {
           return a._fromDateKey.localeCompare(b._fromDateKey);
         }
         return a._toDateKey.localeCompare(b._toDateKey);
-      })
-      .slice(0, 10);
-  }, [schedule, currentUserId, todayKey]);
+      });
+  }, [schedule, currentUserId, todayKey, next7DaysKey]);
 
   return (
     <div className="h-full max-h-[500px] flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5 shadow-xl transition-all">
@@ -83,7 +90,7 @@ export default function UpcomingShiftsWidget({
               My Upcoming Shifts
             </h3>
             <p className="text-[11px] text-slate-400">
-              Your scheduled duty assignments
+              Scheduled shifts in the next 7 days
             </p>
           </div>
         </div>
@@ -188,7 +195,7 @@ export default function UpcomingShiftsWidget({
         ) : (
           <div className="py-6 text-center text-xs text-slate-500 dark:text-slate-400 space-y-1">
             <Calendar className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-1 opacity-70" />
-            <p className="font-semibold text-slate-700 dark:text-slate-300">No upcoming shifts scheduled.</p>
+            <p className="font-semibold text-slate-700 dark:text-slate-300">No shifts scheduled in the next 7 days.</p>
             <p className="text-[11px]">Check the schedule to view openings or sign up for shifts.</p>
           </div>
         )}
@@ -197,7 +204,7 @@ export default function UpcomingShiftsWidget({
       {/* Footer */}
       <div className="shrink-0 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
         <span className="text-[11px] text-slate-400">
-          {userShifts.length} shift{userShifts.length === 1 ? '' : 's'} scheduled
+          {userShifts.length} shift{userShifts.length === 1 ? '' : 's'} in next 7 days
         </span>
         {onNavigateToSchedule && (
           <button

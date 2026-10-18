@@ -202,13 +202,15 @@ export const ADMIN_PERMISSIONS = [
     key: 'can_manage_dashboard_setup',
     tab: 'dashboard-setup',
     label: 'Manage dashboard setup',
-    description: 'Configure the station default layout, card arrangements, and column sizes for the Dashboard module.',
+    description: 'Configure the station default layout, card arrangements, and column sizes for the Dashboard module. Requires "Has access to Dashboard".',
+    requires: 'can_access_dashboard',
   },
   {
     key: 'can_manage_widget_setup',
     tab: 'widget-setup',
     label: 'Manage dashboard widgets',
-    description: 'Enable or disable built-in widgets and create custom cards, markdown notices, and web embeds for the dashboard.',
+    description: 'Enable or disable built-in widgets and create custom cards, markdown notices, and web embeds for the dashboard. Requires "Has access to Dashboard".',
+    requires: 'can_access_dashboard',
   },
   {
     key: 'can_manage_work_orders',
@@ -220,6 +222,11 @@ export const ADMIN_PERMISSIONS = [
 
 // Member-facing permissions: these gate modules rather than admin tabs.
 export const MEMBER_PERMISSIONS = [
+  {
+    key: 'can_access_dashboard',
+    label: 'Has access to Dashboard',
+    description: 'Open the Dashboard module and view station widgets.',
+  },
   {
     key: 'can_view_my_schedule',
     label: 'View their schedule',
@@ -455,7 +462,14 @@ export const ADMIN_PERMISSION_GROUPS = [
 export const MEMBER_PERMISSION_GROUPS = [
   {
     label: 'Their own schedule and hours',
-    keys: ['can_view_my_schedule', 'can_make_offers', 'can_view_full_schedule', 'can_edit_own_availability', 'can_use_timeclock'],
+    keys: [
+      'can_access_dashboard',
+      'can_view_my_schedule',
+      'can_make_offers',
+      'can_view_full_schedule',
+      'can_edit_own_availability',
+      'can_use_timeclock',
+    ],
   },
   {
     label: 'The crew and its records',
@@ -633,6 +647,11 @@ export const roleAllowsTab = (role, tabId) => {
   // the reverse. No card is ever shown to somebody whose save the server would refuse without telling them why.
   if (tabId === 'map') {
     if (permissionGranted(role, 'can_edit_map')) return true;
+    return permissionGranted(role, direct.key);
+  }
+
+  if (tabId === 'dashboard-setup' || tabId === 'widget-setup') {
+    if (!permissionGranted(role, 'can_access_dashboard')) return false;
     return permissionGranted(role, direct.key);
   }
 

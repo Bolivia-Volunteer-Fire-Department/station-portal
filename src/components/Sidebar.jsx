@@ -28,6 +28,7 @@ export default function Sidebar({
     onLogout: propLogout,
     // Module visibility, each driven by a role permission:
     canAdminister: propAdmin,
+    canAccessDashboard: propDashboard,
     canViewSchedule: propSchedule,
     canEditAvailability: propAvail,
     canUseTimeclock: propClock,
@@ -52,6 +53,7 @@ export default function Sidebar({
     const departmentName = propDept || station.departmentName || '';
     const onLogout = propLogout || auth.onLogout;
     const canAdminister = propAdmin !== undefined ? propAdmin : Boolean(auth.canAdminister);
+    const canAccessDashboard = propDashboard !== undefined ? propDashboard : (auth.permissions?.canAccessDashboard ?? true);
     const canViewSchedule = propSchedule !== undefined ? propSchedule : Boolean(auth.permissions?.canViewSchedule);
     const canEditAvailability = propAvail !== undefined ? propAvail : Boolean(auth.permissions?.canEditOwnAvailability);
     const canUseTimeclock = propClock !== undefined ? propClock : Boolean(auth.permissions?.canUseTimeclock);
@@ -115,7 +117,7 @@ export default function Sidebar({
         const NavIcon = getSidebarModuleIcon(moduleId, sidebarNavIcons);
         switch (moduleId) {
             case 'dashboard':
-                return (
+                return canAccessDashboard ? (
                     <button
                         key="dashboard"
                         onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
@@ -126,7 +128,7 @@ export default function Sidebar({
                         <NavIcon className="w-5 h-5 shrink-0" />
                         <span className={isCollapsed ? 'md:hidden' : ''}>Dashboard</span>
                     </button>
-                );
+                ) : null;
             case 'clock-history':
                 return canUseTimeclock ? (
                     <button
@@ -145,6 +147,24 @@ export default function Sidebar({
                         <span className={isCollapsed ? 'md:hidden' : ''}>Clock History</span>
                     </button>
                 ) : null;
+            case 'apparatus':
+                return (
+                    <button
+                        key="apparatus"
+                        onClick={() => {
+                            setActiveTab('apparatus');
+                            setIsSidebarOpen(false);
+                        }}
+                        className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'apparatus'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                        title={isCollapsed ? 'Apparatus Registry' : undefined}
+                    >
+                        <NavIcon className="w-5 h-5 shrink-0" />
+                        <span className={isCollapsed ? 'md:hidden' : ''}>Apparatus Registry</span>
+                    </button>
+                );
             case 'chat':
                 return canUseChat ? (
                     <button

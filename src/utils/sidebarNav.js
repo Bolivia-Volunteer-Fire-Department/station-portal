@@ -105,6 +105,7 @@ export const DEFAULT_SIDEBAR_NAV_ORDER = [
 export const DEFAULT_MODULE_ICONS = {
   dashboard: 'LayoutDashboard',
   'clock-history': 'History',
+  apparatus: 'Truck',
   chat: 'MessagesSquare',
   roster: 'Users',
   schedule: 'CalendarDays',
@@ -290,7 +291,7 @@ export const SIDEBAR_MODULE_CATALOG = [
     id: 'dashboard',
     label: 'Dashboard',
     description: 'Station dashboard and widgets',
-    permissionKey: null,
+    permissionKey: 'canAccessDashboard',
   },
   {
     id: 'chat',

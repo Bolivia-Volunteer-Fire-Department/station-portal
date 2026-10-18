@@ -637,6 +637,14 @@ export const adminBulkSaveTraining = async ({ trainings = [], deleteIds = [] }, 
     },
   });
 
+// Bulk imports grouped training sessions and attendee signatures from CSV import.
+export const adminBulkImportTrainings = async ({ sessions = [] }, token) =>
+  dispatchRequest({
+    action: 'ADMIN_BULK_IMPORT_TRAININGS',
+    token,
+    payload: { sessions },
+  });
+
 // Removes a member's signature from a training record.
 export const adminRemoveTrainingSignature = async (signatureId, token) =>
   dispatchRequest({

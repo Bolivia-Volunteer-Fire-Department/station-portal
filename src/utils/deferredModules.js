@@ -38,6 +38,7 @@ const loaders = {
   UserSettings: () => import('../components/MySettings'),
   HelpGuides: () => import('../components/HelpGuides'),
   MyClockHistory: () => import('../components/MyClockHistory'),
+  ApparatusModule: () => import('../components/ApparatusModule'),
   FirefighterRunner: () => import('../components/FirefighterRunner/FirefighterRunner'),
 };
 
@@ -64,6 +65,7 @@ export const UserProfile = lazy(loaders.UserProfile);
 export const UserSettings = lazy(loaders.UserSettings);
 export const HelpGuides = lazy(loaders.HelpGuides);
 export const MyClockHistory = lazy(loaders.MyClockHistory);
+export const ApparatusModule = lazy(loaders.ApparatusModule);
 export const FirefighterRunner = lazy(loaders.FirefighterRunner);
 
 // Every name a prefetch may be handed, so a typo in App cannot silently warm nothing.

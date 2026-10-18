@@ -218,6 +218,32 @@ const withSchedule = { can_view_my_schedule: true, can_make_offers: true };
 check('with the schedule granted, offers are honored', resolvePermissionValue(withSchedule, 'can_make_offers'), true);
 check('and nothing is blocked', permissionBlockedByDependency(withSchedule, 'can_make_offers'), false);
 
+console.log('\n--- dashboard setup and widget setup depend on dashboard access ---');
+const dashboardWithoutAccess = {
+  can_access_dashboard: false,
+  can_manage_dashboard_setup: true,
+  can_manage_widget_setup: true,
+};
+check('managing dashboard setup is blocked without dashboard access', permissionBlockedByDependency(dashboardWithoutAccess, 'can_manage_dashboard_setup'), true);
+check('managing widget setup is blocked without dashboard access', permissionBlockedByDependency(dashboardWithoutAccess, 'can_manage_widget_setup'), true);
+check(
+  'and both resolve to FALSE on save',
+  [resolvePermissionValue(dashboardWithoutAccess, 'can_manage_dashboard_setup'), resolvePermissionValue(dashboardWithoutAccess, 'can_manage_widget_setup')],
+  [false, false]
+);
+check('dashboard access itself is not blocked by anything', permissionBlockedByDependency({}, 'can_access_dashboard'), false);
+check(
+  'with dashboard access granted, neither setup permission is blocked',
+  [permissionBlockedByDependency({ can_access_dashboard: true }, 'can_manage_dashboard_setup'), permissionBlockedByDependency({ can_access_dashboard: true }, 'can_manage_widget_setup')],
+  [false, false]
+);
+check('dashboard access is a member permission, not a tab', permissionTab('can_access_dashboard'), null);
+check('and dashboard access grants no Administration access on its own', roleHasAdministration({ can_access_dashboard: true }), false);
+check('dashboard-setup tab requires can_access_dashboard', roleAllowsTab(dashboardWithoutAccess, 'dashboard-setup'), false);
+check('widget-setup tab requires can_access_dashboard', roleAllowsTab(dashboardWithoutAccess, 'widget-setup'), false);
+check('with dashboard access, dashboard-setup tab is allowed', roleAllowsTab({ can_access_dashboard: true, can_manage_dashboard_setup: true }, 'dashboard-setup'), true);
+check('with dashboard access, widget-setup tab is allowed', roleAllowsTab({ can_access_dashboard: true, can_manage_widget_setup: true }, 'widget-setup'), true);
+
 console.log('\n--- the master switch locks the other boxes on, and forces them TRUE ---');
 check('locked while is_admin is ticked', permissionLockedByAdmin({ is_admin: true }, 'can_edit_users'), true);
 check('the master switch is not locked by itself', permissionLockedByAdmin({ is_admin: true }, MASTER_PERMISSION_KEY), false);

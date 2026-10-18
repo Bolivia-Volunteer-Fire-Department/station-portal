@@ -50,6 +50,14 @@ export const dateKeyDaysBack = (days, fromKey = stationTodayKey()) => {
   return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
 };
 
+// A 'yyyy-MM-dd' key that many DAYS after another one, defaulting to the STATION's today.
+export const dateKeyDaysAhead = (days, fromKey = stationTodayKey()) => {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(fromKey ?? '').trim());
+  if (!parts) return '';
+  const shifted = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]) + Number(days || 0)));
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+};
+
 // A 'yyyy-MM-dd' key that many whole months before another one, defaulting to the STATION's today.
 //
 // Kept for the screens that think in months (a calendar month, a month-scoped claim read). The clock history does NOT use
