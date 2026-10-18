@@ -1077,6 +1077,60 @@ export const deleteHydrant = async ({ id } = {}) => {
   return { id: wanted };
 };
 
+// Bulk imports or updates hydrants in batches.
+export const bulkSaveHydrants = async ({ hydrants = [], authorId = '', onProgress }) => {
+  const db = firestore();
+  const BATCH_LIMIT = 400;
+  const now = stationTimestamp();
+
+  let batch = writeBatch(db);
+  let opCount = 0;
+  let created = 0;
+  let updated = 0;
+  let batchesCommitted = 0;
+
+  for (const h of hydrants) {
+    const normal = normalizeHydrant(h);
+    const targetId = String(h.hydrant_id || h.id || normal.hydrant_id || normal.id || '').trim() || doc(collection(db, HYDRANTS_COLLECTION)).id;
+    const ref = doc(db, HYDRANTS_COLLECTION, targetId);
+
+    const docData = {
+      ...normal,
+      id: normal.id || targetId,
+      hydrant_id: targetId,
+      updated_at: now,
+      updated_by: String(authorId || ''),
+    };
+
+    if (!h.isExisting) {
+      docData.created_at = now;
+      docData.created_by = String(authorId || '');
+      created++;
+    } else {
+      updated++;
+    }
+
+    batch.set(ref, docData, { merge: true });
+    opCount++;
+
+    if (opCount >= BATCH_LIMIT) {
+      await batch.commit();
+      batchesCommitted++;
+      onProgress?.({ batchesCommitted, created, updated });
+      batch = writeBatch(db);
+      opCount = 0;
+    }
+  }
+
+  if (opCount > 0) {
+    await batch.commit();
+    batchesCommitted++;
+    onProgress?.({ batchesCommitted, created, updated });
+  }
+
+  return { success: true, count: hydrants.length, created, updated, batchesCommitted };
+};
+
 // Saves the station's landmark pin categories and icons.
 export const saveMapTypes = async ({ types, authorId = '' } = {}) => {
   const problem = mapTypesProblem(types);
@@ -1211,21 +1265,84 @@ export const deleteDocument = async ({ collection: collectionName, id }) => {
   return { id: target };
 };
 
-// Saves training courses in bulk.
-export const saveTrainingRows = async ({ rows = [], deleteIds = [] }) => {
+// Saves training courses in bulk and synchronizes member attendee signatures when provided.
+export const saveTrainingRows = async ({ rows = [], deleteIds = [], authorId = '' }) => {
   const db = firestore();
   const batch = writeBatch(db);
 
-  rows.forEach((row) => {
-    const { action, token, row_version, id, date_key, ...fields } = row;
+  for (const row of rows) {
+    const { action, token, row_version, id, date_key, attendee_ids, ...fields } = row;
     void action;
     void token;
     void row_version;
     void date_key;
     const target = String(id || '').trim() || doc(collection(db, 'trainings')).id;
-    batch.set(doc(db, 'trainings', target), { ...fields, id: target, date_key: parseSheetDateKey(fields.date) || '' }, { merge: true });
-  });
-  deleteIds.forEach((id) => batch.delete(doc(db, 'trainings', String(id))));
+    const dateKey = parseSheetDateKey(fields.date) || '';
+
+    // If attendee_ids is provided, manage member attendance signatures
+    if (Array.isArray(attendee_ids)) {
+      const existingSigsSnap = await getDocs(
+        query(collection(db, 'training_signatures'), where('training_id', '==', target))
+      );
+      const existingUserMap = new Map();
+      existingSigsSnap.forEach((d) => {
+        const data = d.data();
+        existingUserMap.set(String(data.user_id || '').trim(), d.id);
+      });
+
+      const newAttendeeSet = new Set(attendee_ids.map((uid) => String(uid || '').trim()).filter(Boolean));
+      const now = new Date().toISOString();
+
+      // Add signatures for newly selected members
+      for (const uid of newAttendeeSet) {
+        if (!existingUserMap.has(uid)) {
+          const sigRef = doc(collection(db, 'training_signatures'));
+          batch.set(sigRef, {
+            training_id: target,
+            user_id: uid,
+            signed_at: now,
+            signed_by_id: String(authorId || ''),
+          });
+        }
+      }
+
+      // Remove signatures for members who were unselected
+      for (const [uid, sigDocId] of existingUserMap.entries()) {
+        if (!newAttendeeSet.has(uid)) {
+          batch.delete(doc(db, 'training_signatures', sigDocId));
+        }
+      }
+
+      fields.signature_count = newAttendeeSet.size;
+    }
+
+    // If marked as locked/approved, ensure both is_locked and legacy is_entered_into_external flags are set
+    if (fields.is_locked || fields.locked || fields.is_entered_into_external) {
+      fields.is_locked = true;
+      fields.is_entered_into_external = true;
+      if (!fields.locked_at) fields.locked_at = new Date().toISOString();
+      if (!fields.locked_by_id && authorId) fields.locked_by_id = String(authorId);
+    }
+
+    batch.set(
+      doc(db, 'trainings', target),
+      {
+        ...fields,
+        id: target,
+        date_key: dateKey,
+      },
+      { merge: true }
+    );
+  }
+
+  for (const delId of deleteIds) {
+    const targetId = String(delId);
+    batch.delete(doc(db, 'trainings', targetId));
+    const sigsSnap = await getDocs(
+      query(collection(db, 'training_signatures'), where('training_id', '==', targetId))
+    );
+    sigsSnap.forEach((sigDoc) => batch.delete(sigDoc.ref));
+  }
 
   await batch.commit();
   return { saved: rows.length, deleted: deleteIds.length };

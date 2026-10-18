@@ -61,6 +61,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Removed the Clock History module as a module, and migrated it into the Station Time widget as a "History" button.
 * Did a Firebase/Firestore review and improved read/write efficiencies.
 * Added an **Import CSV** function for Trainings.
+* Added a **Hydrants** tab to Assets, and an import tool for those.
 
 ### Version 1.6x
 * Added the **District Map** module.

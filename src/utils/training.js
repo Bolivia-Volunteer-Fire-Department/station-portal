@@ -82,10 +82,15 @@ export const TRAINING_CATEGORY_OPTIONS = [
 // signatures may change afterwards.
 export const ENTERED_EXTERNALLY_KEY = 'is_entered_into_external';
 
-// A training that has been recorded in an external system. Completely locked: not editable, not
-// deletable, and its signatures cannot be added or removed - in the app. Clearing the column in
-// the spreadsheet is the only way back, which is what the Administration warning says.
-export const trainingLocked = (training) => Boolean(training?.[ENTERED_EXTERNALLY_KEY]);
+// A training that has been recorded in an external system or locked/approved by an officer. Completely locked:
+// not editable, not deletable, and its signatures cannot be added or removed in the app.
+export const trainingLocked = (training) =>
+  Boolean(
+    training?.[ENTERED_EXTERNALLY_KEY] ||
+    training?.is_locked ||
+    training?.locked ||
+    training?.locked_at
+  );
 
 // Whether the Training module may edit a training: not once anyone has signed it (the record is
 // evidence at that point, so changes belong in the Administration module), and never once it is
@@ -107,6 +112,19 @@ export const trainingEditBlockedReason = (training) => {
     return 'Somebody has already signed this training, so it can only be changed in the Administration module.';
   }
   return '';
+};
+
+// --- the signing requirement mode setting ------------------------------------
+//
+// "Members must sign for their own trainings": default TRUE.
+// When FALSE, departments allow officers/users creating or editing trainings to select attending members directly.
+export const MEMBERS_MUST_SIGN_KEY = 'members_must_sign_trainings';
+
+export const membersMustSignTrainings = (systemSettings) => {
+  const raw = getSettingValue(systemSettings, MEMBERS_MUST_SIGN_KEY, 'true');
+  if (raw === '' || raw === null || raw === undefined) return true;
+  if (typeof raw === 'boolean') return raw;
+  return String(raw).trim().toLowerCase() !== 'false';
 };
 
 // --- the signing window ------------------------------------------------------
@@ -233,6 +251,10 @@ export const normalizeTraining = (row) => {
     signature_count: Number.isFinite(Number(source.signature_count))
       ? Number(source.signature_count)
       : 0,
+    locked_at: text(source.locked_at),
+    locked_by_id: text(source.locked_by_id),
+    locked_by_name: text(source.locked_by_name),
+    is_locked: Boolean(source.is_locked || isTruthyFlag(source[ENTERED_EXTERNALLY_KEY])),
   };
   TRAINING_FLAG_KEYS.forEach((key) => {
     training[key] = isTruthyFlag(source[key]);

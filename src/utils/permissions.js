@@ -218,6 +218,12 @@ export const ADMIN_PERMISSIONS = [
     label: 'Manage work orders',
     description: 'Review, prioritize, schedule, assign, and resolve apparatus, station facility, and equipment work orders in Assets.',
   },
+  {
+    key: 'can_manage_hydrants',
+    tab: 'hydrants',
+    label: 'Manage hydrants',
+    description: 'Track municipal and private fire hydrants, inspection records, flow test data, and location details in Assets.',
+  },
 ];
 
 // Member-facing permissions: these gate modules rather than admin tabs.
@@ -444,6 +450,7 @@ export const ADMIN_PERMISSION_GROUPS = [
       'can_manage_documents',
       'can_manage_equipment',
       'can_manage_apparatus',
+      'can_manage_hydrants',
       'can_manage_asset_setup',
       'can_manage_work_orders',
     ],

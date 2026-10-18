@@ -67,6 +67,7 @@ export const ADMIN_BAR_LABELS = {
   help: 'Help',
   equipment: 'Equipment',
   apparatus: 'Apparatuses',
+  hydrants: 'Hydrants',
   'work-orders': 'Work Orders',
   'asset-setup': 'Asset Setup',
   'dashboard-setup': 'Dash Setup',

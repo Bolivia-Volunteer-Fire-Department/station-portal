@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 const buildTime = Date.now();
-const appVersion = '1.75';
+const appVersion = '1.751';
 
 function versionStampPlugin() {
   return {

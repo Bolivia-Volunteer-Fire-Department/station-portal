@@ -1297,8 +1297,38 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, activeTab, canVerifyDocuments, canAddAssessmentScores, directory.length]);
 
+  // THE TRAINING MODULE'S MEMBER LIST, read when training is open and the user can edit trainings
+  useEffect(() => {
+    if (!authToken || activeTab !== 'training') return;
+    if (directory.length) return;
+    if (!canEditTrainings) return;
+    let cancelled = false;
+    fetchAdminSections(['directory'])
+      .then((data) => {
+        if (cancelled) return;
+        if (Array.isArray(data?.directory)) setDirectory(data.directory);
+      })
+      .catch((error) => console.error('[training] could not read the member directory', error));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, activeTab, canEditTrainings, directory.length]);
+
   // Crew member directory for administrative tools.
   const documentsMembers = directory.length ? directory : users;
+  const trainingMembers = useMemo(() => {
+    const byId = new Map();
+    (Array.isArray(directory) ? directory : []).forEach((user) => {
+      const id = String(user?.id ?? user?.user_id ?? user?.uid ?? '').trim();
+      if (id) byId.set(id, user);
+    });
+    (Array.isArray(users) ? users : []).forEach((user) => {
+      const id = String(user?.id ?? user?.user_id ?? user?.uid ?? '').trim();
+      if (id) byId.set(id, { ...byId.get(id), ...user });
+    });
+    return [...byId.values()];
+  }, [directory, users]);
 
   // Handles clock in and clock out actions.
   useEffect(() => {
@@ -2372,6 +2402,8 @@ const getLoadingMessage = () => {
                 // The public settings, for the SIGNING WINDOW: a training can be signed for a configured number of ...
                 systemSettings={systemSettings}
                 canEdit={canEditTrainings}
+                users={trainingMembers}
+                ranks={ranks}
                 onChanged={refreshTraining}
               />
             )}

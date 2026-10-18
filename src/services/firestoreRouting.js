@@ -248,6 +248,7 @@ export const ROUTED_FEATURES = {
       'ADMIN_DELETE_PRE_INCIDENT_PLAN',
       'ADMIN_SAVE_HYDRANT',
       'ADMIN_DELETE_HYDRANT',
+      'ADMIN_BULK_SAVE_HYDRANTS',
       'ADMIN_SAVE_MAP_BACKDROP',
       'ADMIN_DELETE_MAP_BACKDROP',
       'ADMIN_SAVE_MAP_TYPES',
@@ -537,6 +538,12 @@ const DISPATCH = {
   ADMIN_DELETE_HYDRANT: async (body) => {
     const { deleteHydrant } = await writes();
     return ok(await deleteHydrant({ id: body?.id || body?.hydrantId }));
+  },
+
+  ADMIN_BULK_SAVE_HYDRANTS: async (body, uid) => {
+    const { bulkSaveHydrants } = await writes();
+    const request = body?.payload || body?.request || body || {};
+    return ok(await bulkSaveHydrants({ hydrants: request.hydrants || [], authorId: uid }));
   },
 
   ADMIN_SAVE_MAP_BACKDROP: async (body, uid) => {
@@ -844,10 +851,10 @@ const DISPATCH = {
     return ok({ id });
   },
 
-  ADMIN_BULK_SAVE_TRAINING: async (body) => {
+  ADMIN_BULK_SAVE_TRAINING: async (body, uid) => {
     const { saveTrainingRows } = await writes();
     const request = body.payload || body;
-    return ok(await saveTrainingRows({ rows: request.trainings || [], deleteIds: request.deleteIds || [] }));
+    return ok(await saveTrainingRows({ rows: request.trainings || [], deleteIds: request.deleteIds || [], authorId: uid }));
   },
 
   ADMIN_BULK_IMPORT_TRAININGS: async (body) => {
@@ -867,10 +874,10 @@ const DISPATCH = {
     return ok({ ...result, badges: await refreshCertificationBadges() });
   },
 
-  SAVE_TRAINING: async (body) => {
+  SAVE_TRAINING: async (body, uid) => {
     const { saveTrainingRows } = await writes();
     const request = body.payload || body;
-    return ok(await saveTrainingRows({ rows: request.trainings || [] }));
+    return ok(await saveTrainingRows({ rows: request.trainings || [], authorId: uid }));
   },
 
   ADMIN_SAVE_SYSTEM_SETTING: async (body) => {

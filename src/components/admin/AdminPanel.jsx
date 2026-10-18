@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes, Wrench } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes, Wrench, Droplets } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
@@ -33,6 +33,7 @@ const AdminReportsConfigurationTab = lazy(() => import('./AdminReportsConfigurat
 const AdminFormsTab = lazy(() => import('./AdminFormsTab'));
 const AdminEquipmentTab = lazy(() => import('./AdminEquipmentTab'));
 const AdminApparatusTab = lazy(() => import('./AdminApparatusTab'));
+const AdminHydrantsTab = lazy(() => import('./AdminHydrantsTab'));
 const AdminAssetSetupTab = lazy(() => import('./AdminAssetSetupTab'));
 const AdminDashboardSetupTab = lazy(() => import('./AdminDashboardSetupTab'));
 const AdminWidgetSetupTab = lazy(() => import('./AdminWidgetSetupTab'));
@@ -68,6 +69,7 @@ export const ADMIN_NAV_CATEGORIES = [
     items: [
       { id: 'equipment', label: 'Equipment', icon: ShieldAlert },
       { id: 'apparatus', label: 'Apparatuses', icon: Truck },
+      { id: 'hydrants', label: 'Hydrants', icon: Droplets },
       { id: 'work-orders', label: 'Work Orders', icon: Wrench },
       { id: 'asset-setup', label: 'Asset Setup', icon: SlidersHorizontal },
     ],
@@ -641,9 +643,11 @@ export default function AdminPanel({
           trainings={trainings}
           signatures={trainingSignatures}
           users={nameRows}
+          ranks={ranks}
           currentUserId={currentUserId}
           departmentName={departmentName}
           departmentLogoUrl={departmentLogoUrl}
+          systemSettings={systemSettings}
           onDataChanged={onAdminDataChanged}
         />
       )}
@@ -685,6 +689,14 @@ export default function AdminPanel({
             ''
           }
           users={nameRows}
+          onDataChanged={onDataChanged}
+        />
+      )}
+
+      {/* Hydrants management & flow rating tab */}
+      {activeSubTab === 'hydrants' && (
+        <AdminHydrantsTab
+          token={token}
           onDataChanged={onDataChanged}
         />
       )}

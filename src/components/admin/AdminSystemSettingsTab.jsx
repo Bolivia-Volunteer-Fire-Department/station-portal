@@ -8,7 +8,7 @@ import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
 // Configuration for training signature time limits.
-import { SIGNATURE_WINDOW_KEY, signatureWindowConfig } from '../../utils/training';
+import { SIGNATURE_WINDOW_KEY, signatureWindowConfig, MEMBERS_MUST_SIGN_KEY, membersMustSignTrainings } from '../../utils/training';
 import {
   DEFAULT_PAY_WEEK_START,
   PAY_PERIOD_DAYS_KEY,
@@ -53,6 +53,7 @@ const KNOWN_KEYS = [
   CLOCK_ROUNDING_KEY,
   'session_timeout',
   SIGNATURE_WINDOW_KEY,
+  MEMBERS_MUST_SIGN_KEY,
   PAY_PERIOD_DAYS_KEY,
   PAY_WEEK_START_KEY,
   ...LOADING_MESSAGE_KEYS,
@@ -107,6 +108,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <PayPeriodCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <TrainingSignatureRequirementCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <BossSayingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       {/* <CustomSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} /> */}
@@ -1051,6 +1053,82 @@ function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
         </div>
 
       </form>
+    </div>
+  );
+}
+
+// Controls whether individual members must sign for their own trainings or officers can sign on their behalf.
+function TrainingSignatureRequirementCard({ token, systemSettings, onDataChanged }) {
+  const [mustSign, setMustSign] = useState(() => membersMustSignTrainings(systemSettings));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setMustSign(membersMustSignTrainings(systemSettings));
+  }, [systemSettings]);
+
+  const handleToggle = async (checked) => {
+    setMustSign(checked);
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await adminSaveSystemSetting(MEMBERS_MUST_SIGN_KEY, String(checked), token);
+      if (!result?.success) throw new Error(result?.message || 'Failed to update setting.');
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to update setting.');
+      setMustSign(!checked);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <div className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Training Signatures</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Members must sign for their own trainings
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {saving && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+            {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+            <ToggleSwitch
+              checked={mustSign}
+              onChange={handleToggle}
+              disabled={saving}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          {mustSign ? (
+            <>
+              <strong className="text-slate-700 dark:text-slate-300">Self-sign required (Default):</strong> Members must sign into their own account in the Training module to sign and acknowledge their attendance.
+            </>
+          ) : (
+            <>
+              <strong className="text-amber-600 dark:text-amber-400">Member sign-off disabled:</strong> Any user authorized to add or edit trainings can select which members were present directly on the training form, signing attendance on their behalf.
+            </>
+          )}
+        </p>
+      </div>
     </div>
   );
 }

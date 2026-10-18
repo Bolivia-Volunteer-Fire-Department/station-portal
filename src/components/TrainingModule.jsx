@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Eye, Info, Loader2, Pencil, PenLine, Save } from 'lucide-react';
+import { Check, Eye, Info, Loader2, Lock, Pencil, PenLine, Save } from 'lucide-react';
 import { saveTraining, signTraining } from '../services/api';
 import TrainingBadges from './training/TrainingBadges';
 import TrainingFilters from './training/TrainingFilters';
@@ -18,6 +18,7 @@ import {
   trainingEditBlockedReason,
   trainingSignBlockedReason,
   trainingTotals,
+  membersMustSignTrainings,
 } from '../utils/training';
 
 // The Training module.
@@ -43,6 +44,8 @@ export default function TrainingModule({
   // member has already made.
   systemSettings = [],
   canEdit = false,
+  users = [],
+  ranks = [],
   onChanged,
 }) {
   const [pendingSignIds, setPendingSignIds] = useState(() => new Set());
@@ -91,6 +94,7 @@ export default function TrainingModule({
   // than the device's, because a deadline is a station fact - the same comparison every other "is this still live?"
   // question in the app makes (utils/scheduleDate#stationTodayKey).
   const windowDays = signatureWindowDays(systemSettings);
+  const membersMustSign = membersMustSignTrainings(systemSettings);
   const todayKey = stationTodayKey();
 
   const toggleSign = (training) => {
@@ -179,6 +183,12 @@ export default function TrainingModule({
             setEditing(null);
             setEditorOpen(false);
           }}
+          users={users}
+          ranks={ranks}
+          systemSettings={systemSettings}
+          existingSignatures={editing ? signatures.filter((s) => String(s.training_id) === String(editing.id)) : []}
+          currentUserId={currentUser?.id || currentUser?.uid || ''}
+          currentUserName={currentUser?.name || currentUser?.full_name || currentUser?.user_name || ''}
         />
       )}
 
@@ -194,6 +204,15 @@ export default function TrainingModule({
       />
 
       <TrainingTotals totals={totals} signedLabel="Signed by me" />
+
+      {!membersMustSign && (
+        <div className="mx-1 my-3 p-3 rounded-2xl flex items-start gap-2.5 text-sm bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-blue-800 dark:text-blue-200">
+          <Info className="w-4 h-4 shrink-0 mt-0.5" />
+      <span>
+            Member sign off is disabled for this department. Training creators mark member attendance directly on the report.
+          </span>    
+        </div>
+      )}
 
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
@@ -277,7 +296,7 @@ export default function TrainingModule({
                 <th className="px-4 py-3">Training</th>
                 <th className="px-4 py-3">Location</th>
                 <th className="px-4 py-3">Instructors</th>
-                <th className="px-4 py-3 text-center" title="Entered into an external system">Ext.</th>
+                <th className="px-4 py-3 text-center" title="Locked & Approved / External">Ext.</th>
                 {canEdit && <th className="px-4 py-3" />}
                 <th className="px-4 py-3 text-right">Signature</th>
               </tr>
@@ -323,15 +342,26 @@ export default function TrainingModule({
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                       {training.instructors || '—'}
                     </td>
-                    {/* A tick means the training has been filed in an external system - and, as a
-                        consequence, that it is locked. */}
+                    {/* A lock means the training has been locked/approved by an officer */}
                     <td className="px-4 py-3 text-center">
                       {training.locked ? (
                         <span
                           className="inline-flex text-emerald-600 dark:text-emerald-400"
-                          title="Entered into an external system — this training is locked"
+                          title={
+                            training.locked_by_name || training.locked_at
+                              ? `Locked & approved${training.locked_by_name ? ` by ${training.locked_by_name}` : ''}${
+                                  training.locked_at
+                                    ? ` on ${new Date(training.locked_at).toLocaleDateString(undefined, {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric',
+                                      })}`
+                                    : ''
+                                }`
+                              : 'Locked & approved'
+                          }
                         >
-                          <Check className="w-4 h-4" />
+                          <Lock className="w-4 h-4" />
                         </span>
                       ) : (
                         <span className="text-slate-300 dark:text-slate-600">—</span>

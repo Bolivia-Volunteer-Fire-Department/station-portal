@@ -666,11 +666,12 @@ service cloud.firestore {
       allow delete: if permission('can_edit_map');
     }
 
-    // HYDRANTS: shared municipal and private fire hydrants placed on the district map.
-    // Readable by members who can view the map or documents; created, updated, and deleted by map editors.
+    // HYDRANTS: shared municipal and private fire hydrants placed on the district map and managed in Assets.
+    // Readable by members who can view the map, documents, or manage hydrants; created, updated, and deleted by map editors or hydrant managers.
     match /hydrants/{hydrantId} {
-      allow read: if signedIn() && (permission('can_view_map') || permission('can_view_documents'));
-      allow write: if permission('can_edit_map');
+      allow read: if signedIn()
+        && (permission('can_view_map') || permission('can_view_documents') || permission('can_manage_hydrants'));
+      allow write: if permission('can_edit_map') || permission('can_manage_hydrants');
     }
 
     // THE MAP BACKGROUND: the roads and the waterways the district is drawn over - the county's own geometry, clipped to the
@@ -704,17 +705,18 @@ service cloud.firestore {
 
     match /training_signatures/{signatureId} {
       allow read: if signedIn()
-        && (resource.data.user_id == uid() || permission('can_administer_trainings'));
+        && (resource.data.user_id == uid() || permission('can_administer_trainings') || permission('can_edit_trainings'));
       allow create: if signedIn()
         && ((request.resource.data.user_id == uid() && permission('can_sign_trainings'))
-          || permission('can_administer_trainings'));
+          || permission('can_administer_trainings')
+          || permission('can_edit_trainings'));
       // OFFICER-ONLY, and this is narrower than it used to be. The member's own row was deletable by the member, which
       // is the opposite of what the sheet's handler did: it REFUSED a removal outright ("signatures cannot be removed,
       // ask an administrator to correct a signature"), because a signature is an acknowledgment of attendance rather
       // than a preference. A rule that allows a crafted request to do what the handler refuses is not the rule the
       // handler describes - so the withdrawal is an administrator's action at the level the data is protected, not only
       // at the level the button is drawn.
-      allow update, delete: if signedIn() && permission('can_administer_trainings');
+      allow update, delete: if signedIn() && (permission('can_administer_trainings') || permission('can_edit_trainings'));
     }
 
     // The catalog everyone reads, and one member's own records: the same shape as the clock and the availability

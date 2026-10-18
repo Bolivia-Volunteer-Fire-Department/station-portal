@@ -139,6 +139,54 @@ export const normalizeContact = (c) => ({
   description: str(c?.description, 200),
 });
 
+// NFPA 291 fire flow classifications based on calculated GPM @ 20 PSI residual pressure
+export const getHydrantNfpaClass = (flowGpm) => {
+  const gpm = Number(flowGpm);
+  if (!Number.isFinite(gpm) || gpm <= 0) {
+    return {
+      classLabel: 'Unknown',
+      shortClass: 'Unrated',
+      color: 'slate',
+      badgeClass: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700',
+      hex: '#64748b',
+    };
+  }
+  if (gpm >= 1500) {
+    return {
+      classLabel: 'Class AA (1,500+ GPM)',
+      shortClass: 'Class AA',
+      color: 'blue',
+      badgeClass: 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+      hex: '#3b82f6',
+    };
+  }
+  if (gpm >= 1000) {
+    return {
+      classLabel: 'Class A (1,000–1,499 GPM)',
+      shortClass: 'Class A',
+      color: 'emerald',
+      badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+      hex: '#10b981',
+    };
+  }
+  if (gpm >= 500) {
+    return {
+      classLabel: 'Class B (500–999 GPM)',
+      shortClass: 'Class B',
+      color: 'amber',
+      badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+      hex: '#f59e0b',
+    };
+  }
+  return {
+    classLabel: 'Class C (<500 GPM)',
+    shortClass: 'Class C',
+    color: 'red',
+    badgeClass: 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300 border-red-200 dark:border-red-800',
+    hex: '#ef4444',
+  };
+};
+
 export const normalizeHydrant = (h) => {
   const lat = numOrNull(h?.latitude ?? h?.lat);
   const lng = numOrNull(h?.longitude ?? h?.lng);
@@ -151,10 +199,19 @@ export const normalizeHydrant = (h) => {
     latitude: validPos ? roundCoordinate(lat) : null,
     longitude: validPos ? roundCoordinate(lng) : null,
     distance: str(h?.distance, 50),
-    flow: numOrNull(h?.flow),
+    flow: numOrNull(h?.flow ?? h?.calculated_gpm_20psi),
     status: h?.status === 'out-of-service' ? 'out-of-service' : 'in-service',
     type: h?.type === 'wet' ? 'wet' : 'dry',
     notes: str(h?.notes, 500),
+    district: str(h?.district || h?.section, 50),
+    last_tested_date: str(h?.last_tested_date || h?.test_date, 50),
+    static_pressure_psi: numOrNull(h?.static_pressure_psi),
+    residual_pressure_psi: numOrNull(h?.residual_pressure_psi),
+    pitot_pressure_psi: numOrNull(h?.pitot_pressure_psi),
+    calculated_gpm: numOrNull(h?.calculated_gpm),
+    calculated_gpm_20psi: numOrNull(h?.calculated_gpm_20psi ?? h?.flow),
+    tested_by: str(h?.tested_by, 100),
+    agency_name: str(h?.agency_name, 100),
   };
 };
 

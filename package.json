@@ -71,6 +71,7 @@
     "fix:guides": "python3 scripts/reflow-guides.py src/content/help/member/*.md src/content/help/admin/*.md",
     "verify:training": "vite build --ssr scripts/verify-training.mjs --outDir tmp-test-out/training --logLevel error && node tmp-test-out/training/verify-training.js",
     "verify:training-import": "node scripts/verify-training-import.mjs",
+    "verify:hydrant-import": "node scripts/verify-hydrant-import.mjs",
     "verify:user-row": "vite build --ssr scripts/verify-user-row.mjs --outDir tmp-test-out/user-row --logLevel error && node tmp-test-out/user-row/verify-user-row.js",
     "verify:help": "vite build --ssr scripts/verify-help-guides.mjs --outDir tmp-test-out/help --logLevel error && node tmp-test-out/help/verify-help-guides.js",
     "verify:notification-prefs": "vite build --ssr scripts/verify-notification-prefs.mjs --outDir tmp-test-out/notification-prefs --logLevel error && node tmp-test-out/notification-prefs/verify-notification-prefs.js",

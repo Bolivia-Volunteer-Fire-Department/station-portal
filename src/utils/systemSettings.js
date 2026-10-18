@@ -144,6 +144,8 @@ export const PUBLIC_SETTING_KEYS = [
   // imported from utils/training, which reads settings through this module (the same cycle the rounding key above avoids);
   // scripts/verify-training pins the two names together so they cannot drift.
   'training_signature_window_days',
+  // Toggle controlling whether members must log in and sign their own training attendance (default true).
+  'members_must_sign_trainings',
   // THE PAY PERIOD, both halves public: the LENGTH is the window the member's own Clock History opens on - a screen cannot
   // honour a setting it may not read - and the day a period STARTS is a fact about the station rather than about the person
   // looking. Literals rather than imports from utils/payPeriod, which reads settings through this module (the same cycle the

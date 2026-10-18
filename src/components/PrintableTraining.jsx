@@ -200,7 +200,7 @@ export default function PrintableTraining({
 
           {detail.locked && (
             <p className="mt-3 border border-black/40 bg-slate-100 px-2 py-1 text-xs font-semibold">
-              Entered into an external system — locked, and its signatures cannot be changed in the app.
+              Locked & approved — signatures cannot be changed in the app.
             </p>
           )}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, Printer, Trash2, Upload, UserMinus } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, Printer, ShieldCheck, Trash2, Upload, UserMinus } from 'lucide-react';
 import { adminBulkSaveTraining, adminRemoveTrainingSignature } from '../../services/api';
 import TrainingBadges from '../training/TrainingBadges';
 import ConfirmModal from '../ConfirmModal';
@@ -28,10 +28,12 @@ export default function AdminTrainingTab({
   trainings = [],
   signatures = [],
   users = [],
+  ranks = [],
   currentUserId = '',
   // Station name and logo for printed reports.
   departmentName = '',
   departmentLogoUrl = '',
+  systemSettings = [],
   onDataChanged,
 }) {
   const [editing, setEditing] = useState(null);
@@ -95,6 +97,9 @@ export default function AdminTrainingTab({
   const printedByName =
     users.find((user) => String(user.id) === String(currentUserId))?.name || '';
 
+  const currentUserName =
+    users.find((user) => String(user.id || user.user_id) === String(currentUserId))?.name || '';
+
   useEffect(() => {
     if (message?.type === 'success') {
       const timer = setTimeout(() => setMessage(null), 4000);
@@ -113,14 +118,11 @@ export default function AdminTrainingTab({
   };
 
   const handleSave = async (values) => {
-    // Ticking the external-system marker locks the training permanently, so it is confirmed
-    // before the write rather than reported after it - there is no way back through the app.
-    if (!trainingLocked(editing) && Boolean(values.is_entered_into_external)) {
-      setPending({ kind: 'lock', values });
-      return;
-    }
-
     await saveTraining(values);
+  };
+
+  const handleQuickLock = (training) => {
+    setPending({ kind: 'lock_training', training });
   };
 
   // Save training changes to the database.
@@ -186,7 +188,16 @@ export default function AdminTrainingTab({
     setPending(null);
     if (!action) return;
     if (action.kind === 'lock') void saveTraining(action.values);
-    else if (action.kind === 'train') void deleteTraining(action.training);
+    else if (action.kind === 'lock_training') {
+      void saveTraining({
+        ...action.training,
+        is_locked: true,
+        is_entered_into_external: true,
+        locked_at: new Date().toISOString(),
+        locked_by_id: currentUserId,
+        locked_by_name: currentUserName,
+      });
+    } else if (action.kind === 'train') void deleteTraining(action.training);
     else void removeSignature(action.signature);
   };
 
@@ -206,6 +217,12 @@ export default function AdminTrainingTab({
             setEditing(null);
             setEditorOpen(false);
           }}
+          users={users}
+          ranks={ranks}
+          systemSettings={systemSettings}
+          existingSignatures={editing ? signaturesForTraining(signatures, editing.id) : []}
+          currentUserId={currentUserId}
+          currentUserName={currentUserName}
         />
       )}
 
@@ -376,7 +393,11 @@ export default function AdminTrainingTab({
                         {training.locked ? (
                           <span
                             className="inline-flex text-emerald-600 dark:text-emerald-400"
-                            title="Locked for everyone."
+                            title={
+                              training.locked_by_name
+                                ? `Locked & approved by ${training.locked_by_name}${training.locked_at ? ` on ${training.locked_at.slice(0, 10)}` : ''}`
+                                : 'Locked for everyone.'
+                            }
                           >
                             <Lock className="w-4 h-4" />
                           </span>
@@ -385,6 +406,18 @@ export default function AdminTrainingTab({
                         )}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
+                        {/* Quick Approve / Lock button */}
+                        {!training.locked && (
+                          <button
+                            type="button"
+                            onClick={() => handleQuickLock(training)}
+                            title="Lock & approve this training"
+                            className="mr-3 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            Approve
+                          </button>
+                        )}
                         {/* Print button for individual training record */}
                         <button
                           type="button"
@@ -499,17 +532,16 @@ export default function AdminTrainingTab({
       {pending && (
         <ConfirmModal
           title={
-            pending.kind === 'lock'
-              ? 'Lock this training'
+            pending.kind === 'lock' || pending.kind === 'lock_training'
+              ? 'Lock & Approve Training'
               : pending.kind === 'train'
                 ? 'Delete training'
                 : 'Remove signature'
           }
           message={
-            pending.kind === 'lock' ? (
+            pending.kind === 'lock' || pending.kind === 'lock_training' ? (
               <>
-                Mark <strong className="text-slate-900 dark:text-white">{pending.values.title}</strong> as locked? This locks the training and its signatures for everyone, including
-                administrators, and cannot be undone in the app. Only the training sheet can clear it.
+                Lock and approve <strong className="text-slate-900 dark:text-white">{pending.training?.title || pending.values?.title}</strong>? This permanently finalizes the training report and its attendance signatures for everyone.
               </>
             ) : pending.kind === 'train' ? (
               pending.signedCount > 0 ? (
@@ -531,7 +563,13 @@ export default function AdminTrainingTab({
               </>
             )
           }
-          confirmLabel={pending.kind === 'lock' ? 'Lock training' : pending.kind === 'train' ? 'Delete' : 'Remove'}
+          confirmLabel={
+            pending.kind === 'lock' || pending.kind === 'lock_training'
+              ? 'Lock & Approve'
+              : pending.kind === 'train'
+                ? 'Delete'
+                : 'Remove'
+          }
           onConfirm={confirmPending}
           onCancel={() => setPending(null)}
         />

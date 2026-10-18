@@ -246,6 +246,10 @@ export const adminSaveHydrant = ({ id = '', fields = {} } = {}, token) =>
 export const adminDeleteHydrant = (id, token) =>
   routeWrite('ADMIN_DELETE_HYDRANT', { id: String(id || ''), token });
 
+// Bulk saves or imports hydrants in batches.
+export const adminBulkSaveHydrants = ({ hydrants = [] } = {}, token) =>
+  routeWrite('ADMIN_BULK_SAVE_HYDRANTS', { request: { hydrants }, token });
+
 // Fetches background road and waterway map layers.
 export const fetchMapBackdrops = () => dispatchRequest({ action: 'GET_MAP_BACKDROPS' });
 
