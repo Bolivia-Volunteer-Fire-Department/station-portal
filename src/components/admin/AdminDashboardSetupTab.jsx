@@ -318,7 +318,7 @@ export default function AdminDashboardSetupTab({ token, systemSettings, onDataCh
                   onDragLeave={(e) => handleDragLeave(e, index)}
                   onDrop={(e) => handleDrop(e, index)}
                   onDragEnd={handleDragEnd}
-                  className={`relative flex flex-col justify-between rounded-xl border p-4 bg-white dark:bg-slate-800 shadow-sm transition-all ${spanClass} ${
+                  className={`relative isolate flex flex-col justify-between rounded-xl border p-4 bg-white dark:bg-slate-800 shadow-sm transition-all ${spanClass} ${
                     draggedIndex === index
                       ? 'opacity-40 border-dashed border-red-500 scale-[0.98]'
                       : dragOverIndex === index

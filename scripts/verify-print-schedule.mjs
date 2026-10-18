@@ -266,7 +266,7 @@ check('into <body>', /document\.body\s*\)/.test(sheetSource), true);
 // every time anyone pressed Print.
 const propsBlock = /export default function PrintableSchedule\(\{([\s\S]*?)\n\}\) \{/.exec(sheetSource)?.[1] || '';
 check('the props block was found', propsBlock.length > 0, true);
-for (const prop of ['mode', 'departmentName', 'year', 'month', 'member', 'schedule', 'scheduleTemplates', 'assignments', 'users', 'ranks', 'memberName', 'onDone']) {
+for (const prop of ['mode', 'departmentName', 'year', 'month', 'member', 'schedule', 'scheduleTemplates', 'assignments', 'users', 'ranks', 'showOpenShifts', 'memberName', 'onDone']) {
   check(`the sheet destructures ${prop}`, new RegExp(`(^|[\\s,{])${prop}(\\s*=|\\s*[,}])`).test(propsBlock), true);
 }
 check('it prints itself', /window\.print\(\)/.test(sheetSource), true);
@@ -279,6 +279,7 @@ const calendar = readFileSync('src/components/ScheduleCalendar.jsx', 'utf8');
 check('My Schedule offers a print button', /onClick=\{\(\) => setPrintOpen\(true\)\}/.test(calendar), true);
 // The printed mode FOLLOWS the Show everyone toggle, so the sheet matches what is on screen.
 check('the sheet mode follows Show everyone', /mode=\{showEveryone \? 'crew' : 'member'\}/.test(calendar), true);
+check('the sheet passes showOpenShifts from the toggle', /showOpenShifts=\{showOpenShifts\}/.test(calendar), true);
 check('printing the month on screen', /year=\{viewDate\.getFullYear\(\)\}/.test(calendar), true);
 check('with the member on the header', /memberName=\{currentUser\?\.name/.test(calendar), true);
 check('and the ranks needed to judge a vacancy', /ranks=\{ranks\}/.test(calendar), true);
@@ -411,6 +412,24 @@ check('and says whose shifts it lists', printHeader({ mode: 'crew', year: 2026, 
 check('saying who printed it', printHeader({ mode: 'crew', memberName: 'Member 1', year: 2026, month: 2 }).printedBy, 'Member 1');
 check('and the member sheet does not claim the crew', printHeader({ mode: 'member', memberName: 'Member 1', year: 2026, month: 2 }).title, 'My Schedule');
 check('nor name a printer', printHeader({ mode: 'member', memberName: 'Member 1', year: 2026, month: 2 }).printedBy, '');
+
+console.log('\n--- hiding open shifts suppresses vacancies and unfilled shifts ---');
+check('hiding open shifts hides a crew vacancy', printLinesForDate({ ...vacancyArgs, dateKey: MONDAY, showOpenShifts: false }).length, 0);
+check('hiding open shifts hides an own vacancy', printLinesForDate({ ...ownVacancy, showOpenShifts: false }).length, 0);
+check('hiding open shifts hides admin vacancies', printLinesForDate({ ...adminVacancies, showOpenShifts: false }).length, 0);
+check(
+  'hiding open shifts retains filled shifts while omitting open shifts in admin mode',
+  printLinesForDate({
+    dateKey: TUESDAY,
+    mode: 'admin',
+    schedule,
+    scheduleTemplates: templates,
+    assignments,
+    users,
+    showOpenShifts: false,
+  }).map((l) => l.text),
+  ['Member 3 · Day Shift · Officer']
+);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

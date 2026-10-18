@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { CalendarDays, CalendarPlus, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Loader2, Printer, Users } from 'lucide-react';
+import { CalendarClock, CalendarDays, CalendarPlus, CalendarRange, ChevronLeft, ChevronRight, Clock, Eye, Loader2, Printer, Users } from 'lucide-react';
 import { toDateKey, parseSheetDateKey, displayDate } from '../utils/scheduleDate';
 import { assignmentColor } from '../utils/assignmentColor';
 import { useMonthSlide } from '../utils/motion';
@@ -146,6 +146,8 @@ export default function ScheduleCalendar({
   // Default off, and local to this component: the calendar opens on the
   // signed-in member's own shifts and only expands to the whole crew on demand.
   const [showEveryone, setShowEveryone] = useState(false);
+  // Default on: member or admin can toggle open shifts off to declutter the schedule or printout.
+  const [showOpenShifts, setShowOpenShifts] = useState(true);
   // Open pill the member clicked, held while the confirmation modal is up.
   const [offerTarget, setOfferTarget] = useState(null);
   // The item whose details are open, as { kind: 'shift' | 'event', item }. Shift pills that are already
@@ -443,10 +445,11 @@ export default function ScheduleCalendar({
   );
 
   // Pills drawn on the calendar: the crew (or just you), plus every unfilled
-  // shift you're eligible to pick up.
+  // shift you're eligible to pick up (when open shifts are toggled on).
+  const activeOpenAssignments = showOpenShifts ? openAssignments : [];
   const calendarAssignments = showEveryone
-    ? [...filledAssignments, ...openAssignments]
-    : [...myAssignments, ...openAssignments];
+    ? [...filledAssignments, ...activeOpenAssignments]
+    : [...myAssignments, ...activeOpenAssignments];
 
   // ---- Shift offers ------------------------------------------------------
   // Offers arrive keyed by `slot_key` from the backend, which is exactly the
@@ -538,7 +541,7 @@ export default function ScheduleCalendar({
   };
 
   // Open shifts in the RANGE ON SCREEN - drives the legend entries below the toggle.
-  const openShiftsInView = openAssignments.filter(
+  const openShiftsInView = activeOpenAssignments.filter(
     (a) => a.from <= viewToKey && a.to >= viewFromKey
   );
   const openableInView = openShiftsInView.filter((a) => offerStateFor(a) === '');
@@ -743,31 +746,37 @@ export default function ScheduleCalendar({
             })}
           </div>
 
-          {(canViewFullSchedule || events.length > 0) && (
-            <div className="flex flex-wrap items-center gap-3">
-              {canViewFullSchedule && (
-                <ViewToggle
-                  noun="everyone"
-                  description="Include every member's shifts on the calendar, not just yours."
-                  icon={Users}
-                  enabled={showEveryone}
-                  onChange={setShowEveryone}
-                />
-              )}
+          <div className="flex flex-wrap items-center gap-3">
+            {canViewFullSchedule && (
+              <ViewToggle
+                noun="everyone"
+                description="Include every member's shifts on the calendar, not just yours."
+                icon={Users}
+                enabled={showEveryone}
+                onChange={setShowEveryone}
+              />
+            )}
 
-              {/* Shown only when there is something to show, so a station that uses no events never sees a
-                  control for them. Not persisted: a temporary view choice, like Show everyone. */}
-              {events.length > 0 && (
-                <ViewToggle
-                  noun="events"
-                  description="Include non-shift entries such as trainings. Shifts are not affected."
-                  icon={Eye}
-                  enabled={showEvents}
-                  onChange={setShowEvents}
-                />
-              )}
-            </div>
-          )}
+            <ViewToggle
+              noun="open shifts"
+              description="Include unfilled open shifts on the calendar and printed sheet."
+              icon={CalendarClock}
+              enabled={showOpenShifts}
+              onChange={setShowOpenShifts}
+            />
+
+            {/* Shown only when there is something to show, so a station that uses no events never sees a
+                control for them. Not persisted: a temporary view choice, like Show everyone. */}
+            {events.length > 0 && (
+              <ViewToggle
+                noun="events"
+                description="Include non-shift entries such as trainings. Shifts are not affected."
+                icon={Eye}
+                enabled={showEvents}
+                onChange={setShowEvents}
+              />
+            )}
+          </div>
         </div>
 
         <div className="px-4 py-3 space-y-3">
@@ -1181,6 +1190,7 @@ export default function ScheduleCalendar({
       {printOpen && (
         <PrintableSchedule
           mode={showEveryone ? 'crew' : 'member'}
+          showOpenShifts={showOpenShifts}
           departmentName={departmentName}
           logoUrl={departmentLogoUrl}
           memberName={currentUser?.name || ''}

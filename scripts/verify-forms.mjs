@@ -555,6 +555,78 @@ checkIs('multiselect non-empty array passes validation', validMsResult.valid);
 check('multiselect populates data array', validMsResult.data.req_tools, ['Axe', 'TIC']);
 check('multiselect missing optional defaults to empty array', validMsResult.data.opt_tools, []);
 
+// Modifiable field tests
+console.log('\n--- modifiable field configuration ---');
+const defaultModifiableField = normalizeEnteredFieldItem({
+  field_type: 'text',
+  caption: 'Unit Name',
+  data_name: 'unit_name',
+});
+checkIs('modifiable defaults to true', defaultModifiableField.modifiable === true);
+
+const explicitModifiableField = normalizeEnteredFieldItem({
+  field_type: 'text',
+  caption: 'Station #',
+  data_name: 'station_no',
+  modifiable: false,
+  default_value: 'Station 14',
+});
+checkIs('modifiable preserves false', explicitModifiableField.modifiable === false);
+check('non-modifiable keeps default_value', explicitModifiableField.default_value, 'Station 14');
+
+let threwWithoutDefault = false;
+try {
+  normalizeEnteredFieldItem({
+    field_type: 'text',
+    caption: 'Department ID',
+    data_name: 'dept_id',
+    modifiable: false,
+  });
+} catch (err) {
+  threwWithoutDefault = true;
+  checkIs('error message mentions non-modifiable and default value', /not modifiable and must have a default value/.test(err.message));
+}
+checkIs('normalizeEnteredFieldItem throws if modifiable is false without a default value', threwWithoutDefault);
+
+// File field tests
+console.log('\n--- file upload field configuration and validation ---');
+const fileField = normalizeEnteredFieldItem({
+  field_type: 'file',
+  caption: 'Scene Photos',
+  data_name: 'scene_photos',
+  required: true,
+});
+check('file field normalizes field type', fileField.field_type, 'file');
+check('file field caption preserved', fileField.caption, 'Scene Photos');
+
+const fileAliasField = normalizeEnteredFieldItem({
+  field_type: 'file_upload',
+  caption: 'Attached Receipt',
+});
+check('file_upload alias normalizes to file', fileAliasField.field_type, 'file');
+
+const uploadAliasField = normalizeEnteredFieldItem({
+  field_type: 'upload',
+  caption: 'Inspection Report',
+});
+check('upload alias normalizes to file', uploadAliasField.field_type, 'file');
+
+// File validation in validateFormSubmission
+const fileLayout = [
+  { field_type: 'file', caption: 'Required Document', data_name: 'req_doc', required: true },
+  { field_type: 'file', caption: 'Optional Photos', data_name: 'opt_photos', required: false },
+];
+const emptyFileResult = validateFormSubmission(fileLayout, { req_doc: [], opt_photos: [] });
+checkIs('file empty array fails required validation', !emptyFileResult.valid && Boolean(emptyFileResult.errors.req_doc));
+checkIs('file optional empty array has no error', !emptyFileResult.errors.opt_photos);
+
+const validFileResult = validateFormSubmission(fileLayout, {
+  req_doc: [{ fileId: 'f1', name: 'report.pdf', size: 1024 }],
+});
+checkIs('file non-empty array passes validation', validFileResult.valid);
+check('file populates data array', validFileResult.data.req_doc.length, 1);
+check('file missing optional defaults to empty array', validFileResult.data.opt_photos, []);
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
 

@@ -141,7 +141,7 @@ export default function WidgetResizeHandle({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       title={`Width: ${spanLabel(colSpan)} (Drag corner to snap or click to cycle width)`}
-      className={`group/handle absolute -bottom-1.5 -right-1.5 z-20 flex items-center justify-center p-1 rounded-br-xl rounded-tl-lg cursor-se-resize select-none touch-none transition-all shadow-md ${
+      className={`group/handle absolute -bottom-1.5 -right-1.5 ${isDragging ? 'z-20' : 'z-10'} flex items-center justify-center p-1 rounded-br-xl rounded-tl-lg cursor-se-resize select-none touch-none transition-all shadow-md ${
         isDragging
           ? 'bg-red-600 text-white ring-4 ring-red-400/50 scale-110 shadow-lg'
           : 'bg-slate-100 hover:bg-red-500 dark:bg-slate-700 dark:hover:bg-red-600 text-slate-500 hover:text-white dark:text-slate-300 border border-slate-300 dark:border-slate-600'

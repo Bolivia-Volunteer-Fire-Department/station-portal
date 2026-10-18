@@ -141,6 +141,7 @@ export const ENTERED_FIELD_KINDS = [
   'multiselect',
   'checkbox',
   'radio',
+  'file',
   'signature',
   'signature_stamp',
   'divider',
@@ -196,6 +197,7 @@ export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
   const id = text(item.id) || `field_${Date.now()}_${index}`;
   let rawType = text(item.field_type || item.type).toLowerCase();
   if (rawType === 'multi_select') rawType = 'multiselect';
+  if (rawType === 'file_upload' || rawType === 'upload') rawType = 'file';
   const fieldType = ENTERED_FIELD_KINDS.includes(rawType) ? rawType : 'text';
   const isNonData = isNonDataField(fieldType);
   const isMarkdown = fieldType === 'markdown';
@@ -243,6 +245,17 @@ export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
     }
   }
 
+  const isSignature = ['signature', 'signature_stamp'].includes(fieldType);
+  const modifiable = isNonData || isSignature ? true : (item.modifiable !== undefined ? Boolean(item.modifiable) : true);
+  if (!isNonData && !isSignature && !modifiable) {
+    const hasDefault = isMultiSelect
+      ? (Array.isArray(defaultValue) && defaultValue.length > 0)
+      : defaultValue !== undefined && defaultValue !== null && String(defaultValue).trim() !== '';
+    if (!hasDefault) {
+      throw new Error(`Field "${caption || index + 1}" is not modifiable and must have a default value.`);
+    }
+  }
+
   return {
     id,
     data_name: isNonData ? '' : dataName,
@@ -250,6 +263,7 @@ export const normalizeEnteredFieldItem = (item = {}, index = 0) => {
     field_type: fieldType,
     col_span: colSpan,
     required: isNonData ? false : Boolean(item.required),
+    modifiable,
     default_value: defaultValue,
     placeholder: text(item.placeholder),
     instructions: isMarkdown ? '' : text(item.instructions || item.help_text || item.instruction_text),
@@ -311,6 +325,14 @@ export const validateFormSubmission = (layout = [], answers = {}) => {
             : !value)) ||
         (item.field_type === 'signature_stamp' &&
           (!value || typeof value !== 'object' || (!value.stamped && !value.signed))) ||
+        (item.field_type === 'file' &&
+          (Array.isArray(value)
+            ? value.length === 0
+            : typeof value === 'object'
+            ? !value?.fileId && !value?.name && !value?.dataUrl && !value?.downloadUrl
+            : typeof value === 'string'
+            ? value.trim() === ''
+            : !value)) ||
         (Array.isArray(value) && value.length === 0);
       if (isEmpty) {
         errors[name] = `${item.caption || name} is required.`;
@@ -345,7 +367,7 @@ export const validateFormSubmission = (layout = [], answers = {}) => {
       }
     }
 
-    data[name] = value ?? (item.field_type === 'multiselect' ? [] : '');
+    data[name] = value ?? (item.field_type === 'multiselect' || item.field_type === 'file' ? [] : '');
   });
 
   return {

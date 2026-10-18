@@ -4,7 +4,8 @@ import '../../print.css';
 import { departmentLogoUrl, stationLogoUrl } from '../../utils/assets';
 import Markdown from '../Markdown';
 import { formatPhoneNumber, parseSignatureValue } from '../../utils/formDefinition';
-import { BadgeCheck } from 'lucide-react';
+import { formatFileSize } from '../../services/formFileStorage';
+import { BadgeCheck, Paperclip } from 'lucide-react';
 
 /**
  * Printable form submission document with department letterhead.
@@ -288,6 +289,62 @@ export default function PrintableFormSubmission({
                 <div className="mt-1 text-xs font-semibold text-black">
                   {val ? formatPhoneNumber(String(val)) : '—'}
                 </div>
+              </div>
+            );
+          }
+
+          if (item.field_type === 'file') {
+            const fileList = Array.isArray(val) ? val : val ? [val] : [];
+            return (
+              <div
+                key={item.id || idx}
+                className={`${spanClass(item.col_span || 3)} print-form-item border border-slate-300 rounded p-2.5 bg-white`}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                  {item.caption}
+                </div>
+                {item.instructions && (
+                  <p className="text-[10px] text-slate-500 italic mb-1.5">{item.instructions}</p>
+                )}
+                {fileList.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {fileList.map((f, fIdx) => (
+                        <div
+                          key={f.fileId || fIdx}
+                          className="flex items-center gap-2 p-1.5 border border-slate-200 rounded text-[11px]"
+                        >
+                          <Paperclip className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                          <div className="truncate">
+                            <span className="font-semibold text-black">{f.name || 'Attachment'}</span>
+                            {f.size ? (
+                              <span className="text-slate-500 ml-1">({formatFileSize(f.size)})</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Render embedded thumbnail for images */}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {fileList
+                        .filter((f) => f.type?.startsWith('image/') || f.dataUrl?.startsWith('data:image/'))
+                        .map((f, fIdx) => {
+                          const src = f.dataUrl || f.downloadURL;
+                          if (!src) return null;
+                          return (
+                            <img
+                              key={fIdx}
+                              src={src}
+                              alt={f.name || 'Form Image'}
+                              className="max-h-32 rounded border border-slate-300 object-contain"
+                            />
+                          );
+                        })}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-[11px] italic text-slate-400">No attachments uploaded</span>
+                )}
               </div>
             );
           }

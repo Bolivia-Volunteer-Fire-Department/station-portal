@@ -500,7 +500,7 @@ export default function DashboardModule({
               onDragLeave={(e) => handleDragLeave(e, index)}
               onDrop={(e) => handleDrop(e, index)}
               onDragEnd={handleDragEnd}
-              className={`relative flex flex-col h-full transition-all duration-150 ${spanClass} ${
+              className={`relative isolate flex flex-col h-full transition-all duration-150 ${spanClass} ${
                 isCustomizing
                   ? draggedIndex === index
                     ? 'opacity-40 border-2 border-dashed border-red-500 rounded-2xl p-1 bg-slate-50/50 dark:bg-slate-900/30 scale-[0.98]'

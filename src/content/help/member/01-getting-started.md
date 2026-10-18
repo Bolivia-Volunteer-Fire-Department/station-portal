@@ -57,6 +57,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Added a Monthly/Weekly/Daily/Auto button group to the Schedule so members (i.e. Cody) with trash phones can see their schedule easier.
 * Fixed Heading display issues in the areas where Markdown is used.
 * Fixed text color not working in the Markdown Editor.
+* Added a toggle to the Schedule module to show and hide open shifts.
 
 ### Version 1.6x
 * Added the **District Map** module.

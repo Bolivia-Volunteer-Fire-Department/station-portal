@@ -9,6 +9,7 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
   const [dataName, setDataName] = useState(item.data_name || '');
   const colSpan = Number(item.col_span) || 3;
   const [required, setRequired] = useState(Boolean(item.required));
+  const [modifiable, setModifiable] = useState(item.modifiable !== undefined ? Boolean(item.modifiable) : true);
   const [defaultValue, setDefaultValue] = useState(item.default_value !== undefined ? String(item.default_value) : '');
   const [placeholder, setPlaceholder] = useState(item.placeholder || '');
   const [instructions, setInstructions] = useState(item.instructions || '');
@@ -24,6 +25,7 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
   const isDivider = fieldType === 'divider';
   const isNonData = isMarkdown || isDivider;
   const isSignature = ['signature', 'signature_stamp'].includes(fieldType);
+  const isFile = fieldType === 'file';
 
   const handleCaptionChange = (val) => {
     setCaption(val);
@@ -78,11 +80,21 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
     if (pattern.trim()) validation.pattern = pattern.trim();
     if (customHint.trim()) validation.custom_hint = customHint.trim();
 
-    let finalDefaultValue = isNonData || isSignature ? '' : defaultValue;
+    let finalDefaultValue = isNonData || isSignature || isFile ? '' : defaultValue;
     if (fieldType === 'multiselect') {
       finalDefaultValue = defaultValue
         ? defaultValue.split(',').map((s) => s.trim()).filter(Boolean)
         : [];
+    }
+
+    if (!isNonData && !isSignature && !isFile && !modifiable) {
+      const hasDefault = fieldType === 'multiselect'
+        ? (Array.isArray(finalDefaultValue) ? finalDefaultValue.length > 0 : Boolean(String(defaultValue || '').trim()))
+        : String(defaultValue ?? '').trim() !== '';
+      if (!hasDefault) {
+        setError('A default value must be provided when a field is not modifiable.');
+        return;
+      }
     }
 
     onSave({
@@ -92,11 +104,12 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
       data_name: finalDataName,
       col_span: Number(colSpan) || 3,
       required: isNonData ? false : required,
+      modifiable: isNonData ? false : isSignature || isFile ? true : modifiable,
       default_value: finalDefaultValue,
-      placeholder: isNonData || isSignature ? '' : placeholder.trim(),
+      placeholder: isNonData || isSignature || isFile ? '' : placeholder.trim(),
       instructions: isMarkdown ? '' : instructions.trim(),
       options: isNonData || isSignature ? [] : options,
-      validation: isNonData || isSignature ? {} : validation,
+      validation: isNonData || isSignature || isFile ? {} : validation,
       markdown_content: isMarkdown ? markdownContent : '',
     });
   };
@@ -112,6 +125,7 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
     multiselect: 'Multi-Select Dropdown',
     checkbox: 'Checkbox (Yes/No)',
     radio: 'Radio Selection',
+    file: 'Upload File (Pictures & PDFs)',
     signature: 'E-Signature (Finger / Stylus Draw)',
     signature_stamp: 'E-Signature Button (Digital Stamp)',
     divider: 'Divider / Section Line',
@@ -260,6 +274,8 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
                     placeholder={
                       isSignature
                         ? 'e.g. member_signature'
+                        : isFile
+                        ? 'e.g. incident_photo'
                         : fieldType === 'tel'
                         ? 'e.g. phone_number'
                         : 'e.g. odometer_reading'
@@ -271,7 +287,7 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
                   </span>
                 </label>
 
-                <div className="sm:col-span-2 pt-1">
+                <div className="sm:col-span-2 pt-1 flex flex-wrap items-center gap-6">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -283,9 +299,23 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
                       Required field (must be completed to submit)
                     </span>
                   </label>
+
+                  {!isSignature && !isFile && (
+                    <label className="flex items-center gap-2 cursor-pointer" title="Allow members to edit this value when filling out the form">
+                      <input
+                        type="checkbox"
+                        checked={modifiable}
+                        onChange={(e) => setModifiable(e.target.checked)}
+                        className="h-4 w-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Modifiable
+                      </span>
+                    </label>
+                  )}
                 </div>
 
-                {!isSignature && (
+                {!isSignature && !isFile && (
                   <>
                     <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                       Placeholder (Optional)
@@ -303,20 +333,40 @@ export default function FormFieldConfigModal({ item, isNew = false, onSave, onCl
                     </label>
 
                     <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Default Value (Optional)
+                      Default Value {!modifiable ? <span className="text-red-500 font-bold">*</span> : '(Optional)'}
                       <input
                         type="text"
                         value={defaultValue}
                         onChange={(e) => setDefaultValue(e.target.value)}
                         placeholder={
-                          fieldType === 'multiselect'
+                          !modifiable
+                            ? 'Required default value for non-modifiable field'
+                            : fieldType === 'multiselect'
                             ? 'e.g. Option 1, Option 2'
                             : 'Initial default value'
                         }
-                        className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                        className={`mt-1 h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-900 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 ${
+                          !modifiable && !defaultValue.trim()
+                            ? 'border-amber-400 dark:border-amber-500'
+                            : 'border-slate-300 dark:border-slate-600'
+                        }`}
                       />
+                      {!modifiable && (
+                        <span className="mt-1 block text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                          A default value is required because this field is not modifiable.
+                        </span>
+                      )}
                     </label>
                   </>
+                )}
+
+                {isFile && (
+                  <div className="sm:col-span-2 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 p-3 text-xs text-blue-800 dark:text-blue-300">
+                    <p className="font-semibold">Accepted File Formats:</p>
+                    <p className="mt-0.5 text-[11px] text-blue-700 dark:text-blue-400">
+                      Pictures (JPEG, PNG, WebP) and PDF documents up to 25 MB.
+                    </p>
+                  </div>
                 )}
 
                 {['select', 'radio', 'multiselect'].includes(fieldType) && (

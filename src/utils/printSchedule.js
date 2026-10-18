@@ -117,6 +117,7 @@ export const printLinesForDate = ({
   // Non-shift entries. Printed in every mode: an event is on the calendars, so a sheet without it would
   // disagree with the screen the reader was just looking at.
   events = [],
+  showOpenShifts = true,
   // Vacancies in the past are not worth printing for a member - there is nothing to pick up.
   todayKey = toDateKey(new Date()),
 }) => {
@@ -140,7 +141,8 @@ export const printLinesForDate = ({
     memberCanFillAssignment({ member, assignment: assignmentsById(assignmentId), ranks });
   const isPast = dateKey < todayKey;
   const showsEveryone = mode === 'admin' || mode === 'crew';
-  const showsVacancy = (assignmentId) => mode === 'admin' || (!isPast && canFill(assignmentId));
+  const showsVacancy = (assignmentId) =>
+    showOpenShifts && (mode === 'admin' || (!isPast && canFill(assignmentId)));
 
   const lines = [];
 
@@ -234,6 +236,7 @@ export const printMonth = ({
   users = [],
   ranks = [],
   events = [],
+  showOpenShifts = true,
   todayKey,
 }) =>
   printMonthGrid(year, month).map((week) =>
@@ -251,6 +254,7 @@ export const printMonth = ({
             users,
             ranks,
             events,
+            showOpenShifts,
             ...(todayKey ? { todayKey } : {}),
           }),
     }))

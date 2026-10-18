@@ -1,10 +1,31 @@
 import React, { useState } from 'react';
-import { AlertCircle, BadgeCheck, Calendar, CheckCircle2, FileEdit, Loader2, Lock, Printer, Send, X } from 'lucide-react';
+import {
+  AlertCircle,
+  BadgeCheck,
+  Calendar,
+  CheckCircle2,
+  Eye,
+  FileEdit,
+  FileUp,
+  Loader2,
+  Lock,
+  Paperclip,
+  Printer,
+  Send,
+  X,
+} from 'lucide-react';
 import Markdown from '../Markdown';
 import SignaturePad from './SignaturePad';
 import MultiSelectDropdown from './MultiSelectDropdown';
 import PrintableFormSubmission from './PrintableFormSubmission';
 import { formatPhoneNumber, parseSignatureValue, validateFormSubmission } from '../../utils/formDefinition';
+import {
+  uploadFormFile,
+  openFormFile,
+  discardFormFile,
+  validateFormFile,
+  formatFileSize,
+} from '../../services/formFileStorage';
 import { submitFormResponse } from '../../services/api';
 import { toast } from '../../utils/toast';
 import { renderInViewport } from '../../utils/viewportLayer';
@@ -24,13 +45,20 @@ export default function EnteredFormModal({
     (form.layout || []).forEach((item) => {
       if (item.field_type !== 'markdown' && item.data_name) {
         if (submission?.data?.[item.data_name] !== undefined) {
-          initial[item.data_name] = submission.data[item.data_name];
+          const raw = submission.data[item.data_name];
+          if (item.field_type === 'file') {
+            initial[item.data_name] = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+          } else {
+            initial[item.data_name] = raw;
+          }
         } else if (item.field_type === 'multiselect') {
           initial[item.data_name] = Array.isArray(item.default_value)
             ? item.default_value
             : item.default_value
             ? [item.default_value]
             : [];
+        } else if (item.field_type === 'file') {
+          initial[item.data_name] = Array.isArray(item.default_value) ? item.default_value : [];
         } else {
           initial[item.data_name] = item.default_value !== undefined ? item.default_value : '';
         }
@@ -44,9 +72,13 @@ export default function EnteredFormModal({
   const [generalError, setGeneralError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [uploadingField, setUploadingField] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const handleFieldChange = (dataName, value) => {
     if (isReadOnly) return;
+    const fieldItem = (form.layout || []).find((f) => f.data_name === dataName);
+    if (fieldItem && fieldItem.modifiable === false) return;
     setAnswers((prev) => ({ ...prev, [dataName]: value }));
     if (errors[dataName]) {
       setErrors((prev) => {
@@ -55,6 +87,56 @@ export default function EnteredFormModal({
         return next;
       });
     }
+  };
+
+  const handleFileUpload = async (fieldId, event) => {
+    const rawFiles = Array.from(event.target.files || []);
+    if (rawFiles.length === 0) return;
+
+    for (const f of rawFiles) {
+      const err = validateFormFile(f);
+      if (err) {
+        toast.error(err);
+        event.target.value = '';
+        return;
+      }
+    }
+
+    setUploadingField(fieldId);
+    setUploadProgress(0);
+
+    const formId = form.id || submission?.form_template_id || 'general';
+    try {
+      const uploaded = [];
+      for (let i = 0; i < rawFiles.length; i++) {
+        const res = await uploadFormFile({
+          formId,
+          file: rawFiles[i],
+          onProgress: (p) => setUploadProgress(Math.round(((i + p) / rawFiles.length) * 100)),
+        });
+        uploaded.push(res);
+      }
+      const currentList = Array.isArray(answers[fieldId]) ? answers[fieldId] : [];
+      handleFieldChange(fieldId, [...currentList, ...uploaded]);
+    } catch (err) {
+      console.error('File upload error:', err);
+      toast.error('Could not upload file: ' + (err?.message || 'Upload failed'));
+    } finally {
+      setUploadingField(null);
+      setUploadProgress(0);
+      event.target.value = '';
+    }
+  };
+
+  const handleRemoveFile = (fieldId, fileIndex) => {
+    if (isReadOnly) return;
+    const currentList = Array.isArray(answers[fieldId]) ? answers[fieldId] : [];
+    const removedFile = currentList[fileIndex];
+    if (removedFile) {
+      discardFormFile(removedFile);
+    }
+    const nextList = currentList.filter((_, i) => i !== fileIndex);
+    handleFieldChange(fieldId, nextList);
   };
 
   const handleSubmit = async (e) => {
@@ -257,6 +339,7 @@ export default function EnteredFormModal({
                 const fieldId = item.data_name || `field_${idx}`;
                 const val = answers[fieldId] ?? '';
                 const err = errors[fieldId];
+                const isFieldDisabled = isReadOnly || item.modifiable === false;
 
                 return (
                   <div key={item.id || idx} className={`${spanClass(item.col_span || 3)} space-y-1.5`}>
@@ -265,7 +348,10 @@ export default function EnteredFormModal({
                       className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
                     >
                       {item.caption}
-                      {item.required && !isReadOnly && <span className="text-red-500 ml-1 font-bold">*</span>}
+                      {item.required && !isReadOnly && item.modifiable !== false && <span className="text-red-500 ml-1 font-bold">*</span>}
+                      {item.modifiable === false && !isReadOnly && (
+                        <span className="ml-1.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">(Fixed)</span>
+                      )}
                     </label>
 
                     {item.instructions && (
@@ -278,7 +364,7 @@ export default function EnteredFormModal({
                       <textarea
                         id={fieldId}
                         value={val}
-                        disabled={isReadOnly}
+                        disabled={isFieldDisabled}
                         onChange={(e) => handleFieldChange(fieldId, e.target.value)}
                         placeholder={item.placeholder}
                         rows={3}
@@ -293,7 +379,7 @@ export default function EnteredFormModal({
                         id={fieldId}
                         type="tel"
                         value={val}
-                        disabled={isReadOnly}
+                        disabled={isFieldDisabled}
                         onChange={(e) => handleFieldChange(fieldId, formatPhoneNumber(e.target.value))}
                         placeholder={item.placeholder || '(555) 000-0000'}
                         className={`w-full h-10 rounded-xl border px-3 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:dark:bg-slate-800 disabled:text-slate-600 disabled:dark:text-slate-400 disabled:cursor-not-allowed ${
@@ -305,7 +391,7 @@ export default function EnteredFormModal({
                     ) : item.field_type === 'signature' ? (
                       (() => {
                         const sig = parseSignatureValue(val);
-                        return isReadOnly ? (
+                        return isFieldDisabled ? (
                           <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
                             {sig.image ? (
                               <div className="space-y-1.5">
@@ -354,7 +440,7 @@ export default function EnteredFormModal({
                               </p>
                             </div>
                           </div>
-                          {!isReadOnly && (
+                          {!isFieldDisabled && (
                             <button
                               type="button"
                               onClick={() => handleFieldChange(fieldId, null)}
@@ -364,7 +450,7 @@ export default function EnteredFormModal({
                             </button>
                           )}
                         </div>
-                      ) : isReadOnly ? (
+                      ) : isFieldDisabled ? (
                         <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-xs text-slate-400 italic bg-slate-50 dark:bg-slate-900/40">
                           No digital stamp applied
                         </div>
@@ -391,11 +477,107 @@ export default function EnteredFormModal({
                           Click to Apply Digital Signature Stamp
                         </button>
                       )
+                    ) : item.field_type === 'file' ? (
+                      <div className="space-y-2">
+                        {/* Uploaded files list */}
+                        {Array.isArray(val) && val.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {val.map((f, fIdx) => (
+                              <div
+                                key={f.fileId || fIdx}
+                                className="flex items-center justify-between p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-xs"
+                              >
+                                <div className="flex items-center gap-2 truncate min-w-0">
+                                  <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                  <div className="truncate">
+                                    <p className="truncate font-medium text-slate-700 dark:text-slate-200">
+                                      {f.name}
+                                    </p>
+                                    {f.size ? (
+                                      <p className="text-[10px] text-slate-400">
+                                        {formatFileSize(f.size)}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 ml-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openFormFile(f)}
+                                    className="p-1 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                                    title="View attachment"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  {!isFieldDisabled && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveFile(fieldId, fIdx)}
+                                      className="p-1 rounded text-slate-400 hover:text-red-600"
+                                      title="Remove attachment"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : isFieldDisabled ? (
+                          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-xs text-slate-400 italic bg-slate-50 dark:bg-slate-900/40">
+                            No files attached
+                          </div>
+                        ) : null}
+
+                        {/* Upload in progress */}
+                        {uploadingField === fieldId && (
+                          <div className="flex items-center gap-2 p-2 rounded-xl border border-blue-200 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 text-xs">
+                            <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                            <div className="flex-1">
+                              <span className="font-semibold text-blue-900 dark:text-blue-300">
+                                Uploading files… {uploadProgress}%
+                              </span>
+                              <div className="w-full h-1.5 bg-blue-200 dark:bg-blue-900 rounded-full mt-1 overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-600 transition-all duration-200"
+                                  style={{ width: `${uploadProgress}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Upload trigger button */}
+                        {!isFieldDisabled && (
+                          <div>
+                            <label
+                              htmlFor={`file-input-${fieldId}`}
+                              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-dashed text-xs font-semibold cursor-pointer transition ${
+                                err
+                                  ? 'border-red-400 text-red-600 bg-red-50/50 hover:bg-red-100/50 dark:border-red-600 dark:text-red-400 dark:bg-red-950/20'
+                                  : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                              }`}
+                            >
+                              <FileUp className="w-4 h-4 text-blue-500" />
+                              <span>Attach Pictures or PDFs (up to 25 MB)</span>
+                            </label>
+                            <input
+                              id={`file-input-${fieldId}`}
+                              type="file"
+                              multiple
+                              accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
+                              disabled={uploadingField === fieldId}
+                              onChange={(e) => handleFileUpload(fieldId, e)}
+                              className="hidden"
+                            />
+                          </div>
+                        )}
+                      </div>
                     ) : item.field_type === 'select' ? (
                       <select
                         id={fieldId}
                         value={val}
-                        disabled={isReadOnly}
+                        disabled={isFieldDisabled}
                         onChange={(e) => handleFieldChange(fieldId, e.target.value)}
                         className={`w-full h-10 rounded-xl border px-3 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:dark:bg-slate-800 disabled:text-slate-600 disabled:dark:text-slate-400 disabled:cursor-not-allowed ${
                           err
@@ -415,7 +597,7 @@ export default function EnteredFormModal({
                         id={fieldId}
                         options={item.options || []}
                         value={Array.isArray(val) ? val : val ? [val] : []}
-                        disabled={isReadOnly}
+                        disabled={isFieldDisabled}
                         onChange={(newVal) => handleFieldChange(fieldId, newVal)}
                         placeholder={item.placeholder || 'Select one or more options…'}
                         error={Boolean(err)}
@@ -423,13 +605,13 @@ export default function EnteredFormModal({
                     ) : item.field_type === 'radio' ? (
                       <div className="space-y-1.5 pt-1">
                         {(item.options || []).map((opt) => (
-                          <label key={opt} className={`flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 ${isReadOnly ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
+                          <label key={opt} className={`flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 ${isFieldDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
                             <input
                               type="radio"
                               name={fieldId}
                               value={opt}
                               checked={val === opt}
-                              disabled={isReadOnly}
+                              disabled={isFieldDisabled}
                               onChange={(e) => handleFieldChange(fieldId, e.target.value)}
                               className="text-blue-600 focus:ring-blue-500 h-4 w-4"
                             />
@@ -438,12 +620,12 @@ export default function EnteredFormModal({
                         ))}
                       </div>
                     ) : item.field_type === 'checkbox' ? (
-                      <label className={`flex items-center gap-2 pt-1 text-sm text-slate-700 dark:text-slate-300 ${isReadOnly ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
+                      <label className={`flex items-center gap-2 pt-1 text-sm text-slate-700 dark:text-slate-300 ${isFieldDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
                         <input
                           id={fieldId}
                           type="checkbox"
                           checked={Boolean(val)}
-                          disabled={isReadOnly}
+                          disabled={isFieldDisabled}
                           onChange={(e) => handleFieldChange(fieldId, e.target.checked)}
                           className="h-4 w-4 rounded text-blue-600 focus:ring-blue-500"
                         />
@@ -454,7 +636,7 @@ export default function EnteredFormModal({
                         id={fieldId}
                         type={item.field_type || 'text'}
                         value={val}
-                        disabled={isReadOnly}
+                        disabled={isFieldDisabled}
                         onChange={(e) => handleFieldChange(fieldId, e.target.value)}
                         placeholder={item.placeholder}
                         className={`w-full h-10 rounded-xl border px-3 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:dark:bg-slate-800 disabled:text-slate-600 disabled:dark:text-slate-400 disabled:cursor-not-allowed ${
