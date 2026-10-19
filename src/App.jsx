@@ -829,15 +829,6 @@ const getLoadingMessage = () => {
         onDuty: setOnDutyUsers,
         announcements: setAnnouncements,
         systemSettings: setSystemSettings,
-        ...((canViewWorkOrders || canManageWorkOrders)
-          ? {
-              workOrders: (rows) => {
-                if (Array.isArray(rows)) {
-                  setWorkOrders(rows.map((wo) => normalizeWorkOrder(wo, currentUser)));
-                }
-              },
-            }
-          : {}),
         // Handles clock in and clock out actions.
         scheduleVersion: (row) => {
           const version = Number((row && row.version) || 0);
@@ -852,7 +843,7 @@ const getLoadingMessage = () => {
       onError: (error) => console.warn('[live] a live read could not be kept open:', error && error.message),
     });
     return stop;
-  }, [currentUser?.id, canViewWorkOrders, canManageWorkOrders, currentUser]);
+  }, [currentUser?.id]);
 
   // When network reconnects (or when a backgrounded tab returns to visible on a mobile browser), re-sync on-duty
   useEffect(() => {
@@ -1303,7 +1294,7 @@ const getLoadingMessage = () => {
     if (!authToken) return;
     if (!canViewWorkOrders && !canManageWorkOrders) return;
     void refreshWorkOrders(authToken);
-  }, [authToken, canViewWorkOrders, canManageWorkOrders, refreshWorkOrders]);
+  }, [authToken, canViewWorkOrders, canManageWorkOrders, refreshWorkOrders, activeTab, adminSubTab]);
 
   // THE DOCUMENTS MODULE'S MEMBER LIST, read when that module is open and the reader is somebody who ...
   useEffect(() => {

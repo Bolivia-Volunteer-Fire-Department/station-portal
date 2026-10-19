@@ -225,7 +225,7 @@ export default function AdminWorkOrdersTab({
 
   const handleRefresh = async () => {
     await loadData();
-    if (onDataChanged) onDataChanged('workOrders');
+    if (onDataChanged) onDataChanged();
   };
 
   // Filtered list
@@ -304,7 +304,7 @@ export default function AdminWorkOrdersTab({
     try {
       await adminSaveWorkOrder(updated, token);
       setWorkOrdersList((prev) => prev.map((item) => (item.id === workOrder.id ? updated : item)));
-      if (onDataChanged) onDataChanged('workOrders');
+      if (onDataChanged) onDataChanged();
     } catch (err) {
       console.error('Failed to assign work order:', err);
       setNoticeModal({
@@ -331,7 +331,7 @@ export default function AdminWorkOrdersTab({
     try {
       await adminSaveWorkOrder(updated, token);
       setWorkOrdersList((prev) => prev.map((item) => (item.id === workOrder.id ? updated : item)));
-      if (onDataChanged) onDataChanged('workOrders');
+      if (onDataChanged) onDataChanged();
     } catch (err) {
       console.error('Failed to change work order status:', err);
       setNoticeModal({
@@ -458,7 +458,7 @@ export default function AdminWorkOrdersTab({
       });
 
       setEditorOpen(false);
-      if (onDataChanged) onDataChanged('workOrders');
+      if (onDataChanged) onDataChanged();
     } catch (err) {
       console.error('Failed to save work order:', err);
       setNoticeModal({
@@ -479,7 +479,7 @@ export default function AdminWorkOrdersTab({
       await adminDeleteWorkOrder(pendingDelete.id, token);
       setWorkOrdersList((prev) => prev.filter((wo) => wo.id !== pendingDelete.id));
       setPendingDelete(null);
-      if (onDataChanged) onDataChanged('workOrders');
+      if (onDataChanged) onDataChanged();
     } catch (err) {
       console.error('Failed to delete work order:', err);
       setNoticeModal({
@@ -522,7 +522,7 @@ export default function AdminWorkOrdersTab({
         setWorkOrdersList((prev) =>
           prev.map((wo) => (wo.id === formData.id ? normalizeWorkOrder(updated, currentUser) : wo))
         );
-        if (onDataChanged) onDataChanged('workOrders');
+        if (onDataChanged) onDataChanged();
       } catch (err) {
         console.error('Failed to auto-save note:', err);
       }

@@ -116,9 +116,6 @@ export const subscribeLive = ({ userId, handlers = {}, onError } = {}) => {
   if (handlers.scheduleVersion) {
     stops.push(watch(doc(db, 'live', 'schedule'), snapshotData, handlers.scheduleVersion, onError));
   }
-  if (handlers.workOrders) {
-    stops.push(watch(collection(db, 'work_orders'), rowsFrom, handlers.workOrders, onError));
-  }
 
   if (handlers.announcements || handlers.events) {
     void getDoc(doc(db, 'users', id))
