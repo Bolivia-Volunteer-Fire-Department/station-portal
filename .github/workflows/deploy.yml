@@ -87,7 +87,9 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         # Only runs when the service account secret has been added in GitHub Actions Secrets
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_FIRE_CLOCK_76723 != '' }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_FIRE_CLOCK_76723 }}
+        if: env.FIREBASE_SERVICE_ACCOUNT != ''
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
