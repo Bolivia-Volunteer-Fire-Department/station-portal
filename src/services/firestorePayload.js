@@ -358,7 +358,7 @@ export const fetchMemberPayload = async (account, stationRows = null) => {
     certificationSetup: setup,
     announcements,
     systemSettings: settingRows(settings),
-    userSettings: [{ user_id: account.userId, ...(mySettings.data() || {}) }],
+    userSettings: [{ id: account.userId, user_id: account.userId, ...(mySettings.data() || {}) }],
   };
 };
 

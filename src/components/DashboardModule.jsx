@@ -233,8 +233,11 @@ export default function DashboardModule({
     setSavingLayout(true);
     try {
       const formatted = formatDashboardLayout(layout);
+      const targetUserId = currentUser?.id || userSettings?.id || userSettings?.user_id;
       await onSaveUserSettings?.({
         ...(userSettings || {}),
+        id: targetUserId,
+        user_id: targetUserId,
         dashboard_layout: formatted,
       });
       setIsCustomizing(false);

@@ -458,7 +458,10 @@ export const saveUserSettings = async (updatedSettings, token) =>
     action: 'UPDATE_USER_SETTINGS',
     token,
     payload: {
-      id: String(updatedSettings.id),
+      id:
+        updatedSettings.id !== undefined && updatedSettings.id !== null && String(updatedSettings.id).trim() !== '' && String(updatedSettings.id) !== 'undefined'
+          ? String(updatedSettings.id).trim()
+          : (updatedSettings.userId || updatedSettings.user_id ? String(updatedSettings.userId || updatedSettings.user_id).trim() : undefined),
       time_format: updatedSettings.time_format === undefined ? undefined : String(updatedSettings.time_format),
       is_dark_mode: updatedSettings.is_dark_mode === undefined ? undefined : String(updatedSettings.is_dark_mode),
       hide_events_by_default:

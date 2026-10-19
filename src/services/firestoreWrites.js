@@ -331,7 +331,7 @@ const memberSettingValue = (key, value) => {
 // Saves user preferences like theme and notifications.
 export const saveMemberSettings = async ({ userId, fields }) => {
   const target = String(userId || '').trim();
-  if (!target) throw new Error('Which member do these settings belong to?');
+  if (!target || target === 'undefined' || target === 'null') throw new Error('Which member do these settings belong to?');
 
   const document = {};
   Object.entries(fields || {}).forEach(([key, value]) => {

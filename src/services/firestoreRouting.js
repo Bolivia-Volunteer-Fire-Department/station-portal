@@ -694,7 +694,9 @@ const DISPATCH = {
   UPDATE_USER_SETTINGS: async (body, uid) => {
     const { saveMemberSettings } = await writes();
     const payload = body.payload || {};
-    return ok(await saveMemberSettings({ userId: payload.id || uid, fields: payload }));
+    const rawId = String(payload.id || '').trim();
+    const targetUserId = rawId && rawId !== 'undefined' && rawId !== 'null' ? rawId : uid;
+    return ok(await saveMemberSettings({ userId: targetUserId, fields: payload }));
   },
 
   SAVE_MEMBER_PRIVATE: async (body, uid) => {

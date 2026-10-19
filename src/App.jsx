@@ -1817,7 +1817,10 @@ const getLoadingMessage = () => {
       if (result && result.success) {
         // Optimistically update React state so UI reflects changes immediately
         setUserSettings((prevSettings) => {
-          const targetId = String(updatedSettings.id);
+          const rawTargetId = updatedSettings.id ?? updatedSettings.userId ?? updatedSettings.user_id ?? currentUser?.id;
+          const targetId = String(rawTargetId || '').trim();
+          if (!targetId || targetId === 'undefined' || targetId === 'null') return prevSettings;
+
           const exists = prevSettings.some(
             (s) => String(s.id || s.user_id) === targetId
           );
@@ -1829,6 +1832,7 @@ const getLoadingMessage = () => {
             'hide_events_by_default',
             'colorblind_rank_labels',
             'font_scale',
+            'default_module',
             'dashboard_layout',
             // Missing from this list means the optimistic merge drops it, so the switch would appear not to sti...
             'is_sounds_active',
