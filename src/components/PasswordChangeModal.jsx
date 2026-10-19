@@ -3,6 +3,8 @@ import { KeyRound, AlertCircle, Loader2, LogOut, ShieldCheck } from 'lucide-reac
 import { passwordChangeCopy, passwordChangeProblem } from '../utils/passwordPolicy';
 import { playSound, modalSoundFor } from '../utils/uiSounds';
 import PasswordInput from './PasswordInput';
+import PasswordCrackEstimate from './PasswordCrackEstimate';
+import { getRequiredPasswordStrength, checkPasswordStrengthPolicy } from '../utils/passwordCrackTime';
 import { renderInViewport } from '../utils/viewportLayer';
 
 /**
@@ -17,12 +19,13 @@ import { renderInViewport } from '../utils/viewportLayer';
  * about permissions rather than about the session. Hence z-[55] - above the app (which tops out at z-50) and
  * below the modal layer (z-[60]), where ReauthModal lives.
  */
-export default function PasswordChangeModal({ username = '', onPasswordChange, onSignOut }) {
+export default function PasswordChangeModal({ username = '', onPasswordChange, onSignOut, systemSettings }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const copy = passwordChangeCopy();
+  const policy = getRequiredPasswordStrength(systemSettings);
 
   // An interruption - the member is being made to act before they can do anything else - so the error tone.
   useEffect(() => {
@@ -36,6 +39,12 @@ export default function PasswordChangeModal({ username = '', onPasswordChange, o
     const problem = passwordChangeProblem({ newPassword, confirmPassword });
     if (problem) {
       setError(problem);
+      return;
+    }
+
+    const strengthCheck = checkPasswordStrengthPolicy(newPassword, systemSettings);
+    if (!strengthCheck.ok) {
+      setError(strengthCheck.problem);
       return;
     }
 
@@ -92,6 +101,7 @@ export default function PasswordChangeModal({ username = '', onPasswordChange, o
               required
               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
             />
+            <PasswordCrackEstimate password={newPassword} minTier={policy.minTier} />
           </div>
 
           <div>

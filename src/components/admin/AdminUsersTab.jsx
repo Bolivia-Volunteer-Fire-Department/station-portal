@@ -6,6 +6,8 @@ import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import MemberName from '../MemberName';
 import PasswordInput from '../PasswordInput';
+import PasswordCrackEstimate from '../PasswordCrackEstimate';
+import { getRequiredPasswordStrength, checkPasswordStrengthPolicy } from '../../utils/passwordCrackTime';
 import { recordHeading } from '../../utils/displayLabel';
 import { MEMBER_PRIVATE_ADMIN_FIELDS } from '../../utils/memberFields';
 
@@ -31,7 +33,8 @@ const EMPTY_FORM = { id: '', user_name: '', name: '', password: '', status: 'act
 // Private fields stored separately from the public roster.
 const PRIVATE_FIELDS = [...MEMBER_PRIVATE_ADMIN_FIELDS];
 
-export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved }) {
+export default function AdminUsersTab({ token, users, roles, ranks, onDataChanged, isAdmin = false, onRowSaved, systemSettings }) {
+  const policy = useMemo(() => getRequiredPasswordStrength(systemSettings), [systemSettings]);
   const [formData, setFormData] = useState(EMPTY_FORM);
   // Tracks original private fields to only save changes.
   const [savedPrivate, setSavedPrivate] = useState({});
@@ -116,9 +119,16 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
       setBulkError('Change at least one field - anything left alone is not saved.');
       return;
     }
-    if (bulkForm.password && bulkForm.password.length < 8) {
-      setBulkError('A password must be at least 8 characters.');
-      return;
+    if (bulkForm.password) {
+      if (bulkForm.password.length < 8) {
+        setBulkError('A password must be at least 8 characters.');
+        return;
+      }
+      const strengthCheck = checkPasswordStrengthPolicy(bulkForm.password, systemSettings);
+      if (!strengthCheck.ok) {
+        setBulkError(strengthCheck.problem);
+        return;
+      }
     }
     setPendingBulk(true);
   };
@@ -205,6 +215,18 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.password) {
+      if (formData.password.length < 8) {
+        setError('A password must be at least 8 characters.');
+        return;
+      }
+      const strengthCheck = checkPasswordStrengthPolicy(formData.password, systemSettings);
+      if (!strengthCheck.ok) {
+        setError(strengthCheck.problem);
+        return;
+      }
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -346,6 +368,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />
+              <PasswordCrackEstimate password={formData.password} minTier={policy.minTier} />
               {/* Require password reset on next login */}
               <label className="mt-2 flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -557,6 +580,7 @@ export default function AdminUsersTab({ token, users, roles, ranks, onDataChange
                   onChange={(e) => setBulkForm({ ...bulkForm, password: e.target.value })}
                   className={BULK_FIELD_CLASS}
                 />
+                <PasswordCrackEstimate password={bulkForm.password} minTier={policy.minTier} />
               </div>
               <div>
                 <label className={BULK_LABEL_CLASS}>Must change password at next login</label>

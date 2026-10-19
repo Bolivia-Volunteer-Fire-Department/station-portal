@@ -103,7 +103,7 @@ export default function UserProfile({
             unwrap
           />
 
-          <PasswordChangeCard onPasswordChange={onPasswordChange} />
+          <PasswordChangeCard onPasswordChange={onPasswordChange} systemSettings={systemSettings} />
         </div>
       )}
 

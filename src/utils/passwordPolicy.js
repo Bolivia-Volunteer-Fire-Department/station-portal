@@ -1,3 +1,5 @@
+import { checkPasswordStrengthPolicy } from './passwordCrackTime.js';
+
 // The "choose a new password at your next sign-in" flag.
 //
 // One column on the users sheet, ticked by an administrator (Administration → Users) so a member who has just
@@ -35,7 +37,7 @@ export const mustChangePassword = (user) => {
 //
 // Match the backend's eight-character minimum. The confirmation match is client-side because only the chosen
 // password is sent to the server.
-export const passwordChangeProblem = ({ newPassword, confirmPassword } = {}) => {
+export const passwordChangeProblem = ({ newPassword, confirmPassword, systemSettings } = {}) => {
   const chosen = String(newPassword ?? '');
   const repeated = String(confirmPassword ?? '');
 
@@ -43,6 +45,14 @@ export const passwordChangeProblem = ({ newPassword, confirmPassword } = {}) => 
   if (chosen.length < 8) return 'Use at least 8 characters.';
   if (!repeated) return 'Repeat the new password to confirm it.';
   if (chosen !== repeated) return 'The two passwords do not match.';
+
+  if (systemSettings) {
+    const strengthCheck = checkPasswordStrengthPolicy(chosen, systemSettings);
+    if (!strengthCheck.ok) {
+      return strengthCheck.problem;
+    }
+  }
+
   return '';
 };
 

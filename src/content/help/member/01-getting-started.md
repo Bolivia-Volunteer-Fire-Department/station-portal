@@ -62,6 +62,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Did a Firebase/Firestore review and improved read/write efficiencies.
 * Added an **Import CSV** function for Trainings.
 * Added a **Hydrants** tab to Assets, and an import tool for those.
+* Added password policy features.
 
 ### Version 1.6x
 * Added the **District Map** module.

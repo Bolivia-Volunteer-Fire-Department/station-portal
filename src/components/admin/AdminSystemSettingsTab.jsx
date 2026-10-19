@@ -36,6 +36,7 @@ import {
   formatMobileNavModules,
 } from '../../utils/mobileNav';
 import { getBackupConfig, formatBackupDate, backupStatusDetails } from '../../utils/databaseBackup';
+import { PASSWORD_MIN_STRENGTH_KEY, PASSWORD_STRENGTH_LEVELS, getRequiredPasswordStrength } from '../../utils/passwordCrackTime';
 import ToggleSwitch from '../ToggleSwitch';
 import CenteredContent from '../CenteredContent';
 import ConfirmModal from '../ConfirmModal';
@@ -52,6 +53,7 @@ const KNOWN_KEYS = [
   'gps_margin_of_error',
   CLOCK_ROUNDING_KEY,
   'session_timeout',
+  PASSWORD_MIN_STRENGTH_KEY,
   SIGNATURE_WINDOW_KEY,
   MEMBERS_MUST_SIGN_KEY,
   PAY_PERIOD_DAYS_KEY,
@@ -105,6 +107,7 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <PasswordStrengthPolicyCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <PayPeriodCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
@@ -899,6 +902,142 @@ function SessionTimeoutCard({ token, systemSettings, onDataChanged }) {
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save Session Timeout
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// Enforces minimum password strength based on 2026 brute-force benchmark.
+function PasswordStrengthPolicyCard({ token, systemSettings, onDataChanged }) {
+  const currentSetting = getRequiredPasswordStrength(systemSettings);
+  const [selectedLevel, setSelectedLevel] = useState(currentSetting.id);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setSelectedLevel(getRequiredPasswordStrength(systemSettings).id);
+  }, [systemSettings]);
+
+  const activePolicy = PASSWORD_STRENGTH_LEVELS.find((l) => l.id === selectedLevel) || PASSWORD_STRENGTH_LEVELS[0];
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await adminSaveSystemSetting(PASSWORD_MIN_STRENGTH_KEY, selectedLevel, token);
+      if (!result?.success) throw new Error(result?.message || 'Failed to save password strength requirement.');
+      void onDataChanged();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save password strength requirement.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Password Strength Policy</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Enforce a minimum password complexity based on 2026 brute-force crack time benchmarks.
+            </p>
+          </div>
+          <span
+            className={`ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+              activePolicy.minTier > 0
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400'
+                : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400'
+            }`}
+          >
+            {activePolicy.minTier > 0 ? `Enforcing (${activePolicy.label})` : 'Not enforced'}
+          </span>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {saved && (
+          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800/80">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>Password strength requirement saved successfully.</span>
+          </div>
+        )}
+
+        <div className="space-y-2 pt-1">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Minimum Required Strength
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+            {PASSWORD_STRENGTH_LEVELS.map((lvl) => {
+              const isSelected = selectedLevel === lvl.id;
+              return (
+                <label
+                  key={lvl.id}
+                  className={`flex flex-col p-3 rounded-xl border cursor-pointer transition text-left ${
+                    isSelected
+                      ? 'border-red-500 bg-red-50/50 dark:bg-red-950/30 dark:border-red-500 ring-1 ring-red-500'
+                      : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {lvl.label}
+                    </span>
+                    <input
+                      type="radio"
+                      name="password_min_strength"
+                      value={lvl.id}
+                      checked={isSelected}
+                      onChange={() => {
+                        setSelectedLevel(lvl.id);
+                        setSaved(false);
+                      }}
+                      className="w-4 h-4 accent-red-600"
+                    />
+                  </div>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    {lvl.description}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="pt-3 border-t border-slate-200 dark:border-slate-700/80 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedLevel('none');
+              setSaved(false);
+            }}
+            disabled={saving || selectedLevel === 'none'}
+            className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 transition disabled:opacity-50"
+          >
+            Clear (none)
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Password Policy
           </button>
         </div>
       </form>

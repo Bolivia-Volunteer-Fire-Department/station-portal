@@ -403,6 +403,7 @@ export default function AdminPanel({
           users={users}
           roles={roles}
           ranks={ranks}
+          systemSettings={systemSettings}
           onDataChanged={onDataChanged}
           isAdmin={isAdmin}
           onRowSaved={onRowSaved}

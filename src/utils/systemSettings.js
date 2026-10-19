@@ -159,7 +159,10 @@ export const PUBLIC_SETTING_KEYS = [
   // writes for a cartoon head to say.
   ...BOSS_SAYING_KEYS,
   'is_dark_mode',
+  'is_sounds_active',
   'time_format',
+  DEFAULT_MODULE_KEY,
+  'password_min_strength',
   'mobile_nav_modules',
   'sidebar_nav_order',
   'sidebar_nav_icons',

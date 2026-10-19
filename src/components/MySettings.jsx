@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck, Camera, Trash2, Compass } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
 import PasswordInput from './PasswordInput';
+import PasswordCrackEstimate from './PasswordCrackEstimate';
+import { getRequiredPasswordStrength, checkPasswordStrengthPolicy } from '../utils/passwordCrackTime';
 import RankIcon from './RankIcon';
 import { soundsActiveFrom } from '../utils/uiSounds';
 import { visibleNotificationTypes } from '../utils/notificationPrefs';
@@ -418,22 +420,34 @@ export default function UserSettings({
   );
 }
 
-export function PasswordChangeCard({ onPasswordChange }) {
+export function PasswordChangeCard({ onPasswordChange, systemSettings }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
+  const policy = useMemo(() => getRequiredPasswordStrength(systemSettings), [systemSettings]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setStatusMessage(null);
 
+    if (!newPassword) {
+      setStatusMessage({ type: 'error', text: 'Please enter a new password.' });
+      return;
+    }
+    if (newPassword.length < 8) {
+      setStatusMessage({ type: 'error', text: 'Password must be at least 8 characters.' });
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setStatusMessage({ type: 'error', text: 'Passwords do not match.' });
       return;
     }
-    if (!newPassword) {
-      setStatusMessage({ type: 'error', text: 'Please enter a new password.' });
+
+    const strengthCheck = checkPasswordStrengthPolicy(newPassword, systemSettings);
+    if (!strengthCheck.ok) {
+      setStatusMessage({ type: 'error', text: strengthCheck.problem });
       return;
     }
 
@@ -489,6 +503,7 @@ export function PasswordChangeCard({ onPasswordChange }) {
               required
               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
             />
+            <PasswordCrackEstimate password={newPassword} minTier={policy.minTier} />
           </div>
 
           <div>

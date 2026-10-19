@@ -2096,6 +2096,7 @@ const getLoadingMessage = () => {
           username={currentUser.user_name || ''}
           onPasswordChange={handlePasswordChange}
           onSignOut={handleLogout}
+          systemSettings={systemSettings}
         />
       )}
 
