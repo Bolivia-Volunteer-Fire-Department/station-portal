@@ -28,6 +28,7 @@ import WeatherRadarWidget from './widgets/WeatherRadarWidget';
 import CustomMarkdownWidget from './widgets/CustomMarkdownWidget';
 import ApparatusStatusWidget from './widgets/ApparatusStatusWidget';
 import AssignedWorkOrdersWidget from './widgets/AssignedWorkOrdersWidget';
+import PreplansDueWidget from './widgets/PreplansDueWidget';
 import WidgetResizeHandle from './widgets/WidgetResizeHandle';
 import {
   DASHBOARD_DEFAULT_LAYOUT_KEY,
@@ -66,6 +67,7 @@ export default function DashboardModule({
   userSettings = {},
   onSaveUserSettings,
   onNavigate,
+  onNavigateToMap,
   token,
 }) {
   // Read station default layout, custom widgets, and widget configurations
@@ -338,6 +340,16 @@ export default function DashboardModule({
             currentUser={currentUser}
             onNavigate={onNavigate}
             workOrders={workOrders}
+          />
+        );
+
+      case 'preplans-due':
+        return (
+          <PreplansDueWidget
+            token={token}
+            currentUser={currentUser}
+            onNavigate={onNavigate}
+            onNavigateToMap={onNavigateToMap}
           />
         );
 

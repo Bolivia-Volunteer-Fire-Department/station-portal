@@ -119,3 +119,99 @@ export const getCurrentCoordinates = async () => {
     }
   }
 };
+
+/**
+ * Creates a Leaflet divIcon representing the user's live position with pulsing radar rings.
+ */
+export const createUserLocationIcon = (L) => {
+  if (!L || typeof L.divIcon !== 'function') return null;
+  return L.divIcon({
+    className: 'user-live-location-icon',
+    html: `
+      <div class="user-location-marker-container">
+        <div class="user-location-pulse-ring"></div>
+        <div class="user-location-accuracy-ring"></div>
+        <div class="user-location-dot"></div>
+      </div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  });
+};
+
+/**
+ * Watches the user's coordinates in real time via the browser Geolocation API.
+ * Returns the numeric watch ID, or null on failure.
+ */
+export const watchUserCoordinates = (onSuccess, onError, options = {}) => {
+  if (typeof window !== 'undefined' && window.isSecureContext === false) {
+    onError?.({
+      errorCode: 1,
+      errorReason: 'insecure-context',
+      errorMessage: 'Geolocation is restricted to secure contexts (HTTPS or localhost).',
+    });
+    return null;
+  }
+
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    onError?.({
+      errorCode: 2,
+      errorReason: 'unsupported',
+      errorMessage: 'Geolocation is not supported by this browser.',
+    });
+    return null;
+  }
+
+  const defaultOptions = {
+    enableHighAccuracy: true,
+    timeout: 12000,
+    maximumAge: 4000,
+    ...options,
+  };
+
+  try {
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (pos?.coords && Number.isFinite(pos.coords.latitude) && Number.isFinite(pos.coords.longitude)) {
+          onSuccess({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            heading: pos.coords.heading,
+            speed: pos.coords.speed,
+            timestamp: pos.timestamp,
+          });
+        }
+      },
+      (err) => {
+        onError?.({
+          errorCode: err?.code,
+          errorReason: err?.code === 1 ? 'denied' : err?.code === 3 ? 'timeout' : 'unavailable',
+          errorMessage: err?.message || 'Could not acquire position.',
+        });
+      },
+      defaultOptions
+    );
+    return watchId;
+  } catch (err) {
+    onError?.({
+      errorCode: 2,
+      errorReason: 'unavailable',
+      errorMessage: err?.message || 'Failed to watch position.',
+    });
+    return null;
+  }
+};
+
+/**
+ * Safely clears an active geolocation watch subscription.
+ */
+export const clearUserCoordinatesWatch = (watchId) => {
+  if (watchId !== null && watchId !== undefined && typeof navigator !== 'undefined' && navigator.geolocation) {
+    try {
+      navigator.geolocation.clearWatch(watchId);
+    } catch {
+      // ignore
+    }
+  }
+};

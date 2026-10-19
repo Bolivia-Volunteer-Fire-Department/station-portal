@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Building2,
+  Calendar,
+  Camera,
   Check,
+  ClipboardCheck,
   Compass,
   Crosshair,
   Droplets,
@@ -12,6 +15,8 @@ import {
   Flame,
   Loader2,
   LocateFixed,
+  MapPin,
+  MessageSquare,
   Paperclip,
   Pencil,
   Plus,
@@ -20,6 +25,7 @@ import {
   ShieldAlert,
   Trash2,
   Upload,
+  User,
   Users,
   X,
 } from 'lucide-react';
@@ -27,6 +33,7 @@ import {
   BUILDING_CONSTRUCTION_TYPES,
   HYDRANT_STATUSES,
   HYDRANT_TYPES,
+  INSPECTION_STATUSES,
   OCCUPANCY_TYPES,
   PROPERTY_USES,
   ROOF_CONSTRUCTIONS,
@@ -35,15 +42,21 @@ import {
   US_STATES,
   calculateDistanceFeet,
   formatDistance,
+  getPreplanInspectionDue,
   normalizePreIncidentPlan,
+  normalizePreplanNote,
+  normalizeSiteInspection,
   preIncidentPlanProblem,
 } from '../utils/preIncidentPlans';
 import { getCurrentCoordinates } from '../utils/geolocation';
 import { discardPreplanFile, openPreplanFile, uploadPreplanFile } from '../services/preplanFileStorage';
 import { formatFileSize } from '../utils/apparatus';
+import CameraCaptureModal from './CameraCaptureModal';
 import ConfirmModal from './ConfirmModal';
 import PreIncidentPlanView from './PreIncidentPlanView';
+import PreplanBuildingMap from './preplans/PreplanBuildingMap';
 import PrintablePreIncidentPlan from './PrintablePreIncidentPlan';
+import { useAuth } from '../context/AuthContext';
 
 export default function PreIncidentPlanModal({
   plan,
@@ -71,11 +84,26 @@ export default function PreIncidentPlanModal({
   const [showHydrantPicker, setShowHydrantPicker] = useState(false);
   const [hydrantSearch, setHydrantSearch] = useState('');
 
-  // File uploads
+  // File uploads & camera capture
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [fileUploadError, setFileUploadError] = useState('');
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
+  const [viewTab, setViewTab] = useState('details'); // 'details' | 'map'
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
+  const { currentUser } = useAuth();
+  const currentUserId = String(currentUser?.id || currentUser?.uid || '');
+
+  // Subform inputs for edit tabs 9 and 10
+  const [newInspection, setNewInspection] = useState({
+    inspection_date: new Date().toISOString().split('T')[0],
+    inspector_name: '',
+    status: 'passed',
+    notes: '',
+  });
+  const [newNoteInput, setNewNoteInput] = useState('');
 
   const bodyRef = useRef(null);
 
@@ -84,14 +112,72 @@ export default function PreIncidentPlanModal({
       setDraft(normalizePreIncidentPlan(plan || {}, stationName));
       setIsEditing(initialEdit || !plan?.id);
       setActiveTab('occupancy');
+      setViewTab('details');
       setError('');
       setShowHydrantPicker(false);
       setHydrantSearch('');
       setUploadingFile(false);
       setUploadProgress(0);
       setFileUploadError('');
+      setNewInspection({
+        inspection_date: new Date().toISOString().split('T')[0],
+        inspector_name: currentUser?.name || currentUser?.displayName || '',
+        status: 'passed',
+        notes: '',
+      });
+      setNewNoteInput('');
     }
-  }, [isOpen, plan, initialEdit, stationName]);
+  }, [isOpen, plan, initialEdit, stationName, currentUser]);
+
+  const handleAddInspection = () => {
+    if (!newInspection.inspection_date) return;
+    const item = normalizeSiteInspection({
+      ...newInspection,
+      inspector_name: newInspection.inspector_name.trim() || currentUser?.name || 'Inspector',
+      inspector_id: currentUserId,
+      created_by: currentUser?.name || '',
+    });
+    setDraft((cur) => ({
+      ...cur,
+      site_inspections: [item, ...(cur.site_inspections || [])],
+    }));
+    setNewInspection({
+      inspection_date: new Date().toISOString().split('T')[0],
+      inspector_name: currentUser?.name || currentUser?.displayName || '',
+      status: 'passed',
+      notes: '',
+    });
+  };
+
+  const handleRemoveInspection = (index) => {
+    setDraft((cur) => {
+      const next = [...(cur.site_inspections || [])];
+      next.splice(index, 1);
+      return { ...cur, site_inspections: next };
+    });
+  };
+
+  const handleAddNote = () => {
+    if (!newNoteInput.trim()) return;
+    const note = normalizePreplanNote({
+      content: newNoteInput.trim(),
+      author_id: currentUserId,
+      author_name: currentUser?.name || currentUser?.displayName || 'Crew Member',
+    });
+    setDraft((cur) => ({
+      ...cur,
+      notes: [note, ...(cur.notes || [])],
+    }));
+    setNewNoteInput('');
+  };
+
+  const handleRemoveNote = (index) => {
+    setDraft((cur) => {
+      const next = [...(cur.notes || [])];
+      next.splice(index, 1);
+      return { ...cur, notes: next };
+    });
+  };
 
   const handlePrint = () => {
     setPrinting(true);
@@ -322,8 +408,7 @@ export default function PreIncidentPlanModal({
   }, [existingHydrants, draft.latitude, draft.longitude, hydrantSearch]);
 
   // File Upload Helpers
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
+  const uploadSingleFile = async (file) => {
     if (!file) return;
     setUploadingFile(true);
     setFileUploadError('');
@@ -342,12 +427,37 @@ export default function PreIncidentPlanModal({
         ...cur,
         files: [...(cur.files || []), uploaded],
       }));
+      return uploaded;
     } catch (err) {
       setFileUploadError(err?.message || 'Failed to upload document or diagram.');
+      throw err;
     } finally {
       setUploadingFile(false);
       setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        await uploadSingleFile(file);
+      } catch {
+        // error reported to state in uploadSingleFile
+      }
+    }
+  };
+
+  const handleCameraCapture = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        await uploadSingleFile(file);
+      } catch {
+        // error reported to state in uploadSingleFile
+      }
     }
   };
 
@@ -371,6 +481,9 @@ export default function PreIncidentPlanModal({
     { id: 'chemicals', label: '5. HazMat & Chemicals', icon: ShieldAlert },
     { id: 'contacts', label: `6. Emergency Contacts (${draft.contacts?.length || 0})`, icon: Users },
     { id: 'files', label: `7. Diagrams & Files (${draft.files?.length || 0})`, icon: Paperclip },
+    { id: 'site_map', label: `8. Building Map (${draft.building_landmarks?.length || 0})`, icon: MapPin },
+    { id: 'inspections', label: `9. Site Inspections (${draft.site_inspections?.length || 0})`, icon: ClipboardCheck },
+    { id: 'notes', label: `10. Notes Log (${draft.notes?.length || 0})`, icon: MessageSquare },
   ];
 
   if (!isOpen) return null;
@@ -432,6 +545,36 @@ export default function PreIncidentPlanModal({
               </button>
             </div>
           </div>
+
+          {/* View Mode Tabs Bar (when reading preplan) */}
+          {!isEditing ? (
+            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-slate-50/80 px-6 py-2.5 backdrop-blur-xs dark:border-slate-800 dark:bg-slate-800/50">
+              <button
+                type="button"
+                onClick={() => setViewTab('details')}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                  viewTab === 'details'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-700/60'
+                }`}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Pre-Incident Plan Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewTab('map')}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                  viewTab === 'map'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-700/60'
+                }`}
+              >
+                <MapPin className="h-3.5 w-3.5" />
+                Building Satellite Map ({draft.building_landmarks?.length || 0})
+              </button>
+            </div>
+          ) : null}
 
           {/* Form Tabs Bar (pinned below header) */}
           {isEditing ? (
@@ -1625,7 +1768,7 @@ export default function PreIncidentPlanModal({
                           Building Diagrams & Tactical Files
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Upload floor plans, aerial views, utility shut-off diagrams, and emergency action plans (PDFs or images up to 25MB).
+                          Upload floor plans, aerial views, utility shut-off diagrams, or take a picture on site (PDFs or images up to 25MB).
                         </p>
                       </div>
                       <input
@@ -1635,15 +1778,40 @@ export default function PreIncidentPlanModal({
                         accept="image/*,.pdf,.doc,.docx,.txt"
                         className="hidden"
                       />
-                      <button
-                        type="button"
-                        disabled={uploadingFile}
-                        onClick={() => fileInputRef.current?.click()}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:opacity-50"
-                      >
-                        {uploadingFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                        {uploadingFile ? `Uploading ${uploadProgress}%...` : 'Upload File / Diagram'}
-                      </button>
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleCameraCapture}
+                        className="hidden"
+                      />
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={uploadingFile}
+                          onClick={() => {
+                            if (navigator?.mediaDevices?.getUserMedia) {
+                              setCameraModalOpen(true);
+                            } else {
+                              cameraInputRef.current?.click();
+                            }
+                          }}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50"
+                        >
+                          <Camera className="h-4 w-4" />
+                          <span>Take Photo</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={uploadingFile}
+                          onClick={() => fileInputRef.current?.click()}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:opacity-50"
+                        >
+                          {uploadingFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          {uploadingFile ? `Uploading ${uploadProgress}%...` : 'Upload File / Diagram'}
+                        </button>
+                      </div>
                     </div>
 
                     {fileUploadError ? (
@@ -1654,19 +1822,43 @@ export default function PreIncidentPlanModal({
                     ) : null}
 
                     {/* Drag & Drop / Click Upload Target */}
-                    <div
-                      onClick={() => !uploadingFile && fileInputRef.current?.click()}
-                      className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 p-6 text-center cursor-pointer transition hover:border-blue-400 hover:bg-blue-50/30 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:border-blue-500"
-                    >
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-                        <FileUp className="h-6 w-6" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div
+                        onClick={() => !uploadingFile && fileInputRef.current?.click()}
+                        className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 p-5 text-center cursor-pointer transition hover:border-blue-400 hover:bg-blue-50/30 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:border-blue-500"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+                          <FileUp className="h-5 w-5" />
+                        </div>
+                        <span className="mt-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          Click to browse or drop tactical files here
+                        </span>
+                        <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          Floor plans, CAD exports, and PDFs
+                        </span>
                       </div>
-                      <span className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                        Click to browse or drop tactical files here
-                      </span>
-                      <span className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        Supports floor plan images (PNG, JPG, WebP), CAD exports, and PDF documents
-                      </span>
+
+                      <div
+                        onClick={() => {
+                          if (uploadingFile) return;
+                          if (navigator?.mediaDevices?.getUserMedia) {
+                            setCameraModalOpen(true);
+                          } else {
+                            cameraInputRef.current?.click();
+                          }
+                        }}
+                        className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-300/80 bg-emerald-50/40 p-5 text-center cursor-pointer transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-emerald-800/60 dark:bg-emerald-950/20 dark:hover:border-emerald-600 dark:hover:bg-emerald-950/40"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+                          <Camera className="h-5 w-5" />
+                        </div>
+                        <span className="mt-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          Take a picture directly with camera
+                        </span>
+                        <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          Snap photos on site with device or camera app
+                        </span>
+                      </div>
                     </div>
 
                     {/* Attached Files Grid */}
@@ -1735,13 +1927,300 @@ export default function PreIncidentPlanModal({
                     )}
                   </div>
                 ) : null}
+
+                {/* TAB 8: Building Satellite Map & Tactical Plotting */}
+                {activeTab === 'site_map' ? (
+                  <div className="space-y-4">
+                    <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Satellite Building Map & Special Landmarks
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Zoomed-in aerial satellite view centered on the structure. Plot special tactical landmarks (FDC, sprinkler risers, electrical/gas shutoffs, Knox boxes, and roof access points).
+                      </p>
+                    </div>
+
+                    <PreplanBuildingMap
+                      plan={draft}
+                      editable={true}
+                      onChangeLandmarks={(newLandmarks) => {
+                        setDraft((cur) => ({ ...cur, building_landmarks: newLandmarks }));
+                      }}
+                      onChangeCoordinates={({ latitude, longitude }) => {
+                        setDraft((cur) => ({ ...cur, latitude, longitude }));
+                      }}
+                    />
+                  </div>
+                ) : null}
+
+                {/* TAB 9: Annual Site Inspections Log & Compliance */}
+                {activeTab === 'inspections' ? (
+                  <div className="space-y-4">
+                    <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Annual Site Inspections & Compliance Log
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Record periodic site and safety inspections. Every preplan requires an inspection annually, no more than 365 days from the last inspection date.
+                      </p>
+                    </div>
+
+                    {/* Subform to add inspection */}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Add Inspection Entry
+                      </h4>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            Inspection Date *
+                          </label>
+                          <input
+                            type="date"
+                            value={newInspection.inspection_date}
+                            onChange={(e) =>
+                              setNewInspection((prev) => ({ ...prev, inspection_date: e.target.value }))
+                            }
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            Inspector Name
+                          </label>
+                          <input
+                            type="text"
+                            placeholder={currentUser?.name || 'Inspector Name'}
+                            value={newInspection.inspector_name}
+                            onChange={(e) =>
+                              setNewInspection((prev) => ({ ...prev, inspector_name: e.target.value }))
+                            }
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            Result / Status
+                          </label>
+                          <select
+                            value={newInspection.status}
+                            onChange={(e) =>
+                              setNewInspection((prev) => ({ ...prev, status: e.target.value }))
+                            }
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                          >
+                            {INSPECTION_STATUSES.map((st) => (
+                              <option key={st.value} value={st.value}>
+                                {st.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          Notes & Findings
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Passed annual life safety check, riser tags verified..."
+                          value={newInspection.notes}
+                          onChange={(e) =>
+                            setNewInspection((prev) => ({ ...prev, notes: e.target.value }))
+                          }
+                          className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleAddInspection}
+                          disabled={!newInspection.inspection_date}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Inspection
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Table of existing inspections */}
+                    {draft.site_inspections && draft.site_inspections.length > 0 ? (
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-left text-xs">
+                          <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
+                            <tr>
+                              <th className="px-3 py-2.5">Date</th>
+                              <th className="px-3 py-2.5">Inspector</th>
+                              <th className="px-3 py-2.5">Status</th>
+                              <th className="px-3 py-2.5">Next Due (+365d)</th>
+                              <th className="px-3 py-2.5">Notes</th>
+                              <th className="px-3 py-2.5 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                            {draft.site_inspections.map((insp, idx) => {
+                              const stObj = INSPECTION_STATUSES.find((s) => s.value === insp.status);
+                              let nextDue = '—';
+                              if (insp.inspection_date) {
+                                const d = new Date(insp.inspection_date);
+                                const nextD = new Date(d.getTime() + 365 * 24 * 60 * 60 * 1000);
+                                nextDue = nextD.toISOString().split('T')[0];
+                              }
+                              return (
+                                <tr key={insp.id || idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                                  <td className="px-3 py-2 font-semibold text-slate-900 dark:text-white">
+                                    {insp.inspection_date || '—'}
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                                    {insp.inspector_name || '—'}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                      {stObj?.label || insp.status || 'Passed'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-slate-600 dark:text-slate-400">
+                                    {nextDue}
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
+                                    {insp.notes || '—'}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveInspection(idx)}
+                                      className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                      title="Remove inspection entry"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 dark:border-slate-700">
+                        No inspections recorded yet.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {/* TAB 10: Operational & Field Notes Log */}
+                {activeTab === 'notes' ? (
+                  <div className="space-y-4">
+                    <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Operational & Field Notes Log
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Running log of field notes, gate codes, Knox lock locations, or hazard alerts. Automatically captures author and timestamp.
+                      </p>
+                    </div>
+
+                    {/* Add note subform */}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center gap-1 font-medium">
+                          <User className="h-3.5 w-3.5 text-blue-500" />
+                          Posting as <strong className="text-slate-800 dark:text-slate-200">{currentUser?.name || 'Crew Member'}</strong>
+                        </span>
+                        <span className="text-[11px]">{new Date().toLocaleDateString()}</span>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={newNoteInput}
+                        onChange={(e) => setNewNoteInput(e.target.value)}
+                        placeholder="Write a field note or hazard update..."
+                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white p-2.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleAddNote}
+                          disabled={!newNoteInput.trim()}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Note
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Running notes list */}
+                    {draft.notes && draft.notes.length > 0 ? (
+                      <div className="space-y-3">
+                        {draft.notes.map((note, idx) => (
+                          <div
+                            key={note.id || idx}
+                            className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs dark:border-slate-700 dark:bg-slate-800"
+                          >
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-1.5 text-xs dark:border-slate-700">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-900 dark:text-white">
+                                  {note.author_name || 'Crew Member'}
+                                </span>
+                                <span className="text-[11px] text-slate-400">
+                                  {note.created_at ? new Date(note.created_at).toLocaleString() : ''}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveNote(idx)}
+                                className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                title="Remove note"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700 dark:text-slate-300">
+                              {note.content}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 dark:border-slate-700">
+                        No field notes recorded yet.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </form>
+            ) : viewTab === 'map' ? (
+              <div className="space-y-4">
+                <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Satellite Building Map & Tactical Landmarks
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    High-resolution aerial satellite view with plotted FDCs, sprinkler risers, utility shutoffs, and Knox access points.
+                  </p>
+                </div>
+                <PreplanBuildingMap plan={draft} editable={false} />
+              </div>
             ) : (
               <PreIncidentPlanView
                 plan={draft}
                 stationName={stationName}
                 onPrint={handlePrint}
                 onNavigateToMap={onNavigateToMap}
+                onSave={async (updated) => {
+                  setDraft(updated);
+                  if (onSave) {
+                    await onSave(updated);
+                  }
+                }}
+                canEdit={canEdit}
+                currentUser={currentUser}
               />
             )}
           </div>
@@ -1824,6 +2303,18 @@ export default function PreIncidentPlanModal({
           onDone={() => setPrinting(false)}
         />
       ) : null}
+
+      {cameraModalOpen && (
+        <CameraCaptureModal
+          isOpen={cameraModalOpen}
+          onClose={() => setCameraModalOpen(false)}
+          onCapture={async (file) => {
+            await uploadSingleFile(file);
+          }}
+          onFallbackNative={() => cameraInputRef.current?.click()}
+          occupancyName={draft.occupancy_name}
+        />
+      )}
     </>
   );
 }

@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck, Camera, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Clock, Save, CheckCircle, AlertCircle, Loader2, KeyRound, Bell, Smartphone, ShieldCheck, Camera, Trash2, Compass } from 'lucide-react';
 import ToggleSwitch from './ToggleSwitch';
 import PasswordInput from './PasswordInput';
 import RankIcon from './RankIcon';
 import { soundsActiveFrom } from '../utils/uiSounds';
 import { visibleNotificationTypes } from '../utils/notificationPrefs';
-import { rolePermissionAudit, roleColumnValue, ADMIN_PERMISSIONS } from '../utils/permissions';
+import { rolePermissionAudit, roleColumnValue, ADMIN_PERMISSIONS, permissionGranted, roleHasAdministration } from '../utils/permissions';
+import { DEFAULT_MODULE_KEY, SIDEBAR_MODULE_CATALOG } from '../utils/sidebarNav';
+import { getSettingValue } from '../utils/systemSettings';
 import {
   pushSupported,
   notificationPermission,
@@ -65,6 +67,7 @@ export default function UserSettings({
     // Same ladder, resolved by the shared rule rather than re-implemented here: the member's own value, else the
     // station default, else on. A blank cell is "inherit", not "off".
     is_sounds_active: soundsActiveFrom(existingUserSetting?.is_sounds_active, systemSettings?.is_sounds_active),
+    default_module: existingUserSetting?.default_module || '',
   });
 
   const [saving, setSaving] = useState(false);
@@ -94,6 +97,10 @@ export default function UserSettings({
         existingUserSetting?.is_sounds_active !== undefined && existingUserSetting?.is_sounds_active !== ''
           ? isTruthySetting(existingUserSetting.is_sounds_active)
           : prev.is_sounds_active,
+      default_module:
+        existingUserSetting?.default_module !== undefined
+          ? (existingUserSetting.default_module || '')
+          : prev.default_module,
     }));
   }, [existingUserSetting]);
 
@@ -114,6 +121,7 @@ export default function UserSettings({
       // Always sent, never omitted: an empty string would mean "inherit the station default" on the backend, and
       // this switch is a decision either way. The member's own answer always wins.
       is_sounds_active: String(formData.is_sounds_active),
+      default_module: String(formData.default_module || ''),
     };
 
     try {
@@ -136,6 +144,35 @@ export default function UserSettings({
   const isUsingSystemSoundsDefault =
     existingUserSetting?.is_sounds_active === undefined || existingUserSetting?.is_sounds_active === '';
   const systemSoundsDefault = soundsActiveFrom('', systemSettings?.is_sounds_active);
+
+  const stationDefaultModule = (
+    Array.isArray(systemSettings)
+      ? getSettingValue(systemSettings, DEFAULT_MODULE_KEY, 'dashboard')
+      : (systemSettings?.[DEFAULT_MODULE_KEY] || systemSettings?.default_module || 'dashboard')
+  ) || 'dashboard';
+
+  const stationDefaultModuleLabel =
+    SIDEBAR_MODULE_CATALOG.find((m) => m.id === stationDefaultModule)?.label || stationDefaultModule;
+
+  const accessibleModules = useMemo(() => {
+    if (!currentRole) return SIDEBAR_MODULE_CATALOG.filter((m) => m.id !== 'admin');
+    const isAdmin = roleHasAdministration(currentRole);
+    return SIDEBAR_MODULE_CATALOG.filter((mod) => {
+      if (mod.id === 'admin') return isAdmin;
+      if (!mod.permissionKey) return true;
+      if (mod.permissionKey === 'canAccessDashboard') return isAdmin || permissionGranted(currentRole, 'can_access_dashboard');
+      if (mod.permissionKey === 'canUseChat') return canUseChat || permissionGranted(currentRole, 'can_use_chat');
+      if (mod.permissionKey === 'canViewRoster') return isAdmin || permissionGranted(currentRole, 'can_view_roster');
+      if (mod.permissionKey === 'canViewSchedule') return permissionGranted(currentRole, 'can_view_my_schedule');
+      if (mod.permissionKey === 'canEditAvailability') return permissionGranted(currentRole, 'can_edit_own_availability');
+      if (mod.permissionKey === 'canSignTrainings') return permissionGranted(currentRole, 'can_sign_trainings');
+      if (mod.permissionKey === 'canViewDocuments') return permissionGranted(currentRole, 'can_view_documents');
+      if (mod.permissionKey === 'canViewWorkOrders') return canManageWorkOrders || permissionGranted(currentRole, 'can_view_work_orders') || permissionGranted(currentRole, 'can_manage_work_orders');
+      if (mod.permissionKey === 'canViewMap') return permissionGranted(currentRole, 'can_view_map');
+      if (mod.permissionKey === 'canViewReports') return permissionGranted(currentRole, 'can_view_reports') || permissionGranted(currentRole, 'can_generate_forms');
+      return true;
+    });
+  }, [currentRole, canUseChat, canManageWorkOrders]);
 
   return (
     <div className="space-y-6">
@@ -224,6 +261,41 @@ export default function UserSettings({
                 <span>
                   Currently using station default setting (<strong className="text-slate-700 dark:text-slate-200">{systemDefaultValue}-Hour</strong>).
                 </span>
+              ) : (
+                <span>Overriding station default setting.</span>
+              )}
+            </p>
+          </div>
+
+          {/* Default Starting Module Preference */}
+          <div className="border-t border-slate-200 dark:border-slate-700/80 pt-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <Compass className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <label htmlFor="default-module-select" className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Default Starting Module
+              </label>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Choose which module opens automatically when you sign in.
+            </p>
+            <div className="max-w-md pt-1">
+              <select
+                id="default-module-select"
+                value={formData.default_module || ''}
+                onChange={(e) => setFormData({ ...formData, default_module: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
+              >
+                <option value="">Station Default ({stationDefaultModuleLabel})</option>
+                {accessibleModules.map((mod) => (
+                  <option key={mod.id} value={mod.id}>
+                    {mod.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 pt-0.5">
+              {!formData.default_module ? (
+                <span>Currently using station default setting (<strong className="text-slate-700 dark:text-slate-200">{stationDefaultModuleLabel}</strong>).</span>
               ) : (
                 <span>Overriding station default setting.</span>
               )}

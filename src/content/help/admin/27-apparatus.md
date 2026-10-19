@@ -3,7 +3,7 @@
 *Assets → Apparatuses* lets officers track all fire department vehicles, response trucks, pump ratings, and service schedules in one organized place.
 
 > [!IMPORTANT]
-> Managing the apparatus registry requires the **Manage apparatuses** permission.
+> Managing the apparatus bay requires the **Manage apparatuses** permission.
 
 ## Apparatus categories and types
 

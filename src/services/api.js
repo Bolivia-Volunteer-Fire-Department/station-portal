@@ -466,6 +466,8 @@ export const saveUserSettings = async (updatedSettings, token) =>
       colorblind_rank_labels:
         updatedSettings.colorblind_rank_labels === undefined ? undefined : String(updatedSettings.colorblind_rank_labels),
       font_scale: updatedSettings.font_scale === undefined ? undefined : String(updatedSettings.font_scale),
+      default_module:
+        updatedSettings.default_module === undefined ? undefined : String(updatedSettings.default_module),
       dashboard_layout:
         updatedSettings.dashboard_layout === undefined ? undefined : String(updatedSettings.dashboard_layout),
       ...notificationPrefFields(updatedSettings),

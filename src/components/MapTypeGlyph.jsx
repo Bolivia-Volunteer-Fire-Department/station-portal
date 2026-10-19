@@ -15,7 +15,33 @@ import { iconElements } from '../utils/mapIcons';
 // in daylight, thicker closes up the small shapes.
 const STROKE_WIDTH = 2.2;
 
-export default function MapTypeGlyph({ icon, size = 14, color = '#ffffff', className = '' }) {
+export default function MapTypeGlyph({ icon, letter, size = 14, color = '#ffffff', className = '' }) {
+  const isLetter = Boolean(letter || (typeof icon === 'string' && icon.startsWith('letter-')));
+  if (isLetter) {
+    const char = letter || icon.replace('letter-', '').toUpperCase();
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        className={className}
+        aria-hidden="true"
+      >
+        <text
+          x="12"
+          y="18"
+          textAnchor="middle"
+          fill={color}
+          fontFamily="system-ui, -apple-system, sans-serif"
+          fontWeight="900"
+          fontSize="18"
+        >
+          {char}
+        </text>
+      </svg>
+    );
+  }
+
   return (
     <svg
       viewBox="0 0 24 24"
@@ -37,7 +63,17 @@ export default function MapTypeGlyph({ icon, size = 14, color = '#ffffff', class
 // THE SAME GLYPH AS MARKUP, for Leaflet. The attributes are lucide's own numbers and path data (trusted constants from a
 // generated file) and the color is one of the palette's hexes, which the type list is validated against before it is stored -
 // so nothing here is somebody's typed text.
-export const glyphHtml = (icon, { size = 14, color = '#ffffff', strokeWidth = STROKE_WIDTH } = {}) => {
+export const glyphHtml = (icon, { size = 14, color = '#ffffff', strokeWidth = STROKE_WIDTH, letter } = {}) => {
+  const isLetter = Boolean(letter || (typeof icon === 'string' && icon.startsWith('letter-')));
+  if (isLetter) {
+    const char = letter || icon.replace('letter-', '').toUpperCase();
+    return (
+      `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">` +
+      `<text x="12" y="18" text-anchor="middle" fill="${color}" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="18">${char}</text>` +
+      `</svg>`
+    );
+  }
+
   const body = iconElements(icon)
     .map(([tag, attributes]) => `<${tag} ${Object.entries(attributes).map(([name, value]) => `${name}="${value}"`).join(' ')}/>`)
     .join('');

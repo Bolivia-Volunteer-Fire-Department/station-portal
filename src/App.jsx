@@ -129,7 +129,8 @@ import {
   SESSION_ENDED_MESSAGE,
   unauthorizedIsStale,
 } from './utils/sessionTimeout';
-import { bossSayingsFrom } from './utils/systemSettings';
+import { bossSayingsFrom, getSettingValue } from './utils/systemSettings';
+import { DEFAULT_MODULE_KEY } from './utils/sidebarNav';
 import { departmentLogoUrl, stationLogoUrl, stationSyncLoopsUrl } from './utils/assets';
 import { updateRuntimePwaIcons } from './utils/pwaIcons';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
@@ -1548,6 +1549,7 @@ const getLoadingMessage = () => {
 
   const handleLogout = () => {
     pendingActionRef.current = null;
+    defaultNavigatedSignInRef.current = 0;
     setNeedsReauth(false);
     setReauthReason(null);
     setCurrentUser(null);
@@ -1586,6 +1588,7 @@ const getLoadingMessage = () => {
   // Ends the session with an explanation, which is the only difference from a normal sign-out
   const endSession = useCallback((message) => {
     pendingActionRef.current = null;
+    defaultNavigatedSignInRef.current = 0;
     setNeedsReauth(false);
     setReauthReason(null);
     setCurrentUser(null);
@@ -1926,6 +1929,86 @@ const getLoadingMessage = () => {
     playSound('intro_short');
   }, [signInCount, initialLoading]);
 
+  // Navigate to default module on sign-in (User preference overrides Station default)
+  const defaultNavigatedSignInRef = useRef(0);
+  useEffect(() => {
+    if (!currentUser || signInCount === 0 || initialLoading || globalLoading.active) return;
+    if (defaultNavigatedSignInRef.current === signInCount) return;
+
+    defaultNavigatedSignInRef.current = signInCount;
+
+    const userSettingRow = userSettings.find((s) => String(s.id ?? s.user_id) === String(currentUser.id));
+    const userDefault = userSettingRow?.default_module;
+    const stationDefault = getSettingValue(systemSettings, DEFAULT_MODULE_KEY, 'dashboard');
+    const targetModule = (userDefault && userDefault.trim()) || stationDefault || 'dashboard';
+
+    const isAllowed =
+      targetModule === 'admin'
+        ? canAdminister
+        : targetModule === 'schedule'
+          ? canViewSchedule
+          : targetModule === 'availability'
+            ? canEditOwnAvailability
+            : targetModule === 'clock-history'
+              ? canUseTimeclock
+              : targetModule === 'training'
+                ? canSignTrainings
+                : targetModule === 'documents'
+                  ? canViewDocuments
+                  : targetModule === 'district-map'
+                    ? canViewMap
+                    : targetModule === 'roster'
+                      ? canViewRoster
+                      : targetModule === 'reports'
+                        ? canViewReports || canGenerateForms
+                        : targetModule === 'work-orders'
+                          ? canViewWorkOrders
+                          : targetModule === 'chat'
+                            ? canUseChat
+                            : targetModule === 'dashboard'
+                              ? canAccessDashboard
+                              : true;
+
+    if (isAllowed) {
+      setActiveTab(targetModule);
+    } else {
+      const fallbackTab = canAccessDashboard
+        ? 'dashboard'
+        : canViewSchedule
+          ? 'schedule'
+          : canViewRoster
+            ? 'roster'
+            : canSignTrainings
+              ? 'training'
+              : canViewDocuments
+                ? 'documents'
+                : canAdminister
+                  ? 'admin'
+                  : 'help';
+      setActiveTab(fallbackTab);
+    }
+  }, [
+    signInCount,
+    currentUser,
+    userSettings,
+    systemSettings,
+    initialLoading,
+    globalLoading.active,
+    canAdminister,
+    canViewSchedule,
+    canEditOwnAvailability,
+    canUseTimeclock,
+    canSignTrainings,
+    canViewDocuments,
+    canViewMap,
+    canViewRoster,
+    canViewReports,
+    canGenerateForms,
+    canViewWorkOrders,
+    canUseChat,
+    canAccessDashboard,
+  ]);
+
   return (
     <>
       {/* THE SPLASH: the brand moment that plays first, while the app's data loads concurrently
@@ -2186,7 +2269,7 @@ const getLoadingMessage = () => {
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                     {activeTab === 'dashboard' && `Welcome, ${currentUser.name}`}
                     {activeTab === 'clock-history' && 'Clock History'}
-                    {activeTab === 'apparatus' && 'Apparatus Registry'}
+                    {activeTab === 'apparatus' && 'Apparatus Bay'}
                     {activeTab === 'roster' && 'Roster'}
                     {activeTab === 'schedule' && 'Schedule'}
                     {activeTab === 'availability' && 'Availability'}
@@ -2256,6 +2339,10 @@ const getLoadingMessage = () => {
                   userSettings={currentUserSettings}
                   onSaveUserSettings={handleSaveUserSettings}
                   onNavigate={handleSidebarNavigate}
+                  onNavigateToMap={(plan) => {
+                    setMapTargetPreplanId(plan?.id || null);
+                    setActiveTab('district-map');
+                  }}
                   token={authToken}
                 />
               ) : null

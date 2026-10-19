@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { stationLogoUrl } from '../utils/assets';
+import { buildingLandmarkTypeFor } from '../utils/buildingLandmarks';
+import { INSPECTION_STATUSES, getPreplanInspectionDue } from '../utils/preIncidentPlans';
 
 export default function PrintablePreIncidentPlan({ plan, stationName = '', onDone }) {
   useEffect(() => {
@@ -28,6 +30,7 @@ export default function PrintablePreIncidentPlan({ plan, stationName = '', onDon
     .join(', ');
 
   const hasCoords = Number.isFinite(plan.latitude) && Number.isFinite(plan.longitude);
+  const dueInfo = getPreplanInspectionDue(plan);
 
   return createPortal(
     <div className="print-sheet text-black text-xs font-sans leading-normal">
@@ -251,9 +254,53 @@ export default function PrintablePreIncidentPlan({ plan, stationName = '', onDon
         </div>
       ) : null}
 
+      {/* Plotted Building Landmarks & Tactical Features */}
+      {plan.building_landmarks && plan.building_landmarks.length > 0 ? (
+        <div className="border border-slate-400 p-2.5 mb-4">
+          <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
+            Plotted Building Landmarks & Tactical Features ({plan.building_landmarks.length})
+          </h3>
+          <table className="w-full text-[10px] border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300 text-left">
+                <th className="py-1 px-1.5 font-bold">Feature / Type</th>
+                <th className="py-1 px-1.5 font-bold">Label</th>
+                <th className="py-1 px-1.5 font-bold">Side & Floor</th>
+                <th className="py-1 px-1.5 font-bold">Coordinates</th>
+                <th className="py-1 px-1.5 font-bold">Notes / Access Info</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {plan.building_landmarks.map((lm, idx) => {
+                const def = buildingLandmarkTypeFor(lm.type);
+                return (
+                  <tr key={lm.id || idx}>
+                    <td className="py-1 px-1.5 font-semibold text-slate-900">
+                      <span
+                        className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle"
+                        style={{ background: def.color }}
+                      />
+                      {def.label}
+                    </td>
+                    <td className="py-1 px-1.5 font-medium">{lm.label || '—'}</td>
+                    <td className="py-1 px-1.5 text-slate-700">{lm.side || '—'} &middot; {lm.floor || '—'}</td>
+                    <td className="py-1 px-1.5 font-mono text-slate-600">
+                      {Number.isFinite(lm.latitude) && Number.isFinite(lm.longitude)
+                        ? `${Number(lm.latitude).toFixed(5)}, ${Number(lm.longitude).toFixed(5)}`
+                        : '—'}
+                    </td>
+                    <td className="py-1 px-1.5 text-slate-800">{lm.notes || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
       {/* Attached Diagrams & Tactical Files */}
       {plan.files && plan.files.length > 0 ? (
-        <div className="border border-slate-400 p-2.5">
+        <div className="border border-slate-400 p-2.5 mb-4">
           <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
             Attached Diagrams & Tactical Documents ({plan.files.length})
           </h3>
@@ -281,6 +328,74 @@ export default function PrintablePreIncidentPlan({ plan, stationName = '', onDon
                 </div>
               );
             })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Annual Site Inspections Running Log */}
+      {plan.site_inspections && plan.site_inspections.length > 0 ? (
+        <div className="border border-slate-400 p-2.5 mb-4">
+          <div className="flex items-center justify-between border-b border-black pb-1 mb-2">
+            <h3 className="font-bold uppercase text-xs">
+              Annual Site Inspections Log ({plan.site_inspections.length})
+            </h3>
+            <span className="text-[10px] font-semibold text-slate-700">
+              Next Annual Inspection Due: <strong>{dueInfo.nextDueDateString}</strong>{' '}
+              {dueInfo.isOverdue ? '(OVERDUE)' : dueInfo.daysRemaining <= 30 ? '(Due Soon)' : '(Current)'}
+            </span>
+          </div>
+          <table className="w-full text-[10px] border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300 text-left">
+                <th className="py-1 px-1.5 font-bold">Inspection Date</th>
+                <th className="py-1 px-1.5 font-bold">Inspector</th>
+                <th className="py-1 px-1.5 font-bold">Result / Status</th>
+                <th className="py-1 px-1.5 font-bold">Next Due (+365d)</th>
+                <th className="py-1 px-1.5 font-bold">Notes / Findings</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {plan.site_inspections.map((insp, idx) => {
+                const statusObj = INSPECTION_STATUSES.find((s) => s.value === insp.status);
+                let nextDue = '—';
+                if (insp.inspection_date) {
+                  const d = new Date(insp.inspection_date);
+                  const nextD = new Date(d.getTime() + 365 * 24 * 60 * 60 * 1000);
+                  nextDue = nextD.toISOString().split('T')[0];
+                }
+                return (
+                  <tr key={insp.id || idx}>
+                    <td className="py-1 px-1.5 font-semibold text-slate-900">{insp.inspection_date || '—'}</td>
+                    <td className="py-1 px-1.5 font-medium">{insp.inspector_name || '—'}</td>
+                    <td className="py-1 px-1.5 font-semibold">{statusObj?.label || insp.status || 'Passed'}</td>
+                    <td className="py-1 px-1.5 font-mono text-slate-700">{nextDue}</td>
+                    <td className="py-1 px-1.5 text-slate-800">{insp.notes || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {/* Operational & Field Notes Log */}
+      {plan.notes && plan.notes.length > 0 ? (
+        <div className="border border-slate-400 p-2.5">
+          <h3 className="font-bold uppercase text-xs border-b border-black pb-1 mb-2">
+            Operational & Field Notes Log ({plan.notes.length})
+          </h3>
+          <div className="space-y-2">
+            {plan.notes.map((note, idx) => (
+              <div key={note.id || idx} className="border-b border-slate-200 pb-1.5 last:border-b-0 text-[10px]">
+                <div className="flex items-center justify-between text-slate-600 mb-0.5">
+                  <span className="font-bold text-slate-900">{note.author_name || 'Crew Member'}</span>
+                  <span className="font-mono text-[9px]">
+                    {note.created_at ? new Date(note.created_at).toLocaleString() : ''}
+                  </span>
+                </div>
+                <div className="text-slate-800 whitespace-pre-wrap">{note.content}</div>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}

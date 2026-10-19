@@ -21,6 +21,7 @@ import { getSettingValue } from '../../utils/systemSettings';
 import {
   SIDEBAR_NAV_ORDER_KEY,
   SIDEBAR_NAV_ICONS_KEY,
+  DEFAULT_MODULE_KEY,
   DEFAULT_SIDEBAR_NAV_ORDER,
   DEFAULT_MODULE_ICONS,
   SIDEBAR_MODULE_CATALOG,
@@ -47,6 +48,11 @@ export default function AdminNavigationSetupTab({ token, systemSettings, onDataC
 
   return (
     <CenteredContent className="space-y-6">
+      <DefaultStationModuleCard
+        token={token}
+        systemSettings={systemSettings}
+        onDataChanged={onDataChanged}
+      />
       <SidebarNavOrderCard
         token={token}
         systemSettings={systemSettings}
@@ -59,6 +65,115 @@ export default function AdminNavigationSetupTab({ token, systemSettings, onDataC
         onDataChanged={onDataChanged}
       />
     </CenteredContent>
+  );
+}
+
+function DefaultStationModuleCard({ token, systemSettings, onDataChanged }) {
+  const currentSetting = getSettingValue(systemSettings, DEFAULT_MODULE_KEY, 'dashboard');
+  const [selectedModule, setSelectedModule] = useState(currentSetting || 'dashboard');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setSelectedModule(getSettingValue(systemSettings, DEFAULT_MODULE_KEY, 'dashboard') || 'dashboard');
+  }, [systemSettings]);
+
+  const isDirty = (selectedModule || 'dashboard') !== (currentSetting || 'dashboard');
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await adminSaveSystemSettings(
+        [{ key: DEFAULT_MODULE_KEY, value: selectedModule || 'dashboard' }],
+        token
+      );
+      if (!result?.success) throw new Error(result?.message || 'Failed to save station default module.');
+
+      void onDataChanged?.();
+      setSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save station default module.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const stationModules = SIDEBAR_MODULE_CATALOG.filter((m) => m.id !== 'admin');
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
+      <form onSubmit={handleSave} className="p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
+            <Compass className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Station Default Module</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Choose the default landing module for members upon signing in. Individual members can override this in My Settings.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="max-w-md">
+          <label htmlFor="station-default-module" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+            Default Starting Module
+          </label>
+          <select
+            id="station-default-module"
+            value={selectedModule}
+            onChange={(e) => {
+              setSelectedModule(e.target.value);
+              setSaved(false);
+            }}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
+          >
+            {stationModules.map((mod) => (
+              <option key={mod.id} value={mod.id}>
+                {mod.label} — {mod.description}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700/60">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {saved ? (
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
+                <Check className="w-4 h-4" /> Saved successfully
+              </span>
+            ) : isDirty ? (
+              <span className="text-amber-600 dark:text-amber-400 font-medium">Unsaved changes</span>
+            ) : (
+              <span>Currently set to {SIDEBAR_MODULE_CATALOG.find((m) => m.id === selectedModule)?.label || selectedModule}</span>
+            )}
+          </div>
+          <button
+            type="submit"
+            disabled={saving || !isDirty}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition shadow-xs ${
+              isDirty
+                ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+            }`}
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Station Default
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

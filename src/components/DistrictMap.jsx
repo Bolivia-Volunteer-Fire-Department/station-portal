@@ -4,7 +4,7 @@ import L from 'leaflet';
 // opens the map never downloads it. Vite extracts it into the lazy chunk automatically.
 import 'leaflet/dist/leaflet.css';
 import './DistrictMap.css';
-import { AlertCircle, Building2, Crosshair, FileText, Layers, Loader2, LocateFixed, MapPin, Maximize, Moon, Pencil, Plus, Sun, Trash2, X } from 'lucide-react';
+import { AlertCircle, Building2, Crosshair, Layers, Loader2, LocateFixed, MapPin, Maximize, Moon, Pencil, Plus, Sun, Trash2, X } from 'lucide-react';
 import {
   adminDeleteMapLandmark,
   adminDeletePreIncidentPlan,
@@ -49,9 +49,13 @@ import {
   preIncidentPlanFields,
   sortedPreIncidentPlans,
 } from '../utils/preIncidentPlans';
-// WHAT A PIN CAN BE, and how a kind resolves to it: the station's own list of types, read with everything else on this screen.
 import { DEFAULT_MAP_TYPES, mapPinStyle, mapTypeFor, mapTypesView } from '../utils/mapTypes';
-import { getCurrentCoordinates } from '../utils/geolocation';
+import {
+  getCurrentCoordinates,
+  createUserLocationIcon,
+  watchUserCoordinates,
+  clearUserCoordinatesWatch,
+} from '../utils/geolocation';
 import ConfirmModal from './ConfirmModal';
 import DistrictMapDrawing from './DistrictMapDrawing';
 import MapTypeGlyph, { glyphHtml } from './MapTypeGlyph';
@@ -142,6 +146,18 @@ const LAYER_CHIP_FACT = {
   districts: ' — the departments around yours, each named in the middle of its own area',
 };
 
+const SATELLITE_TILE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const SATELLITE_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, USDA';
+const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+const ROADS_VIEW_OPTIONS = [
+  { id: 'gis', label: 'GIS Roads' },
+  { id: 'osm', label: 'OpenStreetMap' },
+  { id: 'satellite', label: 'Satellite' },
+  { id: 'off', label: 'Off' },
+];
+
 export default function DistrictMap({
   token,
   canEdit = false,
@@ -161,6 +177,28 @@ export default function DistrictMap({
   // WHAT A PIN CAN BE, as the station has it. The device's copy first, and the built-in eight when there is nothing stored - so
   // a station that has never edited its types still draws coloured, named pins straight away.
   const [typeDocs, setTypeDocs] = useState(() => cachedMapTypes());
+  // Roads / Basemap view: GIS Roads, OpenStreetMap, Satellite, or Off
+  const [roadsView, setRoadsView] = useState(() => {
+    try {
+      const stored = localStorage.getItem('sp_district_roads_view');
+      if (stored === 'gis' || stored === 'osm' || stored === 'satellite' || stored === 'off') {
+        return stored;
+      }
+    } catch {
+      // storage unavailable
+    }
+    return 'gis';
+  });
+
+  const handleRoadsViewChange = (newView) => {
+    setRoadsView(newView);
+    try {
+      localStorage.setItem('sp_district_roads_view', newView);
+    } catch {
+      // storage unavailable
+    }
+  };
+
   // Which layers are switched on. ON by default: a station that fetched a layer wants to see it, and the whole design is that
   // it costs nothing to draw (it is already on the device). The landmarks are a layer like any other - a station checking where
   // its boundary runs against a road does not want two hundred pins in the way - and the flood zones are ON for the same
@@ -215,6 +253,7 @@ export default function DistrictMap({
   const [pendingDelete, setPendingDelete] = useState(null);
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [activeLandmark, setActiveLandmark] = useState(null);
 
   const [activePreplan, setActivePreplan] = useState(null);
   const [isPreplanModalOpen, setIsPreplanModalOpen] = useState(false);
@@ -354,6 +393,7 @@ export default function DistrictMap({
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
+  const tileLayerRef = useRef(null);
   const boundaryLayerRef = useRef(null);
   const pinLayerRef = useRef(null);
   const preplanLayerRef = useRef(null);
@@ -367,6 +407,106 @@ export default function DistrictMap({
   const fittedRef = useRef(false);
   // The boundary's source line, as currently credited, so the same sentence is not added twice.
   const attributionRef = useRef('');
+
+  // Live user location tracking
+  const userLocationMarkerRef = useRef(null);
+  const watchIdRef = useRef(null);
+  const [isTrackingUser, setIsTrackingUser] = useState(false);
+  const [isLocatingUser, setIsLocatingUser] = useState(false);
+  const [userLocationError, setUserLocationError] = useState('');
+
+  const stopUserTracking = useCallback(() => {
+    if (watchIdRef.current !== null) {
+      clearUserCoordinatesWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    if (userLocationMarkerRef.current) {
+      userLocationMarkerRef.current.remove();
+      userLocationMarkerRef.current = null;
+    }
+    setIsTrackingUser(false);
+    setIsLocatingUser(false);
+  }, []);
+
+  const startUserTracking = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    stopUserTracking();
+    setIsLocatingUser(true);
+    setUserLocationError('');
+
+    let hasCentered = false;
+
+    const id = watchUserCoordinates(
+      (coords) => {
+        setIsLocatingUser(false);
+        setIsTrackingUser(true);
+
+        const currentMap = mapRef.current;
+        if (!currentMap) return;
+
+        if (!userLocationMarkerRef.current) {
+          const icon = createUserLocationIcon(L);
+          const marker = L.marker([coords.latitude, coords.longitude], {
+            icon,
+            zIndexOffset: 1000,
+          }).addTo(currentMap);
+
+          marker.bindPopup(`
+            <div style="font-family: system-ui, sans-serif; font-size: 12px; line-height: 1.4; padding: 2px;">
+              <div style="font-weight: 700; color: #1e40af;">Your Current Position</div>
+              <div style="color: #64748b; font-size: 11px;">Live GPS Tracking</div>
+              <div style="color: #0f172a; font-family: monospace; font-size: 10px; margin-top: 3px;">
+                ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}
+              </div>
+            </div>
+          `);
+          userLocationMarkerRef.current = marker;
+        } else {
+          userLocationMarkerRef.current.setLatLng([coords.latitude, coords.longitude]);
+        }
+
+        if (!hasCentered) {
+          hasCentered = true;
+          currentMap.setView([coords.latitude, coords.longitude], Math.max(currentMap.getZoom() || 16, 16), {
+            animate: true,
+          });
+        }
+      },
+      (err) => {
+        setIsLocatingUser(false);
+        setIsTrackingUser(false);
+        setUserLocationError(err?.errorMessage || 'Location unavailable.');
+        if (userLocationMarkerRef.current) {
+          userLocationMarkerRef.current.remove();
+          userLocationMarkerRef.current = null;
+        }
+      }
+    );
+    watchIdRef.current = id;
+  }, [stopUserTracking]);
+
+  const toggleUserLocationTracking = useCallback(() => {
+    if (isTrackingUser || isLocatingUser) {
+      stopUserTracking();
+    } else {
+      startUserTracking();
+    }
+  }, [isTrackingUser, isLocatingUser, stopUserTracking, startUserTracking]);
+
+  // Clean up user location tracking on unmount of DistrictMap
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) {
+        clearUserCoordinatesWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
+    };
+  }, []);
 
   // ---- the map ----------------------------------------------------------------------------------
   useEffect(() => {
@@ -388,8 +528,20 @@ export default function DistrictMap({
     fittedRef.current = false;
 
     return () => {
+      if (watchIdRef.current !== null) {
+        clearUserCoordinatesWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
+      if (tileLayerRef.current) {
+        tileLayerRef.current.remove();
+        tileLayerRef.current = null;
+      }
       boundaryLayerRef.current = null;
       pinLayerRef.current = null;
       if (preplanLayerRef.current) {
@@ -402,6 +554,32 @@ export default function DistrictMap({
       attributionRef.current = '';
     };
   }, [view]);
+
+  // ---- the basemap tiles (Satellite / OpenStreetMap) --------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || view !== 'map') return;
+    if (tileLayerRef.current) {
+      tileLayerRef.current.remove();
+      tileLayerRef.current = null;
+    }
+    if (roadsView === 'satellite') {
+      tileLayerRef.current = L.tileLayer(SATELLITE_TILE_URL, {
+        pane: 'tilePane',
+        maxZoom: 21,
+        maxNativeZoom: 19,
+        attribution: SATELLITE_ATTRIBUTION,
+      }).addTo(map);
+    } else if (roadsView === 'osm') {
+      tileLayerRef.current = L.tileLayer(OSM_TILE_URL, {
+        pane: 'tilePane',
+        maxZoom: 21,
+        maxNativeZoom: 19,
+        attribution: OSM_ATTRIBUTION,
+        className: mapDark ? 'station-osm-dark-tiles' : '',
+      }).addTo(map);
+    }
+  }, [roadsView, view, mapDark]);
 
   // ---- the boundary -----------------------------------------------------------------------------
   useEffect(() => {
@@ -446,6 +624,7 @@ export default function DistrictMap({
     // one measured place (see scripts/verify-schedule-drop.mjs), which a custom pane would have broken. Nothing else uses
     // this pane - the app has no tiles - so it is free.
     const pane = 'tilePane';
+    const backdropPane = (roadsView === 'satellite' || roadsView === 'osm') ? 'overlayPane' : pane;
 
     // THE FLOOD ZONES, first, so everything else is read through them. Each polygon is drawn in FEMA's own colour for its zone
     // (utils/districtMap#floodZoneColour), which is the one place on this map where a colour carries a fact rather than an
@@ -454,7 +633,7 @@ export default function DistrictMap({
     const flood = layersOn.flood ? backdrops.flood : null;
     if (flood) {
       L.geoJSON(flood.collection, {
-        pane,
+        pane: backdropPane,
         interactive: false,
         // The colour is asked for PER FEATURE, which is what makes one layer five colours - and the outline is carried in the
         // same colour at a hair's width, because a zone edge is real but is not a line anybody drives along.
@@ -474,7 +653,7 @@ export default function DistrictMap({
     const water = layersOn.water ? backdrops.water : null;
     if (water) {
       L.geoJSON(water.collection, {
-        pane,
+        pane: backdropPane,
         interactive: false,
         style: () => ({
           color: ground.water.color,
@@ -486,7 +665,7 @@ export default function DistrictMap({
       }).addTo(group);
     }
 
-    const roads = layersOn.roads ? backdrops.roads : null;
+    const roads = (roadsView === 'gis' && layersOn.roads) ? backdrops.roads : null;
     if (roads) {
       // NOT INTERACTIVE, deliberately: the road's name lies along the road itself as a label (drawn in the effect below), so a
       // tap that popped a box would repeat what the ground already says - and a line that took clicks would swallow the press
@@ -523,7 +702,7 @@ export default function DistrictMap({
     const neighbourRoads = layersOn.neighbourRoads ? backdrops.neighbourRoads : null;
     if (neighbourRoads) {
       L.geoJSON(neighbourRoads.collection, {
-        pane,
+        pane: backdropPane,
         interactive: false,
         style: () => ({
           color: ground.neighbourRoads.casing,
@@ -534,7 +713,7 @@ export default function DistrictMap({
         }),
       }).addTo(group);
       L.geoJSON(neighbourRoads.collection, {
-        pane,
+        pane: backdropPane,
         interactive: false,
         style: () => ({
           color: ground.neighbourRoads.color,
@@ -557,7 +736,7 @@ export default function DistrictMap({
     if (districts) {
       const ours = boundary ? boundary.label : '';
       L.geoJSON(districts.collection, {
-        pane,
+        pane: backdropPane,
         // NOT INTERACTIVE, deliberately. The beat's whole name is already printed in the middle of its own ground by the marker
         // below, so there is nothing left to ask of the shape - and a fill that took clicks would (a) risk popping a box with
         // nothing in it and (b) swallow the press that places a landmark. The name on the ground IS the answer.
@@ -594,7 +773,7 @@ export default function DistrictMap({
     // The background is NOT interactive - no layer in it answers taps - so `placing` is not in the list: arming a landmark
     // needs no cooperation from lines that take no clicks. `boundary` because the neighbouring districts are filtered against it.
     // `ground` and `mapDark` because every colour above is read from them: flipping the toggle redraws the ground it stands on.
-  }, [backdrops, boundary, ground, layersOn, mapDark, view]);
+  }, [backdrops, boundary, ground, layersOn, mapDark, roadsView, view]);
 
   // ---- the road names ---------------------------------------------------------------------------
   //
@@ -627,7 +806,7 @@ export default function DistrictMap({
       }
     };
     const roadFeatures = [
-      ...(layersOn.roads && backdrops.roads ? backdrops.roads.collection?.features || [] : []),
+      ...(roadsView === 'gis' && layersOn.roads && backdrops.roads ? backdrops.roads.collection?.features || [] : []),
       ...(layersOn.neighbourRoads && backdrops.neighbourRoads ? backdrops.neighbourRoads.collection?.features || [] : []),
     ];
     if (!map || roadFeatures.length === 0) {
@@ -661,7 +840,7 @@ export default function DistrictMap({
       map.off('zoomend', draw);
       clear();
     };
-  }, [backdrops, layersOn, mapDark, view]);
+  }, [backdrops, layersOn, mapDark, roadsView, view]);
 
   // ---- who gets the credit ----------------------------------------------------------------------
   //
@@ -718,9 +897,11 @@ export default function DistrictMap({
         }),
       });
       marker.bindTooltip(pin.label, { direction: 'top', offset: [0, -size / 2 - 4] });
-      // A press selects the pin in the LIST below rather than opening a popup: the list is where it can be edited, and a
-      // popup full of buttons would have to be built as HTML by hand - which is how a landmark's own name becomes markup.
-      marker.on('click', () => setSelectedId(pin.id));
+      // A press selects the pin on the map and opens its details modal
+      marker.on('click', () => {
+        setSelectedId(pin.id);
+        setActiveLandmark(pin);
+      });
       marker.addTo(group);
     });
 
@@ -898,6 +1079,7 @@ export default function DistrictMap({
 
   const startAdd = () => {
     setSelectedId('');
+    setActiveLandmark(null);
     setError('');
     // A new pin starts on the station's FIRST type rather than on a hard-coded one: the list is theirs, and the first entry is
     // the one they put first.
@@ -907,6 +1089,8 @@ export default function DistrictMap({
 
   const startEdit = (pin) => {
     setError('');
+    setSelectedId(pin.id);
+    setActiveLandmark(null);
     setDraft({ id: pin.id, label: pin.label, kind: pin.kind, note: pin.note, lat: pin.lat, lng: pin.lng });
     setPlacing(false);
   };
@@ -914,6 +1098,7 @@ export default function DistrictMap({
   const cancelDraft = () => {
     setDraft(null);
     setPlacing(false);
+    setSelectedId('');
   };
 
   // STANDING NEXT TO THE THING is how most landmarks get placed, so the device's own position is offered as a button rather
@@ -950,9 +1135,10 @@ export default function DistrictMap({
       const next = [...landmarkDocs.filter((pin) => pin.id !== id), { id, ...fields }];
       setLandmarkDocs(next);
       cacheLandmarks(next);
-      setSelectedId(id);
+      setSelectedId('');
       setDraft(null);
       setPlacing(false);
+      setActiveLandmark(null);
     } catch (err) {
       setError(err?.message || 'Failed to save the landmark.');
     } finally {
@@ -973,6 +1159,7 @@ export default function DistrictMap({
       setLandmarkDocs(next);
       cacheLandmarks(next);
       if (selectedId === pin.id) setSelectedId('');
+      if (activeLandmark?.id === pin.id) setActiveLandmark(null);
     } catch (err) {
       setError(err?.message || 'Failed to remove the landmark.');
     } finally {
@@ -1029,12 +1216,10 @@ export default function DistrictMap({
     map.setView(FALLBACK_VIEW[0], FALLBACK_VIEW[1]);
   };
 
-  // Choosing a landmark in the list BOTH marks it and takes the map to it: a panel of pin names beside a map is a panel of
-  // names until the map agrees which one is meant.
-  const selectOnMap = (pin) => {
-    setSelectedId(pin.id);
-    const map = mapRef.current;
-    if (map) map.panTo([pin.lat, pin.lng]);
+  // When closing the landmark details modal, deselect the active landmark and clear the marker ring.
+  const closeLandmarkDetails = () => {
+    setActiveLandmark(null);
+    setSelectedId('');
   };
 
   // The types actually on this station's map, in the order the station's own list declares them - a legend that only shows what
@@ -1106,6 +1291,27 @@ export default function DistrictMap({
             ) : null}
             <button
               type="button"
+              onClick={toggleUserLocationTracking}
+              title={isTrackingUser ? 'Stop locating / tracking your position' : 'Locate and track your position on the district map'}
+              className={`${actionButton} border transition ${
+                isTrackingUser
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-600 dark:bg-blue-950/70 dark:text-blue-300'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              {isLocatingUser ? (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              ) : (
+                <LocateFixed
+                  className={`h-4 w-4 ${
+                    isTrackingUser ? 'animate-pulse text-blue-600 dark:text-blue-400' : ''
+                  }`}
+                />
+              )}
+              <span>{isTrackingUser ? 'Tracking Me' : isLocatingUser ? 'Locating…' : 'Locate Me'}</span>
+            </button>
+            <button
+              type="button"
               onClick={resetView}
               className={`${actionButton} border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700`}
             >
@@ -1115,6 +1321,22 @@ export default function DistrictMap({
           </div>
         ) : null}
       </div>
+
+      {userLocationError ? (
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>{userLocationError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUserLocationError('')}
+            className="text-amber-700 hover:text-amber-900 dark:text-amber-300"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
@@ -1160,7 +1382,33 @@ export default function DistrictMap({
               {MAP_BACKDROP_LAYERS.some((layer) => backdrops[layer]) || landmarks.length ? (
                 <>
                   <span className="font-medium text-slate-500 dark:text-slate-400">Layers</span>
-                  {MAP_BACKDROP_LAYERS.filter((layer) => backdrops[layer]).map((layer) => {
+                  <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100/90 p-0.5 shadow-xs dark:border-slate-700 dark:bg-slate-800/90">
+                    {ROADS_VIEW_OPTIONS.map((opt) => {
+                      const active = roadsView === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => handleRoadsViewChange(opt.id)}
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                            active
+                              ? 'border border-slate-300 bg-white text-slate-800 shadow-xs dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100'
+                              : 'border border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          {opt.id === 'gis' && (
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{ background: ground.roads?.color || '#94a3b8', opacity: active ? 1 : 0.4 }}
+                            />
+                          )}
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {MAP_BACKDROP_LAYERS.filter((layer) => layer !== 'roads' && backdrops[layer]).map((layer) => {
                     const style = ground[layer];
                     const on = layersOn[layer];
                     return (
@@ -1231,24 +1479,24 @@ export default function DistrictMap({
               ) : null}
             </div>
 
-            {/* DARK GROUND, beside the layers because it is about what is on screen - and it defaults to the member's own app
-                setting (read from the document on open), so the map arrives matching the app. A chip rather than a buried
-                preference: a bright map in a dark truck is a torch, and daylight washes a dark one out, so this is flipped in
-                the moment rather than set once. */}
-            <button
-              type="button"
-              aria-pressed={mapDark}
-              title={mapDark ? 'Dark ground active — press for the light map' : 'Light ground active — press for the dark map'}
-              onClick={toggleMapTheme}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition shadow-xs sm:ml-auto ${
-                mapDark
-                  ? 'border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700'
-                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'
-              }`}
-            >
-              {mapDark ? <Moon className="h-3 w-3 text-cyan-400" /> : <Sun className="h-3 w-3 text-amber-500" />}
-              <span>{mapDark ? 'Dark map' : 'Light map'}</span>
-            </button>
+            {/* DARK GROUND, available when GIS Roads or OpenStreetMap is selected. Defaults to the member's own app
+                setting (read from the document on open), so the map arrives matching the app. */}
+            {roadsView === 'gis' || roadsView === 'osm' ? (
+              <button
+                type="button"
+                aria-pressed={mapDark}
+                title={mapDark ? 'Dark ground active — press for the light map' : 'Light ground active — press for the dark map'}
+                onClick={toggleMapTheme}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition shadow-xs sm:ml-auto ${
+                  mapDark
+                    ? 'border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700'
+                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'
+                }`}
+              >
+                {mapDark ? <Moon className="h-3 w-3 text-cyan-400" /> : <Sun className="h-3 w-3 text-amber-500" />}
+                <span>{mapDark ? 'Dark map' : 'Light map'}</span>
+              </button>
+            ) : null}
           </div>
 
           {!hasSomething && !loading && !error ? (
@@ -1311,140 +1559,146 @@ export default function DistrictMap({
             ) : null}
           </div>
 
-          {/* THE FORM, which is also the "move it" mode. The position is shown as two numbers an officer can read back to
-              somebody, and it is chosen either on the map or from the device they are standing with. */}
-          {draft ? (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveDraft();
-              }}
-              className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+          {/* THE FORM, which is also the "move it" mode. Positioned as a modal dialog over the map. */}
+          {draft && !placing ? (
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs"
             >
-              <div className="flex items-center gap-2">
-                {/* The type's own disc and glyph, which is the same thing the map is drawing at that moment. */}
-                <span
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-                  style={{ background: typeOf(draft).color }}
+              <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveDraft();
+                  }}
+                  className="space-y-4"
                 >
-                  <MapTypeGlyph icon={typeOf(draft).icon} size={14} />
-                </span>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                  {draft.id ? 'Edit landmark' : 'New landmark'}
-                </h3>
-                <button
-                  type="button"
-                  onClick={cancelDraft}
-                  aria-label="Cancel"
-                  className="ml-auto rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-3 dark:border-slate-800">
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white"
+                      style={{ background: typeOf(draft).color }}
+                    >
+                      <MapTypeGlyph icon={typeOf(draft).icon} size={14} />
+                    </span>
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                      {draft.id ? 'Edit landmark' : 'New landmark'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={cancelDraft}
+                      aria-label="Cancel"
+                      className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Name</span>
-                  <input
-                    value={draft.label}
-                    maxLength={LANDMARK_LABEL_MAX}
-                    onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
-                    placeholder="Hydrant 12"
-                    className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                  />
-                </label>
-              </div>
+                  <div>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Name</span>
+                      <input
+                        value={draft.label}
+                        maxLength={LANDMARK_LABEL_MAX}
+                        onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
+                        placeholder="Hydrant 12"
+                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </label>
+                  </div>
 
-              {/* THE TYPE PICKER IS A GRID OF BUTTONS RATHER THAN A DROPDOWN, because each type IS its icon and its color: a
-                  select can only show names, so the one place somebody chooses a type would be the one place they cannot see
-                  what they are choosing. */}
-              <div>
-                <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Type</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {types.map((type) => {
-                    const on = draft.kind === type.key;
-                    return (
-                      <button
-                        key={type.key}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => setDraft((current) => ({ ...current, kind: type.key }))}
-                        className={`inline-flex items-center gap-1.5 rounded-xl border px-2 py-1.5 text-xs font-medium transition ${
-                          on
-                            ? 'border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-500 dark:bg-slate-700 dark:text-white'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <span
-                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                          style={{ background: type.color }}
-                        >
-                          <MapTypeGlyph icon={type.icon} size={10} />
-                        </span>
-                        {type.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                  {/* THE TYPE PICKER IS A GRID OF BUTTONS RATHER THAN A DROPDOWN, because each type IS its icon and its color: a
+                      select can only show names, so the one place somebody chooses a type would be the one place they cannot see
+                      what they are choosing. */}
+                  <div>
+                    <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Type</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {types.map((type) => {
+                        const on = draft.kind === type.key;
+                        return (
+                          <button
+                            key={type.key}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => setDraft((current) => ({ ...current, kind: type.key }))}
+                            className={`inline-flex items-center gap-1.5 rounded-xl border px-2 py-1.5 text-xs font-medium transition ${
+                              on
+                                ? 'border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-500 dark:bg-slate-700 dark:text-white'
+                                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <span
+                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+                              style={{ background: type.color }}
+                            >
+                              <MapTypeGlyph icon={type.icon} size={10} />
+                            </span>
+                            {type.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-                  Note (optional)
-                </span>
-                <textarea
-                  rows={2}
-                  value={draft.note}
-                  maxLength={LANDMARK_NOTE_MAX}
-                  onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
-                  placeholder="Behind the shed, key in the lock box"
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                />
-              </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      Note (optional)
+                    </span>
+                    <textarea
+                      rows={2}
+                      value={draft.note}
+                      maxLength={LANDMARK_NOTE_MAX}
+                      onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
+                      placeholder="Behind the shed, key in the lock box"
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </label>
 
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-slate-500 dark:text-slate-400">
-                  {Number.isFinite(draft.lat) && Number.isFinite(draft.lng)
-                    ? `${draft.lat.toFixed(5)}, ${draft.lng.toFixed(5)}`
-                    : 'Not placed yet'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPlacing(true)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                >
-                  <Crosshair className="h-3.5 w-3.5" />
-                  Choose on map
-                </button>
-                <button
-                  type="button"
-                  onClick={useMyPosition}
-                  disabled={locating}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                >
-                  {locating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
-                  Use my position
-                </button>
-              </div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      {Number.isFinite(draft.lat) && Number.isFinite(draft.lng)
+                        ? `${draft.lat.toFixed(5)}, ${draft.lng.toFixed(5)}`
+                        : 'Not placed yet'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPlacing(true)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      <Crosshair className="h-3.5 w-3.5" />
+                      Choose on map
+                    </button>
+                    <button
+                      type="button"
+                      onClick={useMyPosition}
+                      disabled={locating}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      {locating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
+                      Use my position
+                    </button>
+                  </div>
 
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={cancelDraft}
-                  className="rounded-xl px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
-                >
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  {saving ? 'Saving…' : 'Save landmark'}
-                </button>
+                  <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={cancelDraft}
+                      className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {saving ? 'Saving…' : 'Save landmark'}
+                    </button>
+                  </div>
+                </form>
               </div>
-            </form>
+            </div>
           ) : null}
 
           {/* A legend of the types that are actually on this station's map, rather than the whole list: colours that mean nothing
@@ -1471,168 +1725,134 @@ export default function DistrictMap({
               ) : null}
             </div>
           ) : null}
+        </>
+      )}
 
-          {landmarks.length ? (
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
-              <div className="flex items-center gap-2 border-b border-slate-100 p-4 dark:border-slate-700">
-                <MapPin className="h-4 w-4 text-red-500" />
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Landmarks{' '}
-                  <span className="font-normal text-slate-500 dark:text-slate-400">({landmarks.length})</span>
-                </h3>
-              </div>
-              <ul className="divide-y divide-slate-100 dark:divide-slate-700">
-                {landmarks.map((pin) => {
-                  const type = typeOf(pin);
-                  const isSelected = pin.id === selectedId;
-                  return (
-                    <li key={pin.id}>
-                      <button
-                        type="button"
-                        onClick={() => selectOnMap(pin)}
-                        className={`flex w-full items-start gap-3 p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-700/40 ${
-                          isSelected ? 'bg-slate-50 dark:bg-slate-700/40' : ''
-                        }`}
-                      >
-                        <span
-                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                          style={{ background: type.color }}
-                        >
-                          <MapTypeGlyph icon={type.icon} size={12} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">
-                            {pin.label}
-                          </span>
-                          <span className="block text-xs text-slate-500 dark:text-slate-400">
-                            {type.label}
-                            {pin.note ? ` · ${pin.note}` : ''}
-                          </span>
-                        </span>
-                      </button>
-                      {isSelected && canEdit ? (
-                        <div className="flex items-center justify-end gap-2 px-3 pb-3">
-                          <button
-                            type="button"
-                            onClick={() => startEdit(pin)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPendingDelete(pin)}
-                            className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remove
-                          </button>
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
-
-          {preplans.length ? (
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
-              <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-700">
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                    Pre-Incident Plans{' '}
-                    <span className="font-normal text-slate-500 dark:text-slate-400">({preplans.length})</span>
+      {/* Landmark Details Modal: appears when tapping a landmark pin on the map */}
+      {activeLandmark && !draft ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="landmark-details-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeLandmarkDetails();
+          }}
+        >
+          <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+              <div className="flex items-center gap-3 min-w-0">
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-xs"
+                  style={{ background: typeOf(activeLandmark).color }}
+                >
+                  <MapTypeGlyph icon={typeOf(activeLandmark).icon} size={20} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h3
+                    id="landmark-details-title"
+                    className="truncate text-base font-semibold text-slate-900 dark:text-white"
+                  >
+                    {activeLandmark.label}
                   </h3>
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                    {typeOf(activeLandmark).label}
+                  </span>
                 </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeLandmarkDetails}
+                aria-label="Close"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="my-5 space-y-4 text-sm">
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Type
+                </span>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span
+                    className="h-3 w-3 rounded-full"
+                    style={{ background: typeOf(activeLandmark).color }}
+                  />
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    {typeOf(activeLandmark).label}
+                  </span>
+                </div>
+              </div>
+
+              {activeLandmark.note ? (
+                <div>
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Note
+                  </span>
+                  <p className="mt-1.5 rounded-xl bg-slate-50 p-3 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                    {activeLandmark.note}
+                  </p>
+                </div>
+              ) : null}
+
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Location
+                </span>
+                <p className="mt-1.5 font-mono text-xs text-slate-600 dark:text-slate-400">
+                  {Number.isFinite(activeLandmark.lat) && Number.isFinite(activeLandmark.lng)
+                    ? `${activeLandmark.lat.toFixed(5)}, ${activeLandmark.lng.toFixed(5)}`
+                    : 'Unknown position'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <div>
                 {canEdit ? (
                   <button
                     type="button"
                     onClick={() => {
-                      setActivePreplan(null);
-                      setIsPreplanInitialEdit(true);
-                      setIsPreplanModalOpen(true);
+                      const toDelete = activeLandmark;
+                      closeLandmarkDetails();
+                      setPendingDelete(toDelete);
                     }}
-                    className="inline-flex items-center gap-1 rounded-xl bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+                    className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    New plan
+                    <Trash2 className="h-4 w-4" />
+                    Remove
                   </button>
                 ) : null}
               </div>
-              <ul className="divide-y divide-slate-100 dark:divide-slate-700">
-                {preplans.map((plan) => {
-                  const isSelected = activePreplan?.id === plan.id && isPreplanModalOpen;
-                  return (
-                    <li key={plan.id} className={`flex items-center justify-between p-3 transition ${isSelected ? 'bg-blue-50/70 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const map = mapRef.current;
-                          if (map && Number.isFinite(plan.latitude) && Number.isFinite(plan.longitude)) {
-                            map.panTo([plan.latitude, plan.longitude]);
-                          }
-                          setActivePreplan(plan);
-                          setIsPreplanInitialEdit(false);
-                          setIsPreplanModalOpen(true);
-                        }}
-                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
-                      >
-                        <span
-                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white shadow-xs"
-                          style={{ background: PREPLAN_PIN_COLOR }}
-                        >
-                          <Building2 className="h-3.5 w-3.5 text-white" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">
-                            {plan.occupancy_name}
-                          </span>
-                          <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
-                            {plan.street_address_1 ? `${plan.street_address_1} · ` : ''}
-                            {plan.occupancy_type || 'Commercial / Residential'}
-                            {plan.occupancy_id ? ` · ID: ${plan.occupancy_id}` : ''}
-                          </span>
-                        </span>
-                      </button>
-                      <div className="ml-2 flex shrink-0 items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActivePreplan(plan);
-                            setIsPreplanInitialEdit(false);
-                            setIsPreplanModalOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                        >
-                          <FileText className="h-3.5 w-3.5 text-blue-500" />
-                          View plan
-                        </button>
-                        {canEdit ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActivePreplan(plan);
-                              setIsPreplanInitialEdit(true);
-                              setIsPreplanModalOpen(true);
-                            }}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="flex items-center gap-2">
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const toEdit = activeLandmark;
+                      closeLandmarkDetails();
+                      startEdit(toEdit);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={closeLandmarkDetails}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-          ) : null}
-        </>
-      )}
+          </div>
+        </div>
+      ) : null}
 
       {/* In THIS component rather than anywhere else: this is the one holding the pin about to be removed, and a dialog
           rendered from a sibling would not be about anything on screen. */}

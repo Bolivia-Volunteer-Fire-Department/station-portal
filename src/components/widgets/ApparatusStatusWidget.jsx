@@ -284,7 +284,7 @@ export default function ApparatusStatusWidget({ token, onNavigate }) {
             onClick={() => onNavigate('apparatus')}
             className="text-xs font-semibold text-red-600 dark:text-red-400 hover:text-red-500 flex items-center gap-0.5 transition"
           >
-            <span>Apparatus Registry</span>
+            <span>Apparatus Bay</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>

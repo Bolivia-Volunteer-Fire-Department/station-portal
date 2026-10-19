@@ -86,6 +86,7 @@ import {
 
 export const SIDEBAR_NAV_ORDER_KEY = 'sidebar_nav_order';
 export const SIDEBAR_NAV_ICONS_KEY = 'sidebar_nav_icons';
+export const DEFAULT_MODULE_KEY = 'default_module';
 
 export const DEFAULT_SIDEBAR_NAV_ORDER = [
   'dashboard',

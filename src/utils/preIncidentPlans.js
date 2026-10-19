@@ -1,4 +1,5 @@
 // Pre-Incident Plans (PIPs) data model, normalization, validation, and offline caching.
+import { normalizeBuildingLandmark } from './buildingLandmarks.js';
 
 export const PRE_INCIDENT_PLANS_COLLECTION = 'pre_incident_plans';
 export const PRE_INCIDENT_PLANS_CACHE_KEY = 'sp_pre_incident_plans';
@@ -130,6 +131,87 @@ export const roundCoordinate = (value) => {
   const rounded = Math.round(number * factor) / factor;
   return Object.is(rounded, -0) ? 0 : rounded;
 };
+
+export const INSPECTION_STATUSES = [
+  { value: 'passed', label: 'Passed / Satisfactory', color: 'emerald' },
+  { value: 'deficiencies', label: 'Deficiencies Found', color: 'amber' },
+  { value: 'follow_up', label: 'Follow-Up Required', color: 'red' },
+  { value: 'scheduled', label: 'Scheduled / In Progress', color: 'blue' },
+];
+
+export const normalizeSiteInspection = (insp) => {
+  const dateStr = str(insp?.inspection_date, 30);
+  return {
+    id: str(insp?.id || `insp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`, 50),
+    inspection_date: dateStr,
+    inspector_name: str(insp?.inspector_name, 100),
+    inspector_id: str(insp?.inspector_id, 100),
+    status: str(insp?.status || 'passed', 50),
+    notes: str(insp?.notes, 2000),
+    created_at: str(insp?.created_at || new Date().toISOString(), 50),
+    created_by: str(insp?.created_by, 100),
+  };
+};
+
+/**
+ * Calculates the next inspection due date and compliance status for a pre-incident plan.
+ * Rule: Every preplan needs to be inspected annually, no more than 365 days from the last inspection
+ * (so if an inspection is completed early, the next one is due a year from that date).
+ */
+export const getPreplanInspectionDue = (plan, now = new Date()) => {
+  const inspections = Array.isArray(plan?.site_inspections) ? plan.site_inspections : [];
+
+  // Sort inspections by inspection_date descending (most recent first)
+  const sorted = [...inspections]
+    .filter((i) => i.inspection_date)
+    .sort((a, b) => new Date(b.inspection_date) - new Date(a.inspection_date));
+
+  const latest = sorted[0] || null;
+  let dueDate = null;
+  let baseDate = null;
+  const hasRecord = Boolean(latest);
+
+  if (latest) {
+    baseDate = new Date(latest.inspection_date);
+    // Exactly 365 days from the last inspection date
+    dueDate = new Date(baseDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+  } else if (plan?.created_at) {
+    baseDate = new Date(plan.created_at);
+    dueDate = new Date(baseDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+  } else {
+    // If never inspected and no creation stamp, inspection is due immediately
+    dueDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDayStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+  const diffMs = dueDayStart.getTime() - todayStart.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  const isOverdue = diffDays < 0;
+  // Is due in the current calendar month
+  const isDueThisMonth =
+    dueDate.getFullYear() === now.getFullYear() && dueDate.getMonth() === now.getMonth();
+
+  return {
+    latestInspection: latest,
+    nextDueDate: dueDate,
+    nextDueDateString: dueDate.toISOString().split('T')[0],
+    daysRemaining: diffDays,
+    isOverdue,
+    isDueThisMonth,
+    hasRecord,
+  };
+};
+
+export const normalizePreplanNote = (note) => ({
+  id: str(note?.id || `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`, 50),
+  content: str(note?.content || note?.text, 5000),
+  author_id: str(note?.author_id, 100),
+  author_name: str(note?.author_name, 100),
+  created_at: str(note?.created_at || new Date().toISOString(), 50),
+  updated_at: str(note?.updated_at, 50),
+});
 
 export const normalizeContact = (c) => ({
   id: str(c?.id || Math.random().toString(36).substring(2, 9), 50),
@@ -342,6 +424,21 @@ export const normalizePreIncidentPlan = (raw = {}, defaultStation = '') => {
     // Attached Diagrams & Documents (array of file objects)
     files: Array.isArray(source.files) ? source.files : [],
 
+    // Building Landmarks / Tactical Site Features plotted on the building satellite map
+    building_landmarks: Array.isArray(source.building_landmarks)
+      ? source.building_landmarks.map(normalizeBuildingLandmark)
+      : [],
+
+    // Running log of annual site inspections
+    site_inspections: Array.isArray(source.site_inspections)
+      ? source.site_inspections.map(normalizeSiteInspection)
+      : [],
+
+    // Running list of generic notes
+    notes: Array.isArray(source.notes)
+      ? source.notes.map(normalizePreplanNote)
+      : [],
+
     created_at: str(source.created_at, 50),
     updated_at: str(source.updated_at, 50),
     created_by: str(source.created_by, 100),
@@ -412,6 +509,9 @@ export const preIncidentPlanFields = (input = {}, defaultStation = '') => {
     nearby_hydrants: norm.nearby_hydrants,
     chemical_inventory: norm.chemical_inventory,
     files: norm.files,
+    building_landmarks: norm.building_landmarks,
+    site_inspections: norm.site_inspections,
+    notes: norm.notes,
   };
 };
 

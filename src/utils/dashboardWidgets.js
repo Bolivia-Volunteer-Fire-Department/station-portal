@@ -83,6 +83,15 @@ export const BUILTIN_WIDGETS = [
     maxColSpan: 3,
     category: 'Operations',
   },
+  {
+    id: 'preplans-due',
+    label: 'Preplans Due for Inspection',
+    description: 'Pre-incident plans overdue or due for annual site inspection this month.',
+    defaultColSpan: 2,
+    minColSpan: 1,
+    maxColSpan: 3,
+    category: 'Operations',
+  },
 ];
 
 // Factory default station layout:

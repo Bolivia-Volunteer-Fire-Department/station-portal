@@ -7,6 +7,8 @@
 // One setting's value, or `fallback` when the sheet has no such row. Tolerant of a missing list, a row with
 // no key, and a key that arrived padded with whitespace - this reads a spreadsheet somebody may have edited
 // by hand, where a trailing space is invisible.
+export const DEFAULT_MODULE_KEY = 'default_module';
+
 export const getSettingValue = (systemSettings, key, fallback = '') => {
   const rows = Array.isArray(systemSettings) ? systemSettings : [];
   const setting = rows.find((row) => String(row?.key ?? '').trim() === String(key).trim());
