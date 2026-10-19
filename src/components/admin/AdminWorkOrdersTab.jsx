@@ -89,6 +89,7 @@ export default function AdminWorkOrdersTab({
   currentUserName: currentUserNameProp = '',
   users = [],
   roles = [],
+  workOrders: workOrdersProp = null,
   onDataChanged,
   initialWorkOrderId = null,
   initialWorkOrder = null,
@@ -112,10 +113,18 @@ export default function AdminWorkOrdersTab({
     );
   }, [currentUserNameProp, currentUser, effectiveUsers, currentUserId]);
 
-  const [workOrdersList, setWorkOrdersList] = useState([]);
+  const [workOrdersList, setWorkOrdersList] = useState(() =>
+    Array.isArray(workOrdersProp) ? workOrdersProp.map((wo) => normalizeWorkOrder(wo, currentUser)) : []
+  );
   const [apparatusList, setApparatusList] = useState([]);
   const [equipmentList, setEquipmentList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !Array.isArray(workOrdersProp) || workOrdersProp.length === 0);
+
+  useEffect(() => {
+    if (Array.isArray(workOrdersProp)) {
+      setWorkOrdersList(workOrdersProp.map((wo) => normalizeWorkOrder(wo, currentUser)));
+    }
+  }, [workOrdersProp, currentUser]);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -216,7 +225,7 @@ export default function AdminWorkOrdersTab({
 
   const handleRefresh = async () => {
     await loadData();
-    if (onDataChanged) onDataChanged();
+    if (onDataChanged) onDataChanged('workOrders');
   };
 
   // Filtered list
@@ -295,7 +304,7 @@ export default function AdminWorkOrdersTab({
     try {
       await adminSaveWorkOrder(updated, token);
       setWorkOrdersList((prev) => prev.map((item) => (item.id === workOrder.id ? updated : item)));
-      if (onDataChanged) onDataChanged();
+      if (onDataChanged) onDataChanged('workOrders');
     } catch (err) {
       console.error('Failed to assign work order:', err);
       setNoticeModal({
@@ -322,7 +331,7 @@ export default function AdminWorkOrdersTab({
     try {
       await adminSaveWorkOrder(updated, token);
       setWorkOrdersList((prev) => prev.map((item) => (item.id === workOrder.id ? updated : item)));
-      if (onDataChanged) onDataChanged();
+      if (onDataChanged) onDataChanged('workOrders');
     } catch (err) {
       console.error('Failed to change work order status:', err);
       setNoticeModal({
@@ -449,7 +458,7 @@ export default function AdminWorkOrdersTab({
       });
 
       setEditorOpen(false);
-      if (onDataChanged) onDataChanged();
+      if (onDataChanged) onDataChanged('workOrders');
     } catch (err) {
       console.error('Failed to save work order:', err);
       setNoticeModal({
@@ -470,7 +479,7 @@ export default function AdminWorkOrdersTab({
       await adminDeleteWorkOrder(pendingDelete.id, token);
       setWorkOrdersList((prev) => prev.filter((wo) => wo.id !== pendingDelete.id));
       setPendingDelete(null);
-      if (onDataChanged) onDataChanged();
+      if (onDataChanged) onDataChanged('workOrders');
     } catch (err) {
       console.error('Failed to delete work order:', err);
       setNoticeModal({
@@ -513,7 +522,7 @@ export default function AdminWorkOrdersTab({
         setWorkOrdersList((prev) =>
           prev.map((wo) => (wo.id === formData.id ? normalizeWorkOrder(updated, currentUser) : wo))
         );
-        if (onDataChanged) onDataChanged();
+        if (onDataChanged) onDataChanged('workOrders');
       } catch (err) {
         console.error('Failed to auto-save note:', err);
       }

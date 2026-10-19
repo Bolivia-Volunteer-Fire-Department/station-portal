@@ -47,18 +47,57 @@ export const WORK_ORDER_CATEGORIES = [
   { value: 'other', label: 'Other', description: 'General request or unlisted asset' },
 ];
 
-export const ACTIVE_STATUS_VALUES = ['pending', 'scheduled', 'in_progress', 'on_hold'];
+export const INACTIVE_STATUS_VALUES = [
+  'complete',
+  'completed',
+  'resolved',
+  'closed',
+  'cancelled',
+  'canceled',
+  'rejected',
+  'duplicate',
+];
+
+export const ACTIVE_STATUS_VALUES = [
+  'pending',
+  'new',
+  'submitted',
+  'open',
+  'active',
+  'scheduled',
+  'in_progress',
+  'in-progress',
+  'on_hold',
+  'on-hold',
+  'assigned',
+  'pending_review',
+];
+
+export function isClosedWorkOrder(wo) {
+  if (!wo) return false;
+  const raw = String(typeof wo === 'object' ? wo.status : wo || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (!raw) return false;
+  return INACTIVE_STATUS_VALUES.includes(raw);
+}
 
 export function isActiveWorkOrder(wo) {
-  if (!wo || !wo.status) return true;
-  return ACTIVE_STATUS_VALUES.includes(String(wo.status).toLowerCase());
+  if (!wo) return true;
+  const statusStr = String(typeof wo === 'object' ? wo.status : wo || '').trim();
+  if (!statusStr) return true;
+  return !isClosedWorkOrder(wo);
 }
 
 export function getStatusMeta(statusValue) {
-  const s = String(statusValue || 'pending').toLowerCase();
+  let s = String(statusValue || 'pending').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (['new', 'submitted', 'open', 'active', 'pending_review'].includes(s)) s = 'pending';
+  else if (s === 'in_progress') s = 'in_progress';
+  else if (s === 'on_hold') s = 'on_hold';
+  else if (['completed', 'resolved', 'closed', 'done'].includes(s)) s = 'complete';
+  else if (['canceled', 'rejected', 'duplicate'].includes(s)) s = 'cancelled';
+
   return WORK_ORDER_STATUSES.find((item) => item.value === s) || {
     value: s,
-    label: s,
+    label: s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : 'Pending Review',
     color: 'slate',
     description: '',
   };
@@ -110,7 +149,15 @@ export function normalizeWorkOrder(row, currentUser = null) {
     description: String(row?.description || '').trim(),
     category: String(row?.category || 'other').toLowerCase(),
     priority: String(row?.priority || 'medium').toLowerCase(),
-    status: String(row?.status || 'pending').toLowerCase(),
+    status: (() => {
+      let s = String(row?.status || 'pending').trim().toLowerCase().replace(/[-\s]+/g, '_');
+      if (['new', 'submitted', 'open', 'active', 'pending_review'].includes(s)) return 'pending';
+      if (s === 'in_progress') return 'in_progress';
+      if (s === 'on_hold') return 'on_hold';
+      if (['completed', 'resolved', 'closed', 'done'].includes(s)) return 'complete';
+      if (['canceled', 'rejected', 'duplicate'].includes(s)) return 'cancelled';
+      return s || 'pending';
+    })(),
 
     // Linked assets
     apparatus_id: String(row?.apparatus_id || '').trim(),

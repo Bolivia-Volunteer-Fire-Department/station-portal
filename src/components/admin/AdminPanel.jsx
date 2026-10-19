@@ -718,6 +718,7 @@ export default function AdminPanel({
           }
           users={nameRows}
           roles={roles}
+          workOrders={workOrders}
           onDataChanged={onDataChanged}
           initialWorkOrderId={initialWorkOrderId}
           initialWorkOrder={initialWorkOrder}

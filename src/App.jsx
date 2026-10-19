@@ -94,6 +94,7 @@ import {
   prefetchableFor,
 } from './utils/deferredModules';
 const WorkOrdersModule = lazy(() => import('./components/WorkOrdersModule'));
+import { normalizeWorkOrder } from './utils/workOrders';
 // Chat component available across all screens.
 import ChatHost from './components/Chat/ChatHost';
 import ScheduleFreshness from './components/ScheduleFreshness';
@@ -203,6 +204,7 @@ export default function App() {
   const [offers, setOffers] = useState([]);
   const [adminOffers, setAdminOffers] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
+  const refreshWorkOrdersRef = useRef(null);
   const [authToken, setAuthToken] = useState(null);
   // Prompts the user to re-enter their password when expired.
   const [needsReauth, setNeedsReauth] = useState(false);
@@ -560,6 +562,16 @@ const getLoadingMessage = () => {
     const handlePushMessage = (event) => {
       const message = event.data;
       if (!message || message.type !== 'PUSH_RECEIVED') return;
+
+      if (
+        message?.category === 'work_order' ||
+        message?.data?.type?.startsWith('WORK_ORDER') ||
+        /work\s*order/i.test(message?.title || '') ||
+        /work\s*order/i.test(message?.body || '')
+      ) {
+        if (tokenRef.current) void refreshWorkOrdersRef.current?.(tokenRef.current);
+      }
+
       // Hidden tabs would just swallow the toast; the OS notification has it covered
       if (document.visibilityState !== 'visible') return;
 
@@ -795,6 +807,9 @@ const getLoadingMessage = () => {
       }
       const hiddenAt = scheduleSentinel.current.hiddenAt || 0;
       scheduleSentinel.current.hiddenAt = 0;
+      if (tokenRef.current && (canViewWorkOrders || canManageWorkOrders)) {
+        void refreshWorkOrdersRef.current?.(tokenRef.current);
+      }
       const { from, to } = scheduleSentinel.current;
       if (!from && !to) return;
       const hiddenMs = hiddenAt ? Date.now() - hiddenAt : 0;
@@ -803,7 +818,7 @@ const getLoadingMessage = () => {
     };
     document.addEventListener('visibilitychange', onVisibilityChanged);
     return () => document.removeEventListener('visibilitychange', onVisibilityChanged);
-  }, []);
+  }, [canViewWorkOrders, canManageWorkOrders]);
 
   useEffect(() => {
     const userId = currentUser?.id ? String(currentUser.id) : '';
@@ -814,6 +829,15 @@ const getLoadingMessage = () => {
         onDuty: setOnDutyUsers,
         announcements: setAnnouncements,
         systemSettings: setSystemSettings,
+        ...((canViewWorkOrders || canManageWorkOrders)
+          ? {
+              workOrders: (rows) => {
+                if (Array.isArray(rows)) {
+                  setWorkOrders(rows.map((wo) => normalizeWorkOrder(wo, currentUser)));
+                }
+              },
+            }
+          : {}),
         // Handles clock in and clock out actions.
         scheduleVersion: (row) => {
           const version = Number((row && row.version) || 0);
@@ -828,7 +852,7 @@ const getLoadingMessage = () => {
       onError: (error) => console.warn('[live] a live read could not be kept open:', error && error.message),
     });
     return stop;
-  }, [currentUser?.id]);
+  }, [currentUser?.id, canViewWorkOrders, canManageWorkOrders, currentUser]);
 
   // When network reconnects (or when a backgrounded tab returns to visible on a mobile browser), re-sync on-duty
   useEffect(() => {
@@ -1034,12 +1058,13 @@ const getLoadingMessage = () => {
         return;
       }
       if (data && data.workOrders) {
-        setWorkOrders(data.workOrders);
+        setWorkOrders(data.workOrders.map((wo) => normalizeWorkOrder(wo, currentUser)));
       }
     } catch (err) {
       console.warn('Failed to fetch work orders:', err);
     }
-  }, [authToken]);
+  }, [authToken, currentUser]);
+  refreshWorkOrdersRef.current = refreshWorkOrders;
 
   // Handles clock in and clock out actions.
   const [logsScope, setLogsScope] = useState(null);
@@ -2587,6 +2612,7 @@ const getLoadingMessage = () => {
                 currentUserId={String(currentUser?.id ?? '')}
                 currentUserName={currentUser?.name || currentUser?.full_name || currentUser?.user_name || ''}
                 canManageWorkOrders={canManageWorkOrders}
+                workOrders={workOrders}
                 onNavigateToAdmin={() => {
                   setActiveTab('admin');
                   setAdminSubTab('work-orders');

@@ -50,6 +50,7 @@ export default function WorkOrdersModule({
   currentUser = null,
   currentUserName: currentUserNameProp = '',
   canManageWorkOrders = false,
+  workOrders: workOrdersProp = null,
   onNavigateToAdmin = null,
   onChanged = null,
 }) {
@@ -65,10 +66,18 @@ export default function WorkOrdersModule({
     );
   }, [currentUserNameProp, currentUser]);
 
-  const [workOrdersList, setWorkOrdersList] = useState([]);
+  const [workOrdersList, setWorkOrdersList] = useState(() =>
+    Array.isArray(workOrdersProp) ? workOrdersProp.map((wo) => normalizeWorkOrder(wo, currentUser)) : []
+  );
   const [apparatusList, setApparatusList] = useState([]);
   const [equipmentList, setEquipmentList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !Array.isArray(workOrdersProp) || workOrdersProp.length === 0);
+
+  useEffect(() => {
+    if (Array.isArray(workOrdersProp)) {
+      setWorkOrdersList(workOrdersProp.map((wo) => normalizeWorkOrder(wo, currentUser)));
+    }
+  }, [workOrdersProp, currentUser]);
 
   // Active view tab: 'my' (My Submissions) or 'all' (All Station Tickets)
   const [viewTab, setViewTab] = useState('my');
@@ -246,6 +255,7 @@ export default function WorkOrdersModule({
       setWorkOrdersList((prev) => [finalWorkOrder, ...prev]);
       setIsSubmitModalOpen(false);
       setViewTab('my');
+      onChanged?.();
     } catch (err) {
       console.error('Failed to submit work order:', err);
       setNoticeModal({
@@ -283,6 +293,7 @@ export default function WorkOrdersModule({
       setSelectedTicket(updated);
       setWorkOrdersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       setTicketNoteText('');
+      onChanged?.();
     } catch (err) {
       console.error('Failed to add note:', err);
       setNoticeModal({
@@ -411,7 +422,7 @@ export default function WorkOrdersModule({
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            All Station Tickets ({activeStationWorkOrders.length} Open)
+            All Station Tickets ({activeStationWorkOrders.length} Open{workOrdersList.length > activeStationWorkOrders.length ? ` · ${workOrdersList.length} Total` : ''})
           </button>
         </div>
 
