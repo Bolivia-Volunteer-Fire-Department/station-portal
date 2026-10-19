@@ -63,6 +63,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Added an **Import CSV** function for Trainings.
 * Added a **Hydrants** tab to Assets, and an import tool for those.
 * Added password policy features.
+* Prep for migration to **stationsync.net**!
 
 ### Version 1.6x
 * Added the **District Map** module.

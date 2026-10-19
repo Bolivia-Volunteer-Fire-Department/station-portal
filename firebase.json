@@ -13,6 +13,40 @@
     "rules": "storage.rules",
     "bucket": "fire-clock-76df723.firebasestorage.app"
   },
+  "hosting": {
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "version.json",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "sw.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
+  },
   "emulators": {
     "firestore": {
       "port": 8080
@@ -28,6 +62,9 @@
     },
     "database": {
       "port": 9000
+    },
+    "hosting": {
+      "port": 5000
     },
     "ui": {
       "enabled": true,
