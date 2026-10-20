@@ -1909,8 +1909,24 @@ const getLoadingMessage = () => {
     try {
       const result = await updateUserPassword({ newPassword });
       if (result.success) {
-        // The server clears the "must change it" flag as part of the save; clearing it here too is what clo...
+        // The server clears the "must change it" flag as part of the save; clearing it here too is what closes the modal
         setCurrentUser((prev) => ({ ...prev, [MUST_CHANGE_PASSWORD_COLUMN]: 'FALSE' }));
+        return result;
+      }
+      if (
+        result.code === 'auth/requires-recent-login' ||
+        (result.message && result.message.includes('requires-recent-login'))
+      ) {
+        queueReauth(async () => {
+          const retried = await updateUserPassword({ newPassword });
+          if (retried.success) {
+            setCurrentUser((prev) => ({ ...prev, [MUST_CHANGE_PASSWORD_COLUMN]: 'FALSE' }));
+            setStatusMessage({ type: 'success', text: 'Password updated successfully!' });
+          } else {
+            setStatusMessage({ type: 'error', text: retried.message || 'Failed to update password.' });
+          }
+        });
+        return { success: false, message: 'Please confirm your current password to complete the change.' };
       }
       return result;
     } catch {

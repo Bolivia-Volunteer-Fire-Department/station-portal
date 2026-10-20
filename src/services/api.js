@@ -483,7 +483,16 @@ export const updateUserPassword = async ({ newPassword }) => {
     await changeOwnPassword(newPassword);
     return { success: true };
   } catch (error) {
-    return { success: false, message: error?.message || 'The password could not be changed.' };
+    const isRecentLoginError =
+      error?.code === 'auth/requires-recent-login' ||
+      String(error?.message || '').includes('requires-recent-login');
+    return {
+      success: false,
+      code: error?.code,
+      message: isRecentLoginError
+        ? 'For your security, please confirm your current credentials to change your password.'
+        : (error?.message || 'The password could not be changed.'),
+    };
   }
 };
 

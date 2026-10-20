@@ -156,7 +156,7 @@ export default function DistrictMapDrawing({ token }) {
           <MapIcon className="mx-auto h-10 w-10 text-slate-400" />
           <h3 className="mt-3 text-lg font-semibold text-slate-900 dark:text-white">No district map yet</h3>
           <p className="mx-auto mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
-            An officer can upload the department's boundary drawing from Administration → System → District Map. Once it is
+            An administrator can upload an SVG of the department's district map from Administration → Content → Map Setup. Once it is
             saved it appears here for everybody whose role may see it.
           </p>
         </div>

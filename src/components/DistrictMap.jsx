@@ -1258,8 +1258,8 @@ export default function DistrictMap({
           in the middle of the screen with a gap above the map. */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex w-full items-center gap-1 rounded-xl border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-800 sm:w-auto">
-          {viewTab('map', 'The district', MapPin)}
-          {viewTab('drawing', 'Drawing', Layers)}
+          {viewTab('map', 'Interactive Map', MapPin)}
+          {viewTab('drawing', 'Basic Map', Layers)}
         </div>
         {/* Only drawn when the map view has actions to put in it: an empty full-width row would still add the row gap above the
             map on a phone when the Drawing tab - which has no actions - is open. */}
