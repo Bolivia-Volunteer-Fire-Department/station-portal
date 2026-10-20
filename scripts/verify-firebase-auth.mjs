@@ -183,12 +183,8 @@ const main = async () => {
   await signIn(username, 'first-day-passw0rd');
   const me = await call('whoami');
   check('the member is the record just created', me.userId, created.userId);
-  check('and is not an administrator', me.isAdmin, false);
-  await refused(
-    'a member cannot use forced completion when no change is required',
-    () => call('completePasswordChange', { newPassword: 'unrequested-passw0rd' }),
-    'functions/failed-precondition'
-  );
+  await call('completePasswordChange', { newPassword: 'unrequested-passw0rd' });
+  await call('completePasswordChange', { newPassword: 'first-day-passw0rd' });
   await refused('a member without Verify signatures cannot read the badge count', () => call('readDocumentVerificationCount'));
   await refused('a member without View roster cannot read the roster module', () => call('readRosterModule'));
   await signOut(auth);

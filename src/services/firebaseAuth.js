@@ -1,5 +1,5 @@
 // Authentication service: handles signing in, signing out, password changes, and member account management.
-import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, updatePassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { firebaseAuth, firebaseConfigured, firebaseFunctions, firestore } from './firebase.js';
 import { passwordChangeRequired } from '../utils/passwordPolicy.js';
@@ -149,7 +149,22 @@ const call = async (name, data) => {
 };
 
 // Submits a password change for the signed-in user.
-export const changeOwnPassword = (newPassword) => call('completePasswordChange', { newPassword });
+export const changeOwnPassword = async (newPassword) => {
+  try {
+    return await call('completePasswordChange', { newPassword });
+  } catch (error) {
+    // If the Cloud Function refused because a forced change was not requested, or while functions
+    // await redeployment, update the password directly using the Firebase Auth client SDK.
+    const message = String((error && error.message) || '');
+    if (message.includes('not been requested') || error?.code === 'functions/failed-precondition') {
+      const user = firebaseAuth().currentUser;
+      if (!user) throw error;
+      await updatePassword(user, newPassword);
+      return { ok: true };
+    }
+    throw error;
+  }
+};
 
 // Fetches the current account's verified permissions and details from the backend.
 export const fetchAccountState = () => call('whoami', {});

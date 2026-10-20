@@ -8,7 +8,7 @@ import { AVATAR_URL_MAX } from '../utils/avatars.js';
 import { rowsFor, rowsOf } from './firestorePayload.js';
 import { badgeForRecord, badgeIndexFor, badgeToday } from '../utils/certificationBadges.js';
 import { normalizeFormDefinition } from '../utils/formDefinition.js';
-import { visibleDocumentFor } from './firestoreReads.js';
+import { keysFor, mayReadWholeDocuments, visibleDocumentFor } from './firestoreReads.js';
 import { settingSide } from '../utils/systemSettings.js';
 import { MAP_LAYER_COLLECTION, MAP_LAYER_DOC_ID, mapLayerFields, mapSvgProblem } from '../utils/mapLayer.js';
 import { MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID, mapTypesDocument, mapTypesProblem } from '../utils/mapTypes.js';
@@ -405,13 +405,17 @@ export const signChecklistItems = async ({ userId, documentId, itemIds }) => {
   const wanted = [...new Set((Array.isArray(itemIds) ? itemIds : []).map((id) => String(id || '').trim()).filter(Boolean))];
   if (!wanted.length) return { success: false, message: 'No items were named.' };
 
-  const items = document.audience_keys?.length
-    ? await rowsOf(query(
-        collection(firestore(), 'document_checklist_items'),
-        where('document_id', '==', documentId),
-        where('audience_keys', 'array-contains-any', document.audience_keys)
-      ))
-    : [];
+  const whole = await mayReadWholeDocuments(userId);
+  const keys = whole ? null : await keysFor(userId);
+  const items = whole
+    ? await rowsFor('document_checklist_items', 'document_id', documentId)
+    : (keys && keys.length
+      ? await rowsOf(query(
+          collection(firestore(), 'document_checklist_items'),
+          where('document_id', '==', documentId),
+          where('audience_keys', 'array-contains-any', keys)
+        ))
+      : []);
   const owned = new Set(items.map((item) => item.id));
 
   const mine = await ownSignatureRows(userId);

@@ -43,7 +43,7 @@ const onDutyRows = async (_uid) => {
 };
 
 // Finds the audience keys (role, rank, etc.) for the current user.
-const keysFor = async (uid) => {
+export const keysFor = async (uid) => {
   const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
   return audienceKeysFor({ userId: uid, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
 };
@@ -65,7 +65,7 @@ const managesWholeTimeclock = async (uid) => {
 };
 
 // Checks if an officer has permission to view all documents.
-const mayReadWholeDocuments = async (uid) => {
+export const mayReadWholeDocuments = async (uid) => {
   if (!uid) return false;
   const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
   const roleId = String(me.role_id || '');
@@ -505,10 +505,13 @@ export const READERS = {
     const document = await visibleDocumentFor(uid, wanted);
     if (!document) return { success: false, message: 'That document is not available.' };
 
+    const whole = await mayReadWholeDocuments(uid);
+    const audienceKeys = whole ? null : await keysFor(uid);
+
     const signature = documentSignatureFor(await rowsFor('document_signatures', 'user_id', uid), wanted, uid);
     return {
       success: true,
-      document: await documentFullRow(document, document.audience_keys),
+      document: await documentFullRow(document, audienceKeys),
       signature,
       signature_stale: signatureIsStale(signature, document),
       assessment_score: isAssessmentDocument(document) ? await assessmentScoreRow(wanted, uid) : null,
@@ -535,14 +538,15 @@ export const READERS = {
     if (!member.exists()) return { success: false, message: 'That member no longer exists.' };
 
     const wholeCollection = await mayReadWholeDocuments(uid);
+    const audienceKeys = wholeCollection ? null : audienceKeysFor({
+      userId: memberId,
+      roleId: String((member.data() || {}).role_id || ''),
+      rankId: String((member.data() || {}).rank_id || ''),
+    });
     const [visible, signatures, summaries] = await Promise.all([
-      wholeCollection ? rowsOf(collection(firestore(), 'documents')) : audienceRows('documents', audienceKeysFor({
-        userId: memberId,
-        roleId: String((member.data() || {}).role_id || ''),
-        rankId: String((member.data() || {}).rank_id || ''),
-      })),
+      wholeCollection ? rowsOf(collection(firestore(), 'documents')) : audienceRows('documents', audienceKeys),
       rowsFor('document_signatures', 'user_id', memberId),
-      documentItemSummaries(memberId),
+      documentItemSummaries(memberId, audienceKeys),
     ]);
     const today = stationTodayKey();
     const live = visible.filter((document) => documentIsLive(document, today));
@@ -584,11 +588,31 @@ export const READERS = {
     const documentId = String((body && body.id) || '').trim();
     if (!documentId) return { items: [], signatures: [] };
 
-    const [items, signatures, document] = await Promise.all([
-      rowsFor('document_checklist_items', 'document_id', documentId),
-      rowsFor('document_signatures', 'document_id', documentId),
-      getDoc(doc(firestore(), 'documents', documentId)),
-    ]);
+    const whole = await mayReadWholeDocuments(uid);
+    let items;
+    let signatures;
+    let document;
+
+    if (whole) {
+      [items, signatures, document] = await Promise.all([
+        rowsFor('document_checklist_items', 'document_id', documentId),
+        rowsFor('document_signatures', 'document_id', documentId),
+        getDoc(doc(firestore(), 'documents', documentId)),
+      ]);
+    } else {
+      const keys = await keysFor(uid);
+      [items, signatures, document] = await Promise.all([
+        checklistItemRows(documentId, keys),
+        rowsOf(
+          query(
+            collection(firestore(), 'document_signatures'),
+            where('document_id', '==', documentId),
+            where('user_id', '==', uid)
+          )
+        ),
+        getDoc(doc(firestore(), 'documents', documentId)),
+      ]);
+    }
 
     const revision = (row) => {
       const value = parseInt(row && row.content_revision, 10);

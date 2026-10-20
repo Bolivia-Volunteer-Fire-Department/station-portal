@@ -1085,15 +1085,10 @@ exports.resetMemberPassword = onCall(async (request) => {
 
 // The member's own half: they have changed it, so the flag comes off. Only a function can clear it.
 //
-// The function changes the Auth password itself before clearing either flag. An empty "done" call cannot clear the
-// requirement while leaving the temporary password usable.
+// The member changing their password: updates the Auth password and clears the forced-change requirement if one was active.
 exports.completePasswordChange = onCall(async (request) => {
   const caller = request.auth;
   if (!caller) throw new HttpsError('unauthenticated', 'Sign in first.');
-  const privateAccount = await db.doc(`users_private/${caller.uid}`).get();
-  if (caller.token.must_change_password !== true && privateAccount.get('is_change_password_on_login') !== true) {
-    throw new HttpsError('failed-precondition', 'A password change has not been requested for this account.');
-  }
   const data = request.data || {};
   await auth.updateUser(caller.uid, { password: cleanPassword(data.newPassword) });
   await setPasswordChangeRequired(caller.uid, false);
