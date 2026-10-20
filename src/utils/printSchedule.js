@@ -118,6 +118,7 @@ export const printLinesForDate = ({
   // disagree with the screen the reader was just looking at.
   events = [],
   showOpenShifts = true,
+  showRegularShifts = true,
   // Vacancies in the past are not worth printing for a member - there is nothing to pick up.
   todayKey = toDateKey(new Date()),
 }) => {
@@ -158,9 +159,13 @@ export const printLinesForDate = ({
     if (!who) {
       // An unfilled row is a vacancy.
       if (!showsVacancy(row.assignment_id)) continue;
-    } else if (!showsEveryone && String(who) !== String(member?.id)) {
-      // On a member's own sheet somebody else's shift is not listed.
-      continue;
+    } else {
+      // Regular filled shifts follow the toggle: when regular shifts are hidden, skip them.
+      if (!showRegularShifts) continue;
+      if (!showsEveryone && String(who) !== String(member?.id)) {
+        // On a member's own sheet somebody else's shift is not listed.
+        continue;
+      }
     }
 
     lines.push(
@@ -237,6 +242,7 @@ export const printMonth = ({
   ranks = [],
   events = [],
   showOpenShifts = true,
+  showRegularShifts = true,
   todayKey,
 }) =>
   printMonthGrid(year, month).map((week) =>
@@ -255,6 +261,7 @@ export const printMonth = ({
             ranks,
             events,
             showOpenShifts,
+            showRegularShifts,
             ...(todayKey ? { todayKey } : {}),
           }),
     }))

@@ -64,6 +64,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Added a **Hydrants** tab to Assets, and an import tool for those.
 * Added password policy features.
 * Prep for migration to **stationsync.net**!
+* Added a button to the Schedule module to hide regular shifts.
 
 ### Version 1.6x
 * Added the **District Map** module.

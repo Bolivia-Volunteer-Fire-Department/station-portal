@@ -497,11 +497,11 @@ check('so no label inverts it', /enabled=\{!showEvents\}/.test(calendarSource), 
 check('the view toggles share a container', /flex flex-wrap items-center gap-3/.test(calendarSource), true);
 check(
   'and are laid out side by side',
-  /flex flex-wrap items-center gap-3[\s\S]{0,900}noun="everyone"[\s\S]{0,900}noun="events"/.test(calendarSource),
+  /flex flex-wrap items-center gap-3[\s\S]{0,1500}noun="everyone"[\s\S]{0,1500}noun="events"/.test(calendarSource),
   true
 );
 // All are the shared chip, so none can drift into a different treatment.
-check('and all use the shared view toggle', viewToggleCalls(calendarSource), 3);
+check('and all use the shared view toggle', viewToggleCalls(calendarSource), 4);
 check('and it is shown only when there are events', /events\.length > 0 && \(/.test(calendarSource), true);
 check('and it is not persisted', /localStorage[\s\S]{0,200}showEvents/.test(calendarSource), false);
 // An event must not be offerable: the offer machinery keys off assignments, and events must not reach it.
@@ -893,9 +893,9 @@ check('the toggle is a button', /<button/.test(viewToggleCode), true);
 // A call site passes the noun only, so it cannot pair the wrong verb with the wrong state.
 check('the verb follows the state', /\{enabled \? 'Hide' : 'Show'\} \{noun\}/.test(viewToggleCode), true);
 check('and the tooltip is unchanged by it', /title=\{description\}/.test(viewToggleCode), true);
-check('no call site hard-codes a verb', viewToggleCalls(calendarSource) + viewToggleCalls(availabilitySource) + viewToggleCalls(boardSource), 5);
+check('no call site hard-codes a verb', viewToggleCalls(calendarSource) + viewToggleCalls(availabilitySource) + viewToggleCalls(boardSource), 6);
 ['src/components/ScheduleCalendar.jsx', 'src/components/AvailabilityCalendar.jsx', 'src/components/admin/AdminScheduleManagementTab.jsx'].forEach((file) => {
-  check(`${file} passes a noun, not a label`, /noun="(events|everyone|open shifts)"/.test(readFileSync(file, 'utf8')), true);
+  check(`${file} passes a noun, not a label`, /noun="(events|everyone|open shifts|regular shifts)"/.test(readFileSync(file, 'utf8')), true);
 });
 check('with a pressed state for assistive tech', /aria-pressed=\{enabled\}/.test(viewToggleCode), true);
 check('it flips the value it was given', /onChange\(!enabled\)/.test(viewToggleCode), true);
@@ -906,11 +906,11 @@ check('an icon is optional', /\{Icon && <Icon/.test(viewToggleCode), true);
 // Every screen that offers a view toggle uses this component, so the three are identical by construction.
 check('the availability grid uses it too', viewToggleCalls(availabilitySource), 1);
 check('and so does the board', viewToggleCalls(boardSource), 1);
-check('and My Schedule uses it three times', viewToggleCalls(calendarSource), 3);
+check('and My Schedule uses it four times', viewToggleCalls(calendarSource), 4);
 // Settings keep the switch, because those persist. A pressed chip would read as a temporary filter.
 check('preference switches are left alone', /<ToggleSwitch/.test(readFileSync('src/components/MySettings.jsx', 'utf8')), true);
 // The rendered controls must carry the pressed state, not just the source. Rendered with the crew permission so
-// ALL toggles appear. "Show everyone" starts OFF while "Show open shifts" and "Show events"
+// ALL toggles appear. "Show everyone" starts OFF while "Show regular shifts", "Show open shifts" and "Show events"
 // start ON, so both states are represented: that is the assertion, not merely "a chip appeared".
 const renderedWithCrew = renderToString(
   React.createElement(ScheduleCalendar, {
@@ -924,12 +924,12 @@ const renderedWithCrew = renderToString(
   })
 );
 check('the rendered events toggle is pressed by default', /aria-pressed="true"/.test(renderedCalendar), true);
-// The toggles start in OPPOSITE states (everyone off, events and open shifts on), so their verbs must differ - and this is
+// The toggles start in OPPOSITE states (everyone off, events, regular and open shifts on), so their verbs must differ - and this is
 // what proves the verb follows the state rather than being a fixed string: "Show everyone" beside
 // "Hide events".
 check('the rendered everyone toggle reads Show while hidden', plain(renderedWithCrew).includes('Show everyone'), true);
 check('and the rendered events toggle reads Hide while shown', plain(renderedWithCrew).includes('Hide events'), true);
-check('all rendered toggles are chips', (renderedWithCrew.match(/aria-pressed="/g) || []).length, 3);
+check('all rendered toggles are chips', (renderedWithCrew.match(/aria-pressed="/g) || []).length, 4);
 
 // Each chip's OWN attributes, taken from its opening <button> tag.
 //

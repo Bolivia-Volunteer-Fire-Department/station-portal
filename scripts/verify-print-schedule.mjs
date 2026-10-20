@@ -111,6 +111,20 @@ check(
   printLinesForDate({ dateKey: TUESDAY, mode: 'member', member: { id: '10' }, schedule, scheduleTemplates: templates, assignments, users }).length,
   0
 );
+check(
+  'hiding regular shifts omits the member shift',
+  printLinesForDate({
+    dateKey: MONDAY,
+    mode: 'member',
+    member: { id: '10' },
+    schedule,
+    scheduleTemplates: templates,
+    assignments,
+    users,
+    showRegularShifts: false,
+  }).length,
+  0
+);
 
 const adminLines = printLinesForDate({
   dateKey: TUESDAY,
@@ -266,7 +280,7 @@ check('into <body>', /document\.body\s*\)/.test(sheetSource), true);
 // every time anyone pressed Print.
 const propsBlock = /export default function PrintableSchedule\(\{([\s\S]*?)\n\}\) \{/.exec(sheetSource)?.[1] || '';
 check('the props block was found', propsBlock.length > 0, true);
-for (const prop of ['mode', 'departmentName', 'year', 'month', 'member', 'schedule', 'scheduleTemplates', 'assignments', 'users', 'ranks', 'showOpenShifts', 'memberName', 'onDone']) {
+for (const prop of ['mode', 'departmentName', 'year', 'month', 'member', 'schedule', 'scheduleTemplates', 'assignments', 'users', 'ranks', 'showOpenShifts', 'showRegularShifts', 'memberName', 'onDone']) {
   check(`the sheet destructures ${prop}`, new RegExp(`(^|[\\s,{])${prop}(\\s*=|\\s*[,}])`).test(propsBlock), true);
 }
 check('it prints itself', /window\.print\(\)/.test(sheetSource), true);
@@ -280,6 +294,7 @@ check('My Schedule offers a print button', /onClick=\{\(\) => setPrintOpen\(true
 // The printed mode FOLLOWS the Show everyone toggle, so the sheet matches what is on screen.
 check('the sheet mode follows Show everyone', /mode=\{showEveryone \? 'crew' : 'member'\}/.test(calendar), true);
 check('the sheet passes showOpenShifts from the toggle', /showOpenShifts=\{showOpenShifts\}/.test(calendar), true);
+check('the sheet passes showRegularShifts from the toggle', /showRegularShifts=\{showRegularShifts\}/.test(calendar), true);
 check('printing the month on screen', /year=\{viewDate\.getFullYear\(\)\}/.test(calendar), true);
 check('with the member on the header', /memberName=\{currentUser\?\.name/.test(calendar), true);
 check('and the ranks needed to judge a vacancy', /ranks=\{ranks\}/.test(calendar), true);

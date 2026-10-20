@@ -146,6 +146,8 @@ export default function ScheduleCalendar({
   // Default off, and local to this component: the calendar opens on the
   // signed-in member's own shifts and only expands to the whole crew on demand.
   const [showEveryone, setShowEveryone] = useState(false);
+  // Default on: member can toggle regular scheduled shifts off to focus on events or open shifts.
+  const [showRegularShifts, setShowRegularShifts] = useState(true);
   // Default on: member or admin can toggle open shifts off to declutter the schedule or printout.
   const [showOpenShifts, setShowOpenShifts] = useState(true);
   // Open pill the member clicked, held while the confirmation modal is up.
@@ -447,9 +449,10 @@ export default function ScheduleCalendar({
   // Pills drawn on the calendar: the crew (or just you), plus every unfilled
   // shift you're eligible to pick up (when open shifts are toggled on).
   const activeOpenAssignments = showOpenShifts ? openAssignments : [];
-  const calendarAssignments = showEveryone
-    ? [...filledAssignments, ...activeOpenAssignments]
-    : [...myAssignments, ...activeOpenAssignments];
+  const activeRegularAssignments = showRegularShifts
+    ? (showEveryone ? filledAssignments : myAssignments)
+    : [];
+  const calendarAssignments = [...activeRegularAssignments, ...activeOpenAssignments];
 
   // ---- Shift offers ------------------------------------------------------
   // Offers arrive keyed by `slot_key` from the backend, which is exactly the
@@ -561,11 +564,13 @@ export default function ScheduleCalendar({
   // personal even in the crew view: the calendar carries everyone's shifts plus
   // the open ones, while the detail list below is always the signed-in
   // member's own.
-  const visibleAssignments = myAssignments
-    .filter((a) => a.from <= viewToKey && a.to >= viewFromKey)
-    .sort((a, b) =>
-      a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from)
-    );
+  const visibleAssignments = showRegularShifts
+    ? myAssignments
+        .filter((a) => a.from <= viewToKey && a.to >= viewFromKey)
+        .sort((a, b) =>
+          a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from)
+        )
+    : [];
 
   const formatRange = (a) => {
     const [fy, fm, fd] = a.from.split('-').map(Number);
@@ -758,6 +763,14 @@ export default function ScheduleCalendar({
             )}
 
             <ViewToggle
+              noun="regular shifts"
+              description="Include regular scheduled shifts on the calendar."
+              icon={Clock}
+              enabled={showRegularShifts}
+              onChange={setShowRegularShifts}
+            />
+
+            <ViewToggle
               noun="open shifts"
               description="Include unfilled open shifts on the calendar and printed sheet."
               icon={CalendarClock}
@@ -781,11 +794,13 @@ export default function ScheduleCalendar({
 
         <div className="px-4 py-3 space-y-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-            <span className="flex items-center gap-2">
-              <span className="inline-block w-3 h-3 rounded-sm bg-red-600 shrink-0" />
-              You're scheduled
-            </span>
-            {showEveryone && (
+            {showRegularShifts && (
+              <span className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 rounded-sm bg-red-600 shrink-0" />
+                You're scheduled
+              </span>
+            )}
+            {showRegularShifts && showEveryone && (
               <span className="flex items-center gap-2">
                 <span className="inline-block w-3 h-3 rounded-sm bg-slate-400 dark:bg-slate-500 shrink-0" />
                 Others scheduled
@@ -1109,7 +1124,9 @@ export default function ScheduleCalendar({
 
         {visibleAssignments.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {myAssignments.length === 0
+            {!showRegularShifts
+              ? 'Regular shifts are hidden. Click "Show regular shifts" above to display them.'
+              : myAssignments.length === 0
               ? 'You have no schedule assignments on file yet.'
               : `No scheduled assignments in ${viewLabel}.`}
           </p>
@@ -1204,6 +1221,7 @@ export default function ScheduleCalendar({
         <PrintableSchedule
           mode={showEveryone ? 'crew' : 'member'}
           showOpenShifts={showOpenShifts}
+          showRegularShifts={showRegularShifts}
           departmentName={departmentName}
           logoUrl={departmentLogoUrl}
           memberName={currentUser?.name || ''}
@@ -1216,7 +1234,7 @@ export default function ScheduleCalendar({
           users={users}
           ranks={ranks}
           // The normalized list the calendar draws, so the sheet cannot disagree with the screen.
-          events={normalizedEvents}
+          events={showEvents ? normalizedEvents : []}
           onDone={() => setPrintOpen(false)}
         />
       )}

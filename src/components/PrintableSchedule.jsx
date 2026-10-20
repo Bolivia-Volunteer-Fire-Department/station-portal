@@ -37,6 +37,7 @@ export default function PrintableSchedule({
   // Non-shift entries, printed alongside the shifts so the sheet matches the screen.
   events = [],
   showOpenShifts = true,
+  showRegularShifts = true,
   memberName = '',
   onDone,
 }) {
@@ -54,8 +55,9 @@ export default function PrintableSchedule({
         ranks,
         events,
         showOpenShifts,
+        showRegularShifts,
       }),
-    [year, month, mode, member, schedule, scheduleTemplates, assignments, users, ranks, events, showOpenShifts]
+    [year, month, mode, member, schedule, scheduleTemplates, assignments, users, ranks, events, showOpenShifts, showRegularShifts]
   );
 
   const header = useMemo(
