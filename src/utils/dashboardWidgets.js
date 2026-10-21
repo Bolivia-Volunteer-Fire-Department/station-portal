@@ -92,6 +92,15 @@ export const BUILTIN_WIDGETS = [
     maxColSpan: 3,
     category: 'Operations',
   },
+  {
+    id: 'scheduled-tasks',
+    label: "Today's Scheduled Tasks",
+    description: 'Daily operational tasks and apparatus checklists scheduled for today.',
+    defaultColSpan: 2,
+    minColSpan: 1,
+    maxColSpan: 3,
+    category: 'Operations',
+  },
 ];
 
 // Factory default station layout:

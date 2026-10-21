@@ -46,6 +46,7 @@ import {
   isAssessment,
 } from '../utils/documents.js';
 import { deleteField } from 'firebase/firestore';
+import { normalizeTaskNoteTemplate, normalizeTaskNoteEntry, TASK_NOTE_STATUS } from '../utils/tasksAndNotes.js';
 
 // Formats timestamps as 'YYYY-MM-DD HH:MM:SS' in station time (Eastern).
 export const stationTimestamp = (date = new Date()) => {
@@ -916,6 +917,86 @@ export const setFormSubmissionLock = async ({
   return { id: wanted, ...payload };
 };
 
+// Saves or updates a task/note template.
+export const saveTaskNoteTemplate = async ({ template, authorId = '' } = {}) => {
+  const normalized = normalizeTaskNoteTemplate(template || {});
+  const documentId = normalized.id || doc(collection(firestore(), 'task_note_templates')).id;
+  const reference = doc(firestore(), 'task_note_templates', documentId);
+  const previous = await getDoc(reference);
+  const createdBy = previous.exists() ? String(previous.get('created_by_uid') || '') : String(authorId || '');
+  const createdAt = previous.exists() ? String(previous.get('created_at') || '') || stationTimestamp() : stationTimestamp();
+
+  const payload = {
+    ...normalized,
+    id: documentId,
+    created_by_uid: createdBy,
+    created_at: createdAt,
+    updated_at: stationTimestamp(),
+    updated_by_uid: String(authorId || ''),
+  };
+
+  await setDoc(reference, payload, { merge: true });
+  return { id: documentId, ...payload };
+};
+
+// Deletes a task/note template.
+export const deleteTaskNoteTemplate = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which template?');
+  await deleteDoc(doc(firestore(), 'task_note_templates', wanted));
+  return { id: wanted };
+};
+
+// Saves or updates a task/note log entry.
+export const saveTaskNoteEntry = async ({ entry, authorId = '' } = {}) => {
+  const normalized = normalizeTaskNoteEntry(entry || {});
+  const documentId = normalized.id || doc(collection(firestore(), 'task_note_entries')).id;
+  const reference = doc(firestore(), 'task_note_entries', documentId);
+  const previous = await getDoc(reference);
+  const submitterUid = previous.exists()
+    ? String(previous.get('submitted_by_uid') || '')
+    : (normalized.submitted_by_uid || String(authorId || ''));
+  const createdAt = previous.exists()
+    ? String(previous.get('created_at') || '') || stationTimestamp()
+    : stationTimestamp();
+
+  const payload = {
+    ...normalized,
+    id: documentId,
+    submitted_by_uid: submitterUid,
+    created_at: createdAt,
+    updated_at: stationTimestamp(),
+  };
+
+  await setDoc(reference, payload, { merge: true });
+  return { id: documentId, ...payload };
+};
+
+// Un-signs a signed task/note entry, putting it back in editable state.
+export const unsignTaskNoteEntry = async ({ id, authorId = '' } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which entry?');
+  const reference = doc(firestore(), 'task_note_entries', wanted);
+  const updatePayload = {
+    status: TASK_NOTE_STATUS.EDITABLE,
+    signed_by_uid: '',
+    signed_by_name: '',
+    signed_at: null,
+    signature_data: null,
+    updated_at: stationTimestamp(),
+    updated_by_uid: String(authorId || ''),
+  };
+  await setDoc(reference, updatePayload, { merge: true });
+  return { id: wanted, ...updatePayload };
+};
+
+// Deletes a task/note entry.
+export const deleteTaskNoteEntry = async ({ id } = {}) => {
+  const wanted = String(id || '').trim();
+  if (!wanted) throw new Error('Which entry?');
+  await deleteDoc(doc(firestore(), 'task_note_entries', wanted));
+  return { id: wanted };
+};
 
 // Saves the drawing layer SVG for the district map.
 export const saveMapLayer = async ({ svg, authorId = '' } = {}) => {

@@ -16,8 +16,9 @@ import {
   Eye,
   Paperclip,
   Calendar,
+  ClipboardCheck,
 } from 'lucide-react';
-import { fetchApparatus, fetchAssetTypes } from '../services/api';
+import { fetchApparatus, fetchAssetTypes, fetchTaskNoteTemplates } from '../services/api';
 import {
   APPARATUS_TYPES,
   APPARATUS_STATUSES,
@@ -30,12 +31,23 @@ import {
   formatFileSize,
 } from '../utils/apparatus';
 import { openApparatusMaintenanceFile } from '../services/apparatusFileStorage';
+import { TASK_NOTE_KINDS, isTemplateActiveOn } from '../utils/tasksAndNotes';
+import { stationTodayKey } from '../utils/scheduleDate';
+import { toast } from '../utils/toast';
 import ViewportModal from './ViewportModal';
+import TaskNoteEntryModal from './tasks/TaskNoteEntryModal';
 
 const CACHE_KEY = 'fire_clock_cached_apparatus';
 const CACHE_TS_KEY = 'fire_clock_cached_apparatus_at';
 
-export default function ApparatusModule({ token, onBack, _currentUser = null }) {
+export default function ApparatusModule({
+  token,
+  onBack,
+  currentUser = null,
+  _currentUser = null,
+  departmentName = '',
+  departmentLogoUrl = '',
+}) {
   const [apparatusList, setApparatusList] = useState(() => {
     try {
       const cached = localStorage.getItem(CACHE_KEY);
@@ -61,6 +73,53 @@ export default function ApparatusModule({ token, onBack, _currentUser = null }) 
   // Selected apparatus for read-only detail & maintenance inspection
   const [selectedApparatusId, setSelectedApparatusId] = useState(null);
   const [modalTab, setModalTab] = useState('details'); // 'details' | 'maintenance'
+
+  // Daily checklist modal state
+  const [checklistModalOpen, setChecklistModalOpen] = useState(false);
+  const [activeChecklistTemplate, setActiveChecklistTemplate] = useState(null);
+  const [activeChecklistEntry, setActiveChecklistEntry] = useState(null);
+  const [taskNoteTemplates, setTaskNoteTemplates] = useState([]);
+
+  const handleOpenChecklist = async (apparatus) => {
+    try {
+      let tpls = taskNoteTemplates;
+      if (!tpls.length) {
+        tpls = await fetchTaskNoteTemplates();
+        setTaskNoteTemplates(tpls);
+      }
+      const today = stationTodayKey();
+      const activeChecklistTpls = tpls.filter(
+        (t) => t.kind === TASK_NOTE_KINDS.APPARATUS_CHECKLIST && isTemplateActiveOn(t, today)
+      );
+
+      // Prioritize specific apparatus match, then fleet-wide
+      const matched =
+        activeChecklistTpls.find((t) => t.apparatus_id === apparatus.id) ||
+        activeChecklistTpls.find((t) => !t.apparatus_id) ||
+        activeChecklistTpls[0];
+
+      if (!matched) {
+        toast.error('No active checklist template found. Please create one in Administration → Task Setup.');
+        return;
+      }
+
+      setActiveChecklistTemplate(matched);
+      setActiveChecklistEntry({
+        id: '',
+        template_id: matched.id,
+        template_name: matched.name,
+        kind: TASK_NOTE_KINDS.APPARATUS_CHECKLIST,
+        title: `${apparatus.identifier || apparatus.description} Daily Checklist`,
+        entry_date: today,
+        apparatus_id: apparatus.id,
+        apparatus_identifier: apparatus.identifier || apparatus.description,
+        data: {},
+      });
+      setChecklistModalOpen(true);
+    } catch (err) {
+      toast.error(err.message || 'Failed to open apparatus checklist.');
+    }
+  };
 
   const loadData = useCallback(
     async (isManual = false) => {
@@ -489,7 +548,17 @@ export default function ApparatusModule({ token, onBack, _currentUser = null }) 
                     Callsign: <strong className="text-slate-600 dark:text-slate-300">{callsign}</strong>
                   </span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenChecklist(item)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-2xs hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/50 transition"
+                      title={`Start daily checklist for ${callsign}`}
+                    >
+                      <ClipboardCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Checklist</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => openDetailsModal(item, 'maintenance')}
@@ -847,6 +916,30 @@ export default function ApparatusModule({ token, onBack, _currentUser = null }) 
             )}
           </div>
         </ViewportModal>
+      )}
+
+      {/* Apparatus Daily Checklist Modal */}
+      {checklistModalOpen && (
+        <TaskNoteEntryModal
+          entry={activeChecklistEntry}
+          template={activeChecklistTemplate}
+          templates={taskNoteTemplates}
+          currentUser={currentUser}
+          canEdit={true}
+          canUnsign={false}
+          canDelete={false}
+          apparatusList={apparatusList}
+          departmentName={departmentName}
+          departmentLogoUrl={departmentLogoUrl}
+          onClose={() => {
+            setChecklistModalOpen(false);
+            setActiveChecklistTemplate(null);
+            setActiveChecklistEntry(null);
+          }}
+          onSaved={() => {
+            toast.success('Apparatus checklist saved successfully.');
+          }}
+        />
       )}
     </div>
   );

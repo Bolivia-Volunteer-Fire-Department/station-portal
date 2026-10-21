@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
-import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes, Wrench, Droplets } from 'lucide-react';
+import { Users, User, ShieldCheck, Award, Settings2, Map as MapIcon, CalendarClock, CalendarDays, CalendarCog, CalendarCheck, CalendarPlus, ChevronDown, Check, ListTodo, Clock, AlertCircle, Bell, BookOpen, BookText, GraduationCap, Megaphone, Book, Bug, BadgeCheck, ClipboardCheck, Repeat, Loader2, BarChart3, FileText, MessagesSquare, Compass, Package, ShieldAlert, Truck, SlidersHorizontal, LayoutDashboard, Boxes, Wrench, Droplets, CheckSquare, ClipboardList } from 'lucide-react';
 import AdminUsersTab from './AdminUsersTab';
 import AdminDebugTab from './AdminDebugTab';
 import HelpGuides from '../HelpGuides';
@@ -23,6 +23,7 @@ const AdminClockManagementTab = lazy(() => import('./AdminClockManagementTab'));
 const AdminPendingApprovalsTab = lazy(() => import('./AdminPendingApprovalsTab'));
 const AdminNotificationsTab = lazy(() => import('./AdminNotificationsTab'));
 const AdminTrainingTab = lazy(() => import('./AdminTrainingTab'));
+const AdminTrainingSetupTab = lazy(() => import('./AdminTrainingSetupTab'));
 const AdminCertificationsTab = lazy(() => import('./AdminCertificationsTab'));
 const AdminCertificationSetupTab = lazy(() => import('./AdminCertificationSetupTab'));
 const AdminAnnouncementsTab = lazy(() => import('./AdminAnnouncementsTab'));
@@ -38,6 +39,7 @@ const AdminAssetSetupTab = lazy(() => import('./AdminAssetSetupTab'));
 const AdminDashboardSetupTab = lazy(() => import('./AdminDashboardSetupTab'));
 const AdminWidgetSetupTab = lazy(() => import('./AdminWidgetSetupTab'));
 const AdminWorkOrdersTab = lazy(() => import('./AdminWorkOrdersTab'));
+const AdminTasksAndNotesSetupTab = lazy(() => import('./AdminTasksAndNotesSetupTab'));
 
 function AdminTabLoading() {
   return (
@@ -97,6 +99,7 @@ export const ADMIN_NAV_CATEGORIES = [
       { id: 'announcements', label: 'Announcements', icon: Megaphone },
       { id: 'documents', label: 'Documents', icon: BookText },
       { id: 'training', label: 'Training', icon: GraduationCap },
+      { id: 'training-setup', label: 'Training Setup', icon: SlidersHorizontal },
       { id: 'dashboard-setup', label: 'Dashboard Setup', icon: LayoutDashboard },
       { id: 'widget-setup', label: 'Widget Setup', icon: Boxes },
       { id: 'chat', label: 'Chat Setup', icon: MessagesSquare },
@@ -105,11 +108,13 @@ export const ADMIN_NAV_CATEGORIES = [
   },
   {
     id: 'catReports',
-    label: 'Reports',
+    label: 'Reports & Logs',
     icon: BarChart3,
     items: [
       { id: 'reports-config', label: 'Report Setup', icon: BarChart3 },
       { id: 'forms-config', label: 'Form Setup', icon: FileText },
+      { id: 'task-setup', label: 'Task Setup', icon: CheckSquare },
+      { id: 'note-setup', label: 'Note Setup', icon: ClipboardList },
     ],
   },
   {
@@ -578,6 +583,26 @@ export default function AdminPanel({
         />
       )}
 
+      {activeSubTab === 'task-setup' && (
+        <AdminTasksAndNotesSetupTab
+          mode="task"
+          roles={roles}
+          ranks={ranks}
+          token={token}
+          currentUser={currentUser}
+        />
+      )}
+
+      {activeSubTab === 'note-setup' && (
+        <AdminTasksAndNotesSetupTab
+          mode="note"
+          roles={roles}
+          ranks={ranks}
+          token={token}
+          currentUser={currentUser}
+        />
+      )}
+
       {activeSubTab === 'notifications' && (
         <AdminNotificationsTab
           token={token}
@@ -650,6 +675,15 @@ export default function AdminPanel({
           departmentLogoUrl={departmentLogoUrl}
           systemSettings={systemSettings}
           onDataChanged={onAdminDataChanged}
+        />
+      )}
+
+      {/* Training configuration and category setup */}
+      {activeSubTab === 'training-setup' && (
+        <AdminTrainingSetupTab
+          token={token}
+          systemSettings={systemSettings}
+          onDataChanged={onDataChanged}
         />
       )}
 

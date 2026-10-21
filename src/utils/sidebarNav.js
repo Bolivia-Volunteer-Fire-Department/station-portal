@@ -96,6 +96,7 @@ export const DEFAULT_SIDEBAR_NAV_ORDER = [
   'availability',
   'training',
   'documents',
+  'tasks-and-notes',
   'work-orders',
   'district-map',
   'reports',
@@ -114,6 +115,7 @@ export const DEFAULT_MODULE_ICONS = {
   training: 'GraduationCap',
   certifications: 'BadgeCheck',
   documents: 'BookText',
+  'tasks-and-notes': 'ClipboardList',
   'work-orders': 'Wrench',
   'district-map': 'Map',
   reports: 'BarChart3',
@@ -335,6 +337,12 @@ export const SIDEBAR_MODULE_CATALOG = [
     label: 'Documents',
     description: 'Standard operating guidelines',
     permissionKey: 'canViewDocuments',
+  },
+  {
+    id: 'tasks-and-notes',
+    label: 'Tasks & Notes',
+    description: 'Chronological log of shift notes, tasks, and apparatus checklists',
+    permissionKey: 'canViewTasksAndNotes',
   },
   {
     id: 'work-orders',

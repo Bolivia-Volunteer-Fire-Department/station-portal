@@ -20,6 +20,8 @@ import {
   sortTrainingRows,
   trainingLocked,
   trainingTotals,
+  getTrainingCategories,
+  trainingCategoryOptions,
 } from '../../utils/training';
 
 // Displays training records and allows administrators to manage sessions and signatures.
@@ -52,7 +54,10 @@ export default function AdminTrainingTab({
   // Controls whether the training CSV import modal is open.
   const [importModalOpen, setImportModalOpen] = useState(false);
 
-  const allRows = useMemo(() => normalizeTrainingList(trainings), [trainings]);
+  const categories = useMemo(() => getTrainingCategories(systemSettings), [systemSettings]);
+  const categoryOptions = useMemo(() => trainingCategoryOptions(systemSettings), [systemSettings]);
+
+  const allRows = useMemo(() => normalizeTrainingList(trainings, categories), [trainings, categories]);
 
   // Get IDs of trainings signed by the selected member.
   const filterSignedIds = useMemo(() => {
@@ -272,6 +277,7 @@ export default function AdminTrainingTab({
         rows={allRows}
         memberOptions={memberOptions}
         signedLabel="Signatures"
+        categoryOptions={categoryOptions}
       />
 
       {/* Summary statistics for visible trainings */}

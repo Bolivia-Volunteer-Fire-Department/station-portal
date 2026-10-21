@@ -42,6 +42,11 @@ To see what you have access to, click your name at the top of the sidebar to ope
 
 ## About this app
 
+### Version 1.8x
+* Added a mechanism for users to reset their own passwords.
+* Added **Tasks & Notes**.
+* Improved breakpoints on the Dashboard.
+
 ### Version 1.7x
 * Added **Equipment** and **Apparatuses**.
 * Revamped how Documents are organized in the Administration module.
@@ -53,7 +58,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Set sibling shift offers to automatically decline when one is accepted.
 * Added **Work Orders**.
 * Refined what text was selectable in the app overall.
-* Added **configurable forms** that administrators can design for end users to complete.
+* Added **configurable form exports** that administrators can design for end users to complete.
 * Added a Monthly/Weekly/Daily/Auto button group to the Schedule so members (i.e. Cody) with trash phones can see their schedule easier.
 * Fixed Heading display issues in the areas where Markdown is used.
 * Fixed text color not working in the Markdown Editor.

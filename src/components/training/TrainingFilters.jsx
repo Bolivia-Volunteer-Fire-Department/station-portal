@@ -1,4 +1,5 @@
-import { Filter, RotateCcw } from 'lucide-react';
+import React, { useState } from 'react';
+import { Filter, RotateCcw, ChevronDown } from 'lucide-react';
 import {
   TRAINING_CATEGORY_OPTIONS,
   TRAINING_SORT_OPTIONS,
@@ -25,7 +26,12 @@ export default function TrainingFilters({
   rows = [],
   memberOptions = null,
   signedLabel = 'Signature',
+  signedYesLabel = 'Signed only',
+  signedNoLabel = 'Not signed only',
+  categoryOptions = TRAINING_CATEGORY_OPTIONS,
+  defaultCollapsed = true,
 }) {
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
   const locations = trainingLocationOptions(rows);
   const isFiltered = Boolean(
     filters.from ||
@@ -36,20 +42,51 @@ export default function TrainingFilters({
       filters.signed
   );
 
+  const activeFilterCount = [
+    Boolean(filters.from),
+    Boolean(filters.to),
+    Boolean(filters.location),
+    Boolean(filters.category),
+    Boolean(filters.member),
+    Boolean(filters.signed),
+  ].filter(Boolean).length;
+
   // One handler for every control, keyed by the filter's own name, so adding a filter means adding
   // an entry here rather than another callback.
   const setFilter = (key) => (event) => onChange({ ...filters, [key]: event.target.value });
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
-        <Filter className="w-4 h-4 text-red-500 shrink-0" />
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filter &amp; sort</h3>
+      <div
+        className={`px-4 py-2.5 flex items-center justify-between transition ${
+          !isCollapsed ? 'border-b border-slate-200 dark:border-slate-700' : ''
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setIsCollapsed((prev) => !prev)}
+          className="flex items-center gap-2 text-left group cursor-pointer focus:outline-none"
+        >
+          <Filter className="w-4 h-4 text-red-500 shrink-0" />
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 group-hover:text-red-600 dark:group-hover:text-red-400 transition">
+            Filter &amp; sort
+          </h3>
+          {activeFilterCount > 0 && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400">
+              {activeFilterCount} active
+            </span>
+          )}
+          <ChevronDown
+            className={`w-4 h-4 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition-transform duration-200 ${
+              !isCollapsed ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
         {isFiltered && (
           <button
             type="button"
             onClick={() => onChange(emptyTrainingFilters())}
-            className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+            className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Clear filters
@@ -57,9 +94,10 @@ export default function TrainingFilters({
         )}
       </div>
 
-      <div className="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <label className={labelClass} htmlFor="training-filter-from">From date</label>
+      {!isCollapsed && (
+        <div className="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className={labelClass} htmlFor="training-filter-from">From date</label>
           <input
             id="training-filter-from"
             type="date"
@@ -103,7 +141,7 @@ export default function TrainingFilters({
             onChange={setFilter('category')}
             className={selectClass}
           >
-            {TRAINING_CATEGORY_OPTIONS.map((option) => (
+            {(categoryOptions || TRAINING_CATEGORY_OPTIONS).map((option) => (
               <option key={option.value || 'all'} value={option.value}>{option.label}</option>
             ))}
           </select>
@@ -134,8 +172,8 @@ export default function TrainingFilters({
             className={selectClass}
           >
             <option value="">Any</option>
-            <option value="yes">Signed only</option>
-            <option value="no">Not signed only</option>
+            <option value="yes">{signedYesLabel}</option>
+            <option value="no">{signedNoLabel}</option>
           </select>
         </div>
 
@@ -153,6 +191,7 @@ export default function TrainingFilters({
           </select>
         </div>
       </div>
-    </div>
-  );
+    )}
+  </div>
+);
 }

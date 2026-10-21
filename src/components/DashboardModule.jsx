@@ -29,6 +29,7 @@ import CustomMarkdownWidget from './widgets/CustomMarkdownWidget';
 import ApparatusStatusWidget from './widgets/ApparatusStatusWidget';
 import AssignedWorkOrdersWidget from './widgets/AssignedWorkOrdersWidget';
 import PreplansDueWidget from './widgets/PreplansDueWidget';
+import ScheduledTasksWidget from './widgets/ScheduledTasksWidget';
 import WidgetResizeHandle from './widgets/WidgetResizeHandle';
 import {
   DASHBOARD_DEFAULT_LAYOUT_KEY,
@@ -69,6 +70,7 @@ export default function DashboardModule({
   onNavigate,
   onNavigateToMap,
   token,
+  roles = [],
 }) {
   // Read station default layout, custom widgets, and widget configurations
   const rawStationDefaultLayout = getSettingValue(systemSettings, DASHBOARD_DEFAULT_LAYOUT_KEY, '');
@@ -252,9 +254,9 @@ export default function DashboardModule({
   const colSpanClasses = (colSpan) => {
     switch (colSpan) {
       case 2:
-        return 'col-span-1 md:col-span-2';
+        return 'col-span-1 lg:col-span-2 xl:col-span-2';
       case 3:
-        return 'col-span-1 md:col-span-2 lg:col-span-3';
+        return 'col-span-1 lg:col-span-2 xl:col-span-3';
       case 1:
       default:
         return 'col-span-1';
@@ -353,6 +355,17 @@ export default function DashboardModule({
             currentUser={currentUser}
             onNavigate={onNavigate}
             onNavigateToMap={onNavigateToMap}
+          />
+        );
+
+      case 'scheduled-tasks':
+        return (
+          <ScheduledTasksWidget
+            token={token}
+            currentUser={currentUser}
+            currentRole={currentRole}
+            roles={roles}
+            onNavigate={onNavigate}
           />
         );
 
@@ -507,7 +520,7 @@ export default function DashboardModule({
       <CertificationNotice alerts={certificationAlerts} />
 
       {/* Responsive Dashboard Grid */}
-      <div className="dashboard-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+      <div className="dashboard-grid grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 items-start">
         {layout.map((item, index) => {
           if (item.id === 'announcements' && !hasVisibleAnnouncements && !isCustomizing) {
             return null;

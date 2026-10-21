@@ -106,21 +106,21 @@ export default function PreplansDueWidget({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             {overdueCount > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-xs font-bold text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+              <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-xs font-bold text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
                 <AlertCircle className="h-3 w-3 text-red-600 dark:text-red-400" />
                 {overdueCount} Overdue
               </span>
             ) : null}
 
             {dueThisMonthCount > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300">
+              <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300">
                 <Clock className="h-3 w-3 text-amber-600 dark:text-amber-400" />
                 {dueThisMonthCount} Due
               </span>
             ) : overdueCount === 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300">
                 <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
                 All Current
               </span>

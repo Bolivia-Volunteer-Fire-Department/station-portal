@@ -174,3 +174,11 @@ export const createMember = (data) => call('createMember', data);
 export const resetMemberPassword = (data) => call('resetMemberPassword', data);
 export const setMemberStatus = (data) => call('setMemberStatus', data);
 export const updateMemberAccount = (data) => call('updateMemberAccount', data);
+
+// Self-service password reset flows.
+export const requestPasswordReset = ({ email, appOrigin }) =>
+  call('requestPasswordReset', { email, appOrigin });
+
+export const completePasswordReset = ({ token, newPassword }) =>
+  call('completePasswordReset', { token, newPassword });
+

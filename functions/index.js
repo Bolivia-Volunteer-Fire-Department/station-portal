@@ -1,6 +1,7 @@
 // COMMONJS, unlike the rest of the repo, because the Functions emulator analyses this codebase with require() - an
 // ESM entry point fails with "Unexpected token 'export'" before a single function loads. The deployed runtime would
 // accept ESM; the emulator is what we develop and test against, so CJS it is.
+const crypto = require('crypto');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { FieldValue, getFirestore } = require('firebase-admin/firestore');
@@ -1094,6 +1095,246 @@ exports.completePasswordChange = onCall(async (request) => {
   await setPasswordChangeRequired(caller.uid, false);
   await audit(caller.uid, 'COMPLETE_PASSWORD_CHANGE', 'Changed their own password');
   return { ok: true };
+});
+
+// Sends an email via Resend transactional API.
+// Checks for RESEND_API_KEY in environment variables first, then in Firestore settings/private.
+const sendResendEmail = async ({ to, subject, html, text }) => {
+  let apiKey = process.env.RESEND_API_KEY;
+  let sender = process.env.EMAIL_SENDER || 'StationSync <onboarding@resend.dev>';
+  if (!apiKey) {
+    try {
+      const privateSettingsSnap = await db.doc('settings/private').get();
+      if (privateSettingsSnap.exists) {
+        apiKey = String(privateSettingsSnap.get('resend_api_key') || '').trim();
+        const customSender = String(privateSettingsSnap.get('email_sender') || '').trim();
+        if (customSender) sender = customSender;
+      }
+    } catch (err) {
+      logger.warn('[email] Could not read settings/private for resend_api_key:', err);
+    }
+  }
+  if (!apiKey) {
+    logger.warn(`[email] RESEND_API_KEY is not configured. Email to ${to} not sent. Subject: ${subject}`);
+    return { sent: false, reason: 'missing_api_key' };
+  }
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: sender,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      html,
+      text,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    logger.error(`[email] Resend API error (${res.status}): ${errBody}`);
+    throw new Error(`Failed to send email via Resend: ${res.status} - ${errBody}`);
+  }
+  const resData = await res.json();
+  return { sent: true, id: resData.id };
+};
+
+// Public callable for self-service password reset request.
+// Compares the entered email against users_private in Firestore.
+// Always returns a generic success response so member existence or absence is not leaked.
+exports.requestPasswordReset = onCall({ cors: true }, async (request) => {
+  const data = request.data || {};
+  const enteredEmail = String(data.email || '').trim().toLowerCase();
+  const rawOrigin = String(data.appOrigin || '').trim();
+  const appOrigin = rawOrigin || 'https://fire-clock-76723.web.app';
+
+  const genericResponse = {
+    success: true,
+    message: `If the email you entered (${enteredEmail}) matches an active member account, you will receive a link to reset your password shortly.`,
+  };
+
+  if (!enteredEmail || !enteredEmail.includes('@')) {
+    return genericResponse;
+  }
+
+  try {
+    // Check if self-service password reset is disabled by administrators
+    try {
+      const stationSnap = await db.doc('settings/public').get();
+      if (stationSnap.exists && String(stationSnap.get('forgot_password_enabled') || '').trim() === 'false') {
+        logger.info('[password-reset] Request ignored because forgot_password_enabled is false');
+        return genericResponse;
+      }
+    } catch (err) {
+      logger.warn('[password-reset] Could not read forgot_password_enabled from settings/public:', err);
+    }
+
+    // Look up member in users_private by email (case-insensitive)
+    const privSnap = await db.collection('users_private').get();
+    let matchDoc = null;
+    for (const doc of privSnap.docs) {
+      const memberEmail = String(doc.get('email') || '').trim().toLowerCase();
+      if (memberEmail && memberEmail === enteredEmail) {
+        matchDoc = doc;
+        break;
+      }
+    }
+
+    if (!matchDoc) {
+      logger.info(`[password-reset] Request for non-matching email: ${enteredEmail}`);
+      return genericResponse;
+    }
+
+    const memberData = matchDoc.data() || {};
+    if (memberData.status === 'inactive') {
+      logger.info(`[password-reset] Request for inactive user account: ${matchDoc.id}`);
+      return genericResponse;
+    }
+
+    const userId = matchDoc.id;
+
+    // Rate-limiting check without requiring a multi-field composite index:
+    // query by user_id and inspect timestamps in memory
+    const userTokens = await db.collection('password_resets')
+      .where('user_id', '==', userId)
+      .get();
+
+    const oneMinuteAgo = Date.now() - 60000;
+    const hasRecent = userTokens.docs.some((d) => (d.get('created_at_ms') || 0) > oneMinuteAgo);
+
+    if (hasRecent) {
+      logger.info(`[password-reset] Rate limit hit for user ${userId}`);
+      return genericResponse;
+    }
+
+    // Generate secure 32-byte (64 hex characters) token
+    const token = crypto.randomBytes(32).toString('hex');
+    const now = Date.now();
+    const expiresAt = now + 30 * 60 * 1000; // 30 minutes
+
+    await db.doc(`password_resets/${token}`).set({
+      user_id: userId,
+      email: enteredEmail,
+      created_at_ms: now,
+      expires_at_ms: expiresAt,
+      created_at: new Date(now).toISOString(),
+      expires_at: new Date(expiresAt).toISOString(),
+      used: false,
+    });
+
+    const resetLink = `${appOrigin.replace(/\/+$/, '')}/?reset_token=${token}`;
+
+    // Fetch station branding
+    let stationName = 'StationSync';
+    try {
+      const stationSnap = await db.doc('settings/public').get();
+      if (stationSnap.exists) {
+        stationName = stationSnap.get('department_name') || stationSnap.get('station_name') || 'StationSync';
+      }
+    } catch (err) {
+      logger.warn('[password-reset] Could not read department_name from settings/public:', err);
+    }
+
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #0f172a; margin-top: 0; font-size: 20px;">Password Reset Request</h2>
+        <p style="color: #475569; font-size: 15px; line-height: 1.5;">
+          Hello,
+        </p>
+        <p style="color: #475569; font-size: 15px; line-height: 1.5;">
+          A password reset was requested for your <strong>${stationName}</strong> account (username: <strong>${memberData.username || ''}</strong>).
+        </p>
+        <p style="margin: 28px 0; text-align: center;">
+          <a href="${resetLink}" style="background-color: #dc2626; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
+            Reset Your Password
+          </a>
+        </p>
+        <p style="color: #64748b; font-size: 13px; line-height: 1.4;">
+          Or copy and paste this link into your browser:<br/>
+          <a href="${resetLink}" style="color: #2563eb; word-break: break-all;">${resetLink}</a>
+        </p>
+        <p style="color: #64748b; font-size: 13px; line-height: 1.4; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+          This link is valid for <strong>30 minutes</strong>. If you did not request a password reset, you can safely ignore this email.
+        </p>
+      </div>
+    `;
+
+    const text = `Password reset request for ${stationName}:\n\n` +
+      `Please use the following link to reset your password:\n${resetLink}\n\n` +
+      `This link will expire in 30 minutes.\nIf you did not request this, please ignore this email.`;
+
+    try {
+      const sendResult = await sendResendEmail({
+        to: enteredEmail,
+        subject: `Reset your ${stationName} password`,
+        html,
+        text,
+      });
+      if (!sendResult.sent) {
+        logger.warn(`[password-reset] Email could not be sent (${sendResult.reason}). Reset link: ${resetLink}`);
+      } else {
+        logger.info(`[password-reset] Email sent via Resend (id: ${sendResult.id}) to ${enteredEmail}`);
+      }
+    } catch (err) {
+      logger.error(`[password-reset] Failed sending email to ${enteredEmail}:`, err);
+    }
+
+    await audit(userId, 'REQUEST_PASSWORD_RESET', `Password reset link generated for email ${enteredEmail}`);
+  } catch (err) {
+    logger.error('[password-reset] Unexpected error in requestPasswordReset:', err);
+  }
+
+  return genericResponse;
+});
+
+// Completes a self-service password reset using a verified reset token.
+exports.completePasswordReset = onCall({ cors: true }, async (request) => {
+  const data = request.data || {};
+  const token = String(data.token || '').trim();
+  const newPassword = cleanPassword(data.newPassword);
+
+  if (!token) {
+    throw new HttpsError('invalid-argument', 'A reset token is required.');
+  }
+
+  const resetRef = db.doc(`password_resets/${token}`);
+  const resetSnap = await resetRef.get();
+
+  if (!resetSnap.exists) {
+    throw new HttpsError('not-found', 'This password reset link is invalid or has expired.');
+  }
+
+  const resetData = resetSnap.data() || {};
+  if (resetData.used) {
+    throw new HttpsError('failed-precondition', 'This password reset link has already been used.');
+  }
+
+  if (resetData.expires_at_ms && Date.now() > resetData.expires_at_ms) {
+    throw new HttpsError('deadline-exceeded', 'This password reset link has expired. Please request a new one.');
+  }
+
+  const userId = resetData.user_id;
+  if (!userId) {
+    throw new HttpsError('internal', 'Reset record is corrupted.');
+  }
+
+  // Update Auth password
+  await auth.updateUser(userId, { password: newPassword });
+
+  // Clear must_change_password requirement so the user can log in immediately
+  await setPasswordChangeRequired(userId, false);
+
+  // Mark token as used
+  await resetRef.update({
+    used: true,
+    used_at: new Date().toISOString(),
+  });
+
+  await audit(userId, 'SELF_RESET_PASSWORD', 'Member reset password via email link');
+
+  return { success: true };
 });
 
 exports.clockIn = onCall(async (request) => {

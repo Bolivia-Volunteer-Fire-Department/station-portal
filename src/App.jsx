@@ -94,6 +94,7 @@ import {
   prefetchableFor,
 } from './utils/deferredModules';
 const WorkOrdersModule = lazy(() => import('./components/WorkOrdersModule'));
+const TasksAndNotesModule = lazy(() => import('./components/TasksAndNotesModule'));
 import { normalizeWorkOrder } from './utils/workOrders';
 // Chat component available across all screens.
 import ChatHost from './components/Chat/ChatHost';
@@ -112,6 +113,7 @@ import { mergeSavedUser } from './utils/userRow';
 import { mergeSavedRow, mergeRowsById, replaceRowsInRange } from './utils/savedRow';
 // Gets the current date key based on station timezone.
 import { stationTodayKey, toDateKey } from './utils/scheduleDate';
+import { membersMustSignTrainings } from './utils/training';
 // Configures pay period dates for the timeclock history.
 import { payPeriodConfig, payPeriodWindow } from './utils/payPeriod';
 // Sets the starting day of the calendar week.
@@ -351,6 +353,12 @@ const canAddAssessmentScores = can('can_add_assessment_scores');
   const canGenerateForms = can('can_generate_forms');
   const canViewWorkOrders = isAdmin || can('can_view_work_orders') || can('can_manage_work_orders');
   const canManageWorkOrders = isAdmin || can('can_manage_work_orders');
+  const canViewTasksAndNotes = isAdmin || can('can_view_tasks_and_notes');
+  const canEditTasksAndNotes = isAdmin || can('can_edit_tasks_and_notes');
+  const canUnsignTasksAndNotes = isAdmin || can('can_unsign_tasks_and_notes');
+  const canDeleteTasksAndNotes = isAdmin || can('can_delete_tasks_and_notes');
+  const canManageTaskSetup = isAdmin || can('can_manage_task_setup');
+  const canManageNoteSetup = isAdmin || can('can_manage_note_setup');
 
   // Modules that render a seven-column calendar get the wider container
   const runnerSoundProfile = currentUser?.runner_sound_profile || '';
@@ -1314,11 +1322,11 @@ const getLoadingMessage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, activeTab, canVerifyDocuments, canAddAssessmentScores, directory.length]);
 
-  // THE TRAINING MODULE'S MEMBER LIST, read when training is open and the user can edit trainings
+  // THE TRAINING MODULE'S MEMBER LIST, read when training is open and the user can edit trainings or sign off is disabled
   useEffect(() => {
     if (!authToken || activeTab !== 'training') return;
     if (directory.length) return;
-    if (!canEditTrainings) return;
+    if (!canEditTrainings && membersMustSignTrainings(systemSettings)) return;
     let cancelled = false;
     fetchAdminSections(['directory'])
       .then((data) => {
@@ -1330,7 +1338,7 @@ const getLoadingMessage = () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken, activeTab, canEditTrainings, directory.length]);
+  }, [authToken, activeTab, canEditTrainings, directory.length, systemSettings]);
 
   // Crew member directory for administrative tools.
   const documentsMembers = directory.length ? directory : users;
@@ -1527,6 +1535,8 @@ const getLoadingMessage = () => {
                         ? canViewReports || canGenerateForms
                         : activeTab === 'work-orders'
                           ? canViewWorkOrders
+                          : activeTab === 'tasks-and-notes'
+                            ? canViewTasksAndNotes
                           : activeTab === 'dashboard'
                             ? canAccessDashboard
                             : true; // help, settings and the easter egg are always open
@@ -1561,6 +1571,7 @@ const getLoadingMessage = () => {
     canViewReports,
     canGenerateForms,
     canViewWorkOrders,
+    canViewTasksAndNotes,
   ]);
 
   const handleLogout = () => {
@@ -1999,6 +2010,8 @@ const getLoadingMessage = () => {
                         ? canViewReports || canGenerateForms
                         : targetModule === 'work-orders'
                           ? canViewWorkOrders
+                          : targetModule === 'tasks-and-notes'
+                            ? canViewTasksAndNotes
                           : targetModule === 'chat'
                             ? canUseChat
                             : targetModule === 'dashboard'
@@ -2041,6 +2054,7 @@ const getLoadingMessage = () => {
     canViewReports,
     canGenerateForms,
     canViewWorkOrders,
+    canViewTasksAndNotes,
     canUseChat,
     canAccessDashboard,
   ]);
@@ -2153,6 +2167,7 @@ const getLoadingMessage = () => {
           departmentName={departmentName}
           departmentLogoUrl={departmentLogo}
           isLoading={globalLoading.active}
+          systemSettings={systemSettings}
         />
       ) : (
         <AuthProvider
@@ -2275,6 +2290,7 @@ const getLoadingMessage = () => {
             canGenerateForms={canGenerateForms}
             canViewRoster={canViewRoster}
             canViewWorkOrders={canViewWorkOrders}
+            canViewTasksAndNotes={canViewTasksAndNotes}
             canUseChat={canUseChat}
             ranks={ranks}
             systemSettings={systemSettings}
@@ -2315,6 +2331,7 @@ const getLoadingMessage = () => {
                     {activeTab === 'district-map' && 'District Map'}
                     {activeTab === 'chat' && 'Chat'}
                     {activeTab === 'reports' && 'Reports & Forms'}
+                    {activeTab === 'tasks-and-notes' && 'Tasks & Notes'}
                     {activeTab === 'help' && 'Help'}
                     {activeTab === 'settings' && 'My Settings'}
                     {activeTab === 'profile' && 'User Profile'}
@@ -2334,6 +2351,7 @@ const getLoadingMessage = () => {
                     {activeTab === 'district-map' && 'The department\'s boundary drawing. Drag to move, pinch or scroll to zoom.'}
                     {activeTab === 'chat' && "The station's rooms, and your own line in them. It stays open over whatever else you are doing."}
                     {activeTab === 'reports' && 'Run reports, and generate printable forms, shared with your role or rank.'}
+                    {activeTab === 'tasks-and-notes' && 'Chronological log of shift notes, operational tasks, and apparatus checklists.'}
                     {activeTab === 'help' && 'Guides for using StationSync. Administrators have their own set under Administration → System → Help.'}
                     {activeTab === 'settings' && 'Customize your personal account preferences.'}
                     {activeTab === 'profile' && 'Manage your personal details, profile picture, certifications, and account settings.'}
@@ -2381,6 +2399,7 @@ const getLoadingMessage = () => {
                     setActiveTab('district-map');
                   }}
                   token={authToken}
+                  roles={roles}
                 />
               ) : null
             )}
@@ -2407,6 +2426,8 @@ const getLoadingMessage = () => {
               <ApparatusModule
                 token={authToken}
                 currentUser={currentUser}
+                departmentName={departmentName}
+                departmentLogoUrl={departmentLogo}
                 onBack={() => handleSidebarNavigate('dashboard')}
               />
             )}
@@ -2625,6 +2646,26 @@ const getLoadingMessage = () => {
                   setAdminSubTab('work-orders');
                 }}
                 onChanged={refreshWorkOrders}
+              />
+            )}
+
+            {activeTab === 'tasks-and-notes' && canViewTasksAndNotes && (
+              <TasksAndNotesModule
+                token={authToken}
+                currentUser={currentUser}
+                currentUserRole={currentUserRole}
+                roles={roles}
+                canEdit={canEditTasksAndNotes}
+                canUnsign={canUnsignTasksAndNotes}
+                canDelete={canDeleteTasksAndNotes}
+                canManageTaskSetup={canManageTaskSetup}
+                canManageNoteSetup={canManageNoteSetup}
+                departmentName={departmentName}
+                departmentLogoUrl={departmentLogo}
+                onNavigateToAdmin={() => {
+                  setActiveTab('admin');
+                  setAdminSubTab('task-setup');
+                }}
               />
             )}
 

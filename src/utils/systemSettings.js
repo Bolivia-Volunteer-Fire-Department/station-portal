@@ -127,6 +127,8 @@ export const bossSayingsFrom = (systemSettings) => {
 // it belongs to everyone - the safe way round for a document any signed-in member may read. Every key below is public
 // because the BROWSER reads it: the loading messages, the theme and the time format are drawn on screen, and the clock
 // location has to be readable or the fence cannot be checked at all (see clockLocation.js).
+export const FORGOT_PASSWORD_ENABLED_KEY = 'forgot_password_enabled';
+
 export const PUBLIC_SETTING_KEYS = [
   'station_name',
   'department_name',
@@ -148,6 +150,10 @@ export const PUBLIC_SETTING_KEYS = [
   'training_signature_window_days',
   // Toggle controlling whether members must log in and sign their own training attendance (default true).
   'members_must_sign_trainings',
+  // Configured training categories, classifications, icons, and colors.
+  'training_categories',
+  // Toggle controlling whether the self-service Forgot Password feature is visible and active on the login screen (default true).
+  FORGOT_PASSWORD_ENABLED_KEY,
   // THE PAY PERIOD, both halves public: the LENGTH is the window the member's own Clock History opens on - a screen cannot
   // honour a setting it may not read - and the day a period STARTS is a fact about the station rather than about the person
   // looking. Literals rather than imports from utils/payPeriod, which reads settings through this module (the same cycle the

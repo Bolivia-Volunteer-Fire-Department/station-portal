@@ -7,7 +7,7 @@ import { formatTotalHours } from '../../utils/training';
 // Shared by both screens so the same filter set produces the same numbers in both. `signedIds` is
 // optional: the report shows a signature COUNT per row rather than a yes/no for one member, so it
 // can pass the totals for hours and count alone.
-export default function TrainingTotals({ totals, signedLabel = 'Signed' }) {
+export default function TrainingTotals({ totals, signedLabel = 'Signed', signedHint = null }) {
   if (!totals) return null;
 
   // The signature tile is optional: the report passes it only when one member is selected, since
@@ -44,7 +44,11 @@ export default function TrainingTotals({ totals, signedLabel = 'Signed' }) {
           <ListChecks className="w-3.5 h-3.5" />,
           signedLabel,
           `${totals.signedCount} of ${totals.count}`,
-          totals.unsignedCount > 0 ? `${totals.unsignedCount} outstanding` : 'None outstanding'
+          signedHint !== null
+            ? signedHint
+            : totals.unsignedCount > 0
+              ? `${totals.unsignedCount} outstanding`
+              : 'None outstanding'
         )}
     </div>
   );

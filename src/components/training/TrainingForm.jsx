@@ -7,10 +7,12 @@ import {
   normalizeTraining,
   trainingLocked,
   membersMustSignTrainings,
+  getActiveTrainingCategories,
 } from '../../utils/training';
 import { recordHeading } from '../../utils/displayLabel';
 import ViewportModal from '../ViewportModal';
 import ConfirmModal from '../ConfirmModal';
+import RankIcon from '../RankIcon';
 
 // The add/edit form for a training activity, in the editor modal both audiences use.
 const TRAINING_FORM_ID = 'training-editor-form';
@@ -34,6 +36,8 @@ const formFromTraining = (training) => {
   if (!training) return EMPTY_FORM;
   const normalized = normalizeTraining(training);
   return {
+    ...EMPTY_FORM,
+    ...training,
     id: normalized.id,
     date: normalized.date_key || '',
     title: normalized.title,
@@ -85,8 +89,12 @@ export default function TrainingForm({
     [systemSettings]
   );
 
-  // Classification flags: exclude the old is_entered_into_external checkbox since it is now a Lock/Approve button
-  const flags = MEMBER_EDITABLE_FLAGS;
+  const activeCategories = useMemo(
+    () => getActiveTrainingCategories(systemSettings),
+    [systemSettings]
+  );
+  // Classification flags: active configured categories or fallback to defaults
+  const flags = activeCategories.length > 0 ? activeCategories : MEMBER_EDITABLE_FLAGS;
 
   // Selected attendee IDs when membersMustSign is false
   const [selectedMemberIds, setSelectedMemberIds] = useState(() => {
@@ -357,6 +365,7 @@ export default function TrainingForm({
                     onChange={(e) => set(flag.key, e.target.checked)}
                     className="h-4 w-4 accent-red-600"
                   />
+                  {flag.icon && <RankIcon name={flag.icon} className="w-4 h-4 text-slate-500 shrink-0" />}
                   <span>{flag.label}</span>
                 </label>
               ))}
@@ -373,7 +382,7 @@ export default function TrainingForm({
                     <span>Members Present ({selectedMemberIds.length} attended)</span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Select members who attended this training. Attendance signatures will be recorded on their behalf.
+                    Select members who attended this training. Attendance will be recorded for each selected member.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
@@ -488,7 +497,7 @@ export default function TrainingForm({
         <ConfirmModal
           isOpen={true}
           title="Lock & Approve Training"
-          message="Are you sure you want to lock and approve this training? Once saved, this training and its attendance signatures will be permanently locked and cannot be changed."
+          message={`Are you sure you want to lock and approve this training? Once saved, this training and its ${membersMustSign ? 'signatures' : 'attendance records'} will be permanently locked and cannot be changed.`}
           confirmLabel="Approve & Lock"
           confirmVariant="primary"
           onConfirm={() => {

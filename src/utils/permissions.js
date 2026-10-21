@@ -121,6 +121,13 @@ export const ADMIN_PERMISSIONS = [
     description: 'Open the Training report: see who signed each training, change any training, and remove signatures.',
   },
   {
+    key: 'can_manage_training_setup',
+    tab: 'training-setup',
+    label: 'Set up trainings',
+    description: 'Open Training Setup: configure the training signing window, member self-sign requirements, and customize training categories, icons, and colors. Requires "Administer trainings".',
+    requires: 'can_administer_trainings',
+  },
+  {
     key: 'can_make_announcements',
     tab: 'announcements',
     label: 'Make announcements',
@@ -223,6 +230,18 @@ export const ADMIN_PERMISSIONS = [
     tab: 'hydrants',
     label: 'Manage hydrants',
     description: 'Track municipal and private fire hydrants, inspection records, flow test data, and location details in Assets.',
+  },
+  {
+    key: 'can_manage_task_setup',
+    tab: 'task-setup',
+    label: 'Manage task setup',
+    description: 'Create and configure daily task and apparatus checklist templates, schedules, and active form layouts.',
+  },
+  {
+    key: 'can_manage_note_setup',
+    tab: 'note-setup',
+    label: 'Manage note setup',
+    description: 'Create and configure shift note templates, effective dates, and active form layouts.',
   },
 ];
 
@@ -410,6 +429,29 @@ export const MEMBER_PERMISSIONS = [
     label: 'Work orders',
     description: 'Open the Work Orders module to submit tickets for apparatus repairs, facility issues, and equipment needs, and track submitted work orders.',
   },
+  {
+    key: 'can_view_tasks_and_notes',
+    label: 'View Tasks & Notes',
+    description: 'Open Tasks & Notes to see the log of shift notes, tasks, and apparatus checklists.',
+  },
+  {
+    key: 'can_edit_tasks_and_notes',
+    label: 'Add and edit tasks & notes',
+    description: 'Add new tasks & notes and modify existing unsigned notes.',
+    requires: 'can_view_tasks_and_notes',
+  },
+  {
+    key: 'can_unsign_tasks_and_notes',
+    label: 'Un-sign tasks & notes',
+    description: 'Un-sign and unlock completed tasks, notes, and apparatus checklists.',
+    requires: 'can_view_tasks_and_notes',
+  },
+  {
+    key: 'can_delete_tasks_and_notes',
+    label: 'Delete tasks & notes',
+    description: 'Delete tasks, notes, and apparatus checklist log entries.',
+    requires: 'can_view_tasks_and_notes',
+  },
 ];
 
 // Every permission, for the Roles editor, in display order.
@@ -445,6 +487,7 @@ export const ADMIN_PERMISSION_GROUPS = [
     keys: [
       'can_edit_timeclock',
       'can_administer_trainings',
+      'can_manage_training_setup',
       'can_manage_certifications',
       'can_manage_certification_setup',
       'can_manage_documents',
@@ -453,6 +496,8 @@ export const ADMIN_PERMISSION_GROUPS = [
       'can_manage_hydrants',
       'can_manage_asset_setup',
       'can_manage_work_orders',
+      'can_manage_task_setup',
+      'can_manage_note_setup',
     ],
   },
   {
@@ -490,6 +535,10 @@ export const MEMBER_PERMISSION_GROUPS = [
       'can_add_assessment_scores',
       'can_generate_forms',
       'can_view_work_orders',
+      'can_view_tasks_and_notes',
+      'can_edit_tasks_and_notes',
+      'can_unsign_tasks_and_notes',
+      'can_delete_tasks_and_notes',
     ],
   },
   {
@@ -660,6 +709,12 @@ export const roleAllowsTab = (role, tabId) => {
   if (tabId === 'dashboard-setup' || tabId === 'widget-setup') {
     if (!permissionGranted(role, 'can_access_dashboard')) return false;
     return permissionGranted(role, direct.key);
+  }
+
+  if (tabId === 'training-setup') {
+    if (permissionGranted(role, 'can_manage_training_setup')) return true;
+    if (permissionGranted(role, 'can_administer_trainings')) return true;
+    if (permissionGranted(role, 'can_edit_system_settings')) return true;
   }
 
   return permissionGranted(role, direct.key);

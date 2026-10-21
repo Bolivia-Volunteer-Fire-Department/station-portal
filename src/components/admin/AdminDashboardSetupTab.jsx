@@ -187,9 +187,9 @@ export default function AdminDashboardSetupTab({ token, systemSettings, onDataCh
   const colSpanClasses = (colSpan) => {
     switch (colSpan) {
       case 2:
-        return 'col-span-1 md:col-span-2';
+        return 'col-span-1 lg:col-span-2 xl:col-span-2';
       case 3:
-        return 'col-span-1 md:col-span-2 lg:col-span-3';
+        return 'col-span-1 lg:col-span-2 xl:col-span-3';
       case 1:
       default:
         return 'col-span-1';
@@ -303,7 +303,7 @@ export default function AdminDashboardSetupTab({ token, systemSettings, onDataCh
             </span>
           </div>
 
-          <div className="dashboard-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40">
+          <div className="dashboard-grid grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 p-4 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40">
             {layout.map((item, index) => {
               const isCore = item.id === 'time-status' || item.id === 'announcements';
               const widgetMeta = allWidgetsMap.get(item.id) || { label: item.id, description: '' };

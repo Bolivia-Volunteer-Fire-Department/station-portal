@@ -169,6 +169,7 @@ export default function UserSettings({
       if (mod.permissionKey === 'canEditAvailability') return permissionGranted(currentRole, 'can_edit_own_availability');
       if (mod.permissionKey === 'canSignTrainings') return permissionGranted(currentRole, 'can_sign_trainings');
       if (mod.permissionKey === 'canViewDocuments') return permissionGranted(currentRole, 'can_view_documents');
+      if (mod.permissionKey === 'canViewTasksAndNotes') return permissionGranted(currentRole, 'can_view_tasks_and_notes');
       if (mod.permissionKey === 'canViewWorkOrders') return canManageWorkOrders || permissionGranted(currentRole, 'can_view_work_orders') || permissionGranted(currentRole, 'can_manage_work_orders');
       if (mod.permissionKey === 'canViewMap') return permissionGranted(currentRole, 'can_view_map');
       if (mod.permissionKey === 'canViewReports') return permissionGranted(currentRole, 'can_view_reports') || permissionGranted(currentRole, 'can_generate_forms');

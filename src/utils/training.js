@@ -33,14 +33,14 @@ import { toTimeInputValue } from './timeInputValue.js';
 // training: it is edited only in the Administration module and shown as its own table column
 // rather than as a badge. See ENTERED_EXTERNALLY_KEY below for what that column does.
 export const TRAINING_FLAGS = [
-  { key: 'is_company_training', label: 'Company Training', short: 'Company' },
-  { key: 'is_hazmat', label: 'Hazmat', short: 'Hazmat' },
-  { key: 'is_ems', label: 'EMS', short: 'EMS' },
-  { key: 'is_fire_prevention', label: 'Fire prevention', short: 'Fire prev' },
-  { key: 'is_multicompany', label: 'Multi-company', short: 'Multi-co' },
-  { key: 'is_training_facility', label: 'Training Facility', short: 'Facility' },
-  { key: 'is_officer_training', label: 'Officer training', short: 'Officer' },
-  { key: 'is_driver_training', label: 'Driver training', short: 'Driver' },
+  { key: 'is_company_training', label: 'Company Training', short: 'Company', icon: 'flame', color: 'blue' },
+  { key: 'is_hazmat', label: 'Hazmat', short: 'Hazmat', icon: 'biohazard', color: 'amber' },
+  { key: 'is_ems', label: 'EMS', short: 'EMS', icon: 'heart-pulse', color: 'rose' },
+  { key: 'is_fire_prevention', label: 'Fire prevention', short: 'Fire prev', icon: 'shield-alert', color: 'orange' },
+  { key: 'is_multicompany', label: 'Multi-company', short: 'Multi-co', icon: 'users', color: 'indigo' },
+  { key: 'is_training_facility', label: 'Training Facility', short: 'Facility', icon: 'target', color: 'emerald' },
+  { key: 'is_officer_training', label: 'Officer training', short: 'Officer', icon: 'crown', color: 'purple' },
+  { key: 'is_driver_training', label: 'Driver training', short: 'Driver', icon: 'truck', color: 'sky' },
   {
     key: 'is_entered_into_external',
     label: 'Entered into an external system',
@@ -50,6 +50,85 @@ export const TRAINING_FLAGS = [
 ];
 
 export const TRAINING_FLAG_KEYS = TRAINING_FLAGS.map((flag) => flag.key);
+
+// The default set of training categories with icons and colors.
+export const DEFAULT_TRAINING_CATEGORIES = TRAINING_FLAGS.filter((flag) => !flag.adminOnly).map(
+  (flag, index) => ({
+    key: flag.key,
+    label: flag.label,
+    short: flag.short,
+    icon: flag.icon || '',
+    color: flag.color || 'slate',
+    active: true,
+    order: index + 1,
+  })
+);
+
+export const TRAINING_CATEGORIES_KEY = 'training_categories';
+
+// Curated palette of badge colors for training categories
+export const TRAINING_CATEGORY_COLORS = [
+  { id: 'slate', label: 'Slate / Gray', swatch: 'bg-slate-500', badgeClass: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300' },
+  { id: 'red', label: 'Red', swatch: 'bg-red-500', badgeClass: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800/80 dark:bg-red-950/40 dark:text-red-400' },
+  { id: 'rose', label: 'Rose', swatch: 'bg-rose-500', badgeClass: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800/80 dark:bg-rose-950/40 dark:text-rose-400' },
+  { id: 'orange', label: 'Orange', swatch: 'bg-orange-500', badgeClass: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800/80 dark:bg-orange-950/40 dark:text-orange-400' },
+  { id: 'amber', label: 'Amber', swatch: 'bg-amber-500', badgeClass: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-400' },
+  { id: 'yellow', label: 'Yellow', swatch: 'bg-yellow-500', badgeClass: 'border-yellow-200 bg-yellow-50 text-yellow-800 dark:border-yellow-800/80 dark:bg-yellow-950/40 dark:text-yellow-400' },
+  { id: 'green', label: 'Green', swatch: 'bg-green-500', badgeClass: 'border-green-200 bg-green-50 text-green-700 dark:border-green-800/80 dark:bg-green-950/40 dark:text-green-400' },
+  { id: 'emerald', label: 'Emerald', swatch: 'bg-emerald-500', badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/80 dark:bg-emerald-950/40 dark:text-emerald-400' },
+  { id: 'teal', label: 'Teal', swatch: 'bg-teal-500', badgeClass: 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800/80 dark:bg-teal-950/40 dark:text-teal-400' },
+  { id: 'cyan', label: 'Cyan', swatch: 'bg-cyan-500', badgeClass: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-800/80 dark:bg-cyan-950/40 dark:text-cyan-400' },
+  { id: 'sky', label: 'Sky', swatch: 'bg-sky-500', badgeClass: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800/80 dark:bg-sky-950/40 dark:text-sky-400' },
+  { id: 'blue', label: 'Blue', swatch: 'bg-blue-500', badgeClass: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800/80 dark:bg-blue-950/40 dark:text-blue-400' },
+  { id: 'indigo', label: 'Indigo', swatch: 'bg-indigo-500', badgeClass: 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800/80 dark:bg-indigo-950/40 dark:text-indigo-400' },
+  { id: 'purple', label: 'Purple', swatch: 'bg-purple-500', badgeClass: 'border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800/80 dark:bg-purple-950/40 dark:text-purple-400' },
+  { id: 'fuchsia', label: 'Fuchsia', swatch: 'bg-fuchsia-500', badgeClass: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-800/80 dark:bg-fuchsia-950/40 dark:text-fuchsia-400' },
+  { id: 'pink', label: 'Pink', swatch: 'bg-pink-500', badgeClass: 'border-pink-200 bg-pink-50 text-pink-700 dark:border-pink-800/80 dark:bg-pink-950/40 dark:text-pink-400' },
+];
+
+export const getCategoryColorClasses = (colorId) => {
+  const match = TRAINING_CATEGORY_COLORS.find((c) => c.id === colorId);
+  return match
+    ? match.badgeClass
+    : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300';
+};
+
+// Returns configured categories or defaults from system settings.
+export const getTrainingCategories = (systemSettings) => {
+  const raw = getSettingValue(systemSettings, TRAINING_CATEGORIES_KEY, null);
+  if (!raw) return DEFAULT_TRAINING_CATEGORIES;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.map((cat, idx) => ({
+        key: String(cat.key || cat.id || `cat_${idx}`).trim(),
+        label: String(cat.label || '').trim(),
+        short: String(cat.short || cat.label || '').trim(),
+        icon: String(cat.icon || '').trim(),
+        color: String(cat.color || 'slate').trim(),
+        active: cat.active !== false,
+        order: Number.isFinite(Number(cat.order)) ? Number(cat.order) : idx + 1,
+      }));
+    }
+  } catch (err) {
+    console.error('Failed to parse training categories from settings:', err);
+  }
+  return DEFAULT_TRAINING_CATEGORIES;
+};
+
+// Returns only active categories.
+export const getActiveTrainingCategories = (systemSettings) =>
+  getTrainingCategories(systemSettings).filter((cat) => cat.active);
+
+// Filter options for training categories based on system settings.
+export const trainingCategoryOptions = (systemSettings) => {
+  const active = getActiveTrainingCategories(systemSettings);
+  return [
+    { value: '', label: 'All categories' },
+    ...active.map((cat) => ({ value: cat.key, label: cat.label })),
+    { value: TRAINING_NO_CATEGORY, label: 'No category' },
+  ];
+};
 
 // The flags a member-facing form may edit, and the flags a table shows as badges. The external
 // flag is excluded from both on purpose: it is an administrative record that, once set, locks
@@ -100,15 +179,18 @@ export const trainingLocked = (training) =>
 // cannot work this out for itself - a member only receives their OWN signatures, so "has anyone
 // signed this?" is not answerable from the payload without it. It is a count, not a list, so it
 // does not leak who signed.
-export const trainingEditable = (training) =>
-  !trainingLocked(training) && Number(training?.signature_count ?? 0) === 0;
+export const trainingEditable = (training, membersMustSign = true) => {
+  if (trainingLocked(training)) return false;
+  if (!membersMustSign) return true;
+  return Number(training?.signature_count ?? 0) === 0;
+};
 
 // Why a training cannot be edited in the Training module, for a tooltip. Empty when it can.
-export const trainingEditBlockedReason = (training) => {
+export const trainingEditBlockedReason = (training, membersMustSign = true) => {
   if (trainingLocked(training)) {
     return 'This training has been entered into an external system, so it is locked and cannot be changed.';
   }
-  if (Number(training?.signature_count ?? 0) > 0) {
+  if (membersMustSign && Number(training?.signature_count ?? 0) > 0) {
     return 'Somebody has already signed this training, so it can only be changed in the Administration module.';
   }
   return '';
@@ -234,7 +316,7 @@ export function trainingTimeLabel(training, timeFormat = '12') {
 // One training, with its flags as booleans and its duration as a number. Every view normalizes
 // what it receives, so a component cannot be handed raw sheet text and silently drop the badges
 // or lose the date the sort depends on.
-export const normalizeTraining = (row) => {
+export const normalizeTraining = (row, categories = null) => {
   const source = row || {};
   const training = {
     id: text(source.id),
@@ -256,19 +338,26 @@ export const normalizeTraining = (row) => {
     locked_by_name: text(source.locked_by_name),
     is_locked: Boolean(source.is_locked || isTruthyFlag(source[ENTERED_EXTERNALLY_KEY])),
   };
-  TRAINING_FLAG_KEYS.forEach((key) => {
+  const resolvedCats =
+    Array.isArray(categories) && categories.length > 0
+      ? categories
+      : DEFAULT_TRAINING_CATEGORIES;
+  const allKeys = Array.from(new Set([...TRAINING_FLAG_KEYS, ...resolvedCats.map((c) => c.key)]));
+  allKeys.forEach((key) => {
     training[key] = isTruthyFlag(source[key]);
   });
   // Display helpers, derived once so every view agrees on what a row says.
   training.when_label = trainingTimeLabel(training);
-  training.flags = TRAINING_BADGES.filter((flag) => training[flag.key]);
+  training.flags = resolvedCats.filter((flag) => flag.active !== false && training[flag.key]);
   training.locked = trainingLocked(training);
   return training;
 };
 
 // Rows with no id cannot be signed or edited, so they are dropped rather than rendered blank.
-export const normalizeTrainingList = (rows) =>
-  (Array.isArray(rows) ? rows : []).map(normalizeTraining).filter((training) => training.id !== '');
+export const normalizeTrainingList = (rows, categories = null) =>
+  (Array.isArray(rows) ? rows : [])
+    .map((row) => normalizeTraining(row, categories))
+    .filter((training) => training.id !== '');
 
 // --- sorting, filtering and totals ------------------------------------------
 //
@@ -405,9 +494,11 @@ export const filterTrainings = (rows, filters = {}, { signedIds = new Set() } = 
     // worse failure than quietly not filtering.
     if (category === TRAINING_NO_CATEGORY) {
       if (MEMBER_EDITABLE_FLAGS.some((flag) => row[flag.key])) return false;
+      if (Array.isArray(row.flags) && row.flags.some((flag) => row[flag.key])) return false;
     } else if (
       category &&
-      MEMBER_EDITABLE_FLAGS.some((flag) => flag.key === category) &&
+      (MEMBER_EDITABLE_FLAGS.some((flag) => flag.key === category) ||
+        (Array.isArray(row.flags) && row.flags.some((flag) => flag.key === category))) &&
       !row[category]
     ) {
       return false;

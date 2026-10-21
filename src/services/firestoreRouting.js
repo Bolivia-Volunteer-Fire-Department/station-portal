@@ -265,6 +265,20 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
+  // Tasks and shift notes module, templates, and chronological log entries.
+  tasksAndNotes: {
+    requires: ['memberPayload'],
+    writes: [
+      'SAVE_TASK_NOTE_TEMPLATE',
+      'DELETE_TASK_NOTE_TEMPLATE',
+      'SAVE_TASK_NOTE_ENTRY',
+      'UNSIGN_TASK_NOTE_ENTRY',
+      'DELETE_TASK_NOTE_ENTRY',
+    ],
+    reads: ['GET_TASK_NOTE_TEMPLATES', 'GET_TASK_NOTE_ENTRIES'],
+    switchReads: [],
+  },
+
   // Initial member data bundle loaded right after signing in.
   memberPayload: { requires: [], writes: [], reads: ['GET_BOOTSTRAP'], switchReads: ['GET_BOOTSTRAP'] },
 
@@ -272,7 +286,15 @@ export const ROUTED_FEATURES = {
   adminReads: {
     requires: ['adminPayload'],
     writes: [],
-    reads: ['ADMIN_GET_ANNOUNCEMENTS', 'ADMIN_GET_EVENTS', 'ADMIN_GET_DOCUMENTS', 'ADMIN_GET_SCHEDULE_OFFERS', 'ADMIN_GET_CERTIFICATIONS', 'ADMIN_GET_DOCUMENT_VERIFICATION_COUNT'],
+    reads: [
+      'ADMIN_GET_ANNOUNCEMENTS',
+      'ADMIN_GET_EVENTS',
+      'ADMIN_GET_DOCUMENTS',
+      'ADMIN_GET_SCHEDULE_OFFERS',
+      'ADMIN_GET_CERTIFICATIONS',
+      'ADMIN_GET_DOCUMENT_VERIFICATION_COUNT',
+      'ADMIN_GET_PRIVATE_SETTINGS',
+    ],
     switchReads: [],
   },
 
@@ -433,6 +455,10 @@ const READ_DISPATCH = {
     const { readPendingDocumentVerifications } = await import('./firestoreReads.js');
     return ok(await readPendingDocumentVerifications(uid, body?.verifiableDocs));
   },
+  ADMIN_GET_PRIVATE_SETTINGS: async () => {
+    const { readPrivateSettings } = await import('./firestoreReads.js');
+    return ok(await readPrivateSettings());
+  },
   GET_REPORTS: async () => ok(await callable('getReports', {})),
   GET_REPORT_CONFIGS: async () => ok(await callable('getReportConfigurations', {})),
   RUN_REPORT: async (_uid, body) => ok(await callable('runReport', body || {})),
@@ -568,6 +594,33 @@ const DISPATCH = {
     const { saveMapTypes } = await writes();
     const request = body?.request || body || {};
     return ok(await saveMapTypes({ types: request.types, authorId: uid }));
+  },
+
+  SAVE_TASK_NOTE_TEMPLATE: async (body, uid) => {
+    const { saveTaskNoteTemplate } = await writes();
+    const request = body?.template || body || {};
+    return ok(await saveTaskNoteTemplate({ template: request, authorId: uid }));
+  },
+
+  DELETE_TASK_NOTE_TEMPLATE: async (body) => {
+    const { deleteTaskNoteTemplate } = await writes();
+    return ok(await deleteTaskNoteTemplate({ id: body?.id || body?.templateId }));
+  },
+
+  SAVE_TASK_NOTE_ENTRY: async (body, uid) => {
+    const { saveTaskNoteEntry } = await writes();
+    const request = body?.entry || body || {};
+    return ok(await saveTaskNoteEntry({ entry: request, authorId: uid }));
+  },
+
+  UNSIGN_TASK_NOTE_ENTRY: async (body, uid) => {
+    const { unsignTaskNoteEntry } = await writes();
+    return ok(await unsignTaskNoteEntry({ id: body?.id || body?.entryId, authorId: uid }));
+  },
+
+  DELETE_TASK_NOTE_ENTRY: async (body) => {
+    const { deleteTaskNoteEntry } = await writes();
+    return ok(await deleteTaskNoteEntry({ id: body?.id || body?.entryId }));
   },
 
   CLOCK_IN: async (body, uid) => {

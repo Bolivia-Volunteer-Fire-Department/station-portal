@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Eye, Info, Loader2, Lock, Pencil, PenLine, Save } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Eye, Info, Loader2, Lock, Pencil, PenLine, Save, Users } from 'lucide-react';
 import { saveTraining, signTraining } from '../services/api';
 import TrainingBadges from './training/TrainingBadges';
 import TrainingFilters from './training/TrainingFilters';
@@ -13,12 +13,15 @@ import {
   normalizeTrainingList,
   signatureWindowDays,
   signedTrainingIds,
+  signaturesForTraining,
   sortTrainingRows,
   trainingEditable,
   trainingEditBlockedReason,
   trainingSignBlockedReason,
   trainingTotals,
   membersMustSignTrainings,
+  getTrainingCategories,
+  trainingCategoryOptions,
 } from '../utils/training';
 
 // The Training module.
@@ -52,8 +55,13 @@ export default function TrainingModule({
   const [editing, setEditing] = useState(null);
   // Whether the editor modal is open: "new training" and "no editor" are both `editing === null`.
   const [editorOpen, setEditorOpen] = useState(false);
-  // The open training is shown, not edited, when somebody has signed it or it is locked.
-  const viewOnly = Boolean(editing) && !trainingEditable(editing);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+
+  // Department signing requirement: default true (members must sign).
+  const membersMustSign = membersMustSignTrainings(systemSettings);
+
+  // The open training is shown, not edited, when somebody has signed it, it is locked, or the user cannot edit.
+  const viewOnly = !canEdit || (Boolean(editing) && !trainingEditable(editing, membersMustSign));
   const [saving, setSaving] = useState(false);
   const [savingSignatures, setSavingSignatures] = useState(false);
   const [message, setMessage] = useState(null);
@@ -72,14 +80,33 @@ export default function TrainingModule({
     setPendingSignIds(new Set());
   }
 
+  const toggleExpanded = (trainingId) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(trainingId)) next.delete(trainingId);
+      else next.add(trainingId);
+      return next;
+    });
+  };
+
+  const memberName = (userId) => {
+    const user = (Array.isArray(users) ? users : []).find(
+      (u) => String(u?.id ?? u?.user_id ?? u?.uid ?? '') === String(userId)
+    );
+    return user?.name || user?.full_name || user?.user_name || 'Member';
+  };
+
   const signedIds = useMemo(
     () => signedTrainingIds(signatures, currentUser?.id),
     [signatures, currentUser?.id]
   );
+  const categories = useMemo(() => getTrainingCategories(systemSettings), [systemSettings]);
+  const categoryOptions = useMemo(() => trainingCategoryOptions(systemSettings), [systemSettings]);
+
   // Normalized, then filtered and sorted. A row with no id cannot be signed or edited, so it is
   // dropped here rather than rendered as a blank line (the backend's normalizeTrainingList does the
   // same).
-  const allRows = useMemo(() => normalizeTrainingList(trainings), [trainings]);
+  const allRows = useMemo(() => normalizeTrainingList(trainings, categories), [trainings, categories]);
 
   // The filters run on the same rows the table shows, so the totals below always add up to exactly
   // what is on screen - the whole point of the filter is to answer "how many hours is this?".
@@ -94,7 +121,6 @@ export default function TrainingModule({
   // than the device's, because a deadline is a station fact - the same comparison every other "is this still live?"
   // question in the app makes (utils/scheduleDate#stationTodayKey).
   const windowDays = signatureWindowDays(systemSettings);
-  const membersMustSign = membersMustSignTrainings(systemSettings);
   const todayKey = stationTodayKey();
 
   const toggleSign = (training) => {
@@ -169,7 +195,7 @@ export default function TrainingModule({
 
   return (
     <div className="space-y-4">
-      {canEdit && editorOpen && (
+      {editorOpen && (
         <TrainingForm
           // Remounts when the edited row changes, so the form's state is seeded exactly once
           // per row instead of being re-seeded by an effect.
@@ -177,7 +203,7 @@ export default function TrainingModule({
           editing={editing}
           saving={saving}
           readOnly={viewOnly}
-          readOnlyReason={viewOnly ? trainingEditBlockedReason(editing) : ''}
+          readOnlyReason={viewOnly ? trainingEditBlockedReason(editing, membersMustSign) : ''}
           onSubmit={handleSaveTraining}
           onCancel={() => {
             setEditing(null);
@@ -200,26 +226,24 @@ export default function TrainingModule({
         // The location options come from the trainings the member can see, so the list stays short
         // and relevant. No Member select here: a member only ever sees their own record.
         rows={allRows}
-        signedLabel="My signature"
+        signedLabel={membersMustSign ? 'My signature' : 'My attendance'}
+        signedYesLabel={membersMustSign ? 'Signed only' : 'Attended only'}
+        signedNoLabel={membersMustSign ? 'Not signed only' : 'Not attended only'}
+        categoryOptions={categoryOptions}
       />
 
-      <TrainingTotals totals={totals} signedLabel="Signed by me" />
-
-      {!membersMustSign && (
-        <div className="mx-1 my-3 p-3 rounded-2xl flex items-start gap-2.5 text-sm bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-blue-800 dark:text-blue-200">
-          <Info className="w-4 h-4 shrink-0 mt-0.5" />
-      <span>
-            Member sign off is disabled for this department. Training creators mark member attendance directly on the report.
-          </span>    
-        </div>
-      )}
+      <TrainingTotals
+        totals={totals}
+        signedLabel={membersMustSign ? 'Signed by me' : 'Attended by me'}
+        signedHint={membersMustSign ? null : `${totals.signedCount} attended`}
+      />
 
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <PenLine className="w-4 h-4 text-red-500 shrink-0" />
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Training record</h3>
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            {totals.signedCount} of {totals.count} signed
+            {totals.signedCount} of {totals.count} {membersMustSign ? 'signed' : 'attended'}
             {totals.count !== allRows.length ? ` (of ${allRows.length})` : ''}
           </span>
           <div className="ml-auto flex items-center gap-3">
@@ -242,20 +266,22 @@ export default function TrainingModule({
                 Add training
               </button>
             )}
-            {pendingCount > 0 && (
+            {membersMustSign && pendingCount > 0 && (
               <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
                 {pendingCount} unsaved {pendingCount === 1 ? 'signature' : 'signatures'}
               </span>
             )}
-            <button
-              type="button"
-              onClick={handleSaveSignatures}
-              disabled={pendingCount === 0 || savingSignatures}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-4 py-2 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
-            >
-              {savingSignatures ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save signatures
-            </button>
+            {membersMustSign && (
+              <button
+                type="button"
+                onClick={handleSaveSignatures}
+                disabled={pendingCount === 0 || savingSignatures}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-4 py-2 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+              >
+                {savingSignatures ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save signatures
+              </button>
+            )}
           </div>
         </div>
 
@@ -281,7 +307,7 @@ export default function TrainingModule({
         {/* THE RULE, SAID ONCE, rather than only as a tooltip on a button the member cannot use: a Closed button explains
             itself on hover, but a member who never hovers would read it as a broken screen. Shown only when a window is
             configured - with none, there is nothing to say. */}
-        {windowDays !== null && (
+        {membersMustSign && windowDays !== null && (
           <p className="px-4 pt-3 text-xs text-slate-500 dark:text-slate-400">
             Trainings can be signed for {windowDays} day{windowDays === 1 ? '' : 's'} after the date. For anything older,
             ask an administrator.
@@ -292,20 +318,21 @@ export default function TrainingModule({
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
               <tr>
+                <th className="w-8 px-2 py-3" />
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Training</th>
                 <th className="px-4 py-3">Location</th>
                 <th className="px-4 py-3">Instructors</th>
                 <th className="px-4 py-3 text-center" title="Locked & Approved / External">Ext.</th>
-                {canEdit && <th className="px-4 py-3" />}
-                <th className="px-4 py-3 text-right">Signature</th>
+                <th className="px-4 py-3 text-right">Action</th>
+                <th className="px-4 py-3 text-right">{membersMustSign ? 'Signature' : 'Attendance'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700/70">
               {rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={canEdit ? 7 : 6}
+                    colSpan={8}
                     className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
                   >
                     {/* Distinguished on purpose: an empty result from a filter is not the same as
@@ -320,54 +347,74 @@ export default function TrainingModule({
                 const id = String(training.id);
                 const isSigned = signedIds.has(id);
                 const isPending = pendingSignIds.has(id);
+                const isOpen = expandedIds.has(id);
+                const trainingSignatures = signaturesForTraining(signatures, id);
                 // Rule: a training the module may not edit - because somebody has signed it, or
                 // because it is locked - offers Open (read-only) in place of Edit.
-                const editable = trainingEditable(training);
-                const editBlockedReason = trainingEditBlockedReason(training);
+                const editable = canEdit && trainingEditable(training, membersMustSign);
+                const editBlockedReason = trainingEditBlockedReason(training, membersMustSign);
                 // Why the signature button is closed, if it is. Worked out per row rather than stored on the training,
                 // because the window is a setting and the clock keeps moving.
                 const signBlockedReason = trainingSignBlockedReason(training, { todayKey, windowDays });
                 return (
-                  <tr key={id} className="align-top">
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300">
-                      {displayDate(training.date_key || '') || training.date}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900 dark:text-white">{training.title}</div>
-                      <TrainingBadges training={training} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {training.location || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {training.instructors || '—'}
-                    </td>
-                    {/* A lock means the training has been locked/approved by an officer */}
-                    <td className="px-4 py-3 text-center">
-                      {training.locked ? (
-                        <span
-                          className="inline-flex text-emerald-600 dark:text-emerald-400"
+                  <React.Fragment key={id}>
+                    <tr className="align-top">
+                      <td className="px-2 py-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(id)}
                           title={
-                            training.locked_by_name || training.locked_at
-                              ? `Locked & approved${training.locked_by_name ? ` by ${training.locked_by_name}` : ''}${
-                                  training.locked_at
-                                    ? ` on ${new Date(training.locked_at).toLocaleDateString(undefined, {
-                                        month: 'short',
-                                        day: 'numeric',
-                                        year: 'numeric',
-                                      })}`
-                                    : ''
-                                }`
-                              : 'Locked & approved'
+                            isOpen
+                              ? membersMustSign
+                                ? 'Hide signatures'
+                                : 'Hide attendees'
+                              : membersMustSign
+                                ? 'Show signatures'
+                                : 'Show attendees'
                           }
+                          className="p-1 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-700"
                         >
-                          <Lock className="w-4 h-4" />
-                        </span>
-                      ) : (
-                        <span className="text-slate-300 dark:text-slate-600">—</span>
-                      )}
-                    </td>
-                    {canEdit && (
+                          {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                        {displayDate(training.date_key || '') || training.date}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900 dark:text-white">{training.title}</div>
+                        <TrainingBadges training={training} />
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {training.location || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                        {training.instructors || '—'}
+                      </td>
+                      {/* A lock means the training has been locked/approved by an officer */}
+                      <td className="px-4 py-3 text-center">
+                        {training.locked ? (
+                          <span
+                            className="inline-flex text-emerald-600 dark:text-emerald-400"
+                            title={
+                              training.locked_by_name || training.locked_at
+                                ? `Locked & approved${training.locked_by_name ? ` by ${training.locked_by_name}` : ''}${
+                                    training.locked_at
+                                      ? ` on ${new Date(training.locked_at).toLocaleDateString(undefined, {
+                                          month: 'short',
+                                          day: 'numeric',
+                                          year: 'numeric',
+                                        })}`
+                                      : ''
+                                  }`
+                                : 'Locked & approved'
+                            }
+                          >
+                            <Lock className="w-4 h-4" />
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"
@@ -375,45 +422,98 @@ export default function TrainingModule({
                             setEditing(training);
                             setEditorOpen(true);
                           }}
-                          title={editable ? 'Edit this training' : `${editBlockedReason} Open it to read the details.`}
+                          title={
+                            editable
+                              ? 'Edit this training'
+                              : `${editBlockedReason} Open it to read the details.`
+                          }
                           className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                         >
                           {editable ? <Pencil className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                          {editable ? 'Edit' : 'Open'}
+                          {editable ? 'Edit' : canEdit ? 'Open' : 'View'}
                         </button>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {membersMustSign ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleSign(training)}
+                            disabled={isSigned || Boolean(signBlockedReason)}
+                            title={
+                              isSigned
+                                ? 'You signed this training. Signatures cannot be removed.'
+                                : signBlockedReason ||
+                                  (isPending
+                                    ? 'Click to take this back out of the batch'
+                                    : 'Click to add your signature, then save')
+                            }
+                            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                              isSigned
+                                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 cursor-default'
+                                : signBlockedReason
+                                  ? 'cursor-not-allowed border-2 border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-500'
+                                  : isPending
+                                    ? 'border-2 border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                                    : 'border-2 border-dashed border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 dark:border-slate-600 dark:text-slate-400 dark:hover:text-white'
+                            }`}
+                          >
+                            {isSigned && <Check className="w-3.5 h-3.5" />}
+                            {isSigned ? 'Signed' : signBlockedReason ? 'Closed' : isPending ? 'Ready to sign' : 'Sign'}
+                          </button>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                              isSigned
+                                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                                : 'border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-900/40'
+                            }`}
+                          >
+                            {isSigned ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Attended</span>
+                              </>
+                            ) : (
+                              <span>Not Attended</span>
+                            )}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="bg-slate-50/70 dark:bg-slate-900/40">
+                        <td colSpan={8} className="px-4 py-3 border-t border-slate-200 dark:border-slate-700/60">
+                          <div className="space-y-2">
+                            <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                              <Users className="w-3.5 h-3.5 text-slate-500" />
+                              <span>{membersMustSign ? 'Signatures' : 'Attendees'} ({trainingSignatures.length})</span>
+                            </div>
+                            {trainingSignatures.length === 0 ? (
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {membersMustSign ? 'Nobody has signed this training yet.' : 'No attendance recorded yet.'}
+                              </p>
+                            ) : (
+                              <ul className="flex flex-wrap gap-2">
+                                {trainingSignatures.map((signature) => (
+                                  <li
+                                    key={signature.id || `${signature.training_id}-${signature.user_id}`}
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200"
+                                  >
+                                    {memberName(signature.user_id)}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {training.narrative && (
+                              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line">
+                                {training.narrative}
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                    <td className="px-4 py-3 text-right">
-                      {/* THREE STATES AND A CLOSED ONE: signed, ready to sign, unsigned - and a training nobody may sign
-                          any more (the window has passed, or the record is marked as finished), which reads Closed and
-                          explains itself on hover rather than looking like a button that broke. */}
-                      <button
-                        type="button"
-                        onClick={() => toggleSign(training)}
-                        disabled={isSigned || Boolean(signBlockedReason)}
-                        title={
-                          isSigned
-                            ? 'You signed this training. Signatures cannot be removed.'
-                            : signBlockedReason ||
-                              (isPending
-                                ? 'Click to take this back out of the batch'
-                                : 'Click to add your signature, then save')
-                        }
-                        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
-                          isSigned
-                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 cursor-default'
-                            : signBlockedReason
-                              ? 'cursor-not-allowed border-2 border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-500'
-                              : isPending
-                                ? 'border-2 border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
-                                : 'border-2 border-dashed border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 dark:border-slate-600 dark:text-slate-400 dark:hover:text-white'
-                        }`}
-                      >
-                        {isSigned && <Check className="w-3.5 h-3.5" />}
-                        {isSigned ? 'Signed' : signBlockedReason ? 'Closed' : isPending ? 'Ready to sign' : 'Sign'}
-                      </button>
-                    </td>
-                  </tr>
+                  </React.Fragment>
                 );
               })}
             </tbody>

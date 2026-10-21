@@ -1,14 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, Map as MapIcon, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone, Compass, Database, ShieldCheck, Archive, Clock, RotateCw, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Save, Loader2, Pencil, PenLine, Trash2, Plus, AlertCircle, X, Monitor, Settings2, Building2, MapPin, Map as MapIcon, TimerOff, Volume2, CalendarDays, MessageSquare, Upload, Download, Sparkles, RotateCcw, FileArchive, Shield, Check, Smartphone, Compass, Database, ShieldCheck, Archive, Clock, RotateCw, CheckCircle2, AlertTriangle, Mail } from 'lucide-react';
 import { stationLogoUrl } from '../../utils/assets';
 import { processUploadedLogo, generatePwaAssets, createZipArchive, downloadBlob } from '../../utils/pwaIcons';
-import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting, adminTriggerDatabaseBackup } from '../../services/api';
+import { adminSaveSystemSetting, adminSaveSystemSettings, isUnknownAction, adminDeleteSystemSetting, adminTriggerDatabaseBackup, adminReadPrivateSettings } from '../../services/api';
 import { SIDEBAR_NAV_ORDER_KEY, SIDEBAR_NAV_ICONS_KEY } from '../../utils/sidebarNav';
 import { clockLocationConfig } from '../../utils/clockLocation';
 import { CLOCK_ROUNDING_KEY, CLOCK_ROUNDING_OPTIONS, clockRoundingMinutes } from '../../utils/clockRounding';
 import { sessionTimeoutConfig } from '../../utils/sessionTimeout';
-// Configuration for training signature time limits.
-import { SIGNATURE_WINDOW_KEY, signatureWindowConfig, MEMBERS_MUST_SIGN_KEY, membersMustSignTrainings } from '../../utils/training';
 import {
   DEFAULT_PAY_WEEK_START,
   PAY_PERIOD_DAYS_KEY,
@@ -28,6 +26,7 @@ import {
   updateBossSayings,
   bossSayingSavePlan,
   BOSS_SAYING_KEYS,
+  FORGOT_PASSWORD_ENABLED_KEY,
 } from '../../utils/systemSettings';
 import {
   MOBILE_NAV_MODULES_KEY,
@@ -54,8 +53,9 @@ const KNOWN_KEYS = [
   CLOCK_ROUNDING_KEY,
   'session_timeout',
   PASSWORD_MIN_STRENGTH_KEY,
-  SIGNATURE_WINDOW_KEY,
-  MEMBERS_MUST_SIGN_KEY,
+  'training_signature_window_days',
+  'members_must_sign_trainings',
+  'training_categories',
   PAY_PERIOD_DAYS_KEY,
   PAY_WEEK_START_KEY,
   ...LOADING_MESSAGE_KEYS,
@@ -69,6 +69,9 @@ const KNOWN_KEYS = [
   'backup_bucket_name',
   'backup_pitr_status',
   'backup_retention_days',
+  FORGOT_PASSWORD_ENABLED_KEY,
+  'email_sender',
+  'resend_api_key',
 ];
 
 function isTruthySetting(value) {
@@ -103,15 +106,14 @@ export default function AdminSystemSettingsTab({ token, systemSettings, onDataCh
     <CenteredContent className="space-y-6">
       <GeneralSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <DatabaseBackupCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
-      <MapSettingsPointer onOpenMapSettings={onOpenMapSettings} />
+      {/* <MapSettingsPointer onOpenMapSettings={onOpenMapSettings} /> */}
       <DisplaySettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SoundSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <SessionTimeoutCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <PasswordStrengthPolicyCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
+      <EmailSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <PayPeriodCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <ClockSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
-      <SignatureWindowCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
-      <TrainingSignatureRequirementCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <LoadingMessagesCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       <BossSayingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} />
       {/* <CustomSettingsCard token={token} systemSettings={systemSettings} onDataChanged={onDataChanged} /> */}
@@ -1045,19 +1047,61 @@ function PasswordStrengthPolicyCard({ token, systemSettings, onDataChanged }) {
   );
 }
 
-// Sets how many days members have to sign training records before they lock.
-function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
-  const [days, setDays] = useState(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
+// Configures transactional email delivery for password resets and system notifications via Resend.
+function EmailSettingsCard({ token, systemSettings, onDataChanged }) {
+  const [savedKey, setSavedKey] = useState('');
+  const [sender, setSender] = useState('');
+  const [enabled, setEnabled] = useState(isTruthySetting(getSettingValue(systemSettings, 'forgot_password_enabled', 'true')));
+
+  // Obfuscated key handling
+  const [isEditingKey, setIsEditingKey] = useState(false);
+  const [newApiKey, setNewApiKey] = useState('');
+  const [loadingPrivate, setLoadingPrivate] = useState(true);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setDays(getSettingValue(systemSettings, SIGNATURE_WINDOW_KEY, ''));
+    setEnabled(isTruthySetting(getSettingValue(systemSettings, 'forgot_password_enabled', 'true')));
   }, [systemSettings]);
 
-  // Check if the typed days value is valid.
-  const preview = signatureWindowConfig([{ key: SIGNATURE_WINDOW_KEY, value: days }]);
+  useEffect(() => {
+    let active = true;
+    setLoadingPrivate(true);
+    adminReadPrivateSettings(token)
+      .then((res) => {
+        if (!active) return;
+        if (res?.success) {
+          const key = String(res.resend_api_key || '').trim();
+          const from = String(res.email_sender || '').trim();
+          setSavedKey(key);
+          if (from) {
+            setSender(from);
+          } else {
+            setSender(getSettingValue(systemSettings, 'email_sender', ''));
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[email-settings] Failed to load private settings:', err);
+      })
+      .finally(() => {
+        if (active) setLoadingPrivate(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  const hasExistingKey = Boolean(String(savedKey || '').trim());
+
+  const getMaskedKey = () => {
+    const key = String(savedKey || '').trim();
+    if (!key) return '';
+    if (key.length <= 8) return '••••••••';
+    return `${key.slice(0, 3)}••••••••••••••••••••${key.slice(-4)}`;
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -1065,209 +1109,224 @@ function SignatureWindowCard({ token, systemSettings, onDataChanged }) {
     setError(null);
     setSaved(false);
     try {
-      const result = await adminSaveSystemSetting(SIGNATURE_WINDOW_KEY, String(days ?? '').trim(), token);
-      if (!result?.success) throw new Error(result?.message || 'Failed to save the signing window.');
-      void onDataChanged();
+      const updates = [
+        { key: 'email_sender', value: String(sender || '').trim() },
+        { key: 'forgot_password_enabled', value: enabled ? 'true' : 'false' },
+      ];
+
+      if (newApiKey === '__REMOVE__') {
+        updates.push({ key: 'resend_api_key', value: '' });
+      } else if (newApiKey.trim()) {
+        updates.push({ key: 'resend_api_key', value: newApiKey.trim() });
+      }
+
+      const result = await adminSaveSystemSettings(updates, token);
+      if (!result?.success) throw new Error(result?.message || 'Failed to save email settings.');
+      
+      if (newApiKey === '__REMOVE__') {
+        setSavedKey('');
+      } else if (newApiKey.trim()) {
+        setSavedKey(newApiKey.trim());
+      }
       setSaved(true);
+      setIsEditingKey(false);
+      setNewApiKey('');
+      void onDataChanged();
     } catch (err) {
-      setError(err.message || 'Failed to save the signing window.');
+      setError(err?.message || 'Failed to save email settings.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-      <form onSubmit={handleSave} className="p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
-            <PenLine className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Training Signing Window</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              How long after its date a training stays open for signatures.
-            </p>
-          </div>
-          <span
-            className={`ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-              preview.configured
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="p-2.5 rounded-xl bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400">
+          <Mail className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Email & Password Reset</h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Configure self-service password reset options and transactional email delivery via Resend.
+          </p>
+        </div>
+        <span
+          className={`ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+            loadingPrivate
+              ? 'bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400'
+              : hasExistingKey
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400'
-                : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400'
-            }`}
-          >
-            {preview.configured ? `${preview.days} day${preview.days === 1 ? '' : 's'}` : 'No limit'}
-          </span>
+                : 'bg-amber-100 text-amber-700 dark:bg-amber-950/80 dark:text-amber-400'
+          }`}
+        >
+          {loadingPrivate ? 'Checking...' : hasExistingKey ? 'Key Configured' : 'No API Key'}
+        </span>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
         </div>
+      )}
 
-        {error && (
-          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          {preview.configured ? (
-            <>
-              A training can be signed for{' '}
-              <strong className="text-slate-700 dark:text-slate-300">
-                {preview.days} day{preview.days === 1 ? '' : 's'}
-              </strong>{' '}
-              after its date, counting the date itself — so a 30-day window on 1 March closes after 31 March. After that
-              the <strong className="text-slate-700 dark:text-slate-300">Sign</strong> button reads Closed for every
-              member. A signature that is genuinely missing is then yours to sort out here: widen the window, let them
-              sign, and set it back. A training marked as Locked stays closed, whatever the date.
-            </>
-          ) : preview.invalid ? (
-            <>
-              <strong className="text-amber-600 dark:text-amber-400">
-                &ldquo;{preview.raw}&rdquo; cannot be used, so there is no window at all.
-              </strong>{' '}
-              Enter a whole number of days — for example{' '}
-              <code className="rounded bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 px-1 py-0.5 font-mono text-[11px]">
-                30
-              </code>
-              . An unreadable value is ignored rather than applied, so a typo can never close every training in the
-              station at once.
-            </>
-          ) : (
-            <>
-              Trainings are{' '}
-              <strong className="text-slate-700 dark:text-slate-300">
-                open for signature for as long as they exist
-              </strong>
-              . Leave this blank to keep that, or fill it in to close signing a set number of days after each training's
-              date — which is what stops a member signing six months of trainings in one pass.
-            </>
-          )}
-        </p>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-              Signable for (days after the date)
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="e.g. 30"
-              value={days}
-              onChange={(e) => {
-                setDays(e.target.value);
-                setSaved(false);
-              }}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-          <div className="sm:col-span-2 flex items-end">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Counted from the training's own date, so one number covers every training at once. Signatures already given
-              are untouched: closing the window stops new ones, and removing one stays an administrator's action — a
-              signature is an acknowledgment of attendance, not a preference.
-            </p>
-          </div>
+      {saved && (
+        <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800/80">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>Email & password reset settings saved successfully.</span>
         </div>
+      )}
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setDays('');
+      <form onSubmit={handleSave} className="space-y-4">
+        {/* Enable / Disable Feature Toggle */}
+        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700">
+          <div className="pr-4">
+            <span className="text-sm font-semibold text-slate-900 dark:text-white block">
+              Enable "Forgot Password" on Login Screen
+            </span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              When disabled, the "Forgot password?" link is completely hidden from the login screen and reset requests are refused.
+            </span>
+          </div>
+          <ToggleSwitch
+            checked={enabled}
+            onChange={(val) => {
+              setEnabled(val);
               setSaved(false);
             }}
-            className="flex items-center gap-2 mr-auto text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 transition disabled:opacity-50"
-          >
-            Clear (no limit)
-          </button>
-          {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+            disabled={saving}
+          />
+        </div>
+
+        {/* Resend API Key Field (Obfuscated) */}
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
+            Resend API Key
+          </label>
+
+          {loadingPrivate ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500 py-2">
+              <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+              <span>Checking key configuration...</span>
+            </div>
+          ) : hasExistingKey && !isEditingKey ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={getMaskedKey()}
+                  readOnly
+                  disabled
+                  className="w-full bg-slate-100 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 font-mono select-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingKey(true);
+                    setNewApiKey('');
+                    setSaved(false);
+                  }}
+                  className="shrink-0 px-3.5 py-2.5 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition"
+                >
+                  Change Key
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingKey(true);
+                    setNewApiKey('__REMOVE__');
+                    setSaved(false);
+                  }}
+                  className="shrink-0 px-3.5 py-2.5 text-xs font-semibold rounded-xl border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 transition"
+                >
+                  Remove
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                The saved API key is hidden for security. Click "Change Key" to enter a replacement.
+              </p>
+            </div>
+          ) : newApiKey === '__REMOVE__' ? (
+            <div className="flex items-center justify-between p-3.5 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300">
+              <span>API Key will be removed when you save settings.</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingKey(false);
+                  setNewApiKey('');
+                }}
+                className="font-semibold underline hover:no-underline"
+              >
+                Keep Existing Key
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  placeholder={hasExistingKey ? 'Enter new Resend API key' : 're_...'}
+                  value={newApiKey}
+                  onChange={(e) => {
+                    setNewApiKey(e.target.value);
+                    setSaved(false);
+                  }}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 font-mono"
+                />
+                {hasExistingKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingKey(false);
+                      setNewApiKey('');
+                    }}
+                    className="shrink-0 px-3.5 py-2.5 text-xs font-medium rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Sign up at <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-red-600 dark:text-red-400 underline">resend.com</a> to create an API key. Free tier includes 3,000 emails/month.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Sender Address */}
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
+            Sender Address
+          </label>
+          <input
+            type="text"
+            placeholder="StationSync <onboarding@resend.dev>"
+            value={sender}
+            onChange={(e) => {
+              setSender(e.target.value);
+              setSaved(false);
+            }}
+            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+          />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Leave blank to use default <code className="text-xs bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded">StationSync &lt;onboarding@resend.dev&gt;</code>, or use a custom verified domain address (e.g. <code className="text-xs bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded">StationSync &lt;no-reply@station.boliviavfd.org&gt;</code>).
+          </p>
+        </div>
+
+        <div className="pt-3 border-t border-slate-200 dark:border-slate-700/80 flex items-center justify-end">
           <button
             type="submit"
-            disabled={saving}
-            className="ml-auto flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
+            disabled={saving || loadingPrivate}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-red-600/20 disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save Signing Window
+            Save Email Settings
           </button>
         </div>
-
       </form>
-    </div>
-  );
-}
-
-// Controls whether individual members must sign for their own trainings or officers can sign on their behalf.
-function TrainingSignatureRequirementCard({ token, systemSettings, onDataChanged }) {
-  const [mustSign, setMustSign] = useState(() => membersMustSignTrainings(systemSettings));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    setMustSign(membersMustSignTrainings(systemSettings));
-  }, [systemSettings]);
-
-  const handleToggle = async (checked) => {
-    setMustSign(checked);
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const result = await adminSaveSystemSetting(MEMBERS_MUST_SIGN_KEY, String(checked), token);
-      if (!result?.success) throw new Error(result?.message || 'Failed to update setting.');
-      void onDataChanged();
-      setSaved(true);
-    } catch (err) {
-      setError(err.message || 'Failed to update setting.');
-      setMustSign(!checked);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
-      <div className="p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-red-500">
-            <CheckCircle2 className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Training Signatures</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Members must sign for their own trainings
-            </p>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {saving && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
-            {saved && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
-            <ToggleSwitch
-              checked={mustSign}
-              onChange={handleToggle}
-              disabled={saving}
-            />
-          </div>
-        </div>
-
-        {error && (
-          <div className="p-3 rounded-xl flex items-center gap-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/80 dark:text-red-400 dark:border-red-800/80">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          {mustSign ? (
-            <>
-              <strong className="text-slate-700 dark:text-slate-300">Self-sign required (Default):</strong> Members must sign into their own account in the Training module to sign and acknowledge their attendance.
-            </>
-          ) : (
-            <>
-              <strong className="text-amber-600 dark:text-amber-400">Member sign-off disabled:</strong> Any user authorized to add or edit trainings can select which members were present directly on the training form, signing attendance on their behalf.
-            </>
-          )}
-        </p>
-      </div>
     </div>
   );
 }

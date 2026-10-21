@@ -1020,6 +1020,10 @@ export const isUnknownAction = (result) => !!result && result.code === 'UNKNOWN_
 export const adminDeleteSystemSetting = async (key, token) =>
   dispatchRequest({ action: 'ADMIN_DELETE_SYSTEM_SETTING', token, key });
 
+// Reads private system settings (API keys, credentials, private integrations).
+export const adminReadPrivateSettings = async (token) =>
+  dispatchRequest({ action: 'ADMIN_GET_PRIVATE_SETTINGS', token });
+
 // Triggers an on-demand database snapshot and updates the backup status.
 export const adminTriggerDatabaseBackup = async (token) =>
   dispatchRequest({ action: 'ADMIN_TRIGGER_DATABASE_BACKUP', token });
@@ -1186,3 +1190,37 @@ export const adminDeleteWorkOrder = async (id, token) =>
 // Fetches work orders.
 export const fetchWorkOrders = async (token) =>
   dispatchRequest({ action: 'GET_WORK_ORDERS', token });
+
+// Fetches all task, shift note, and apparatus checklist templates.
+export const fetchTaskNoteTemplates = async () => {
+  const response = await routeRead('GET_TASK_NOTE_TEMPLATES');
+  if (!response?.success) throw await notAnswered('GET_TASK_NOTE_TEMPLATES');
+  return Array.isArray(response.templates) ? response.templates : [];
+};
+
+// Fetches windowed chronological task, note, and checklist log entries.
+export const fetchTaskNoteEntries = async ({ fromDate, days = 14 } = {}) => {
+  const response = await routeRead('GET_TASK_NOTE_ENTRIES', { fromDate, days });
+  if (!response?.success) throw await notAnswered('GET_TASK_NOTE_ENTRIES');
+  return Array.isArray(response.entries) ? response.entries : [];
+};
+
+// Saves a task, note, or apparatus checklist template.
+export const saveTaskNoteTemplate = (template) =>
+  routeWrite('SAVE_TASK_NOTE_TEMPLATE', { template });
+
+// Deletes a task, note, or apparatus checklist template.
+export const deleteTaskNoteTemplate = (templateId) =>
+  routeWrite('DELETE_TASK_NOTE_TEMPLATE', { id: String(templateId || '') });
+
+// Saves a task, note, or apparatus checklist log entry.
+export const saveTaskNoteEntry = (entry) =>
+  routeWrite('SAVE_TASK_NOTE_ENTRY', { entry });
+
+// Un-signs a signed task/note entry.
+export const unsignTaskNoteEntry = (entryId) =>
+  routeWrite('UNSIGN_TASK_NOTE_ENTRY', { id: String(entryId || '') });
+
+// Deletes a task/note entry.
+export const deleteTaskNoteEntry = (entryId) =>
+  routeWrite('DELETE_TASK_NOTE_ENTRY', { id: String(entryId || '') });

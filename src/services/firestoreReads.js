@@ -22,6 +22,8 @@ import {
 } from '../utils/districtMap.js';
 import { MAP_TYPES_COLLECTION, MAP_TYPES_DOC_ID } from '../utils/mapTypes.js';
 import { PRE_INCIDENT_PLANS_COLLECTION, HYDRANTS_COLLECTION } from '../utils/preIncidentPlans.js';
+import { daysAgoDateKey } from '../utils/tasksAndNotes.js';
+import { membersMustSignTrainings } from '../utils/training.js';
 
 // Reads who is currently on duty directly from the server.
 const onDutyRows = async (_uid) => {
@@ -423,11 +425,24 @@ export const READERS = {
   },
   // Reads shift coverage offers for this member.
   GET_SHIFT_OFFERS: (uid) => offersForMember(uid).then((offers) => ({ offers })),
-  // Reads training topics and the member's signatures.
+  // Reads training topics and member signatures / attendance records.
   GET_TRAINING: async (uid) => {
+    const db = firestore();
+    let membersMustSign = true;
+    try {
+      const publicSettingsSnap = await getDoc(doc(db, 'settings', 'public'));
+      if (publicSettingsSnap.exists()) {
+        membersMustSign = membersMustSignTrainings(settingRows(publicSettingsSnap));
+      }
+    } catch {
+      // Default to true on error
+    }
+
     const [trainings, signatures] = await Promise.all([
-      rowsOf(collection(firestore(), 'trainings')),
-      rowsFor('training_signatures', 'user_id', uid),
+      rowsOf(collection(db, 'trainings')),
+      membersMustSign
+        ? rowsFor('training_signatures', 'user_id', uid)
+        : rowsOf(collection(db, 'training_signatures')),
     ]);
     return { trainings, signatures };
   },
@@ -806,4 +821,45 @@ export const READERS = {
     const snapshot = await getDocs(collection(firestore(), 'work_orders'));
     return { workOrders: snapshot.docs.map((row) => ({ id: row.id, ...row.data() })) };
   },
+  // Reads all task, shift note, and apparatus checklist templates.
+  GET_TASK_NOTE_TEMPLATES: async () => {
+    const snapshot = await getDocs(collection(firestore(), 'task_note_templates'));
+    const templates = snapshot.docs
+      .map((row) => ({ id: row.id, ...row.data() }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    return { templates };
+  },
+  // Reads windowed chronological task, note, and checklist log entries.
+  GET_TASK_NOTE_ENTRIES: async (_uid, body = {}) => {
+    const days = typeof body.days === 'number' && body.days > 0 ? body.days : 14;
+    const fromDate = body.fromDate || (days > 0 ? daysAgoDateKey(new Date(), days) : '');
+
+    const entriesRef = collection(firestore(), 'task_note_entries');
+    let q;
+    if (fromDate) {
+      q = query(entriesRef, where('entry_date', '>=', fromDate));
+    } else {
+      q = entriesRef;
+    }
+    const snapshot = await getDocs(q);
+    const entries = snapshot.docs
+      .map((row) => ({ id: row.id, ...row.data() }))
+      .sort((a, b) => {
+        const dateA = `${a.entry_date || ''} ${a.entry_time || ''}`;
+        const dateB = `${b.entry_date || ''} ${b.entry_time || ''}`;
+        return dateB.localeCompare(dateA);
+      });
+    return { entries };
+  },
+};
+
+// Reads private system settings (accessible only to users with can_edit_system_settings).
+export const readPrivateSettings = async () => {
+  try {
+    const snap = await getDoc(doc(firestore(), 'settings', 'private'));
+    return snap.exists() ? snap.data() || {} : {};
+  } catch (err) {
+    console.warn('[settings] Could not read private settings:', err);
+    return {};
+  }
 };

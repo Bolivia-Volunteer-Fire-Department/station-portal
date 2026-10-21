@@ -251,6 +251,12 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // PASSWORD RESETS: Temporary 30-minute self-service password reset tokens.
+    // Written and read exclusively by backend Cloud Functions (admin SDK); client access is denied.
+    match /password_resets/{token} {
+      allow read, write: if false;
+    }
+
     // The permission table. Every client reads it to shape its navigation; only a role editor writes it. A role
     // that GRANTS administrator access is special: only an administrator may create or change one, or a role
     // editor could hand themselves the whole app.
@@ -315,7 +321,9 @@ service cloud.firestore {
       allow read: if settingId == 'public' || permission('can_edit_system_settings');
       allow write: if permission('can_edit_system_settings')
         || permission('can_manage_dashboard_setup')
-        || permission('can_manage_widget_setup');
+        || permission('can_manage_widget_setup')
+        || permission('can_manage_training_setup')
+        || permission('can_administer_trainings');
     }
 
     match /shifts/{shiftId} {
@@ -546,6 +554,33 @@ service cloud.firestore {
       allow delete: if permission('can_configure_forms');
     }
 
+    match /task_note_templates/{templateId} {
+      allow read: if signedIn()
+        && (permission('can_view_tasks_and_notes')
+          || permission('can_manage_task_setup')
+          || permission('can_manage_note_setup'));
+      allow create, update: if signedIn()
+        && (permission('can_manage_task_setup') || permission('can_manage_note_setup'))
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0;
+      allow delete: if signedIn()
+        && (permission('can_manage_task_setup') || permission('can_manage_note_setup'));
+    }
+
+    match /task_note_entries/{entryId} {
+      allow read: if signedIn()
+        && permission('can_view_tasks_and_notes');
+      allow create: if signedIn()
+        && permission('can_edit_tasks_and_notes')
+        && request.resource.data.submitted_by_uid == request.auth.uid;
+      allow update: if signedIn()
+        && (permission('can_unsign_tasks_and_notes')
+          || (permission('can_edit_tasks_and_notes')
+            && resource.data.get('status', 'editable') == 'editable'));
+      allow delete: if signedIn()
+        && permission('can_delete_tasks_and_notes');
+    }
+
     // THE DISTRICT MAP: one drawing, kept as SVG TEXT, readable by anyone the station has given `can_view_map`.
     //
     // IT IS DELIBERATELY NOT IN THE BUCKET, and that is the whole reason for this shape. storage.rules refuses
@@ -705,7 +740,11 @@ service cloud.firestore {
 
     match /training_signatures/{signatureId} {
       allow read: if signedIn()
-        && (resource.data.user_id == uid() || permission('can_administer_trainings') || permission('can_edit_trainings'));
+        && (resource.data.user_id == uid()
+          || permission('can_administer_trainings')
+          || permission('can_edit_trainings')
+          || get(/databases/$(database)/documents/settings/public).data.get('members_must_sign_trainings', 'true') == 'false'
+          || get(/databases/$(database)/documents/settings/public).data.get('members_must_sign_trainings', true) == false);
       allow create: if signedIn()
         && ((request.resource.data.user_id == uid() && permission('can_sign_trainings'))
           || permission('can_administer_trainings')
