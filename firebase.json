@@ -9,10 +9,12 @@
   "functions": {
     "source": "functions"
   },
-  "storage": {
-    "rules": "storage.rules",
-    "bucket": "fire-clock-76df723.firebasestorage.app"
-  },
+  "storage": [
+    {
+      "rules": "storage.rules",
+      "bucket": "fire-clock-76df723.firebasestorage.app"
+    }
+  ],
   "hosting": {
     "public": "dist",
     "ignore": [
