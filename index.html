@@ -2,6 +2,12 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Cut the cord from GitHub Pages: force all users to official production URL
+      if (window.location.hostname.endsWith('github.io')) {
+        window.location.replace('https://bvfd.stationsync.net' + window.location.search + window.location.hash);
+      }
+    </script>
     <!-- The viewport is the app's, not the page's.
     //
     // `viewport-fit=cover` is what lets the layout reach the sides of a notched phone and extend under

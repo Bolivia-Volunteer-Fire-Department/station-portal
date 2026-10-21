@@ -97,28 +97,34 @@ jobs:
           channelId: live
           projectId: fire-clock-76723
 
-      - name: Build for GitHub Pages
-        # GitHub Pages serves from /${REPO_NAME}/ unless on a custom domain
-        env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIRESTORE_FEATURES: ${{ secrets.VITE_FIRESTORE_FEATURES }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
-          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
-          VITE_KLIPY_API_KEY: ${{ secrets.VITE_KLIPY_API_KEY }}
+      - name: Prepare GitHub Pages redirect to bvfd.stationsync.net
         run: |
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          echo "Building with base path /${REPO_NAME}/"
-          BASE_PATH="/${REPO_NAME}/" npm run build
+          mkdir -p dist-pages
+          cat << 'EOF' > dist-pages/index.html
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <title>Redirecting to StationSync...</title>
+              <meta http-equiv="refresh" content="0; url=https://bvfd.stationsync.net/" />
+              <link rel="canonical" href="https://bvfd.stationsync.net/" />
+              <script>
+                window.location.replace("https://bvfd.stationsync.net" + window.location.search + window.location.hash);
+              </script>
+            </head>
+            <body style="font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 48px 16px; background: #0f172a; color: #f8fafc;">
+              <h2 style="margin-bottom: 8px;">StationSync has moved</h2>
+              <p style="color: #94a3b8; margin-bottom: 16px;">Our official portal address is now <a href="https://bvfd.stationsync.net" style="color: #38bdf8; font-weight: 600;">bvfd.stationsync.net</a>.</p>
+              <p style="font-size: 14px; color: #64748b;">Redirecting you automatically...</p>
+            </body>
+          </html>
+          EOF
+          cp dist-pages/index.html dist-pages/404.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: dist-pages
 
   deploy:
     needs: build
