@@ -108,14 +108,18 @@ export const fetchAdminCertificationRecords = async ({ includeInactive = false }
 // Counts how many documents/items need verification.
 export const fetchAdminDocumentVerificationCount = async () => {
   const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
-  if (!response?.success) throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  if (response?.count === undefined && !response?.success) {
+    throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  }
   return Math.max(0, Number(response.count) || 0);
 };
 
 // Summary of pending document verifications including total count and per-document breakdown.
 export const fetchAdminDocumentVerificationSummary = async (verifiableDocs = null) => {
   const response = await routeRead('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT', { verifiableDocs });
-  if (!response?.success) throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  if (response?.count === undefined && !response?.success) {
+    throw await notAnswered('ADMIN_GET_DOCUMENT_VERIFICATION_COUNT');
+  }
   return {
     count: Math.max(0, Number(response.count) || 0),
     byDocument: response.byDocument && typeof response.byDocument === 'object' ? response.byDocument : {},
@@ -625,8 +629,8 @@ export const adminDeleteScheduleTemplate = async (templateId, token) =>
   dispatchRequest({ action: 'ADMIN_DELETE_SCHEDULE_TEMPLATE', token, id: templateId });
 
 // Fetches the station training catalogue and member signatures.
-export const fetchTraining = async (token) =>
-  dispatchRequest({ action: 'GET_TRAINING', token });
+export const fetchTraining = async (token, options = {}) =>
+  dispatchRequest({ action: 'GET_TRAINING', token, ...options });
 
 // Signs attendance for training sessions.
 export const signTraining = async (trainingIds, token) =>

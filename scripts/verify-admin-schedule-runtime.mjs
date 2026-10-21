@@ -1103,7 +1103,7 @@ for (const { label, width, height, anchor } of [
   // sidebar is a drawer below `md` and a column at `md`, so a board that switched at a different width would rearrange
   // out of step with the layout around it.
   const { readFileSync } = await import('node:fs');
-  const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
+  const sidebar = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
   check(
     'the breakpoint is the md the sidebar switches at',
     DESKTOP_MEDIA_QUERY === '(min-width: 768px)' && /fixed md:static/.test(sidebar),

@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { renderToString } from 'react-dom/server';
 import { eventItemDetails, shiftItemDetails } from '../src/utils/scheduleItemDetails.js';
 import { eventSegmentsByDay, normalizeEvent } from '../src/utils/events.js';
-import ScheduleItemModal from '../src/components/ScheduleItemModal.jsx';
+import ScheduleItemModal from '../src/components/schedule/ScheduleItemModal.jsx';
 import EventPill from '../src/components/EventPill.jsx';
 import ScheduleCalendar from '../src/components/ScheduleCalendar.jsx';
 import { setCertificationBadges } from '../src/utils/certifications.js';
@@ -330,7 +330,7 @@ check('the wash is unchanged', tappablePill.includes('background-color:#227dc333
 console.log('--- wiring: what opens it ---');
 const calendar = readFileSync('src/components/ScheduleCalendar.jsx', 'utf8');
 const app = readFileSync('src/App.jsx', 'utf8');
-const modal = readFileSync('src/components/ScheduleItemModal.jsx', 'utf8');
+const modal = readFileSync('src/components/schedule/ScheduleItemModal.jsx', 'utf8');
 
 check('the calendar holds a detail target', /const \[detailTarget, setDetailTarget\] = useState\(null\)/.test(calendar), true);
 check(

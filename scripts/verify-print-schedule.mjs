@@ -316,7 +316,7 @@ check('and saying so when there are unsaved changes', /Unsaved changes are not i
 
 console.log('\n--- the station logo is reachable from a subdirectory ---');
 const login = readFileSync('src/components/LoginScreen.jsx', 'utf8');
-const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const sidebar = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
 const app = readFileSync('src/App.jsx', 'utf8');
 const assets = readFileSync('src/utils/assets.js', 'utf8');
 // A literal "/logo.svg" resolves to the domain root and 404s when the app is served from a subdirectory,

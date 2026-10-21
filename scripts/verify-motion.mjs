@@ -281,7 +281,7 @@ checkIs('the hook exists', /export function useDismissAnimation/.test(motion));
 // three original ones - a modal that closed in one frame would be the odd one out, and the popovers they sit beside are
 // not modals and are not covered by this.
 ['ConfirmModal', 'ShiftOfferModal', 'ScheduleItemModal', 'MonthPickerModal', 'ScheduleAssignmentModal'].forEach((name) => {
-  const source = readFileSync(`src/components/${name}.jsx`, 'utf8');
+  const source = readFileSync(`src/components/${name === 'ShiftOfferModal' || name === 'ScheduleItemModal' || name === 'ScheduleAssignmentModal' ? 'schedule/' : ''}${name}.jsx`, 'utf8');
   checkIs(`${name} dismisses through the animation`, /useDismissAnimation\(/.test(source));
   checkIs(`and routes its own close controls through it`, /onClick=\{dismiss\}/.test(source));
 });

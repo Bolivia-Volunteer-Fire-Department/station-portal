@@ -4,22 +4,16 @@ import {
   Radio,
   HardHat,
   ChevronDown,
-  ChevronUp,
-  Tag,
   Loader2,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-  Sparkles,
 } from 'lucide-react';
-import { fetchEquipment, fetchAssetTypes } from '../services/api';
+import { fetchEquipment, fetchAssetTypes } from '../../services/api';
 import {
   TURNOUT_GEAR_TYPES,
   RADIO_TYPES,
   evaluateTurnoutRetirement,
   evaluateInspectionCycle,
   conditionBadgeStyle,
-} from '../utils/equipment';
+} from '../../utils/equipment';
 
 export default function AssignedEquipmentCard({ currentUser, token, collapsible = true, defaultCollapsed = false }) {
   const [equipment, setEquipment] = useState([]);
@@ -83,6 +77,8 @@ export default function AssignedEquipmentCard({ currentUser, token, collapsible 
       <button
         type="button"
         onClick={collapsible ? () => setCollapsed(!collapsed) : undefined}
+        aria-expanded={!collapsed}
+        aria-controls="assigned-equipment-content"
         className={`w-full flex items-center justify-between p-6 ${
           !collapsed ? 'border-b border-slate-200 dark:border-slate-700' : ''
         } text-left transition ${collapsible ? 'hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer' : ''}`}
@@ -116,7 +112,7 @@ export default function AssignedEquipmentCard({ currentUser, token, collapsible 
       </button>
 
       {!collapsed && (
-        <div className="p-6 space-y-6">
+        <div id="assigned-equipment-content" className="p-6 space-y-6">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-slate-400">
               <Loader2 className="h-5 w-5 animate-spin text-red-600" />
@@ -239,4 +235,3 @@ export default function AssignedEquipmentCard({ currentUser, token, collapsible 
     </div>
   );
 }
-

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Check, FlipHorizontal, Loader2, RefreshCw, Smartphone, X, AlertCircle } from 'lucide-react';
+import { playSound, modalSoundFor } from '../utils/uiSounds';
+import { renderInViewport } from '../utils/viewportLayer';
 
 export default function CameraCaptureModal({
   isOpen,
@@ -175,8 +177,14 @@ export default function CameraCaptureModal({
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+  useEffect(() => {
+    if (isOpen) {
+      playSound(modalSoundFor('cameraCapture'));
+    }
+  }, [isOpen]);
+
+  return renderInViewport(
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
       <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-900 text-white shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3.5">

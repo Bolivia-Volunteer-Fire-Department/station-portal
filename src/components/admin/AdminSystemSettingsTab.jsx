@@ -15,6 +15,7 @@ import {
   payPeriodConfig,
 } from '../../utils/payPeriod';
 import { getCurrentCoordinates } from '../../utils/geolocation';
+import PasswordInput from '../PasswordInput';
 import {
   getSettingValue,
   getLoadingMessages,
@@ -1264,8 +1265,7 @@ function EmailSettingsCard({ token, systemSettings, onDataChanged }) {
           ) : (
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder={hasExistingKey ? 'Enter new Resend API key' : 're_...'}
                   value={newApiKey}
                   onChange={(e) => {

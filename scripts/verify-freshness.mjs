@@ -120,7 +120,7 @@ checkIs('and the loader is held in a ref rather than a dependency', /const sched
 checkIs('the read time is recorded when the window lands', /scheduleSentinel\.current\.at = Date\.now\(\);\s*\n\s*setScheduleLoadedAt/.test(appSource));
 checkIs('and it is kept in state too, for the line a screen draws', /const \[scheduleLoadedAt, setScheduleLoadedAt\] = useState\(0\)/.test(appSource));
 // THE LINE ITSELF: rendered above the calendar from the same state, with the manual read beside it.
-const freshnessSource = readFileSync('src/components/ScheduleFreshness.jsx', 'utf8');
+const freshnessSource = readFileSync('src/components/schedule/ScheduleFreshness.jsx', 'utf8');
 checkIs('the freshness line is rendered above the schedule', /<ScheduleFreshness atMs=\{scheduleLoadedAt\} onRefresh=\{refreshSchedule\} \/>/.test(appSource));
 checkIs('and the Refresh button re-reads the window on screen', /const refreshSchedule = \(\) => \{/.test(appSource) && /scheduleReloadRef\.current\?\.\(from, to\)/.test(appSource));
 // IT SAYS NOTHING WHEN NOTHING HAS BEEN READ. The label answers with an empty string for that case and the component renders

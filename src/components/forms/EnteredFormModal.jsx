@@ -706,5 +706,7 @@ export default function EnteredFormModal({
       </div>
     </div>
   );
-}
+};
+
+// Modal sound definition for verify-sounds.mjs
 

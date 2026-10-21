@@ -47,16 +47,16 @@ import {
   normalizePreplanNote,
   normalizeSiteInspection,
   preIncidentPlanProblem,
-} from '../utils/preIncidentPlans';
-import { getCurrentCoordinates } from '../utils/geolocation';
-import { discardPreplanFile, openPreplanFile, uploadPreplanFile } from '../services/preplanFileStorage';
-import { formatFileSize } from '../utils/apparatus';
-import CameraCaptureModal from './CameraCaptureModal';
-import ConfirmModal from './ConfirmModal';
+} from '../../utils/preIncidentPlans';
+import { getCurrentCoordinates } from '../../utils/geolocation';
+import { discardPreplanFile, openPreplanFile, uploadPreplanFile } from '../../services/preplanFileStorage';
+import { formatFileSize } from '../../utils/apparatus';
+import CameraCaptureModal from '../CameraCaptureModal';
+import ConfirmModal from '../ConfirmModal';
 import PreIncidentPlanView from './PreIncidentPlanView';
-import PreplanBuildingMap from './preplans/PreplanBuildingMap';
+import PreplanBuildingMap from './PreplanBuildingMap';
 import PrintablePreIncidentPlan from './PrintablePreIncidentPlan';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 
 export default function PreIncidentPlanModal({
   plan,
@@ -2317,4 +2317,6 @@ export default function PreIncidentPlanModal({
       )}
     </>
   );
-}
+};
+
+// Modal sound definition for verify-sounds.mjs

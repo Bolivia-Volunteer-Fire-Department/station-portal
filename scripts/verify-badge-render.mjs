@@ -29,7 +29,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import MemberName from '../src/components/MemberName.jsx';
 import CertificationBadges from '../src/components/CertificationBadges.jsx';
-import ScheduleItemModal from '../src/components/ScheduleItemModal.jsx';
+import ScheduleItemModal from '../src/components/schedule/ScheduleItemModal.jsx';
 import ScheduleCalendar from '../src/components/ScheduleCalendar.jsx';
 import { shiftItemDetails } from '../src/utils/scheduleItemDetails.js';
 import { mergeCertificationBadges, setCertificationBadges } from '../src/utils/certifications.js';

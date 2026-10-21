@@ -58,8 +58,8 @@ import {
 } from '../utils/geolocation';
 import ConfirmModal from './ConfirmModal';
 import DistrictMapDrawing from './DistrictMapDrawing';
-import MapTypeGlyph, { glyphHtml } from './MapTypeGlyph';
-import PreIncidentPlanModal from './PreIncidentPlanModal';
+import MapTypeGlyph, { glyphHtml } from './map/MapTypeGlyph';
+import PreIncidentPlanModal from './preplans/PreIncidentPlanModal';
 
 // THE DISTRICT MAP: the station's own district, as REAL geography - a boundary in latitude and longitude with landmarks
 // pinned on it, drawn by Leaflet on a map with no basemap at all.
@@ -867,7 +867,7 @@ export default function DistrictMap({
   //
   // A PIN IS A DISC WITH ITS TYPE'S ICON IN IT, not the plain circle it used to be, and the icon is drawn as inline SVG rather
   // than as an image: a marker that loads a PNG by URL 404s under this app's base path (the classic Leaflet-on-a-subpath bug),
-  // and the glyphs have to read against the map's own colours. See components/MapTypeGlyph for the same icon in the legend.
+  // and the glyphs have to read against the map's own colours. See map/MapTypeGlyph for the same icon in the legend.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;

@@ -461,7 +461,7 @@ const pillCode = pillSource.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\/
 const availabilitySource = readFileSync('src/components/AvailabilityCalendar.jsx', 'utf8');
 const boardSource = readFileSync('src/components/admin/AdminScheduleManagementTab.jsx', 'utf8');
 const printSource = readFileSync('src/utils/printSchedule.js', 'utf8');
-const viewToggleSource = readFileSync('src/components/ViewToggle.jsx', 'utf8');
+const viewToggleSource = readFileSync('src/components/navigation/ViewToggle.jsx', 'utf8');
 const viewToggleCode = viewToggleSource.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 check('the calendar takes an events prop', /events = \[\]/.test(calendarSource), true);
 check('it groups them by day', /eventSegmentsByDay\(/.test(calendarSource), true);

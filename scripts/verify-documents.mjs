@@ -141,7 +141,7 @@ const panelSource = readFileSync('src/components/admin/AdminPanel.jsx', 'utf8');
 checkIs('Documents sits under Content', /\{ id: 'documents', label: 'Documents', icon: BookText \}/.test(panelSource));
 checkIs('and renders only while its tab is open', /activeSubTab === 'documents' &&/.test(panelSource));
 
-const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const sidebarSource = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
 checkIs('the member sidebar offers it', /setActiveTab\('documents'\)/.test(sidebarSource));
 checkIs(
   'gated on can_view_documents, the permission that means "may read documents at all"',

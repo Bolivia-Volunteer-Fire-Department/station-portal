@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import '../print.css';
-import { stationLogoUrl } from '../utils/assets';
-import Markdown from './Markdown';
+import '../../print.css';
+import { stationLogoUrl } from '../../utils/assets';
+import Markdown from '../Markdown';
 import {
   documentUpdatedLabel,
   isAssessment,
   isChecklist,
-} from '../utils/documents';
-import { checklistSections } from '../utils/checklists';
+} from '../../utils/documents';
+import { checklistSections } from '../../utils/checklists';
 
 /**
  * Printer-friendly document sheet with department letterhead.

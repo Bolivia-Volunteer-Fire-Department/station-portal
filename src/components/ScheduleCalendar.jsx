@@ -24,9 +24,9 @@ import { mergeDayItems, separateShiftTimeBlocks } from '../utils/dayOrder';
 // "I have not asked for this month".
 import { windowCoversMonth } from '../utils/scheduleWindow';
 import { submitShiftOffer } from '../services/api';
-import ViewToggle from './ViewToggle';
-import ShiftOfferModal from './ShiftOfferModal';
-import ScheduleItemModal from './ScheduleItemModal';
+import ViewToggle from './navigation/ViewToggle';
+import ShiftOfferModal from './schedule/ShiftOfferModal';
+import ScheduleItemModal from './schedule/ScheduleItemModal';
 import MonthPickerModal from './MonthPickerModal';
 import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
 import PrintableSchedule from './PrintableSchedule';

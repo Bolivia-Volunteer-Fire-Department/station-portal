@@ -30,7 +30,7 @@ import {
 } from '../../utils/mapTypes';
 // List of available icon names for map pins.
 import { MAP_ICON_KEYS } from '../../utils/mapIcons';
-import MapTypeGlyph from '../MapTypeGlyph';
+import MapTypeGlyph from '../map/MapTypeGlyph';
 // District boundary helpers and caching.
 import {
   MAP_BACKDROP_BAND_METRES,

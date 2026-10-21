@@ -202,6 +202,8 @@ code {
 
 .animate-fadeIn {
   animation: fadeIn var(--motion-base) var(--motion-settle) forwards;
+  /* Isolate composite stacking context to prevent backdrop filter tearing */
+  isolation: isolate;
 }
 
 /* Hold-to-swap on the schedule board (see utils/scheduleDrop and AdminScheduleManagementTab).
@@ -306,6 +308,11 @@ code {
      forwards only serves to keep a transform applied - and a dialog is exactly the kind of box that contains
      `position: fixed` children. */
   animation: modalIn var(--motion-base) var(--motion-settle) backwards;
+  /* Hardware acceleration & composite layer stabilization: keeps the modal rendered on its own GPU layer,
+     preventing 1-frame layer drops/flashing during scroll of child containers. */
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 /* A dialog leaving, which is the half that was missing: the entry was animated and the exit was one frame,

@@ -18,7 +18,7 @@ import CenteredContent from '../src/components/CenteredContent.jsx';
 import App from '../src/App.jsx';
 import AdminPanel, { ADMIN_NAV_CATEGORIES } from '../src/components/admin/AdminPanel.jsx';
 import AdminMenuPage from '../src/components/admin/AdminMenuPage.jsx';
-import Sidebar from '../src/components/Sidebar.jsx';
+import Sidebar from '../src/components/navigation/Sidebar.jsx';
 import AdminRolesTab from '../src/components/admin/AdminRolesTab.jsx';
 import AdminScheduleTemplatesTab from '../src/components/admin/AdminScheduleTemplatesTab.jsx';
 import AdminAssignmentsTab from '../src/components/admin/AdminAssignmentsTab.jsx';
@@ -2011,7 +2011,7 @@ check(
 // opening the menu on a phone dims the whole page rather than leaving a bright strip above the shade.
 // Note this file's `check` takes a CONDITION, not an expected value - a bare `check(label, '10', '20')`
 // would pass, because a non-empty string is truthy. Hence the explicit comparisons.
-const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const sidebarSource = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
 const backdropZ = /fixed inset-0 bg-black\/60 z-(\d+)/.exec(sidebarSource);
 // `md:h-dvh` here: the drawer's height unit is the visible viewport (see verify-app-shell), and the
 // pinned order below is about the CLASS LIST this pattern identifies, not about that unit.

@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { stationLogoUrl } from '../utils/assets';
-import { buildingLandmarkTypeFor } from '../utils/buildingLandmarks';
-import { INSPECTION_STATUSES, getPreplanInspectionDue } from '../utils/preIncidentPlans';
+import { stationLogoUrl } from '../../utils/assets';
+import { buildingLandmarkTypeFor } from '../../utils/buildingLandmarks';
+import { INSPECTION_STATUSES, getPreplanInspectionDue } from '../../utils/preIncidentPlans';
 
 export default function PrintablePreIncidentPlan({ plan, stationName = '', onDone }) {
   useEffect(() => {

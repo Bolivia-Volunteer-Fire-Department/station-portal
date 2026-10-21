@@ -33,7 +33,7 @@ const css = readFileSync('src/index.css', 'utf8');
 const appCss = readFileSync('src/App.css', 'utf8');
 const printCss = readFileSync('src/print.css', 'utf8');
 const app = readFileSync('src/App.jsx', 'utf8');
-const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const sidebar = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
 // A rule's declarations as an object, so the checks below read like sentences. Comments are stripped first: one

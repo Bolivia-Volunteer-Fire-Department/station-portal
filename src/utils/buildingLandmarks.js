@@ -1,4 +1,4 @@
-import { glyphHtml } from '../components/MapTypeGlyph.jsx';
+import { glyphHtml } from '../components/map/MapTypeGlyph.jsx';
 import { roundCoordinate } from './districtMap.js';
 
 /**

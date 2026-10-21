@@ -55,8 +55,8 @@ import ReauthModal from './components/ReauthModal';
 import PasswordChangeModal from './components/PasswordChangeModal';
 import { mustChangePassword, MUST_CHANGE_PASSWORD_COLUMN } from './utils/passwordPolicy';
 import ClockBlockedModal from './components/ClockBlockedModal';
-import Sidebar from './components/Sidebar';
-import MobileBottomNav from './components/MobileBottomNav';
+import Sidebar from './components/navigation/Sidebar';
+import MobileBottomNav from './components/navigation/MobileBottomNav';
 import { MOBILE_NAV_MODULES_KEY, parseMobileNavModules } from './utils/mobileNav';
 import PixelBurst from './components/PixelBurst';
 import DashboardModule from './components/DashboardModule';
@@ -98,7 +98,7 @@ const TasksAndNotesModule = lazy(() => import('./components/TasksAndNotesModule'
 import { normalizeWorkOrder } from './utils/workOrders';
 // Chat component available across all screens.
 import ChatHost from './components/Chat/ChatHost';
-import ScheduleFreshness from './components/ScheduleFreshness';
+import ScheduleFreshness from './components/schedule/ScheduleFreshness';
 import { pageBarLabel } from './utils/pageLabels';
 import CertificationNotice from './components/CertificationNotice';
 import {
@@ -143,8 +143,6 @@ import AppUpdateBanner from './components/AppUpdateBanner';
 import { AuthProvider } from './context/AuthContext';
 import { StationDataProvider } from './context/StationDataContext';
 import { readStationMetaCache, writeStationMetaCache, isStationMetaStale } from './utils/stationCache';
-
-// Loading spinner displayed while screen code is downloading.
 
 // Loading spinner displayed while screen code is downloading.
 function DeferredScreenFallback() {
@@ -218,7 +216,6 @@ export default function App() {
   const sessionStartedAtRef = useRef(0);
   // Why the prompt opened: which request was refused and which token it carried, for the modal to show
   const [reauthReason, setReauthReason] = useState(null);
-  const [isClockedIn, setIsClockedIn] = useState(false);
 
   const [clockNotice, setClockNotice] = useState(null);
 
@@ -268,9 +265,9 @@ export default function App() {
     setIdleWarningSeconds(value);
   }, []);
 
-  const [easterEggCount, setEasterEggCount] = React.useState(0);
+  const [easterEggCount, setEasterEggCount] = useState(0);
   // Triggers playful animation when clicking the station logo.
-  const [easterBurst, setEasterBurst] = React.useState(0);
+  const [easterBurst, setEasterBurst] = useState(0);
   const handleEasterEgg = () => {
       setEasterBurst((n) => n + 1);
       if (easterEggCount < 5) setEasterEggCount(prev => prev + 1);
@@ -535,7 +532,7 @@ const getLoadingMessage = () => {
   }, [departmentName]);
 
   // Dark mode: user_setting > system_setting > default (dark)
-  const isDarkMode = (() => {
+  const isDarkMode = useMemo(() => {
     const systemDarkModeSetting = systemSettings.find((s) => String(s.key) === 'is_dark_mode')?.value;
     const darkModeSetting = currentUserSettings?.is_dark_mode !== undefined && currentUserSettings?.is_dark_mode !== ''
       ? currentUserSettings.is_dark_mode
@@ -543,7 +540,7 @@ const getLoadingMessage = () => {
     return darkModeSetting === undefined
       ? true
       : darkModeSetting === true || String(darkModeSetting).trim().toUpperCase() === 'TRUE';
-  })();
+  }, [currentUserSettings?.is_dark_mode, systemSettings]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkMode);
@@ -555,10 +552,10 @@ const getLoadingMessage = () => {
   useEffect(() => installUiSoundListeners(), []);
 
   // Which setting wins is the usual ladder - the member's own choice, else the station default, else ...
-  const soundsActive = soundsActiveFrom(
+  const soundsActive = useMemo(() => soundsActiveFrom(
     currentUserSettings?.[SOUNDS_SETTING_KEY],
     systemSettings.find((s) => String(s?.key ?? '').trim() === SOUNDS_SETTING_KEY)?.value ?? SOUNDS_DEFAULT
-  );
+  ), [currentUserSettings, systemSettings]);
   useEffect(() => {
     setSoundsEnabled(soundsActive);
   }, [soundsActive]);
@@ -591,10 +588,10 @@ const getLoadingMessage = () => {
     return () => navigator.serviceWorker.removeEventListener('message', handlePushMessage);
   }, [currentUser]);
 
-  // Handles clock in and clock out actions.
-  useEffect(() => {
-    if (!currentUser) return;
-    setIsClockedIn(onDutyUsers.some((row) => String(row.id ?? row.user_id) === String(currentUser.id)));
+  // Derived state: whether current user is clocked in
+  const isClockedIn = useMemo(() => {
+    if (!currentUser) return false;
+    return onDutyUsers.some((row) => String(row.id ?? row.user_id) === String(currentUser.id));
   }, [currentUser, onDutyUsers]);
 
   const loadAppData = async () => {
@@ -1155,7 +1152,9 @@ const getLoadingMessage = () => {
 
   const refreshTraining = async (token) => {
     try {
-      const data = await fetchTraining(token);
+      const data = await fetchTraining(token, {
+        membersMustSign: membersMustSignTrainings(systemSettings),
+      });
       if (data && data.code === 'UNAUTHORIZED') {
         sessionExpired(token);
         return;
@@ -1581,6 +1580,8 @@ const getLoadingMessage = () => {
     setReauthReason(null);
     setCurrentUser(null);
     applyToken(null);
+    setLogsScope(null);
+    setAdminSectionLoaded({});
 
     // Signs the user out and clears session state.
     void signOutAlongside();
@@ -1620,6 +1621,8 @@ const getLoadingMessage = () => {
     setReauthReason(null);
     setCurrentUser(null);
     applyToken(null);
+    setLogsScope(null);
+    setAdminSectionLoaded({});
 
     // Signs the user out and clears session state.
     void signOutAlongside();

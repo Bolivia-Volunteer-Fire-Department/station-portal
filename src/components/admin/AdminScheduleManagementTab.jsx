@@ -21,10 +21,10 @@ import RankIcon from '../RankIcon';
 import RankDot from '../RankDot';
 import CertificationBadges from '../CertificationBadges';
 import EventPill from '../EventPill';
-import ViewToggle from '../ViewToggle';
+import ViewToggle from '../navigation/ViewToggle';
 import MonthPickerModal from '../MonthPickerModal';
 // The same picker, as a DIALOG, in the day view. One component, two frames - see the file for why the split matters.
-import ScheduleAssignmentModal from '../ScheduleAssignmentModal';
+import ScheduleAssignmentModal from '../schedule/ScheduleAssignmentModal';
 import { eventSegmentsByDay, normalizeEventList } from '../../utils/events';
 import { mergeDayItems, separateShiftTimeBlocks } from '../../utils/dayOrder';
 // THE SAME SLIDE the member's calendar uses, so a change of view on this screen is not a different experience from one

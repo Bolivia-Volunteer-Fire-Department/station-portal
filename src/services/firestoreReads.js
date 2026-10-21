@@ -3,6 +3,7 @@ import { collection, doc, endBefore, getCountFromServer, getDoc, getDocs, limit,
 import { httpsCallable } from 'firebase/functions';
 import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFor, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, scheduleSetupFor, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
+import { getUser, invalidateUser, invalidateAll } from '../utils/userCache.js';
 import { nextDateKey, toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
 import { CHAT_PAGE_SIZE, isChatThread } from '../utils/chat.js';
 import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';
@@ -46,15 +47,15 @@ const onDutyRows = async (_uid) => {
 
 // Finds the audience keys (role, rank, etc.) for the current user.
 export const keysFor = async (uid) => {
-  const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
-  return audienceKeysFor({ userId: uid, roleId: String(me.role_id || ''), rankId: String(me.rank_id || '') });
+  const me = await getUser(uid);
+  return audienceKeysFor({ userId: uid, roleId: String(me?.role_id || ''), rankId: String(me?.rank_id || '') });
 };
 
 // Checks if the user has permission to manage everyone's clock logs.
 const managesWholeTimeclock = async (uid) => {
   if (!uid) return false;
-  const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
-  const roleId = String(me.role_id || '');
+  const me = await getUser(uid);
+  const roleId = String(me?.role_id || '');
   if (!roleId) return false;
   let role = null;
   try {
@@ -69,8 +70,8 @@ const managesWholeTimeclock = async (uid) => {
 // Checks if an officer has permission to view all documents.
 export const mayReadWholeDocuments = async (uid) => {
   if (!uid) return false;
-  const me = (await getDoc(doc(firestore(), 'users', uid))).data() || {};
-  const roleId = String(me.role_id || '');
+  const me = await getUser(uid);
+  const roleId = String(me?.role_id || '');
   if (!roleId) return false;
   let role = null;
   try {
@@ -81,6 +82,20 @@ export const mayReadWholeDocuments = async (uid) => {
   return roleAllowsTab(role, 'documents');
 };
 
+// Checks if a member has permission to configure forms and view all form submissions.
+const mayConfigureForms = async (uid) => {
+  if (!uid) return false;
+  const me = await getUser(uid);
+  const roleId = String(me?.role_id || '');
+  if (!roleId) return false;
+  let role = null;
+  try {
+    role = (await getDoc(doc(firestore(), 'roles', roleId))).data() || null;
+  } catch {
+    return false;
+  }
+  return roleAllowsTab(role, 'forms');
+};
 // Checks whether a document is published and active today.
 const documentIsLive = (document, today) => {
   const row = document || {};
@@ -426,16 +441,20 @@ export const READERS = {
   // Reads shift coverage offers for this member.
   GET_SHIFT_OFFERS: (uid) => offersForMember(uid).then((offers) => ({ offers })),
   // Reads training topics and member signatures / attendance records.
-  GET_TRAINING: async (uid) => {
+  GET_TRAINING: async (uid, body = {}) => {
     const db = firestore();
-    let membersMustSign = true;
-    try {
-      const publicSettingsSnap = await getDoc(doc(db, 'settings', 'public'));
-      if (publicSettingsSnap.exists()) {
-        membersMustSign = membersMustSignTrainings(settingRows(publicSettingsSnap));
+    let membersMustSign = body.membersMustSign;
+    if (typeof membersMustSign !== 'boolean') {
+      try {
+        const publicSettingsSnap = await getDoc(doc(db, 'settings', 'public'));
+        if (publicSettingsSnap.exists()) {
+          membersMustSign = membersMustSignTrainings(settingRows(publicSettingsSnap));
+        } else {
+          membersMustSign = true;
+        }
+      } catch {
+        membersMustSign = true;
       }
-    } catch {
-      // Default to true on error
     }
 
     const [trainings, signatures] = await Promise.all([
@@ -481,9 +500,7 @@ export const READERS = {
     };
   },
   // Reads recurring shift windows for schedule planning.
-  ADMIN_GET_AVAILABILITY_WINDOWS: async () => ({
-    availabilityWindows: await rowsOf(collection(firestore(), 'availability_windows')),
-  }),
+  ADMIN_GET_AVAILABILITY_WINDOWS: async () => READERS.GET_AVAILABILITY_WINDOWS(),
   // Reads announcements for administrators.
   ADMIN_GET_ANNOUNCEMENTS: async (uid, body) => {
     const from = String((body && body.from) || '').trim();
@@ -542,21 +559,22 @@ export const READERS = {
   },
   // Reads pending document and checklist verifications count and per-document breakdown.
   ADMIN_GET_DOCUMENT_VERIFICATION_COUNT: async (uid, body) => {
-    return readPendingDocumentVerifications(uid, body?.verifiableDocs);
+    const summary = await readPendingDocumentVerifications(uid, body?.verifiableDocs);
+    return { success: true, ...summary };
   },
   // Reads document and signature history for a specific member to verify them.
   GET_MEMBER_DOCUMENT_RECORDS: async (uid, body) => {
     const memberId = String((body && body.user_id) || '').trim();
     if (!memberId) return { success: false, message: 'Which member?' };
 
-    const member = await getDoc(doc(firestore(), 'users', memberId));
-    if (!member.exists()) return { success: false, message: 'That member no longer exists.' };
+    const member = await getUser(memberId);
+    if (!member) return { success: false, message: 'That member no longer exists.' };
 
     const wholeCollection = await mayReadWholeDocuments(uid);
     const audienceKeys = wholeCollection ? null : audienceKeysFor({
       userId: memberId,
-      roleId: String((member.data() || {}).role_id || ''),
-      rankId: String((member.data() || {}).rank_id || ''),
+      roleId: String(member.role_id || ''),
+      rankId: String(member.rank_id || ''),
     });
     const [visible, signatures, summaries] = await Promise.all([
       wholeCollection ? rowsOf(collection(firestore(), 'documents')) : audienceRows('documents', audienceKeys),
@@ -728,10 +746,15 @@ export const READERS = {
   // Reads submitted entered forms.
   GET_FORM_SUBMISSIONS: async (uid) => {
     let docs = [];
-    try {
-      const snapshot = await getDocs(collection(firestore(), 'form_submissions'));
-      docs = snapshot.docs;
-    } catch {
+    const canSeeAll = await mayConfigureForms(uid);
+    if (canSeeAll) {
+      try {
+        const snapshot = await getDocs(collection(firestore(), 'form_submissions'));
+        docs = snapshot.docs;
+      } catch {
+        docs = [];
+      }
+    } else {
       try {
         const userQuery = query(
           collection(firestore(), 'form_submissions'),

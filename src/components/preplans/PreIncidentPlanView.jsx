@@ -26,16 +26,16 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { openPreplanFile } from '../services/preplanFileStorage';
-import { formatFileSize } from '../utils/apparatus';
-import PreplanBuildingMap from './preplans/PreplanBuildingMap';
+import { openPreplanFile } from '../../services/preplanFileStorage';
+import { formatFileSize } from '../../utils/apparatus';
+import PreplanBuildingMap from './PreplanBuildingMap';
 import {
   INSPECTION_STATUSES,
   getPreplanInspectionDue,
   normalizeSiteInspection,
   normalizePreplanNote,
-} from '../utils/preIncidentPlans';
-import { useAuth } from '../context/AuthContext';
+} from '../../utils/preIncidentPlans';
+import { useAuth } from '../../context/AuthContext';
 
 export default function PreIncidentPlanView({
   plan,

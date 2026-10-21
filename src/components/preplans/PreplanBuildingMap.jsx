@@ -34,7 +34,7 @@ import {
   buildingLandmarkTypeFor,
   normalizeBuildingLandmark,
 } from '../../utils/buildingLandmarks.js';
-import MapTypeGlyph from '../MapTypeGlyph.jsx';
+import MapTypeGlyph from '../map/MapTypeGlyph';
 import { roundCoordinate } from '../../utils/districtMap.js';
 import {
   createUserLocationIcon,

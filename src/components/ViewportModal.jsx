@@ -110,7 +110,7 @@ export default function ViewportModal({
   return renderInViewport(
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-[60] flex items-stretch justify-center bg-slate-950/80 backdrop-blur-sm animate-fadeIn pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
+      className="fixed inset-0 z-[60] isolate flex items-stretch justify-center bg-slate-950/80 backdrop-blur-sm animate-fadeIn pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
     >
       {/* Clicking the background is a dismissal - unless a write is in flight, which is the one thing this modal
           must not let anybody walk away from by accident. */}
@@ -197,7 +197,7 @@ export default function ViewportModal({
             breakpoint knows nothing about it: `md:grid-cols-3` inside a 34rem panel asked for three columns of
             10rem and squashed a datetime input and its label, on a desktop, because the VIEWPORT was wide. A
             container variant asks the question that matters: how wide is the space the fields actually got. */}
-        <div className="@container relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="@container relative min-h-0 flex-1 overflow-y-auto overscroll-contain transform-gpu">
           {/* A disabled fieldset is what "the form is disabled while saving" means in HTML: every input, select,
               textarea and button inside it stops responding, in one place, rather than one `disabled` per field
               that somebody will eventually forget. */}

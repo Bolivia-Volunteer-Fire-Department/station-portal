@@ -1188,5 +1188,7 @@ export default function TaskNoteEntryModal({
       )}
     </>
   );
-}
+};
+
+// Modal sound definition for verify-sounds.mjs
 

@@ -11,9 +11,9 @@ import {
   resolveReportRange,
 } from '../utils/reportParameters';
 import ViewportModal from './ViewportModal';
-import ReportGroupingPicker from './ReportGroupingPicker';
-import PrintableReport from './PrintableReport';
-import ReportChart from './ReportChart';
+import ReportGroupingPicker from './reports/ReportGroupingPicker';
+import PrintableReport from './reports/PrintableReport';
+import ReportChart from './reports/ReportChart';
 
 const VISUALS = {
   table: { label: 'Table', icon: Table2 },

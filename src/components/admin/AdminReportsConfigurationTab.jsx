@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
-import ReportGroupingPicker from '../ReportGroupingPicker';
+import ReportGroupingPicker from '../reports/ReportGroupingPicker';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
 import { REPORT_RANGE_PRESETS, REPORT_DATASET_MEASURE_LABELS } from '../../utils/reportParameters';

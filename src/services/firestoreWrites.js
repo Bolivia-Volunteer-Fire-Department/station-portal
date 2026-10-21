@@ -947,29 +947,33 @@ export const deleteTaskNoteTemplate = async ({ id } = {}) => {
   return { id: wanted };
 };
 
-// Saves or updates a task/note log entry.
+// Saves or updates a task/note log entry using a transaction to avoid race conditions.
 export const saveTaskNoteEntry = async ({ entry, authorId = '' } = {}) => {
   const normalized = normalizeTaskNoteEntry(entry || {});
   const documentId = normalized.id || doc(collection(firestore(), 'task_note_entries')).id;
   const reference = doc(firestore(), 'task_note_entries', documentId);
-  const previous = await getDoc(reference);
-  const submitterUid = previous.exists()
-    ? String(previous.get('submitted_by_uid') || '')
-    : (normalized.submitted_by_uid || String(authorId || ''));
-  const createdAt = previous.exists()
-    ? String(previous.get('created_at') || '') || stationTimestamp()
-    : stationTimestamp();
 
-  const payload = {
-    ...normalized,
-    id: documentId,
-    submitted_by_uid: submitterUid,
-    created_at: createdAt,
-    updated_at: stationTimestamp(),
-  };
+  // Use a transaction to safely read and write the entry atomically
+  await runTransaction(firestore(), async (transaction) => {
+    const docSnap = await transaction.get(reference);
+    const submitterUid = docSnap.exists()
+      ? String(docSnap.get('submitted_by_uid') || '')
+      : (normalized.submitted_by_uid || String(authorId || ''));
+    const createdAt = docSnap.exists()
+      ? String(docSnap.get('created_at') || '') || stationTimestamp()
+      : stationTimestamp();
 
-  await setDoc(reference, payload, { merge: true });
-  return { id: documentId, ...payload };
+    const payload = {
+      ...normalized,
+      id: documentId,
+      submitted_by_uid: submitterUid,
+      created_at: createdAt,
+      updated_at: stationTimestamp(),
+    };
+
+    transaction.set(reference, payload, { merge: true });
+  });
+  return { id: documentId };
 };
 
 // Un-signs a signed task/note entry, putting it back in editable state.

@@ -7,7 +7,7 @@ import { availabilityKey, claimedKeysFor, claimsMapFromKeys, windowDaysForMonth 
 import EventPill from './EventPill';
 import { eventSegmentsByDay, normalizeEventList } from '../utils/events';
 import { mergeDayItems } from '../utils/dayOrder';
-import ViewToggle from './ViewToggle';
+import ViewToggle from './navigation/ViewToggle';
 import { useMonthSlide } from '../utils/motion';
 
 // Month navigation, shared by the member editor and the administrator's roster view so

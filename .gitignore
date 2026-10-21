@@ -47,3 +47,6 @@ fire-clock-76723.json
 /service-account*.json
 /secrets/
 *.pxd
+
+
+.continueignore

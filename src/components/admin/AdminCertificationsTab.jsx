@@ -16,7 +16,7 @@ import RankIcon from '../RankIcon';
 import CertificationBadges from '../CertificationBadges';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
-import PrintableCertifications from '../PrintableCertifications';
+import PrintableCertifications from '../printable/PrintableCertifications';
 import { userLabel } from '../../utils/displayLabel';
 import { certificationRowsCsv, sortCertificationRows } from '../../utils/certificationReport';
 import {

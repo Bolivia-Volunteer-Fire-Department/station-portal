@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import '../print.css';
-import { stationLogoUrl } from '../utils/assets';
-import { reportGroupLabel, reportMeasureColumns } from '../utils/reportExport';
-import { REPORT_MEASURE_LABELS, REPORT_GROUPINGS } from '../utils/reportParameters';
+import '../../print.css';
+import { stationLogoUrl } from '../../utils/assets';
+import { reportGroupLabel, reportMeasureColumns } from '../../utils/reportExport';
+import { REPORT_MEASURE_LABELS, REPORT_GROUPINGS } from '../../utils/reportParameters';
 import ReportChart from './ReportChart';
 
 // The chart is drawn at a fixed size: the sheet is display:none on screen, where a responsive container would be zero wide.

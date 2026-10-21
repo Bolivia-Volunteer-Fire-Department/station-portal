@@ -1,5 +1,5 @@
 // Loads initial data payloads from Firestore for members and administrators.
-import { collection, doc, documentId, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from './firebase.js';
 import { toTimeInputValue } from '../utils/timeInputValue.js';
 import { toDateKey, stationTodayKey } from '../utils/scheduleDate.js';

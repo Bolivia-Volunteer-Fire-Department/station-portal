@@ -198,7 +198,7 @@ console.log('\n--- the wiring the reported bugs were about ---');
 // a member's own module gated behind it.
 const permissions = readFileSync('src/utils/permissions.js', 'utf8');
 const app = readFileSync('src/App.jsx', 'utf8');
-const sidebar = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const sidebar = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
 const memberModule = readFileSync('src/components/CertificationsModule.jsx', 'utf8');
 const adminTab = readFileSync('src/components/admin/AdminCertificationsTab.jsx', 'utf8');
 const setupTab = readFileSync('src/components/admin/AdminCertificationSetupTab.jsx', 'utf8');

@@ -714,7 +714,6 @@ export const roleAllowsTab = (role, tabId) => {
   if (tabId === 'training-setup') {
     if (permissionGranted(role, 'can_manage_training_setup')) return true;
     if (permissionGranted(role, 'can_administer_trainings')) return true;
-    if (permissionGranted(role, 'can_edit_system_settings')) return true;
   }
 
   return permissionGranted(role, direct.key);

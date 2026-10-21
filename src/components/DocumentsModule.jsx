@@ -33,9 +33,9 @@ import {
 import { toast } from '../utils/toast';
 import ConfirmModal from './ConfirmModal';
 import Markdown from './Markdown';
-import PreIncidentPlanView from './PreIncidentPlanView';
-import PrintableDocument from './PrintableDocument';
-import PrintablePreIncidentPlan from './PrintablePreIncidentPlan';
+import PreIncidentPlanView from './preplans/PreIncidentPlanView';
+import PrintableDocument from './printable/PrintableDocument';
+import PrintablePreIncidentPlan from './preplans/PrintablePreIncidentPlan';
 import { cachedPreIncidentPlans, cachePreIncidentPlans } from '../utils/preIncidentPlans';
 import {
   assessmentScoreDateLabel,

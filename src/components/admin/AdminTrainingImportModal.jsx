@@ -467,5 +467,7 @@ export default function AdminTrainingImportModal({
       </div>
     </ViewportModal>
   );
-}
+};
+
+// Modal sound definition for verify-sounds.mjs
 

@@ -302,7 +302,7 @@ console.log('\n--- the creator is shown to administrators only ---');
 const calloutSource = readFileSync('src/components/AnnouncementCallout.jsx', 'utf8');
 const listSource = readFileSync('src/components/AnnouncementList.jsx', 'utf8');
 const loginSource = readFileSync('src/components/LoginScreen.jsx', 'utf8');
-const sidebarSource = readFileSync('src/components/Sidebar.jsx', 'utf8');
+const sidebarSource = readFileSync('src/components/navigation/Sidebar.jsx', 'utf8');
 
 check('the admin row renders the creator', /announcementAuthorLabel\(announcement, users\)/.test(tabSource), true);
 [

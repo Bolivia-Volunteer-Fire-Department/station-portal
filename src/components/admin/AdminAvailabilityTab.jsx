@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, CalendarRange, Check, Eye, Loader2, Save, Users, X } from 'lucide-react';
 import { adminBulkSaveSchedule, adminSetAvailability } from '../../services/api';
 import AvailabilityCalendar, { MonthNav } from '../AvailabilityCalendar';
-import ViewToggle from '../ViewToggle';
+import ViewToggle from '../navigation/ViewToggle';
 import MemberName from '../MemberName';
 import RankIcon from '../RankIcon';
 import NoAvailabilityCard from './NoAvailabilityCard';

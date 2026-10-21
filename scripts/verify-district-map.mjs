@@ -775,8 +775,8 @@ check('a device with no storage is a MISS, not a crash', [cachedMapLayer(), cach
 console.log('\n--- the wiring, which none of these files fails loudly about ---');
 const source = (path) => readFileSync(path, 'utf8');
 const app = source('src/App.jsx');
-const sidebar = source('src/components/Sidebar.jsx');
-const bottomNav = source('src/components/MobileBottomNav.jsx');
+const sidebar = source('src/components/navigation/Sidebar.jsx');
+const bottomNav = source('src/components/navigation/MobileBottomNav.jsx');
 const navModules = source('src/utils/mobileNav.js');
 const settingsTab = source('src/components/admin/AdminSystemSettingsTab.jsx');
 // THE MAP'S OWN SCREEN. The boundary, the background and the drawing were three cards inside System Settings; they are the
@@ -815,7 +815,7 @@ checkIs(
 
 // ...AND THE TYPES REACH THE SCREEN. Every one of these is wiring, which parses and builds perfectly while showing a station the
 // wrong legend: a card that saves a list nobody reads, or a marker drawn from a table of its own.
-const glyphSource = source('src/components/MapTypeGlyph.jsx');
+const glyphSource = source('src/components/map/MapTypeGlyph.jsx');
 check(
   "the read and the write are the map feature's, like the boundary's",
   [ROUTED_READS.GET_MAP_TYPES, ROUTED_WRITES.ADMIN_SAVE_MAP_TYPES],

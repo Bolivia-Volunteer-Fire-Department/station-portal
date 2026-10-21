@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import '../print.css';
-import { stationLogoUrl } from '../utils/assets';
-import { certificationStateLabel } from '../utils/certifications';
+import '../../print.css';
+import { stationLogoUrl } from '../../utils/assets';
+import { certificationStateLabel } from '../../utils/certifications';
 
 export default function PrintableCertifications({ rows = [], departmentName = '', logoUrl = '', onDone }) {
   useEffect(() => {
