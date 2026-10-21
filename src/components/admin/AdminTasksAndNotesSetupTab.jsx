@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   RotateCcw,
   Lock,
+  Copy,
 } from 'lucide-react';
 import ConfirmModal from '../ConfirmModal';
 import ViewportModal from '../ViewportModal';
@@ -181,6 +182,18 @@ export default function AdminTasksAndNotesSetupTab({
       role_permissions: existing,
     });
     setEditorOpen(true);
+  };
+
+  const handleDuplicate = () => {
+    if (!editingTemplate) return;
+    setEditingTemplate((prev) => ({
+      ...prev,
+      id: '',
+      name: `${prev.name || 'Template'} (Copy)`,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+    toast.success('Template duplicated. Ready to save as a new template.');
   };
 
   const handleToggleCustomPermissions = (enabled) => {
@@ -564,6 +577,20 @@ export default function AdminTasksAndNotesSetupTab({
           saving={saving}
           size="large"
           onClose={() => setEditorOpen(false)}
+          actions={
+            editingTemplate.id ? (
+              <button
+                type="button"
+                onClick={handleDuplicate}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700"
+                title="Duplicate this template as a new template"
+              >
+                <Copy className="h-4 w-4" />
+                <span>Duplicate</span>
+              </button>
+            ) : null
+          }
         >
           <form id={TEMPLATE_FORM_ID} onSubmit={handleSave} className="space-y-6 p-6">
             {/* Template Identity */}

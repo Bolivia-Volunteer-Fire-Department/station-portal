@@ -23,9 +23,11 @@ import { mergeDayItems, separateShiftTimeBlocks } from '../utils/dayOrder';
 // Whether the window the schedule arrived in covers the month on screen: the difference between "this month is empty" and
 // "I have not asked for this month".
 import { windowCoversMonth } from '../utils/scheduleWindow';
+import { pushSupported, notificationPermission, hasPushSubscription } from '../utils/pushNotifications';
 import { submitShiftOffer } from '../services/api';
 import ViewToggle from './navigation/ViewToggle';
 import ShiftOfferModal from './schedule/ShiftOfferModal';
+import PushNotificationPromptModal from './schedule/PushNotificationPromptModal';
 import ScheduleItemModal from './schedule/ScheduleItemModal';
 import MonthPickerModal from './MonthPickerModal';
 import { shiftItemDetails, eventItemDetails } from '../utils/scheduleItemDetails';
@@ -80,6 +82,7 @@ export default function ScheduleCalendar({
   departmentName = '',
   departmentLogoUrl = '',
   onOfferSubmitted,
+  onNavigate,
 }) {
   const now = new Date();
 
@@ -152,6 +155,8 @@ export default function ScheduleCalendar({
   const [showOpenShifts, setShowOpenShifts] = useState(true);
   // Open pill the member clicked, held while the confirmation modal is up.
   const [offerTarget, setOfferTarget] = useState(null);
+  // Whether to show the push notification encouragement prompt after submitting an offer
+  const [showPushPrompt, setShowPushPrompt] = useState(false);
   // The item whose details are open, as { kind: 'shift' | 'event', item }. Shift pills that are already
   // filled and event pills open this; open pills keep going straight to the offer modal, which is the same
   // layout plus the one action that pill has.
@@ -517,6 +522,19 @@ export default function ScheduleCalendar({
     }
     if (result?.success) {
       setOfferTarget(null);
+      // If push notifications are not enabled on this device, prompt the member to enable them
+      try {
+        if (!pushSupported() || notificationPermission() !== 'granted') {
+          setShowPushPrompt(true);
+        } else {
+          const hasSub = await hasPushSubscription();
+          if (!hasSub) {
+            setShowPushPrompt(true);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not inspect push notification status:', e);
+      }
       // Re-reads the member's offers so the pill flips to "pending approval"
       // (and, once a push provider lands, a notification can do the same).
       try {
@@ -1185,6 +1203,13 @@ export default function ScheduleCalendar({
           onConfirm={submitOffer}
         />
       )}
+
+      {/* Push notification prompt - shown after a successful shift offer if notifications are not enabled */}
+      <PushNotificationPromptModal
+        isOpen={showPushPrompt}
+        onClose={() => setShowPushPrompt(false)}
+        onNavigateToSettings={() => onNavigate?.('settings')}
+      />
 
       {/* Details for a filled shift or an event. The rows come from utils/scheduleItemDetails, so what the
           modal says is tested rather than the markup that says it. `crewMember` follows the Show everyone

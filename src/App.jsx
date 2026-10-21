@@ -2491,6 +2491,7 @@ const getLoadingMessage = () => {
                 departmentLogoUrl={departmentLogo}
                 // Re-reads the member's offers after a submit so the pill flips to "pending approval" immediately
                 onOfferSubmitted={() => refreshOffers(authToken)}
+                onNavigate={handleSidebarNavigate}
               />
             )}
 

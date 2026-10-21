@@ -1,5 +1,5 @@
 import React, { useMemo, useEffect, useRef, useState, useId } from 'react';
-import { Loader2, Pencil, Trash2, Plus, AlertCircle, Clock, ArrowUpDown, Download, History, MapPin } from 'lucide-react';
+import { Loader2, Pencil, Trash2, Plus, AlertCircle, Clock, ArrowUpDown, Download, History, MapPin, RefreshCw } from 'lucide-react';
 import { adminSaveTimeclockEntry, adminDeleteTimeclockEntry } from '../../services/api';
 import { formatStationTime } from '../../utils/timeFormat';
 import { computeShiftBreakdown, formatShiftBreakdown } from '../../utils/shiftHours';
@@ -124,6 +124,7 @@ function durationHoursFor(log, roundingMinutes) {
 export default function AdminClockManagementTab({ token, users, ranks, logs = [], timeFormat = '12', onDataChanged, shifts = [], systemSettings = [], loadedFrom = '', onLoadOlder }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -391,45 +392,66 @@ export default function AdminClockManagementTab({ token, users, ranks, logs = []
               </span>
             ) : null}
           </h3>
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setEditorOpen(true);
-            }}
-            className="ml-auto flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
-          >
-            <Plus className="h-4 w-4" />
-            New entry
-          </button>
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            disabled={filteredSortedLogs.length === 0}
-            className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium text-sm px-4 py-2 rounded-xl transition disabled:opacity-50"
-          >
-            <Download className="w-4 h-4" />
-            Export CSV
-          </button>
-          {/* Button to load older historical entries on demand. */}
-          {onLoadOlder && (
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              disabled={loadingOlder}
-              onClick={async () => {
-                setLoadingOlder(true);
-                try {
-                  await onLoadOlder();
-                } finally {
-                  setLoadingOlder(false);
-                }
+              onClick={() => {
+                resetForm();
+                setEditorOpen(true);
               }}
-              className="ml-2 flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium text-sm px-4 py-2 rounded-xl transition disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500"
             >
-              <History className="w-4 h-4" />
-              {loadingOlder ? 'Loading…' : 'Load older entries'}
+              <Plus className="h-4 w-4" />
+              New entry
             </button>
-          )}
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={filteredSortedLogs.length === 0}
+              className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium text-sm px-4 py-2 rounded-xl transition disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+            {onDataChanged && (
+              <button
+                type="button"
+                disabled={refreshing}
+                onClick={async () => {
+                  setRefreshing(true);
+                  try {
+                    await onDataChanged();
+                  } finally {
+                    setRefreshing(false);
+                  }
+                }}
+                className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium text-sm px-4 py-2 rounded-xl transition disabled:opacity-50"
+                title="Refresh timeclock entries"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            )}
+            {/* Button to load older historical entries on demand. */}
+            {onLoadOlder && (
+              <button
+                type="button"
+                disabled={loadingOlder}
+                onClick={async () => {
+                  setLoadingOlder(true);
+                  try {
+                    await onLoadOlder();
+                  } finally {
+                    setLoadingOlder(false);
+                  }
+                }}
+                className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium text-sm px-4 py-2 rounded-xl transition disabled:opacity-50"
+              >
+                <History className="w-4 h-4" />
+                {loadingOlder ? 'Loading…' : 'Load older entries'}
+              </button>
+            )}
+          </div>
         </div>
         <table className="w-full text-sm text-left">
           <thead className="sticky top-0 z-10 bg-slate-100/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-700/60 text-slate-500 dark:text-slate-400 uppercase text-xs">
