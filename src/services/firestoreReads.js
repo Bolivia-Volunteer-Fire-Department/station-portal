@@ -3,7 +3,7 @@ import { collection, doc, endBefore, getCountFromServer, getDoc, getDocs, limit,
 import { httpsCallable } from 'firebase/functions';
 import { activeAudienceRows, audienceKeysFor, audienceRows, memberAvailabilityFor, offersForMember, pendingOffers, readUsersOnce, rowsFor, rowsInRange, rowsOf, scheduleSetupFor, settingRows } from './firestorePayload.js';
 import { firebaseFunctions, firestore } from './firebase.js';
-import { getUser, invalidateUser, invalidateAll } from '../utils/userCache.js';
+import { getUser } from '../utils/userCache.js';
 import { nextDateKey, toDateKey, stationTodayKey } from '../utils/scheduleDate.js';
 import { CHAT_PAGE_SIZE, isChatThread } from '../utils/chat.js';
 import { certificationAlertsFor, decorateCertifications } from '../utils/certifications.js';

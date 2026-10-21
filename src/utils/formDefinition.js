@@ -153,7 +153,7 @@ export const isNonDataField = (fieldType) => ['markdown', 'divider'].includes(fi
 export const formatPhoneNumber = (val) => {
   if (!val) return '';
   const str = String(val);
-  const extMatch = str.match(/(?:x|ext|\#|\*)\s*(\d*)/i);
+  const extMatch = str.match(/(?:x|ext|#|\*)\s*(\d*)/i);
   const hasExtTrigger = Boolean(extMatch);
   let ext = extMatch ? extMatch[1] : '';
 

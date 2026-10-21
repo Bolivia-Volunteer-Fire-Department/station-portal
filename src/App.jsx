@@ -60,8 +60,6 @@ import MobileBottomNav from './components/navigation/MobileBottomNav';
 import { MOBILE_NAV_MODULES_KEY, parseMobileNavModules } from './utils/mobileNav';
 import PixelBurst from './components/PixelBurst';
 import DashboardModule from './components/DashboardModule';
-import ClockCard from './components/ClockCard';
-import OnDutyCard from './components/OnDutyCard';
 import SplashScreen from './components/SplashScreen';
 import LoadingOverlay from './components/LoadingOverlay';
 import {
@@ -100,13 +98,11 @@ import { normalizeWorkOrder } from './utils/workOrders';
 import ChatHost from './components/Chat/ChatHost';
 import ScheduleFreshness from './components/schedule/ScheduleFreshness';
 import { pageBarLabel } from './utils/pageLabels';
-import CertificationNotice from './components/CertificationNotice';
 import {
   certificationBadgesLoaded,
   mergeCertificationBadges,
   setCertificationBadges,
 } from './utils/certifications';
-import DigitalClock from './components/DigitalClock';
 import { getCurrentCoordinates } from './utils/geolocation';
 import { clockLocationConfig, clockLocationNotice, evaluateClockLocation, OUT_OF_RANGE_CODE } from './utils/clockLocation';
 import { mergeSavedUser } from './utils/userRow';
@@ -137,7 +133,6 @@ import { DEFAULT_MODULE_KEY } from './utils/sidebarNav';
 import { departmentLogoUrl, stationLogoUrl, stationSyncLoopsUrl } from './utils/assets';
 import { updateRuntimePwaIcons } from './utils/pwaIcons';
 import { CENTERED_CONTENT_TABS, CONTENT_MAX_WIDTH } from './utils/contentWidth';
-import AnnouncementList from './components/AnnouncementList';
 import { normalizeEventList } from './utils/events';
 import AppUpdateBanner from './components/AppUpdateBanner';
 import { AuthProvider } from './context/AuthContext';

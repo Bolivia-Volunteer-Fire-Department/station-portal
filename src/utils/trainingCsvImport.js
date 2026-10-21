@@ -10,7 +10,6 @@
 //   2. The CLI import script (scripts/import-trainings-csv.mjs)
 
 import { parseSheetDateKey } from './scheduleDate.js';
-import { TRAINING_FLAGS } from './training.js';
 
 // Clean text helper.
 const text = (val) => String(val ?? '').trim();

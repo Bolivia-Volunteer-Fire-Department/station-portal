@@ -101,6 +101,12 @@ export default function CameraCaptureModal({
     };
   }, [capturedPreview]);
 
+  useEffect(() => {
+    if (isOpen) {
+      playSound(modalSoundFor('cameraCapture'));
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const toggleFacingMode = () => {
@@ -176,12 +182,6 @@ export default function CameraCaptureModal({
     handleRetake();
     onClose();
   };
-
-  useEffect(() => {
-    if (isOpen) {
-      playSound(modalSoundFor('cameraCapture'));
-    }
-  }, [isOpen]);
 
   return renderInViewport(
     <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">

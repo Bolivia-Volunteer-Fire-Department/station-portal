@@ -350,7 +350,7 @@ const approvalSections = /approvals:\s*\[([^\]]*)\]/.exec(appSource)?.[1] || '';
 checkIs(
   'Pending Approvals loads its complete row context without Schedule Management first',
   ['scheduleOffers', 'directory', 'schedule', 'scheduleTemplates', 'assignments'].every((section) =>
-    new RegExp(`['\"]${section}['\"]`).test(approvalSections)
+    new RegExp(`['"]${section}['"]`).test(approvalSections)
   ),
   approvalSections
 );
