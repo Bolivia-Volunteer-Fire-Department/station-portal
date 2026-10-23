@@ -9,8 +9,19 @@
 
 const publicUrl = (filename) => encodeURI(`${import.meta.env.BASE_URL}${filename}`);
 
+const defaultLogoFilename = () => {
+  const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
+  const explicit = String(env.VITE_DEPARTMENT_LOGO || '').trim();
+  if (explicit) return explicit;
+  const projectId = String(env.VITE_FIREBASE_PROJECT_ID || '').trim();
+  if (projectId && projectId !== 'fire-clock-76723') {
+    return 'StationSync_loops.svg';
+  }
+  return 'Bolivia Fire Department Logo trans.svg';
+};
+
 // The department patch, shown on the login screen, on the timeclock and on printed schedules.
-export const stationLogoUrl = () => publicUrl('Bolivia Fire Department Logo trans.svg');
+export const stationLogoUrl = () => publicUrl(defaultLogoFilename());
 
 // StationSync brand logos. SVG, so they stay sharp at any size: both are drawn to the SAME viewBox as the PNGs they
 // replaced (2215x448 full lockup, 837x448 loops), so nothing on screen moves. The loops mark is also used as a CSS mask

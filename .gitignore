@@ -50,4 +50,7 @@ fire-clock-76723.json
 *.pxd
 
 
+# Local-only operational notes
+DEPARTMENT_ONBOARDING.md
+
 .continueignore

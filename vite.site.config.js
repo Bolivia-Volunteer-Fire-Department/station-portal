@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const buildTime = Date.now();
-const appVersion = '1.805';
+const appVersion = '1.806';
 
 /**
  * Serves `site.html` at `/` during `npm run dev:site` and renames `dist-site/site.html`

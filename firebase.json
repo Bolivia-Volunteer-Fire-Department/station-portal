@@ -1,20 +1,24 @@
 {
+  "auth": {
+    "providers": {
+      "emailPassword": true
+    }
+  },
   "database": {
     "rules": "database.rules.json"
   },
   "firestore": {
     "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "indexes": "firestore.indexes.json",
+    "database": "(default)",
+    "location": "nam5"
   },
   "functions": {
     "source": "functions"
   },
-  "storage": [
-    {
-      "rules": "storage.rules",
-      "bucket": "fire-clock-76df723.firebasestorage.app"
-    }
-  ],
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": [
     {
       "target": "default",

@@ -1150,7 +1150,8 @@ exports.requestPasswordReset = onCall({ cors: true }, async (request) => {
   const data = request.data || {};
   const enteredEmail = String(data.email || '').trim().toLowerCase();
   const rawOrigin = String(data.appOrigin || '').trim();
-  const appOrigin = rawOrigin || 'https://fire-clock-76723.web.app';
+  const fallbackProject = String(process.env.GCLOUD_PROJECT || 'fire-clock-76723').trim();
+  const appOrigin = rawOrigin || `https://${fallbackProject}.web.app`;
 
   const genericResponse = {
     success: true,

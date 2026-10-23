@@ -335,12 +335,17 @@ export default function FirefighterRunner({
     fireballAudioRef.current = new Audio(fireballSound);
 
     // These are short game effects, so they shouldn't need to loop.
-    if (jumpAudioRef.current) jumpAudioRef.current.preload = "auto";
-    if (dieAudioRef.current) dieAudioRef.current.preload = "auto";
+    if (jumpAudioRef.current) {
+      jumpAudioRef.current.preload = "auto";
+      jumpAudioRef.current.volume = 0.05;
+    }
+    if (dieAudioRef.current) {
+      dieAudioRef.current.preload = "auto";
+      dieAudioRef.current.volume = 0.1;
+    }
     if (pointAudioRef.current) {
       pointAudioRef.current.preload = "auto";
-      // Cut point audio volume by half
-      pointAudioRef.current.volume = 0.4;
+      pointAudioRef.current.volume = 0.2;
     }
     if (fireballAudioRef.current) {
       fireballAudioRef.current.preload = "auto";

@@ -1,6 +1,8 @@
 {
   "projects": {
-    "default": "fire-clock-76723"
+    "default": "fire-clock-76723",
+    "bvfd": "fire-clock-76723",
+    "demo": "stationsync-demo"
   },
   "targets": {
     "fire-clock-76723": {
@@ -10,6 +12,13 @@
         ],
         "default": [
           "fire-clock-76723"
+        ]
+      }
+    },
+    "stationsync-demo": {
+      "hosting": {
+        "default": [
+          "stationsync-demo"
         ]
       }
     }

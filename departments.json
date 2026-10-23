@@ -1,0 +1,24 @@
+{
+  "departments": {
+    "bvfd": {
+      "slug": "bvfd",
+      "name": "Bolivia Volunteer Fire Department",
+      "subdomain": "bvfd.stationsync.net",
+      "projectId": "fire-clock-76723",
+      "hostingTarget": "default",
+      "hostingSite": "fire-clock-76723",
+      "envFile": ".env",
+      "isDemo": false
+    },
+    "demo": {
+      "slug": "demo",
+      "name": "Harborview Fire & Rescue",
+      "subdomain": "demo.stationsync.net",
+      "projectId": "stationsync-demo",
+      "hostingTarget": "default",
+      "hostingSite": "stationsync-demo",
+      "envFile": ".env.demo",
+      "isDemo": true
+    }
+  }
+}
