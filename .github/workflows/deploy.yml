@@ -83,7 +83,7 @@ jobs:
           VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
           VITE_KLIPY_API_KEY: ${{ secrets.VITE_KLIPY_API_KEY }}
           BASE_PATH: "/"
-        run: npm run build
+        run: npm run build && npm run build:site
 
       - name: Deploy to Firebase Hosting
         # Only runs when the service account secret has been added in GitHub Actions Secrets

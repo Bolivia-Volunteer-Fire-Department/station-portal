@@ -7,6 +7,9 @@
       "hosting": {
         "site": [
           "stationsync"
+        ],
+        "default": [
+          "fire-clock-76723"
         ]
       }
     }
