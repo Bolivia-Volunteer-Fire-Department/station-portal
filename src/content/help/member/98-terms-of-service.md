@@ -161,6 +161,23 @@ These Terms shall be governed by and construed in accordance with the laws of th
 
 ---
 
-## 12. Contact Information
+## 12. Open-Source Software & Third-Party Notices
+
+StationSync incorporates open-source software components governed by permissive open-source licenses (`MIT`, `Apache-2.0`, `ISC`, and `BSD-2-Clause`), including:
+
+* **React & React DOM** (`MIT`) — Copyright (c) Meta Platforms, Inc. and affiliates.
+* **Tailwind CSS** (`MIT`) — Copyright (c) Tailwind Labs, Inc.
+* **Firebase JS SDK** (`Apache-2.0`) — Copyright Google LLC.
+* **Leaflet** (`BSD-2-Clause`) — Copyright (c) 2010–2026, Volodymyr Agafonkin; Copyright (c) 2010–2011, CloudMade.
+* **Lucide Icons** (`ISC`) — Copyright (c) Lucide Contributors.
+* **pdf-lib** (`MIT`) — Copyright (c) 2019 Andrew Dillon.
+* **Recharts** (`MIT`) — Copyright (c) 2015–present Recharts Group.
+* **Sonner** (`MIT`) — Copyright (c) 2023 Emil Kowalski.
+
+Full copyright notices and license texts for bundled open-source libraries are published at [`/THIRD-PARTY-LICENSES.txt`](/THIRD-PARTY-LICENSES.txt). Geospatial and map layers include data from OpenStreetMap contributors (`ODbL`), Esri World Imagery, FEMA National Flood Hazard Layer (public domain), and municipal/county GIS agencies. GIF search integration is powered by KLIPY.
+
+---
+
+## 13. Contact Information
 
 For questions, support, security reports, or administrative notifications regarding these Terms, please consult your department's system administrator or contact StationSync support.

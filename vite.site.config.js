@@ -1,11 +1,12 @@
 import { resolve } from 'node:path';
-import { renameSync, existsSync } from 'node:fs';
+import { renameSync, existsSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const buildTime = Date.now();
-const appVersion = '1.806';
+const versionData = JSON.parse(readFileSync(resolve(process.cwd(), 'public/version.json'), 'utf8'));
+const appVersion = String(versionData.version || '1.806');
 
 /**
  * Serves `site.html` at `/` during `npm run dev:site` and renames `dist-site/site.html`
