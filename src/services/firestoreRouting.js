@@ -16,7 +16,7 @@ const enabledFeatures = () =>
 const featureIsOn = (name) => {
   const named = enabledFeatures();
   if (named.includes('off') || named.includes('none')) return false;
-  return named.length === 0 || named.includes('*') || named.includes(name);
+  return named.length === 0 || named.includes('*') || named.includes('all') || named.includes(name);
 };
 
 // Maps features to their required prerequisites and supported read/write actions.
@@ -441,7 +441,73 @@ const READ_DISPATCH = {
   },
   ADMIN_GET_CERTIFICATIONS: async (uid, body) => {
     void uid;
-    return ok(await callable('readAdminCertificationRecords', { includeInactive: body?.includeInactive === true }));
+    try {
+      return ok(await callable('readAdminCertificationRecords', { includeInactive: body?.includeInactive === true }));
+    } catch (err) {
+      console.warn('[routing] callable readAdminCertificationRecords failed, using direct read', err);
+      const [{ collection }, { firestore }, { readUsersOnce, rowsOf }] = await Promise.all([
+        import('firebase/firestore'),
+        import('./firebase.js'),
+        import('./firestorePayload.js'),
+      ]);
+      const [users, records] = await Promise.all([
+        readUsersOnce(),
+        rowsOf(collection(firestore(), 'certifications')),
+      ]);
+      return ok({
+        records,
+        activeUserIds: users.map((u) => String(u.id || '')).filter(Boolean),
+      });
+    }
+  },
+  GET_ROSTER_MODULE: async (uid, body) => {
+    const { READERS } = await import('./firestoreReads.js');
+    try {
+      return ok(await READERS.GET_ROSTER_MODULE(uid, body));
+    } catch (err) {
+      console.warn('[routing] callable readRosterModule failed, using direct read', err);
+      const { readAdminSection } = await import('./firestorePayload.js');
+      const [{ roster = [], certificationBadges = {} }, { certificationSetup = [] }] = await Promise.all([
+        READERS.GET_ROSTER(),
+        readAdminSection('certificationSetup'),
+      ]);
+      const search = String(body?.search || '').trim().toLowerCase();
+      const filtered = roster
+        .filter((m) => !search || String(m.name || '').toLowerCase().includes(search))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+      const certificationTypes = certificationSetup
+        .filter((row) => row && row.show_on_roster === true)
+        .map((row) => ({
+          id: String(row.id || ''),
+          name: String(row.name || ''),
+          icon: String(row.icon || ''),
+          sort_order: Number(row.sort_order ?? 999),
+        }))
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+      const typeByName = new Map(certificationTypes.map((t) => [t.name, t.id]));
+      const memberCertificationIds = Object.fromEntries(
+        filtered.map((m) => {
+          const badges = Array.isArray(certificationBadges[m.id]) ? certificationBadges[m.id] : [];
+          const ids = badges
+            .map((b) => b.certification_id || typeByName.get(b.name) || '')
+            .filter(Boolean);
+          return [m.id, ids];
+        })
+      );
+      return ok({
+        members: filtered,
+        certificationTypes,
+        memberCertificationIds,
+        roster_page: {
+          size: filtered.length || 10,
+          search: String(body?.search || '').trim(),
+          has_more: false,
+          next_cursor: '',
+          scanned: filtered.length,
+          exhausted: false,
+        },
+      });
+    }
   },
   ADMIN_GET_DOCUMENT_VERIFICATION_COUNT: async (uid, body) => {
     try {

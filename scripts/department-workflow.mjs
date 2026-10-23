@@ -165,7 +165,7 @@ const fetchAndWriteEnvFile = (dept) => {
     `VITE_FIREBASE_MESSAGING_SENDER_ID=${sdk.messagingSenderId || ''}`,
     `VITE_FIREBASE_APP_ID=${sdk.appId || appId}`,
     `VITE_FIREBASE_DATABASE_URL=${sdk.databaseURL || `https://${projectId}-default-rtdb.firebaseio.com`}`,
-    `VITE_FIRESTORE_FEATURES=all`,
+    `VITE_FIRESTORE_FEATURES=`,
     `# Explicitly clear project-specific keys so Vite does not inherit BVFD's values from .env`,
     `VITE_FIREBASE_APPCHECK_SITE_KEY=`,
     `VITE_FIREBASE_APPCHECK_DEBUG_TOKEN=`,
