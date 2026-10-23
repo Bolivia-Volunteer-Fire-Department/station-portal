@@ -84,5 +84,60 @@
     filter: none !important;
     -webkit-filter: none !important;
   }
+
+  /* Help guide print overrides: ensure light-paper surfaces even when the app is in dark mode */
+  .print-help-guide-body pre,
+  .print-help-guide-body code {
+    background-color: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+  }
+
+  .print-help-guide-body blockquote,
+  .print-help-guide-body hr,
+  .print-help-guide-body th,
+  .print-help-guide-body td,
+  .print-help-guide-body tr {
+    border-color: #cbd5e1 !important;
+  }
+
+  .print-help-guide-body pre,
+  .print-help-guide-body blockquote,
+  .print-help-guide-body table,
+  .print-help-guide-body figure,
+  .print-help-guide-body img,
+  .print-help-guide-body > div > div.rounded-xl {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-help-guide-body figure img {
+    max-height: 4.5in;
+    width: auto;
+    object-fit: contain;
+  }
+
+  .print-help-guide-body > div > div.rounded-xl {
+    background-color: #f8fafc !important;
+  }
+
+  .print-help-guide-body h1,
+  .print-help-guide-body h2,
+  .print-help-guide-body h3 {
+    break-after: avoid;
+  }
+
+  /* Fixed footer pinned to the bottom of every printed page, with a repeating tfoot spacer so text never overlaps it */
+  .print-page-footer-spacer {
+    height: 36px;
+  }
+
+  .print-page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: #fff !important;
+  }
 }
 

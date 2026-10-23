@@ -6,8 +6,8 @@ import PasswordInput from './PasswordInput';
 import PasswordCrackEstimate from './PasswordCrackEstimate';
 import ViewportModal from './ViewportModal';
 import Markdown from './Markdown';
-import termsMarkdown from '../content/help/member/15-terms-of-service.md?raw';
-import privacyMarkdown from '../content/help/member/16-privacy-policy.md?raw';
+import termsMarkdown from '../content/help/member/98-terms-of-service.md?raw';
+import privacyMarkdown from '../content/help/member/99-privacy-policy.md?raw';
 import { requestPasswordReset, completePasswordReset } from '../services/firebaseAuth.js';
 
 const LEGAL_DOCUMENTS = {

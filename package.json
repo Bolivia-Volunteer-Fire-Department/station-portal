@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:site": "vite --config vite.site.config.js",
     "build": "vite build",
+    "build:site": "vite build --config vite.site.config.js",
+    "preview:site": "vite preview --config vite.site.config.js --port 4174",
     "lint": "oxlint",
     "check:scripts": "node scripts/check-script-syntax.mjs",
     "preview": "vite preview",
@@ -18,6 +21,7 @@
     "functions:lock-runtime": "node scripts/lock-functions-runtime-policy.mjs",
     "deploy:storage": "firebase deploy --only storage",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
+    "deploy:site": "npm run build:site && firebase deploy --only hosting:site",
     "verify:rules": "firebase emulators:exec --project demo-station-portal --only firestore,auth \"node scripts/verify-rules.mjs\"",
     "verify:storage-rules": "firebase emulators:exec --project demo-station-portal --only firestore,auth,storage \"node scripts/verify-storage-rules.mjs\"",
     "verify:firebase-auth": "firebase emulators:exec --project demo-station-portal --only firestore,auth,functions \"node scripts/verify-firebase-auth.mjs\"",

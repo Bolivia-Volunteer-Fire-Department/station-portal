@@ -342,12 +342,17 @@ export default function Sidebar({
                 return (
                     <button
                         key="help"
-                        onClick={() => { setActiveTab('help'); setIsSidebarOpen(false); }}
+                        onClick={() => {
+                            if (typeof window !== 'undefined') {
+                                window.open('https://stationsync.net/#docs', '_blank', 'noopener,noreferrer');
+                            }
+                            setIsSidebarOpen(false);
+                        }}
                         className={`w-full flex items-center ${isCollapsed ? 'gap-3 md:gap-0 md:justify-center px-4 py-3 md:px-0 md:py-3' : 'gap-3 px-4 py-3'} rounded-xl text-sm font-medium transition ${activeTab === 'help'
                             ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
                             : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
                             }`}
-                        title={isCollapsed ? 'Help' : undefined}
+                        title={isCollapsed ? 'Help (stationsync.net)' : undefined}
                     >
                         <NavIcon className="w-5 h-5 shrink-0" />
                         <span className={isCollapsed ? 'md:hidden' : ''}>Help</span>

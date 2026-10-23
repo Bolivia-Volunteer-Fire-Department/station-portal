@@ -2,5 +2,14 @@
   "projects": {
     "default": "fire-clock-76723"
   },
-  "targets": {}
+  "targets": {
+    "fire-clock-76723": {
+      "hosting": {
+        "site": [
+          "stationsync"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

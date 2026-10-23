@@ -290,6 +290,11 @@ export default function AdminPanel({
 
   const categoryHasActive = (items) => items.some((item) => item.id === activeSubTab);
   const selectItem = (itemId) => {
+    if (itemId === 'help' && typeof window !== 'undefined') {
+      window.open('https://stationsync.net/#docs-admin', '_blank', 'noopener,noreferrer');
+      closeMenus();
+      return;
+    }
     onSelectTab(itemId);
     closeMenus();
   };

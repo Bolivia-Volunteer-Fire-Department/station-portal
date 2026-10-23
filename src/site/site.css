@@ -1,0 +1,6 @@
+/* Off-screen rendering deferral for below-the-fold sections and long changelog feeds */
+.site-deferred-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 320px;
+}
+

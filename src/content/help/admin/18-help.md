@@ -25,7 +25,9 @@ Adding a guide is adding a file — no registration step, no build configuration
 
 **The number is the order the thing appears in the app.** These guides are numbered to match the Administration navigation — People, Scheduling, Timeclock, Training, System — with the overview first. Insert a guide where it belongs and renumber what follows, so the list keeps reading like the menu; the test suite fails if the numbering has a gap or a duplicate.
 
-Supported formatting: headings, paragraphs, bold and italic, inline and fenced code, links, bullet and numbered lists, block quotes, `---` dividers, tables, and **alerts**.
+Supported formatting: headings, paragraphs, bold and italic, inline and fenced code, links, images (`![Alt text|width](/help/admin/example.png "Optional caption")`), bullet and numbered lists, block quotes, `---` dividers, tables, and **alerts**.
+
+**Images and screenshots** for help guides live in `public/help/member/` and `public/help/admin/` and are referenced by their root path (`/help/member/...` or `/help/admin/...`). Add `|480` (or a percentage like `|60%`) to the alt text to cap the display width of smaller UI crops, and include a quoted title at the end to display a caption underneath the image. Clicking any screenshot in a guide opens a full-screen lightbox preview.
 
 **Alerts** are GitHub's, and the marker goes on its own line:
 

@@ -60,12 +60,28 @@ const COLOR_TAG_SOURCE =
 
 const INLINE_SOURCE =
   COLOR_TAG_SOURCE +
-  '|(\\*\\*\\*[^*]+?\\*\\*\\*)|(_{3}[^_]+?_{3})|(\\*\\*.+?\\*\\*)|(__[^_]+?__)|(~~[^~]+?~~)|(`[^`]+`)|(\\*[^*]+\\*)|(_[^_]+_)|(\\[[^\\]]+\\]\\([^)\\s]+\\))|' +
+  '|(\\*\\*\\*[^*]+?\\*\\*\\*)|(_{3}[^_]+?_{3})|(\\*\\*.+?\\*\\*)|(__[^_]+?__)|(~~[^~]+?~~)|(`[^`]+`)|(\\*[^*]+\\*)|(_[^_]+_)|(!\\[[^\\]]*\\]\\([^)\\s"]+(?:\\s+"[^"]*")?\\))|(\\[[^\\]]+\\]\\([^)\\s]+\\))|' +
   '(' +
   COLOR_MARK_SOURCE +
   ')';
 
 const isWhitespace = (char) => char === undefined || /\s/.test(char);
+
+// Parses optional width suffix out of image alt text: "Schedule Board|480" -> { alt: "Schedule Board", width: "480px" }
+const parseImageAlt = (rawAlt) => {
+  const raw = String(rawAlt ?? '');
+  const sizeMatch = /^(.*?)\|\s*(\d+(?:px|%)?)\s*$/.exec(raw);
+  if (!sizeMatch) {
+    return { alt: raw.trim(), width: '', rawAlt: raw };
+  }
+  const rawWidth = sizeMatch[2];
+  const width = /^\d+$/.test(rawWidth) ? `${rawWidth}px` : rawWidth;
+  return {
+    alt: sizeMatch[1].trim(),
+    width,
+    rawAlt: raw,
+  };
+};
 
 // Emphasis delimiters must hug their content: "* not italic *" and arithmetic like
 // "2 * 3 * 4" stay literal, which is what someone writing a help guide expects.
@@ -133,6 +149,19 @@ export function parseInline(text) {
       const bgMatch = /^\[bg:([a-zA-Z0-9#_-]+)\]([\s\S]*?)\[\/bg\]$/.exec(raw);
       if (bgMatch) {
         token = { type: 'bgColor', bg: bgMatch[1], children: parseInline(bgMatch[2]) };
+      }
+    } else if (raw.startsWith('![')) {
+      const imgMatch = /^!\[([^\]]*)\]\(([^)\s"]+)(?:\s+"([^"]*)")?\)$/.exec(raw);
+      if (imgMatch) {
+        const { alt, width, rawAlt } = parseImageAlt(imgMatch[1]);
+        token = {
+          type: 'image',
+          src: imgMatch[2],
+          alt,
+          rawAlt,
+          width,
+          caption: (imgMatch[3] || '').trim(),
+        };
       }
     } else {
       const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(raw);

@@ -244,6 +244,19 @@ service firebase.storage {
       allow delete: if signedIn();
     }
 
+    // MARKDOWN DOCUMENT IMAGES: markdown_images/{fileId}
+    // Holds screenshots and diagrams embedded inside SOP Documents, Notes, and Announcements.
+    match /markdown_images/{fileId} {
+      function acceptableMarkdownImage() {
+        return request.resource.size <= 10 * 1024 * 1024
+          && request.resource.contentType.matches('image/jpeg|image/png|image/webp|image/gif');
+      }
+
+      allow read: if signedIn();
+      allow create, update: if signedIn() && acceptableMarkdownImage();
+      allow delete: if signedIn();
+    }
+
     // Everything else in this bucket is closed, which is the rule the console writes when a bucket is created in
     // Production mode. It is kept rather than loosened by the addition above: nothing else in the app needs a
     // file, and a bucket that only ever holds one kind of thing is a bucket whose rules can be read at a glance.

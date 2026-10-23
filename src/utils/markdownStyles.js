@@ -78,6 +78,7 @@ export const INLINE_CLASSES = {
   highlight: 'rounded bg-amber-200/80 dark:bg-amber-300/25 px-0.5',
   underline: 'underline underline-offset-2',
   strikethrough: 'line-through opacity-75',
+  image: 'inline-block max-w-full h-auto rounded-lg border border-slate-200 dark:border-slate-700 my-1',
 };
 
 // Blocks. `bullets` and `numbers` are the list-style classes; `list` is what both share.
@@ -98,6 +99,10 @@ export const BLOCK_CLASSES = {
   tableHeadCell: 'py-1.5 pr-3 font-semibold',
   tableRow: 'border-b border-slate-100 dark:border-slate-800',
   tableCell: 'py-1.5 pr-3 align-top',
+  figure: 'my-3 space-y-1.5',
+  figureImage:
+    'block max-w-full h-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm cursor-zoom-in transition hover:opacity-95',
+  figcaption: 'text-xs text-slate-500 dark:text-slate-400 italic',
 };
 
 // The editor surface is the READER'S OWN BODY, plus the chrome an editing surface needs and a reader does not.

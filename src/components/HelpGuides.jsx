@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, FileText } from 'lucide-react';
+import { BookOpen, FileText, Printer } from 'lucide-react';
 import { hasGuideContent, helpFolderFor, helpGuides } from '../utils/helpGuides';
 import Markdown from './Markdown';
+import PrintableHelpGuide from './printable/PrintableHelpGuide';
 
 // Help guides, rendered from the markdown files under src/content/help/.
 //
@@ -14,6 +15,7 @@ import Markdown from './Markdown';
 export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
   const guides = useMemo(() => helpGuides(scope), [scope]);
   const [activeSlug, setActiveSlug] = useState(initialSlug || (guides[0]?.slug ?? ''));
+  const [printOpen, setPrintOpen] = useState(false);
 
   // Guides are static per scope, but the scope can change (the same component serves both
   // audiences), so the selection resets when it does.
@@ -71,9 +73,22 @@ export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             {isAdminScope ? 'Administration guides' : 'Help guides'}
           </h3>
-          <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
-            {guides.length} guide{guides.length === 1 ? '' : 's'}
-          </span>
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {guides.length} guide{guides.length === 1 ? '' : 's'}
+            </span>
+            {active && hasGuideContent(active) && (
+              <button
+                type="button"
+                onClick={() => setPrintOpen(true)}
+                title={`Print "${active.title}"`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+              >
+                <Printer className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                <span>Print guide</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {guides.length === 0 ? (
@@ -154,6 +169,14 @@ export default function HelpGuides({ scope = 'member', initialSlug = '' }) {
           </div>
         )}
       </div>
+
+      {printOpen && active && (
+        <PrintableHelpGuide
+          guide={active}
+          scope={scope}
+          onDone={() => setPrintOpen(false)}
+        />
+      )}
     </div>
   );
 }

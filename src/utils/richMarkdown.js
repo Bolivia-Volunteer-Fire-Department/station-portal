@@ -251,6 +251,13 @@ const htmlFromToken = (token) => {
       return `<mark class="${INLINE_CLASSES.highlight}">${htmlFromTokens(token.children)}</mark>`;
     case 'link':
       return `<a class="${INLINE_CLASSES.link}" href="${escapeHtml(token.href)}">${htmlFromTokens(token.children)}</a>`;
+    case 'image': {
+      const titleAttr = token.caption ? ` title="${escapeHtml(token.caption)}"` : '';
+      const widthStyle = token.width ? ` style="max-width:${escapeHtml(token.width)};width:100%"` : '';
+      return `<img src="${escapeHtml(token.src)}" alt="${escapeHtml(token.alt)}" data-raw-alt="${escapeHtml(
+        token.rawAlt ?? token.alt ?? ''
+      )}"${titleAttr}${widthStyle} class="${INLINE_CLASSES.image}">`;
+    }
     default:
       return '';
   }
@@ -529,6 +536,14 @@ const readInline = (reader, stops) => {
       reader.next();
       if (token.void) {
         if (token.name === 'br') out += ' ';
+        else if (token.name === 'img') {
+          const src = token.attrs?.src || '';
+          const alt = token.attrs?.['data-raw-alt'] ?? token.attrs?.alt ?? '';
+          const caption = token.attrs?.title || '';
+          if (src) {
+            out += caption ? `![${alt}](${src} "${caption}")` : `![${alt}](${src})`;
+          }
+        }
         continue;
       }
 

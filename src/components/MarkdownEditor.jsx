@@ -12,10 +12,12 @@ import {
   Heading3,
   HelpCircle,
   Highlighter,
+  ImagePlus,
   Italic,
   Link as LinkIcon,
   List,
   ListOrdered,
+  Loader2,
   Minus,
   Pencil,
   Pilcrow,
@@ -29,11 +31,14 @@ import {
   Trash2,
   TextQuote,
   Underline,
+  Upload,
   X,
 } from 'lucide-react';
 import Markdown from './Markdown';
 import { DOCUMENT_CONTENT_LIMIT, documentCharactersLeft } from '../utils/documents';
 import { EDITOR_SURFACE_CLASSES, bgColorClass, textColorClass } from '../utils/markdownStyles';
+import { renderInViewport } from '../utils/viewportLayer';
+import { uploadMarkdownImage } from '../services/markdownImageStorage';
 import {
   BLOCK_ACTIONS,
   CALLOUT_ACTIONS,
@@ -138,6 +143,9 @@ export default function MarkdownEditor({
   const [mode, setMode] = useState('write');
   const [draft, setDraft] = useState(() => String(value ?? ''));
   const [linkDraft, setLinkDraft] = useState(null);
+  const [imageDraft, setImageDraft] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState('');
   const [showCallouts, setShowCallouts] = useState(false);
   const [showTextColorMenu, setShowTextColorMenu] = useState(false);
   const [showBgColorMenu, setShowBgColorMenu] = useState(false);
@@ -146,6 +154,7 @@ export default function MarkdownEditor({
   const calloutRef = useRef(null);
   const textColorRef = useRef(null);
   const bgColorRef = useRef(null);
+  const imageFileInputRef = useRef(null);
   const [activeBlock, setActiveBlock] = useState('paragraph');
   const [activeBlockMeta, setActiveBlockMeta] = useState({ level: null, ordered: false });
   const [activeInline, setActiveInline] = useState([]);
@@ -202,21 +211,56 @@ export default function MarkdownEditor({
     []
   );
 
+  const insertMarkdownSnippet = useCallback(
+    (snippet) => {
+      const next = draft.trim() ? `${draft.replace(/\s+$/, '')}\n\n${snippet}` : snippet;
+      renderedMarkdown.current = next;
+      setDraft(next);
+      onChange?.(next);
+      if (surfaceRef.current && mode === 'write') {
+        surfaceRef.current.innerHTML = htmlFromBlocks(editorBlocksFromMarkdown(next));
+      }
+    },
+    [draft, mode, onChange]
+  );
+
   // Pasting brings whatever markup its source had. Only the text is kept: a pasted paragraph should not deliver a
   // font, a size and a link nobody asked for, and nothing from another page belongs in a procedure.
-  const handlePaste = useCallback((event) => {
-    event.preventDefault();
-    const text = event.clipboardData?.getData('text/plain') ?? '';
-    if (!text) return;
-    // insertText is deprecated, and is still the only way to paste that leaves the browser's undo history intact.
-    if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, text)) return;
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    range.insertNode(document.createTextNode(text));
-    range.collapse(false);
-  }, []);
+  const handlePaste = useCallback(
+    (event) => {
+      const files = Array.from(event.clipboardData?.files || []);
+      const imageFile = files.find((f) => String(f.type || '').startsWith('image/'));
+      if (imageFile) {
+        event.preventDefault();
+        setImageUploading(true);
+        setImageError('');
+        uploadMarkdownImage({ file: imageFile })
+          .then(({ url, alt }) => {
+            insertMarkdownSnippet(`![${alt || 'Screenshot'}](${url})`);
+          })
+          .catch((err) => {
+            setImageError(err?.message || 'Failed to upload pasted image.');
+          })
+          .finally(() => {
+            setImageUploading(false);
+          });
+        return;
+      }
+
+      event.preventDefault();
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (!text) return;
+      // insertText is deprecated, and is still the only way to paste that leaves the browser's undo history intact.
+      if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, text)) return;
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return;
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(document.createTextNode(text));
+      range.collapse(false);
+    },
+    [insertMarkdownSnippet]
+  );
 
   // Which block and which inline marks the caret is in, so the toolbar shows what is already applied rather than
   // offering to apply it twice. Read from the DOM, because the DOM is where the caret is.
@@ -918,6 +962,48 @@ export default function MarkdownEditor({
     setLinkDraft(null);
   };
 
+  const handleImageFileSelect = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImageUploading(true);
+    setImageError('');
+    try {
+      const { url, alt } = await uploadMarkdownImage({ file });
+      setImageDraft((curr) => ({
+        ...(curr || {}),
+        url,
+        alt: curr?.alt || alt || 'Screenshot',
+      }));
+    } catch (err) {
+      setImageError(err?.message || 'Could not upload image.');
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const applyImage = () => {
+    const url = String(imageDraft?.url || '').trim();
+    if (!url) {
+      setImageDraft(null);
+      return;
+    }
+    const cleanAlt = String(imageDraft?.alt || 'Screenshot')
+      .replace(/[|\]]/g, '')
+      .trim();
+    const widthVal = String(imageDraft?.width || '').trim();
+    const altWithWidth = widthVal ? `${cleanAlt}|${widthVal}` : cleanAlt;
+    const caption = String(imageDraft?.caption || '')
+      .replace(/"/g, "'")
+      .trim();
+    const markdownLine = caption
+      ? `![${altWithWidth}](${url} "${caption}")`
+      : `![${altWithWidth}](${url})`;
+    insertMarkdownSnippet(markdownLine);
+    setImageDraft(null);
+    setImageError('');
+  };
+
   // The raw-markdown surface's toolbar: the same buttons, acting on the textarea's selection. Inline marks are a
   // pure text transform, so this path needs none of the DOM work above.
   const runTextCommand = (action) => {
@@ -1197,6 +1283,34 @@ export default function MarkdownEditor({
             />
           ))}
 
+          {/* Insert Image button */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setImageDraft((curr) =>
+                curr ? null : { url: '', alt: '', caption: '', width: '' }
+              );
+              setImageError('');
+            }}
+            title="Insert image or screenshot"
+            aria-label="Insert image or screenshot"
+            className={toolbarButtonClass(Boolean(imageDraft))}
+          >
+            {imageUploading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+            ) : (
+              <ImagePlus className="w-4 h-4" />
+            )}
+          </button>
+          <input
+            ref={imageFileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            onChange={handleImageFileSelect}
+            className="hidden"
+          />
+
           <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
 
           {/* Quick reference guide button */}
@@ -1230,6 +1344,96 @@ export default function MarkdownEditor({
               className={toolbarButtonClass(false)}
             />
           ))}
+        </div>
+      )}
+
+      {imageDraft && (
+        <div className="space-y-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              <ImagePlus className="w-4 h-4 text-red-500" />
+              Insert Image or Screenshot
+            </span>
+            <button
+              type="button"
+              disabled={imageUploading}
+              onClick={() => imageFileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+            >
+              {imageUploading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                  <span>Uploading…</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-3.5 h-3.5 text-red-500" />
+                  <span>Upload Image File</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {imageError && (
+            <p className="text-xs text-red-600 dark:text-red-400">{imageError}</p>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <input
+              type="text"
+              value={imageDraft.url || ''}
+              onChange={(e) => setImageDraft((c) => ({ ...c, url: e.target.value }))}
+              placeholder="Image URL or /help/admin/screenshot.png"
+              aria-label="Image URL or path"
+              className="sm:col-span-5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <input
+              type="text"
+              value={imageDraft.alt || ''}
+              onChange={(e) => setImageDraft((c) => ({ ...c, alt: e.target.value }))}
+              placeholder="Description (alt text)"
+              aria-label="Image description"
+              className="sm:col-span-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <input
+              type="text"
+              value={imageDraft.caption || ''}
+              onChange={(e) => setImageDraft((c) => ({ ...c, caption: e.target.value }))}
+              placeholder="Optional caption"
+              aria-label="Image caption"
+              className="sm:col-span-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <input
+              type="text"
+              value={imageDraft.width || ''}
+              onChange={(e) => setImageDraft((c) => ({ ...c, width: e.target.value }))}
+              placeholder="Max px (e.g. 520)"
+              aria-label="Optional max width in pixels"
+              className="sm:col-span-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setImageDraft(null);
+                setImageError('');
+              }}
+              className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:underline"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!String(imageDraft.url || '').trim() || imageUploading}
+              onClick={applyImage}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50"
+            >
+              <Check className="w-3.5 h-3.5" />
+              Insert image
+            </button>
+          </div>
         </div>
       )}
 
@@ -1327,18 +1531,19 @@ export default function MarkdownEditor({
       </p>
 
       {/* Markdown Quick Reference Modal */}
-      {showReference && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="markdown-ref-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn"
-          onClick={() => setShowReference(false)}
-        >
+      {showReference &&
+        renderInViewport(
           <div
-            className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden animate-popoverIn"
-            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="markdown-ref-title"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fadeIn"
+            onClick={() => setShowReference(false)}
           >
+            <div
+              className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden animate-modalIn"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 px-5 py-4">
               <div className="flex items-center gap-2">
                 <HelpCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
@@ -1508,6 +1713,10 @@ export default function MarkdownEditor({
                     <code>`SERIAL-2026`</code>
                   </div>
                   <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 col-span-1 md:col-span-2">
+                    <span className="text-slate-400 select-none">Images &amp; Screenshots: </span>
+                    <code>![Schedule Board|520](/help/admin/schedule.png &quot;Optional caption&quot;)</code>
+                  </div>
+                  <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 col-span-1 md:col-span-2">
                     <span className="text-slate-400 select-none">Table: </span>
                     <pre className="mt-1 whitespace-pre-wrap font-mono">
                       {'| Item | Serial # | Expiration |\n| --- | --- | --- |\n| SCBA Bottle | B-4921 | 2028-10-15 |'}
@@ -1567,7 +1776,7 @@ export default function MarkdownEditor({
             </div>
           </div>
         </div>
-      )}
+        )}
     </div>
   );
 }
