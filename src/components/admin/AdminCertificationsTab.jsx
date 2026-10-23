@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, X, Users, ChevronDown, ChevronLeft, ChevronRight, FileText, Eye, Paperclip } from 'lucide-react';
+import { Loader2, Pencil, Trash2, AlertCircle, Award, Plus, Check, Printer, Download, Upload, X, Users, ChevronDown, ChevronLeft, ChevronRight, FileText, Eye, Paperclip } from 'lucide-react';
 import { adminSaveCertification, adminDeleteCertification, adminBulkSaveCertification, adminSaveCertificationFile, adminDeleteCertificationFile, fetchAdminCertificationRecords, fetchCertificationFiles } from '../../services/api';
+import AdminCertificationImportModal from './AdminCertificationImportModal';
 import {
   discardCertificationUpload,
   openCertificationFile,
@@ -247,6 +248,7 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
   const [inactiveResult, setInactiveResult] = useState(null);
   const [inactiveFailure, setInactiveFailure] = useState(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -760,6 +762,14 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
             </button>
             <button
               type="button"
+              onClick={() => setImportOpen(true)}
+              title="Import member certifications from NC OSFM Certification Transcript Summary PDFs or CSV"
+              className={`${TOOLBAR_BUTTON_CLASS} border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700`}
+            >
+              <Upload className="h-4 w-4" /> Import
+            </button>
+            <button
+              type="button"
               onClick={() => setPrintOpen(true)}
               disabled={visible.length === 0}
               title={visible.length ? 'Print the filtered certification records' : 'No certifications match these filters'}
@@ -1231,6 +1241,24 @@ export default function AdminCertificationsTab({ token, users = [], setup = [], 
           confirmLabel="Delete record"
           onConfirm={handleDelete}
           onCancel={() => setPendingDelete(null)}
+        />
+      )}
+
+      {importOpen && (
+        <AdminCertificationImportModal
+          isOpen={importOpen}
+          onClose={() => setImportOpen(false)}
+          users={users}
+          setup={setup}
+          records={records}
+          token={token}
+          onBadgesChanged={onBadgesChanged}
+          onImportComplete={(summary) => {
+            if (summary?.typesCreated > 0) {
+              void onDataChanged?.('certificationSetup');
+            }
+            void onDataChanged?.('certificationRecords');
+          }}
         />
       )}
     </div>

@@ -48,6 +48,7 @@ To see what you have access to, click your name at the top of the sidebar to ope
 * Improved breakpoints on the Dashboard.
 * Fixed an issue where the app would break when Google released a new version of firebase-tools or a runtime update.
 * Added an option to the "On Duty" widget to show who's scheduled vs. who's just clocked in.
+* Added an import function for Certifications.
 
 ### Version 1.7x
 * Added **Equipment** and **Apparatuses**.

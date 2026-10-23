@@ -1048,10 +1048,12 @@ Object.entries(BADGE_REFRESHING_SAVES).forEach(([action, { collection, kind }]) 
         targetUserId = String(body.user_id || '').trim();
       }
     }
-    if (kind === 'delete') await deleteDocument({ collection, id: body.id });
-    else await saveDocument({ collection, id: body.id, body });
+    const saved =
+      kind === 'delete'
+        ? await deleteDocument({ collection, id: body.id })
+        : await saveDocument({ collection, id: body.id, body });
     return ok({
-      id: String(body.id || ''),
+      id: String(saved?.id || body.id || ''),
       badges: targetUserId
         ? await refreshCertificationBadges(targetUserId)
         : await refreshCertificationBadges(),
