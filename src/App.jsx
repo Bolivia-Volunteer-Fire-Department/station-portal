@@ -2381,6 +2381,7 @@ const getLoadingMessage = () => {
                   announcements={announcements}
                   announcementAudience={announcementAudience}
                   onDutyUsers={onDutyUsers}
+                  users={nameDirectory}
                   ranks={ranks}
                   schedule={schedule}
                   scheduleWindow={scheduleWindow}

@@ -179,6 +179,17 @@ export default function UserSettings({
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          form="user-settings-form"
+          disabled={saving}
+          className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          <span>{saving ? 'Saving...' : 'Save Preferences'}</span>
+        </button>
+      </div>
 
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden">
@@ -389,18 +400,6 @@ export default function UserSettings({
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
               Changes preview across the app immediately and are kept when you save.
             </p>
-          </div>
-
-          <div className="flex justify-end border-t border-slate-200 pt-4 dark:border-slate-700/80">
-            <button
-              type="submit"
-              form="user-settings-form"
-              disabled={saving}
-              className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              <span>{saving ? 'Saving...' : 'Save Preferences'}</span>
-            </button>
           </div>
         </div>
       </div>

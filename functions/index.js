@@ -8,6 +8,7 @@ const { FieldValue, getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { getStorage } = require('firebase-admin/storage');
 const { HttpsError, onCall } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2/options');
 // The audit lines go to Cloud Logging now rather than to a Firestore collection: structured, free to write, and
 // searchable in the Firebase console. See the note on `audit` below.
 const { logger } = require('firebase-functions/logger');
@@ -75,6 +76,7 @@ const {
 //
 // These are also the reason the Blaze plan is required: callable functions do not exist on Spark.
 
+setGlobalOptions({ preserveExternalChanges: true });
 initializeApp();
 const db = getFirestore();
 const auth = getAuth();

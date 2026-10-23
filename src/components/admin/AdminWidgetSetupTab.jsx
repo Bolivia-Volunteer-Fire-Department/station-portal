@@ -86,6 +86,7 @@ export default function AdminWidgetSetupTab({ token, systemSettings, onDataChang
       description: config.description !== undefined ? config.description : widget.description,
       customLinks: Array.isArray(config.customLinks) && config.customLinks.length > 0 ? [...config.customLinks] : [...DEFAULT_QUICK_LINKS],
       radarUrl: config.radarUrl || 'https://radar.weather.gov',
+      groupBySchedule: config.groupBySchedule !== false,
     });
   };
 
@@ -102,6 +103,7 @@ export default function AdminWidgetSetupTab({ token, systemSettings, onDataChang
         description: editingBuiltinWidget.description.trim(),
         ...(editingBuiltinWidget.id === 'quick-links' ? { customLinks: editingBuiltinWidget.customLinks } : {}),
         ...(editingBuiltinWidget.id === 'weather-radar' ? { radarUrl: editingBuiltinWidget.radarUrl.trim() } : {}),
+        ...(editingBuiltinWidget.id === 'on-duty' ? { groupBySchedule: editingBuiltinWidget.groupBySchedule !== false } : {}),
       },
     }));
 
@@ -679,6 +681,33 @@ export default function AdminWidgetSetupTab({ token, systemSettings, onDataChang
                 </div>
               )}
 
+              {/* On Duty Specific Configuration */}
+              {editingBuiltinWidget.id === 'on-duty' && (
+                <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                  <div className="flex items-start justify-between gap-4 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/50">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        Prioritize Scheduled Shift Crew
+                      </label>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Show personnel scheduled for the current time first (highlighting those clocked in with a green border), followed by additional clocked-in personnel in a separate section below.
+                      </p>
+                    </div>
+                    <ToggleSwitch
+                      enabled={editingBuiltinWidget.groupBySchedule !== false}
+                      checked={editingBuiltinWidget.groupBySchedule !== false}
+                      onChange={(checked) =>
+                        setEditingBuiltinWidget({
+                          ...editingBuiltinWidget,
+                          groupBySchedule: checked,
+                        })
+                      }
+                      ariaLabel="Prioritize scheduled shift crew on Currently On Duty widget"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Weather Radar Specific Configuration */}
               {editingBuiltinWidget.id === 'weather-radar' && (
                 <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-700">
@@ -724,6 +753,7 @@ export default function AdminWidgetSetupTab({ token, systemSettings, onDataChang
                       description: editingBuiltinWidget.originalDescription,
                       customLinks: [...DEFAULT_QUICK_LINKS],
                       radarUrl: 'https://radar.weather.gov',
+                      groupBySchedule: true,
                     })
                   }
                   className="text-xs text-slate-500 hover:text-red-600 transition"

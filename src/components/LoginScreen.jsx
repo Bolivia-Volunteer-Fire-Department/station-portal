@@ -1,10 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle, ChevronLeft, KeyRound, Loader2, Mail } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronLeft, FileText, KeyRound, Loader2, Mail } from 'lucide-react';
 import { stationLogoUrl } from '../utils/assets';
 import { APP_VERSION } from '../utils/appVersion.js';
 import PasswordInput from './PasswordInput';
 import PasswordCrackEstimate from './PasswordCrackEstimate';
+import ViewportModal from './ViewportModal';
+import Markdown from './Markdown';
+import termsMarkdown from '../content/help/member/15-terms-of-service.md?raw';
+import privacyMarkdown from '../content/help/member/16-privacy-policy.md?raw';
 import { requestPasswordReset, completePasswordReset } from '../services/firebaseAuth.js';
+
+const LEGAL_DOCUMENTS = {
+  terms: {
+    title: 'Terms of Service',
+    subtitle: 'StationSync Legal & Compliance',
+    markdown: termsMarkdown,
+  },
+  privacy: {
+    title: 'Privacy Policy',
+    subtitle: 'StationSync Legal & Compliance',
+    markdown: privacyMarkdown,
+  },
+};
 
 // THE LOGIN SCREEN CARRIES NO ANNOUNCEMENTS, and that is deliberate rather than an omission: it is read before anybody
 // has signed in, so it cannot be targeted at a role or a person, and it was the reason the app made a read without a
@@ -35,6 +52,7 @@ export default function LoginScreen({ onLogin, statusMessage: propStatusMessage,
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [resetStatus, setResetStatus] = useState(null);
   const [localStatusMessage, setLocalStatusMessage] = useState(null);
+  const [activeLegalDoc, setActiveLegalDoc] = useState(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -125,6 +143,7 @@ export default function LoginScreen({ onLogin, statusMessage: propStatusMessage,
 
   return (
     <div className="min-h-dvh bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 pt-[calc(1rem_+_env(safe-area-inset-top))] pb-[calc(1rem_+_env(safe-area-inset-bottom))]">
+      <div className="my-auto flex w-full flex-col items-center justify-center">
       <div className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-8">
         <div className="flex flex-col items-center mb-8">
           <div className="mb-3">
@@ -380,6 +399,38 @@ export default function LoginScreen({ onLogin, statusMessage: propStatusMessage,
       <p className="mt-6 text-xs text-slate-400 dark:text-slate-500 text-center select-none tracking-wide">
         StationSync v{APP_VERSION}
       </p>
+      </div>
+
+      <div className="sticky bottom-0 z-10 mt-4 flex items-center justify-center gap-3 rounded-full bg-slate-100/90 px-4 py-1.5 text-xs text-slate-400 backdrop-blur-sm dark:bg-slate-900/90 dark:text-slate-500">
+        <button
+          type="button"
+          onClick={() => setActiveLegalDoc('terms')}
+          className="text-xs text-slate-400 hover:text-slate-600 hover:underline dark:text-slate-500 dark:hover:text-slate-300 transition"
+        >
+          Terms of Service
+        </button>
+        <span aria-hidden="true" className="select-none">•</span>
+        <button
+          type="button"
+          onClick={() => setActiveLegalDoc('privacy')}
+          className="text-xs text-slate-400 hover:text-slate-600 hover:underline dark:text-slate-500 dark:hover:text-slate-300 transition"
+        >
+          Privacy Policy
+        </button>
+      </div>
+
+      {activeLegalDoc && LEGAL_DOCUMENTS[activeLegalDoc] && (
+        <ViewportModal
+          title={LEGAL_DOCUMENTS[activeLegalDoc].title}
+          subtitle={LEGAL_DOCUMENTS[activeLegalDoc].subtitle}
+          icon={<FileText className="h-5 w-5 text-red-500" />}
+          readOnly
+          size="large"
+          onClose={() => setActiveLegalDoc(null)}
+        >
+          <Markdown markdown={LEGAL_DOCUMENTS[activeLegalDoc].markdown} />
+        </ViewportModal>
+      )}
     </div>
   );
 }

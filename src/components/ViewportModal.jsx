@@ -164,16 +164,18 @@ export default function ViewportModal({
             {/* Submits the form inside through the HTML `form` attribute, so the fields keep their native
                 behaviour: Enter in a text input still submits the document. A body that is not a form (the
                 certification editors) passes onSave instead, and this calls it. */}
-            <button
-              type={formId ? 'submit' : 'button'}
-              form={formId}
-              onClick={formId ? undefined : onSave}
-              disabled={busy || saveDisabled}
-              className={`inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50${readOnly ? ' hidden' : ''}`}
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {saving ? busyLabel : saveLabel}
-            </button>
+            {!readOnly && (
+              <button
+                type={formId ? 'submit' : 'button'}
+                form={formId}
+                onClick={formId ? undefined : onSave}
+                disabled={busy || saveDisabled}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? busyLabel : saveLabel}
+              </button>
+            )}
             {/* A close button for a phone, where the toolbar wraps to two rows and a thumb finds the corner more
                 easily than the word Cancel. */}
             <button

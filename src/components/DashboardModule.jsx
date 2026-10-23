@@ -57,6 +57,7 @@ export default function DashboardModule({
   announcements = [],
   announcementAudience = {},
   onDutyUsers = [],
+  users = [],
   ranks = [],
   schedule = [],
   scheduleWindow = null,
@@ -281,7 +282,24 @@ export default function DashboardModule({
         );
 
       case 'on-duty':
-        return <OnDutyCard onDutyUsers={onDutyUsers} ranks={ranks} />;
+        return (
+          <OnDutyCard
+            onDutyUsers={onDutyUsers}
+            ranks={ranks}
+            schedule={schedule}
+            scheduleWindow={scheduleWindow}
+            onNeedSchedule={onNeedSchedule}
+            scheduleTemplates={scheduleTemplates}
+            assignments={assignments}
+            users={users}
+            currentUser={currentUser}
+            timeFormat={timeFormat}
+            token={token}
+            groupBySchedule={widgetConfigs['on-duty']?.groupBySchedule !== false}
+            title={widgetConfigs['on-duty']?.label || 'Currently On Duty'}
+            subtitle={widgetConfigs['on-duty']?.description || ''}
+          />
+        );
 
       case 'announcements':
         if (!hasVisibleAnnouncements && isCustomizing) {
