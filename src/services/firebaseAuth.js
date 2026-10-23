@@ -70,7 +70,20 @@ export const signInAsMember = async (username, password) => {
     return { success: false, message: signInRefusalMessage(error) };
   }
 
-  const account = await call('whoami', {});
+  let account = null;
+  try {
+    account = await call('whoami', {});
+  } catch (error) {
+    console.info(
+      `[firebase] whoami callable unavailable (${error?.code || error?.message}); falling back to token & roster read.`
+    );
+    account = (await accountState()) || {
+      userId: firebaseAuth().currentUser?.uid || '',
+      roleId: '',
+      isAdmin: false,
+      mustChangePassword: false,
+    };
+  }
 
   let row = {};
   let secret = {};
