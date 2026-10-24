@@ -1,4 +1,6 @@
-*Events* are the entries on the calendars that are **not** shifts — training, a company meeting, a detail, a fundraiser. They sit alongside the shift pills so the month reads as a whole picture.
+*Scheduling → Events* are the entries on the calendars that are **not** shifts — training, a company meeting, a detail, a fundraiser. They sit alongside the shift pills so the month reads as a whole picture. Events in this app work very similarly to calendar events in other applications like Google Calendar and Microsoft Outlook.
+
+![The events config](../../../../public/help/admin/08-events-1792844138737.png)
 
 > [!IMPORTANT]
 > You must have the **Can create events** role permission in order to create events.
@@ -11,6 +13,10 @@ This distinction is worth knowing, because it explains everything else on this p
 - An event appears on **every day it covers**. A shift is drawn once, on the day it starts; a three-day event is drawn on all three days.
 - An event can **repeat** without one row per occurrence.
 
+![an event](../../../../public/help/admin/08-events-1792844288670.png)
+
+![the event config form](../../../../public/help/admin/08-events-1792844337768.png)
+
 | Field | What it does |
 |---|---|
 | **Title** | Required. What shows on the pill and in the list. |
@@ -20,7 +26,14 @@ This distinction is worth knowing, because it explains everything else on this p
 | **Role / Rank / Member** | Who sees it. All three blank shows it to everyone. |
 | **Starts / Ends** | The window. For a repeating event only the *times* are used. |
 
-## Repeating events
+Events are then split into **two cards**:
+
+- **One-off events** — the majority, created ad hoc.
+- **Repeating events** — fewer of them, and worth looking at together: a repeat that lands on the wrong weekday is the mistake this screen invites.
+
+The order is **chronological**, earliest first. A repeating event is filed under the date its repeat **starts**, not the anchor date in `date_from` — which is only there to carry the times, as the *Repeating events* section explains below.
+
+### Repeating events
 
 A repeating event is described by a **start date**, an **amount** and a **frequency**, rather than by one row per occurrence.
 
@@ -28,6 +41,8 @@ A repeating event is described by a **start date**, an **amount** and a **freque
 - **Frequency** is daily, weekly or monthly.
 - **Repeat starts** is required — it **anchors** the pattern, and it is not necessarily the first day the event appears (see the note below).
 - **Repeat ends** is optional. Leave it blank and the event repeats indefinitely.
+
+![repeating fields](../../../../public/help/admin/08-events-1792844410350.png)
 
 Some worked examples:
 
@@ -46,7 +61,7 @@ Some worked examples:
 > [!NOTE]
 > A repeating event stores an anchor date alongside the times it runs at. Only the times decide when it lands, so do not read the anchor as the day the event runs.
 
-## Rank targeting means "and above"
+### Rank targeting means "and above"
 
 A **Rank** target is not a single rank. Choosing *Driver* shows the event to Drivers **and everyone senior to them**. That is deliberate: "the officers need to know" usually means the chief does too.
 
@@ -57,25 +72,9 @@ The three targeting fields are combined, so filling Role *and* Rank narrows the 
 
 ## Showing and hiding events
 
-Every calendar has a **Show events** button, on by default. Its text names the action, so it reads **Hide events** while the events are showing and **Show events** once they are hidden. It is there for the moment you want the month to show only shifts, and it is **not remembered** between visits: reload the page and the events are back. The button only appears when there is at least one event to show.
+![show and hide buttons](../../../../public/help/admin/08-events-1792844599870.png)
 
-On **My Schedule** it sits beside **Show everyone** in the same strip, because both are view options for the same calendar rather than settings. On the printed sheet events always print.
+Every calendar has a **Show/Hide events** button, on by default. The button only appears when there is at least one event to show.
 
 > [!TIP]
 > To retire an event rather than delete it, set its **End date** in the past (or its repeat end, if it repeats). The record stays in the list and re-running it later is a single date change.
-
-## The lists
-
-Sorting and filtering sit above the lists, with **New event** at the end of the same bar — the editor opens over the page, with Save and Cancel in a bar at the top of it. You can narrow by **date range** and by who an event **shows to** (*Everyone* for untargeted events, *Targeted* for the ones aimed at a role, rank or member), and sort by date either way or by title. The bar shows how much of the list you are looking at, and **Clear filters** puts it all back.
-
-Events are then split into **two cards**:
-
-- **One-off events** — the majority, created ad hoc.
-- **Repeating events** — fewer of them, and worth looking at together: a repeat that lands on the wrong weekday is the mistake this screen invites.
-
-The order is **chronological**, earliest first, so the list reads the same direction as the calendar above it. A repeating event is filed under the date its repeat **starts**, not the anchor date in `date_from` — which is only there to carry the times, as the [Repeating events](#) section explains.
-
-Each row shows the window, the recurrence, who the event reaches, and who created it. Each card holds **20 events per page**, and the pager appears at the bottom of a card once it has more than one page, showing which rows you are looking at (`21–40 of 45`).
-
-> [!NOTE]
-> Changing a filter returns you to the first page of each list, and deleting an event on the last page moves you back a page rather than leaving an empty card.

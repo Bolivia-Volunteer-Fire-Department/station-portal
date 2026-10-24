@@ -1,4 +1,6 @@
-This tab is the administrator documentation: this set of guides. It is deliberately open to anyone who can reach Administration, and needs **no permission of its own** — documentation is not a privilege, and gating it would hide it from the people most likely to need it.
+*System → Help* is the administrator documentation: this set of guides. It is deliberately open to anyone who can reach Administration, and needs **no permission of its own** — documentation is not a privilege, and gating it would hide it from the people most likely to need it.
+
+IMAGE HERE
 
 ## Reading a guide
 

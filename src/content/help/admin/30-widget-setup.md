@@ -1,6 +1,8 @@
 # Dashboard Widgets Configuration
 
-*Administration → Content → Widget Setup* enables administrators to manage built-in dashboard cards and create custom department widgets.
+*Content → Widget Setup* enables administrators to manage built-in dashboard cards and create custom department widgets.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Managing dashboard widgets requires the **Manage dashboard widgets** permission.
@@ -8,6 +10,8 @@
 ## Managing Built-in Widgets
 
 StationSync provides standard operational widgets that can be toggled on or off depending on station preferences:
+
+IMAGE HERE
 
 - **Station Time & Duty Status**: Core punch-clock and duty status card (always enabled).
 - **On Duty Personnel**: Live roll-call card showing active duty personnel and apparatus assignments.

@@ -253,7 +253,12 @@ export default function TaskNoteEntryModal({
 
       const result = await saveTaskNoteEntry(payload);
       toast.success('Saved draft successfully.');
-      if (onSaved) onSaved(result);
+      const saved = {
+        ...payload,
+        ...(result && typeof result === 'object' ? result : {}),
+        id: result?.id || payload.id || entry?.id,
+      };
+      if (onSaved) onSaved(saved);
       onClose();
     } catch (err) {
       toast.error(err.message || 'Failed to save entry.');
@@ -309,7 +314,12 @@ export default function TaskNoteEntryModal({
       const result = await saveTaskNoteEntry(payload);
       toast.success('Entry finalized with electronic stamp.');
       setSignConfirmationOpen(false);
-      if (onSaved) onSaved(result);
+      const saved = {
+        ...payload,
+        ...(result && typeof result === 'object' ? result : {}),
+        id: result?.id || payload.id || entry?.id,
+      };
+      if (onSaved) onSaved(saved);
       onClose();
     } catch (err) {
       toast.error(err.message || 'Failed to finalize entry.');
@@ -324,7 +334,16 @@ export default function TaskNoteEntryModal({
       const result = await unsignTaskNoteEntry(entry.id);
       toast.success('Entry un-signed and unlocked for editing.');
       setPendingUnsign(false);
-      if (onSaved) onSaved({ ...entry, ...result, status: TASK_NOTE_STATUS.EDITABLE });
+      const saved = {
+        ...entry,
+        ...(result && typeof result === 'object' ? result : {}),
+        status: TASK_NOTE_STATUS.EDITABLE,
+        signed_by_uid: '',
+        signed_by_name: '',
+        signed_at: null,
+        signature_data: null,
+      };
+      if (onSaved) onSaved(saved);
       onClose();
     } catch (err) {
       toast.error(err.message || 'Failed to un-sign entry.');

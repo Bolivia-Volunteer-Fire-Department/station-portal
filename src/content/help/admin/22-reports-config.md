@@ -1,6 +1,8 @@
 # Reports Configuration
 
-*Reports → Reports Configuration* defines the reports members and officers can run. Press **New report**, or **Edit** on a row, and the editor opens **over the page** with Save and Cancel in a bar at the top.
+*Reports & Logs → Report Setup* defines the reports members and officers can run. Press **New report**, or **Edit** on a row, and the editor opens **over the page** with Save and Cancel in a bar at the top.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Requires the **Configure reports** permission, which itself requires **View reports**. The tab is not shown without it.
@@ -9,6 +11,8 @@
 > A report is a saved **definition**, not the numbers themselves. The figures are worked out when somebody runs it, over the date range they choose — so a definition written today keeps working as new shifts and trainings are recorded. Nothing here reads or changes the underlying data.
 
 ## The definition
+
+IMAGE HERE
 
 | Field | What it decides |
 |---|---|

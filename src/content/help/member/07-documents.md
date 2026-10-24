@@ -1,5 +1,7 @@
 The station's documents: procedures, policies and checklists, kept in one place and readable from anywhere.
 
+IMAGE HERE
+
 ## What you will see
 
 The module is a browser with three parts, left to right:
@@ -31,14 +33,18 @@ Two more things decide what is in the list, and neither of them loses anything:
 
 Click a document and it opens beside the list. Long documents scroll inside their own pane, so the browser stays where it is.
 
+IMAGE HERE
+
 The line under the title says which folder it is in and when it was last changed, so you can tell a procedure that was updated last week from one that has not been touched in three years.
 
 > [!NOTE]
-> Documents live on the station's server rather than inside the app, so opening one needs a connection the first time. The list itself, and anything you have already opened, stays readable if your signal drops — which is the one difference from these Help guides, which are part of the app and always available.
+> Opening a document for the first time requires an internet connection. Once opened, documents and checklists stay readable on your device even if your signal drops.
 
 ## Signing
 
 Some documents need your signature — they are marked **to sign** in the list, and the count at the top of the panel tells you how many are waiting. The button in the header filters the list down to just those.
+
+IMAGE HERE
 
 Open one and press **Sign this document**. You are asked to confirm first, because signing records your name and the date against it.
 
@@ -52,6 +58,8 @@ If a document is **edited after you signed it**, it will tell you so. That is no
 ## Checklists
 
 A **checklist** is a document signed line by line: *check the tire pressure*, *check the lights*, and so on. They are grouped under headings, and each line has its own check box.
+
+IMAGE HERE
 
 Check the lines you have done — several at once is fine — and press **Save signatures** when you are done. Each line is recorded against your name and the date, with one date for the whole batch, because saving them is one act.
 
@@ -71,9 +79,7 @@ If a line has been confirmed by more than one officer it says *Verified by 2 peo
 If a document says **Members must sign this** and has *no* items, you sign the document itself with the button in the box above. On a checklist you sign the lines here instead — they are separate records on purpose: one is "I have read this", the other is "I did this specific thing".
 
 > [!NOTE]
-> **Verification is not something you ask for.** It appears when somebody with the *Verify signatures* permission opens this checklist and confirms your lines. If your work is waiting, it shows as **Awaiting verification** until they do. Nobody can verify their own checklist, so an officer who is also on the crew has somebody else check theirs.
->
-> A document can work the same way without any items. Where its author checked **A verifier must confirm the signature**, the box under the document shows **Signed** with the date, and beneath it either **Verified by Jane Doe on …** or **Waiting for a verifier to confirm your signature**. Your file is signed either way — the second line is somebody else's job, not yours.
+> **Verification is not something you ask for.** It appears when somebody with the *Verify signatures* permission opens this checklist and confirms your lines. If your work is waiting, it shows as **Awaiting verification** until they do. Nobody can verify their own checklist, so an officer who is also on the crew has somebody else check theirs. A document can work the same way without any items. Where its author checked **A verifier must confirm the signature**, the box under the document shows **Signed** with the date, and beneath it either **Verified by Jane Doe on …** or **Waiting for a verifier to confirm your signature**. Your file is signed either way — the second line is somebody else's job, not yours.
 
 ## Seeing another member's records
 

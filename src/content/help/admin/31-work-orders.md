@@ -1,11 +1,15 @@
 # Work Orders Management
 
-*Administration → Assets → Work Orders* enables officers and administrators to track station repair requests, apparatus maintenance tickets, equipment defects, and facility work orders.
+*Assets → Work Orders* enables officers and administrators to track station repair requests, apparatus maintenance tickets, equipment defects, and facility work orders.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Viewing and managing work orders requires the **Manage Work Orders** or **View Work Orders** permission.
 
 ## Work Orders Overview
+
+IMAGE HERE
 
 The Work Orders module centralizes issue tracking across the department:
 

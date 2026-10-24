@@ -1,10 +1,14 @@
 The station's district as a real map: the boundary line, and the landmarks your crew has pinned on it — hydrants, water sources, boat ramps, staging areas.
 
+IMAGE HERE
+
 ## What you are looking at
 
 The red outline is **the county's official line for your fire district** rather than an estimate. It is drawn from real latitude and longitude, so it lands exactly where it belongs and stays sharp however far you zoom in.
 
 Underneath it is the **county's own linework**, so you can see where the boundary runs against a road or a creek — the **roads**, the **waterways**, the **flood zones**, the **neighboring districts** around yours, and the **nearby roads** that run out through them. They are drawn from the station's own copy of that linework, so they are there with no signal like everything else — and the **Layers** row above the map switches each one off if you would rather have a plainer map. **Landmarks** is a switch there too: turning the pins off is how you check where the boundary runs without two hundred dots in the way. It only changes what is drawn, so nothing is lost. The same row has a **Light / Dark** switch for the map itself: it starts the way you have the app set, and switching it only changes the map — handy when the rest of the app is dark but you want a bright map in daylight, or the reverse at night.
+
+IMAGE HERE
 
 The roads and the neighboring districts reach about half a mile (a kilometer) **past** your boundary line, so you can see the far side of a road and who covers the ground next door. Your own district is drawn with a solid red line; neighboring districts show as dashed gray outlines with their department name printed in the middle.
 
@@ -15,6 +19,8 @@ The roads and the neighboring districts reach about half a mile (a kilometer) **
 **Tap a road and it tells you who covers each side of it.** That is worth knowing at a district line, which often runs straight down the middle of a road: *GEORGE II HWY SE · WINNABOW FD BEAT 6A / Bolivia FD* means one side is yours and the other is not. The **nearby roads** out in the neighboring districts are there so you can see the way through and out — tap one and it names the road, but not who covers it, because those are somebody else's streets.
 
 The colored dots are **landmarks** — places somebody in the station pinned because they matter. Each kind has its own color, and the legend under the map shows only the kinds your station actually uses.
+
+IMAGE HERE
 
 | To do this | Do this |
 |---|---|
@@ -37,7 +43,7 @@ Landmarks are placed by whoever maintains the map, from this same screen. If you
 
 ## Who can see it
 
-Two permissions, granted per role in *Administration → Roles*:
+Two permissions, granted per role by an administrator:
 
 | Permission | What it gives |
 |---|---|
@@ -48,8 +54,8 @@ If the module is not in your sidebar it is not a fault: a district boundary is n
 
 ## If the map is empty
 
-If it says **No district boundary yet**, nobody has set one. An officer can do it in a moment from *Administration → System → Map Settings* — the county publishes your department's own beat, so it is usually a matter of searching for the station's name and saving it.
+If it says **No district boundary yet**, nobody has set one. An officer or administrator can configure the boundary in department map settings — the county publishes your department's own beat, so it is usually a matter of searching for the station's name and saving it.
 
 ## Keeping it current
 
-The boundary and the background are both **copies**, taken once from the county's open data and kept in the station's own records. That is what makes the map work with no signal and what stops somebody else's server from being a single point of failure — which also means they do not update themselves. The county redraws its beats about once a year, so an officer refreshing the boundary and the background once a year keeps the map right, from *Administration → System → Map Settings*.
+The boundary and the background are both **copies**, taken once from the county's open data and kept in the station's own records. That is what makes the map work with no signal and what stops somebody else's server from being a single point of failure — which also means they do not update themselves. The county redraws its beats periodically, so an officer or administrator can refresh the boundary and background linework when updates occur.

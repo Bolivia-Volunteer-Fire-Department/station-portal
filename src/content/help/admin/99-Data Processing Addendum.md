@@ -5,7 +5,7 @@ This Data Processing Addendum ("DPA") supplements the StationSync Terms of Servi
 ### 1. Purpose and Scope
 
 1. **Scope:** This DPA governs the processing of all Customer Personal Data and operational agency records provided to, or collected by, Processor in connection with Customer’s use of the StationSync workforce and station management platform.
-2. **Roles of the Parties:** 
+2. **Roles of the Parties:**
    * Customer acts as the **Data Controller** (or business/agency), determining the purposes and means of processing member records, rosters, and operational logs.
    * StationSync acts as the **Data Processor** (or service provider), processing data solely on behalf of and under the documented instructions of Customer.
 

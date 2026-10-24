@@ -1,52 +1,53 @@
-**Clock History** is your own record of the shifts you have clocked, newest first. Use it to check your hours before a pay period closes, or to spot an entry you forgot to finish.
+**Clock History** is your personal record of logged shifts, newest first. Use it to verify your duty hours, check past shifts, or spot a forgotten clock-out.
 
-The page opens on the **last twelve months**, and says so above the table — *"entries back to 2025-09-30"*. It reads them when you open the page, so the first look takes a moment; nothing was read before you got here. To reach further back, press **Load older entries**, which brings in the year before that; press it again for the year before that, as far back as your history goes. The entries it brings in are added to what you already have, so your filters and totals keep working across all of it.
+The page opens on the **last twelve months**. To view earlier records, click **Load older entries** at the bottom of the table to load previous years.
 
-## Filtering and sorting
+IMAGE HERE
 
-The controls above the table narrow the list, and the two cards below the controls then total **only what is showing** — filter to last month and the hours card tells you last month's hours, not your all-time total. When a filter is active, the cards say **(filtered)** so the number is never mistaken for a lifetime figure.
+## Filtering and totals
+
+The controls above the table narrow your entries, and the summary cards update to total **only what is currently filtered**:
 
 | Control | Use it for |
 |---|---|
-| **From** | Ignore anything before this date |
-| **To** | Ignore anything after this date |
-| **Status** | **All Entries**, **Active (Clocked In)** or **Completed** |
-| **Sort By** | Newest first (the default), oldest first, or longest duration first |
-
-Either end of the date range can be left open, so **From** on its own gives you everything since a date. The line under the controls counts what you are looking at — *"Showing 12 of 84 entries"* — and **Clear filters** puts everything back.
+| **From** | Show entries on or after this date |
+| **To** | Show entries on or before this date |
+| **Status** | Filter by **All Entries**, **Active (Clocked In)**, or **Completed** |
+| **Sort By** | Newest first (default), oldest first, or longest duration first |
 
 > [!TIP]
-> To find a shift you did not finish, set **Status** to **Active (Clocked In)**. Every open entry is one you never clocked out of. Ask an administrator to help you fix these.
+> To find any shifts you forgot to finish, set **Status** to **Active (Clocked In)**. Any open entries will appear immediately so an officer can help close them out.
 
-## Your totals
+IMAGE HERE
 
-Two cards at the top of the page:
+## Summary cards
 
-- **Total Hours Logged** — the sum of the entries currently listed. An entry still in progress does not count until it has a time out, so a forgotten clock-out will make this look low.
-- **Total Clock Entries** — how many entries are listed, including any that are still open.
+Two cards at the top summarize your hours:
 
-With no filters set these are the totals for **what the page is holding** — the last twelve months when it opens, or more if you have pressed **Load older entries**. So if you are looking for a lifetime figure, load back until the date above the table is older than your first shift.
+- **Total Hours Logged** — The sum of hours for the entries currently shown. Shifts still in progress are excluded until a clock-out is recorded.
+- **Total Clock Entries** — The count of entries displayed.
 
-## The table
+## The clock history table
 
 | Column | What it shows |
 |---|---|
 | **Time In** | When you clocked in |
-| **Time Out** | When you clocked out — blank while you are still on shift |
-| **Duration** | The length of the completed entry |
-| **Shift Time** | Which of the station's shift patterns your entry's hours fell in — *1 hr (Day), 14 hrs (Night)*. These are the station's own windows, rounded the same way as the hours below; they are not the shifts you were rostered on, which is what the *Clocked vs scheduled* report measures |
+| **Time Out** | When you clocked out (blank while on shift) |
+| **Duration** | The total duration of the completed entry |
+| **Shift Time** | Which station shift window your hours fell into (such as Day Shift or Night Shift) |
 
-Times follow your preferred **Time Format** (12-hour or 24-hour), which you can change in your **User Profile** under the **My Settings** tab. That way, the table always matches your preference!
+Times follow your preferred **Time Format** (12-hour or 24-hour military time), configurable in your **User Profile** under the **My Settings** tab.
 
 > [!NOTE]
-> **Hours are rounded the way your station reports them** — *System Settings → Clock Settings* — to the nearest 15 minutes, 30 minutes, or the hour. That covers each entry's **Duration**, the **Shift Time** it fell in, and the cards above, and it is the same step an officer's *Clocked vs scheduled* report uses, so the hours you read here are the hours you are paid for. Your recorded times are never changed, only the hours shown.
+> Hours are rounded according to department reporting policies (such as to the nearest 15 minutes, 30 minutes, or hour). Your exact clock-in and clock-out timestamps are always preserved.
+
+IMAGE HERE
 
 ## If something looks wrong
 
-- **An entry is missing entirely.** You were not clocked in at the time, or the clock action was rejected. Clock actions that fail because of location or connectivity are never recorded, so there is nothing to correct — just clock in again.
-- **An entry has no time out.** You are still shown as on duty. Ask an administrator to close it in *Administration → Timeclock → Clock Management*.
-- **The duration is wrong.** Administrators can correct an entry, and any entry they add or change is flagged as manual so the correction is visible.
-- **Your total looks too high or too low.** Check for a duplicated entry or an open one above. Administrators can delete a duplicate.
+- **Missing entry** — If an entry is missing, a clock action may not have reached the server due to connectivity or location issues. Contact an administrator to manually record the shift.
+- **Missing clock-out** — If you forgot to clock out, your shift is shown as active. Ask an officer or administrator to close and adjust the entry.
+- **Incorrect hours** — Administrators can correct times or remove duplicate entries. Any manually adjusted entry is clearly marked for transparency.
 
 > [!NOTE]
-> Only you and administrators can see your history. There is no way for members to view each other's clock entries.
+> Only you and department officers can view your clock history. Members cannot see each other's individual clock logs.

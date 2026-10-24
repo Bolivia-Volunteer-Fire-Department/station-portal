@@ -1,6 +1,8 @@
 # Asset Configuration & Setup
 
-*Administration → Assets → Asset Setup* lets administrators customize the equipment and apparatus types used across your station.
+*Assets → Asset Setup* lets administrators customize the equipment and apparatus types used across your station.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Configuring asset categories and types requires the **Set up equipment & apparatus** permission.
@@ -8,6 +10,8 @@
 ## Why configure asset types?
 
 Every fire department operates unique response vehicles and issues specialized personal gear. Rather than being locked into rigid options, Asset Setup lets you define exactly what your department uses in the field.
+
+IMAGE HERE
 
 When you add or edit types here, they immediately become available in the dropdown menus on the Equipment and Apparatus tabs.
 

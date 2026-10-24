@@ -9,6 +9,35 @@ import {
   geometryBounds,
   mergeBackdropFeatures,
 } from '../utils/districtMap.js';
+import { getSettingValue } from '../utils/systemSettings.js';
+
+export const DEFAULT_GIS_CONFIG = {
+  provider_name: 'Brunswick County GIS',
+  fire_beats_url: 'https://bcgis.brunswickcountync.gov/arcgis/rest/services/Brunsco_Ops/FireBeats/FeatureServer/0',
+  roads_url: 'https://bcgis.brunswickcountync.gov/arcgis/rest/services/Mapping/DataViewer/MapServer/4',
+  streams_url: 'https://bcgis.brunswickcountync.gov/arcgis/rest/services/Basemaps/HydroBaseWebMercator/MapServer/0',
+  water_bodies_url: 'https://bcgis.brunswickcountync.gov/arcgis/rest/services/Basemaps/HydroBaseWebMercator/MapServer/1',
+  flood_url: 'https://bcgis.brunswickcountync.gov/arcgis/rest/services/Layers/FloodHazards/MapServer/0',
+};
+
+// Resolves configured GIS data source URLs from system settings, falling back to Brunswick County defaults.
+export const resolveGisConfig = (systemSettings) => {
+  const get = (key, fallback) => {
+    if (systemSettings && typeof systemSettings === 'object' && !Array.isArray(systemSettings)) {
+      if (systemSettings[key] !== undefined && systemSettings[key] !== '') return String(systemSettings[key]).trim();
+    }
+    return String(getSettingValue(systemSettings, key, '') || '').trim() || fallback;
+  };
+
+  return {
+    provider_name: get('gis_provider_name', DEFAULT_GIS_CONFIG.provider_name),
+    fire_beats_url: get('gis_fire_beats_url', DEFAULT_GIS_CONFIG.fire_beats_url),
+    roads_url: get('gis_roads_url', DEFAULT_GIS_CONFIG.roads_url),
+    streams_url: get('gis_streams_url', DEFAULT_GIS_CONFIG.streams_url),
+    water_bodies_url: get('gis_water_bodies_url', DEFAULT_GIS_CONFIG.water_bodies_url),
+    flood_url: get('gis_flood_url', DEFAULT_GIS_CONFIG.flood_url),
+  };
+};
 
 const COUNTY_FIRE_BEATS_BASE =
   'https://bcgis.brunswickcountync.gov/arcgis/rest/services/Brunsco_Ops/FireBeats/FeatureServer/0';
@@ -43,7 +72,9 @@ export const fireBeatSearchTerm = (departmentName) => {
 export const escapeSqlLiteral = (value) => String(value ?? '').replace(/'/g, "''");
 
 // Builds the query URL to search for fire beats by agency name.
-export const fireBeatQueryUrl = ({ search = '', limit = 25 } = {}) => {
+export const fireBeatQueryUrl = ({ search = '', limit = 25, baseUrl = '' } = {}) => {
+  const root = String(baseUrl || COUNTY_FIRE_BEATS_BASE).trim().replace(/\/query\/?$/, '');
+  const url = `${root}/query`;
   const term = String(search ?? '').trim();
   const where = term ? `UPPER(AgencyID) LIKE '%${escapeSqlLiteral(term.toUpperCase())}%'` : '1=1';
   const params = new URLSearchParams({
@@ -54,7 +85,32 @@ export const fireBeatQueryUrl = ({ search = '', limit = 25 } = {}) => {
     f: 'geojson',
     resultRecordCount: String(limit),
   });
-  return `${COUNTY_FIRE_BEATS_URL}?${params.toString()}`;
+  return `${url}?${params.toString()}`;
+};
+
+// Tests whether an ArcGIS service endpoint is reachable and returns valid service metadata.
+export const testGisEndpoint = async (url) => {
+  const target = String(url || '').trim().replace(/\/query\/?$/, '');
+  if (!target) throw new Error('Please enter a service URL to test.');
+  const testUrl = target.includes('?') ? `${target}&f=json` : `${target}?f=json`;
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+  try {
+    const res = await fetch(testUrl, { signal: controller?.signal });
+    if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || 'Service returned an error');
+    return {
+      ok: true,
+      name: data.name || data.description || data.serviceDescription || 'ArcGIS Service',
+      type: data.type || (data.capabilities ? 'Feature/Map Service' : 'Service'),
+    };
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new Error('Request timed out after 8s. Check the URL and host reachability.');
+    throw new Error(err.message || 'Could not connect to service endpoint.');
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 };
 
 // Formats a county map feature into a cleaner fire beat object.
@@ -185,14 +241,14 @@ const askCounty = async (url, params, signal) => {
 };
 
 // Searches county GIS for fire beats matching a given department or area name.
-export const searchFireBeats = async ({ search = '', limit = 25, signal } = {}) => {
+export const searchFireBeats = async ({ search = '', limit = 25, signal, baseUrl = '' } = {}) => {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const onOuterAbort = () => controller?.abort();
   const timer = controller ? setTimeout(() => controller.abort(), COUNTY_TIMEOUT_MS) : null;
   if (signal && controller) signal.addEventListener('abort', onOuterAbort);
 
   try {
-    const response = await fetch(fireBeatQueryUrl({ search, limit }), { signal: controller?.signal });
+    const response = await fetch(fireBeatQueryUrl({ search, limit, baseUrl }), { signal: controller?.signal });
     if (!response.ok) {
       throw new Error(
         `The county's map service answered with HTTP ${response.status}. Try again, or upload the boundary as a GeoJSON file instead.`
@@ -233,7 +289,7 @@ export const fetchBackdropLayer = async ({ url, clip, geometryType, where, toler
 };
 
 // Fetches background geographic layers (roads, water, flood zones, neighboring beats).
-export const fetchCountyBackdrop = async ({ layer, clip, band, exclude = '', tolerance, signal } = {}) => {
+export const fetchCountyBackdrop = async ({ layer, clip, band, exclude = '', tolerance, signal, gisConfig = null } = {}) => {
   if (!MAP_BACKDROP_LAYERS.includes(layer)) {
     throw new Error(`There is no map background called "${layer}".`);
   }
@@ -248,18 +304,29 @@ export const fetchCountyBackdrop = async ({ layer, clip, band, exclude = '', tol
   const offset = Number.isFinite(tolerance) && tolerance > 0 ? tolerance : COUNTY_BACKDROP_TOLERANCE[layer] || 0;
   const fields = MAP_BACKDROP_FIELDS[layer] || [];
   const geometryType = clipKind === 'band' ? 'esriGeometryEnvelope' : 'esriGeometryPolygon';
+
+  const beatsUrl = gisConfig?.fire_beats_url || COUNTY_FIRE_BEATS_BASE;
+  const roadsUrl = gisConfig?.roads_url || COUNTY_ROADS_URL;
+  const floodUrl = gisConfig?.flood_url || COUNTY_FLOOD_URL;
+  const streamsUrl = gisConfig?.streams_url || COUNTY_STREAMS_URL;
+  const waterBodiesUrl = gisConfig?.water_bodies_url || COUNTY_WATER_BODIES_URL;
+
+  const isCustomProvider = gisConfig?.provider_name && gisConfig.provider_name !== DEFAULT_GIS_CONFIG.provider_name;
+  const provider = gisConfig?.provider_name || 'Brunswick County GIS';
+  const getSource = (type, defaultSource) => (isCustomProvider ? `${provider} — ${type}` : defaultSource);
+
   try {
     if (layer === 'roads') {
-      const roads = await fetchBackdropLayer({ url: COUNTY_ROADS_URL, clip: geometry, geometryType, tolerance: offset, fields, signal });
-      return { collection: roads, features: roads.features.length, source: COUNTY_BACKDROP_SOURCE.roads, tolerance: offset, fields };
+      const roads = await fetchBackdropLayer({ url: roadsUrl, clip: geometry, geometryType, tolerance: offset, fields, signal });
+      return { collection: roads, features: roads.features.length, source: getSource('Roads', COUNTY_BACKDROP_SOURCE.roads), tolerance: offset, fields };
     }
     if (layer === 'flood') {
-      const zones = await fetchBackdropLayer({ url: COUNTY_FLOOD_URL, clip: geometry, tolerance: offset, fields, signal });
-      return { collection: zones, features: zones.features.length, source: COUNTY_BACKDROP_SOURCE.flood, tolerance: offset, fields };
+      const zones = await fetchBackdropLayer({ url: floodUrl, clip: geometry, tolerance: offset, fields, signal });
+      return { collection: zones, features: zones.features.length, source: getSource('Flood Hazards (FEMA SFHA)', COUNTY_BACKDROP_SOURCE.flood), tolerance: offset, fields };
     }
     if (layer === 'neighbourRoads') {
       const beats = await fetchBackdropLayer({
-        url: COUNTY_FIRE_BEATS_BASE,
+        url: beatsUrl,
         clip: geometry,
         geometryType: 'esriGeometryEnvelope',
         where: neighbourWhere(exclude),
@@ -271,7 +338,7 @@ export const fetchCountyBackdrop = async ({ layer, clip, band, exclude = '', tol
       const outcomes = await Promise.allSettled(
         outlines.map((outline) =>
           fetchBackdropLayer({
-            url: COUNTY_ROADS_URL,
+            url: roadsUrl,
             clip: outline,
             geometryType: 'esriGeometryPolygon',
             where: NEIGHBOUR_ROAD_WHERE,
@@ -295,11 +362,11 @@ export const fetchCountyBackdrop = async ({ layer, clip, band, exclude = '', tol
         );
       }
       const collection = mergeBackdropFeatures(kept);
-      return { collection, features: collection.features.length, source: COUNTY_BACKDROP_SOURCE.neighbourRoads, tolerance: offset, fields };
+      return { collection, features: collection.features.length, source: getSource('Roads (major roads only)', COUNTY_BACKDROP_SOURCE.neighbourRoads), tolerance: offset, fields };
     }
     if (layer === 'districts') {
       const beats = await fetchBackdropLayer({
-        url: COUNTY_FIRE_BEATS_BASE,
+        url: beatsUrl,
         clip: geometry,
         geometryType,
         where: neighbourWhere(exclude),
@@ -307,16 +374,16 @@ export const fetchCountyBackdrop = async ({ layer, clip, band, exclude = '', tol
         fields,
         signal,
       });
-      return { collection: beats, features: beats.features.length, source: COUNTY_BACKDROP_SOURCE.districts, tolerance: offset, fields };
+      return { collection: beats, features: beats.features.length, source: getSource('Fire Beats', COUNTY_BACKDROP_SOURCE.districts), tolerance: offset, fields };
     }
     const [streams, bodies] = await Promise.all([
-      fetchBackdropLayer({ url: COUNTY_STREAMS_URL, clip: geometry, tolerance: offset, fields, signal }),
-      fetchBackdropLayer({ url: COUNTY_WATER_BODIES_URL, clip: geometry, tolerance: offset, fields, signal }),
+      fetchBackdropLayer({ url: streamsUrl, clip: geometry, tolerance: offset, fields, signal }),
+      fetchBackdropLayer({ url: waterBodiesUrl, clip: geometry, tolerance: offset, fields, signal }),
     ]);
     return {
       collection: { type: 'FeatureCollection', features: [...streams.features, ...bodies.features] },
       features: streams.features.length + bodies.features.length,
-      source: COUNTY_BACKDROP_SOURCE.water,
+      source: getSource('HydroBase/Streams & Water Bodies', COUNTY_BACKDROP_SOURCE.water),
       tolerance: offset,
       fields,
     };

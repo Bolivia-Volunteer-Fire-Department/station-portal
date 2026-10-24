@@ -31,8 +31,10 @@ const storageService = read('src/services/avatarStorage.js');
 // THE AVATAR BLOCK ALONE. `storage.rules` also holds the certification-scan rule, which lists two of the same picture
 // types - so reading types from the whole file would let a type the AVATAR rule alone refuses slip through the comparison
 // below. Slicing from the match to the end of the file is enough because the avatar block is the last one before the
-// catch-all.
-const avatarBlock = storageRules.slice(storageRules.indexOf('match /avatars/'));
+// Slicing from the match to the next match block bounds the check to the avatar block alone.
+const avatarStart = storageRules.indexOf('match /avatars/');
+const avatarEnd = storageRules.indexOf('match /', avatarStart + 1);
+const avatarBlock = storageRules.slice(avatarStart, avatarEnd !== -1 ? avatarEnd : undefined);
 
 let failures = 0;
 const check = (name, actual, expected) => {

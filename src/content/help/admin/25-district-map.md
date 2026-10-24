@@ -1,4 +1,6 @@
-*Administration → System → Map Settings* is where the district map is set up, and its three cards are different kinds of thing:
+*Content → Map Setup* is where the district map is configured, and its three cards represent different layers of information:
+
+IMAGE HERE
 
 | Card | What it holds |
 |---|---|
@@ -11,9 +13,20 @@ They used to be cards in the middle of *System Settings*, between the department
 > [!IMPORTANT]
 > **Two permissions open this page.** **Maintain the district map** is the officer who draws on the map — it opens this screen on its own, with no administrator rights, and holds the boundary and the background; **Manage system settings** holds the uploaded drawing. Members need **View the district map** to see the map at all — see *Who sees it* below.
 
+## GIS Data Source
+
+The **GIS Data Source** dropdown configures where the application fetches beat boundaries and regional GIS layers from:
+
+- **Brunswick County, NC (Default)**: Preconfigured for Brunswick County's official ArcGIS Open Data endpoints for beats, roads, waterways, flood zones, and neighboring districts.
+- **Custom / Manual GeoJSON**: Allows departments in other jurisdictions or counties to supply their own boundaries or upload GeoJSON files.
+
+IMAGE HERE
+
 ## Setting the boundary (do this first)
 
 The boundary is the map. Everything else — landmarks, distances, the view the module opens on — follows from it.
+
+IMAGE HERE
 
 **Most stations should fetch it from the county.** Brunswick County publishes every fire department's beat as open data, with the department's own name on it, and this card looks it up by name:
 

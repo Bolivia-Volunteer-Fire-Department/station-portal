@@ -4,9 +4,13 @@ Your **User Profile** is where you manage your account details, check your certi
 
 To open your User Profile, simply click on your name at the very top of the sidebar. The page is split into two tabs: **My Profile** and **My Settings**.
 
+IMAGE HERE
+
 ## The My Profile Tab
 
 The **My Profile** tab brings together your personal details, your credentials, and your account security in one place.
+
+IMAGE HERE
 
 ### Personal Information
 
@@ -46,6 +50,8 @@ The **Change Password** card allows you to update your login password at any tim
 
 The **My Settings** tab lets you customize the appearance, sounds, and alerts for this device.
 
+IMAGE HERE
+
 ### Preferences
 
 The **Preferences** card contains simple switches to tailor the app to your liking:
@@ -58,6 +64,8 @@ The **Preferences** card contains simple switches to tailor the app to your liki
 Click **Save Preferences** to save your selections.
 
 ### Push Notifications
+
+![push notification|350](../../../../public/help/admin/12-announcements-1792849630097.png)
 
 The **Notifications** card lets you receive instant alerts on your phone, tablet, or computer:
 

@@ -1,6 +1,8 @@
 # Forms
 
-*Reports → Forms* defines **printable PDFs filled from the app's own data**. Instead of typing the same training details onto a state sheet a second time, a form is set up once here and then generated already filled in.
+*Reports & Logs → Form Setup* defines **printable PDFs filled from the app's own data**. Instead of typing the same training details onto a state sheet a second time, a form is set up once here and then generated already filled in.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Requires the **Configure forms** permission.
@@ -9,6 +11,8 @@
 > The blank PDFs are **files in the app itself**, not uploads: they live in `public/forms/` and are registered in `src/utils/formCatalog.js`. That is deliberate — it keeps the blanks working with no network, which is what a station laptop needs. Adding a new one is a file plus a line, done by whoever maintains the app rather than from this screen.
 
 ## A form is three things
+
+IMAGE HERE
 
 | Part | What it is | Example |
 |---|---|---|

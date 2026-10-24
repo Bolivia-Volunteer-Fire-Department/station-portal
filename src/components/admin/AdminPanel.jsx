@@ -569,6 +569,7 @@ export default function AdminPanel({
           systemSettings={systemSettings}
           canEditMap={permissionGranted(currentRole, 'can_edit_map')}
           canEditSystemSettings={permissionGranted(currentRole, 'can_edit_system_settings')}
+          onDataChanged={onDataChanged}
         />
       )}
 

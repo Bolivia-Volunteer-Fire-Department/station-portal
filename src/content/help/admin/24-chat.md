@@ -1,9 +1,13 @@
-*Content → Chat Rooms* is where you set up the station's chat: one row per room, who can see it, and the order they appear in for everybody. It does **not** read or write anybody's messages — an officer with this permission is not automatically in the rooms they create.
+*Content → Chat Setup* is where you set up the station's chat: one row per room, who can see it, and the order they appear in for everybody. It does **not** read or write anybody's messages — an officer with this permission is not automatically in the rooms they create.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Setting rooms up requires the **Manage chat rooms** role permission. *Having chat at all* is a separate permission on the role — **Chat** — and it is what members need before they can see a room, open the panel or receive a chat notification. See *Roles*.
 
 ## The fields
+
+IMAGE HERE
 
 | Field | Notes |
 |---|---|

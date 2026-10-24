@@ -1,20 +1,11 @@
-*People → Ranks* defines the department's rank structure. Ranks relate mostly to the schedule and assignments.
+*People → Rank Setup* defines the department's rank structure. Ranks relate mostly to the schedule and assignments.
+
+![Rank overview](../../../../public/help/admin/04-ranks-1792804744295.png)
 
 > [!IMPORTANT]
 > Editing ranks requires the **Manage ranks** role permission.
 
-## The fields
-
-Press **New rank** at the right of the list to add one, or **Edit** on a row. Either opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls; it closes when the save lands.
-
-| Field | Notes |
-|---|---|
-| **Description** | The rank name, such as Firefighter, Driver/Operator, Lieutenant |
-| **Rank Order** | A number. **A higher number is a higher rank** |
-| **Color** | The color used for rank badges, the dot before a member's name on a schedule pill, and the icon beside their name |
-| **Icon** | An icon drawn beside the member's name and rank |
-
-## Rank order is the important one
+## Rank order is most important
 
 Rank order is what the scheduling logic actually compares. It is used to decide:
 
@@ -23,7 +14,7 @@ Rank order is what the scheduling logic actually compares. It is used to decide:
 3. **Which shifts their availability calendar preloads.** Same rule again, which is why a member who says "that shift never appears for me" usually just does not hold the rank for it.
 4. **The order of the crew on a shift.** When several members share a shift, they are listed by the **rank the shift requires**, highest first, then by name.
 
-A higher number means more senior, so a Chief is a larger number than a Firefighter. If you set them the wrong way around, everyone's eligibility silently inverts.
+A higher number means more senior, so a Chief would have a larger number than a Firefighter. If you set them the wrong way around, everyone's eligibility silently inverts.
 
 ## Colors and icons
 
@@ -32,10 +23,14 @@ Both are cosmetic but they are used consistently:
 - The **color** appears on rank badges, on the **dot drawn before a member's name** on a Schedule pill, and beside the member's name.
 - The **icon** is drawn from the same catalog as assignment icons, so ranks and assignments look like part of the same system.
 
+![Ranks on the schedule|200](../../../../public/help/admin/04-ranks-1792804979844.png)
+
 > [!NOTE]
 > **A blank color means no color, so leave nothing blank.** A rank with no color is drawn as a rank badge with no fill and a name with no dot on it — visibly plainer than the other ranks rather than given a color of its own. The editor starts a new rank at red and remembers what you set, so overwrite it rather than clearing it.
 
 Members with no rank at all, or whose rank has no color, keep a plain chip on the *Member Availability* roster — that screen is the one place a fallback color is invented, because the list is read for who is available rather than for how senior they are.
+
+![Ranks on member availability](../../../../public/help/admin/04-ranks-1792805715425.png)
 
 ## Editing ranks safely
 

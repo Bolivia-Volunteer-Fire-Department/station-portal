@@ -2,6 +2,8 @@
 
 **Forms** turns the app's own records into a **printable PDF, already filled in** — so the same details are typed once, not copied out onto a sheet by hand.
 
+IMAGE HERE
+
 **Forms is one half of the *Reports & Forms* screen.** If your role allows reports as well, a switch at the top moves between the two; if it allows only forms, this is the screen you get and there is no switch to read.
 
 > [!NOTE]
@@ -13,6 +15,8 @@
 2. Choose the **period** it covers — *This year*, *Last year* or *All time*.
 3. Press **Generate** on the form you want.
 
+IMAGE HERE
+
 The PDF opens in a new tab, ready to read. From there press **Save** to keep a copy (or use your browser's **Print**). The name it saves under says which form it is, who it is for, and the date, so it is findable later.
 
 > [!TIP]
@@ -20,6 +24,6 @@ The PDF opens in a new tab, ready to read. From there press **Save** to keep a c
 
 ## Nothing appears
 
-If the list is empty, no form has been shared with your role or rank yet. An administrator sets them up under **Administration → Forms**.
+If the list is empty, no form has been shared with your role or rank yet. An administrator sets them up in department configuration.
 
 If a box on the sheet comes out blank, the value behind it had nothing to put there — often because that member has no training recorded in the period chosen. Try another period, or ask an administrator to check the mapping.

@@ -954,7 +954,7 @@ export const saveTaskNoteEntry = async ({ entry, authorId = '' } = {}) => {
   const reference = doc(firestore(), 'task_note_entries', documentId);
 
   // Use a transaction to safely read and write the entry atomically
-  await runTransaction(firestore(), async (transaction) => {
+  const savedPayload = await runTransaction(firestore(), async (transaction) => {
     const docSnap = await transaction.get(reference);
     const submitterUid = docSnap.exists()
       ? String(docSnap.get('submitted_by_uid') || '')
@@ -972,8 +972,9 @@ export const saveTaskNoteEntry = async ({ entry, authorId = '' } = {}) => {
     };
 
     transaction.set(reference, payload, { merge: true });
+    return payload;
   });
-  return { id: documentId };
+  return savedPayload || { id: documentId };
 };
 
 // Un-signs a signed task/note entry, putting it back in editable state.

@@ -1,4 +1,6 @@
-*Training → Training Report* is the department's training record with the signatures attached: what was held, and who has signed that they attended.
+*Content → Training* is the department's training record with the signatures attached: what was held, and who has signed that they attended.
+
+IMAGE HERE
 
 The report is read when you open this tab, so a brief **Loading …** line the first time is normal. A table still arriving shows that line; a table with nothing in it shows none.
 
@@ -6,6 +8,8 @@ The report is read when you open this tab, so a brief **Loading …** line the f
 > Managing trainings and training signatures requires the **Administer trainings** role permission. That permission is deliberately the *strongest* of the three training permissions, because this tab is the only place that can do all of the following: - see **every member's** signatures (everywhere else in the app a member only ever sees their own), - **change or delete** any training, and - **remove** a signature.
 
 ## The report
+
+IMAGE HERE
 
 Each row is one training: date, title, location, instructors and how many members have signed it. Rows are most recent first.
 
@@ -108,6 +112,6 @@ Both prints use dates **with the year** ("Sat, Mar 14, 2026"), which the screen'
 ## If a member says they cannot sign
 
 1. **Check the training exists here.** Signatures need a training to attach to, which means it must have a date and a title.
-2. **Check the member's role** has *Sign trainings* in *People → Roles*. Without it the Training module is not in their sidebar at all.
+2. **Check the member's role** has *Sign trainings* in *People → Role Setup*. Without it the Training module is not in their sidebar at all.
 3. **Check nothing is already recorded** against them for that training — a training shows as signed once it has a signature, and they cannot sign twice.
 4. **Ask them what their screen says.** A failed save reports itself above the list, and the module shows how many trainings they have signed out of the total.

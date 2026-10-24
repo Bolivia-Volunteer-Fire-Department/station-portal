@@ -187,21 +187,22 @@ for (const scope of HELP_SCOPES) {
   );
   check(`${scope}: sorted by filename`, [...guides].map((g) => g.path), guides.map((g) => g.path).sort());
 
-  // Numbering: 01..N, no gaps and no duplicates.
+  // Numbering: 01..N, no gaps and no duplicates for standard guides, with 98/99 reserved for legal appendices.
   //
   // The prefix IS the display order in the Help list, so this is the invariant a hand-renumbering
   // breaks. Inserting a guide between 12 and 13 by calling it "14" leaves the list out of order, and
   // a copy-paste that forgets to renumber leaves two of the same. Both are silent otherwise.
-  const numbers = guides.map((g) => g.slug.split('-')[0]);
+  const standardGuides = guides.filter((g) => !/^9[89]-/.test(g.slug));
+  const numbers = standardGuides.map((g) => g.slug.split('-')[0]);
   check(
     `${scope}: every guide is numbered`,
-    numbers.every((n) => /^\d{2}$/.test(n)),
+    guides.map((g) => g.slug.split('-')[0]).every((n) => /^\d{2}$/.test(n)),
     true
   );
   check(
-    `${scope}: numbering is 01..${String(guides.length).padStart(2, '0')} with no gaps`,
+    `${scope}: numbering is 01..${String(standardGuides.length).padStart(2, '0')} with no gaps`,
     numbers,
-    Array.from({ length: guides.length }, (_, i) => String(i + 1).padStart(2, '0'))
+    Array.from({ length: standardGuides.length }, (_, i) => String(i + 1).padStart(2, '0'))
   );
 
   // No two guides in a scope may share a title.
@@ -393,7 +394,7 @@ console.log('\n--- one guide per module and per tab ---');
 // permission catalog (plus the permissionless tabs), which is plain data with no React in it.
 const adminSlugs = helpGuides('admin').map((g) => g.slug).join(' ');
 const requiredAdminTabs = [
-  ...ADMIN_PERMISSIONS.map((permission) => permission.tab),
+  ...ADMIN_PERMISSIONS.flatMap((permission) => [permission.tab, ...(permission.moreTabs || [])]),
   ...ADMIN_PERMISSIONLESS_TABS,
 ];
 const undocumentedTabs = requiredAdminTabs.filter((tab) => !adminSlugs.includes(tab));
@@ -417,6 +418,9 @@ const requiredMemberModules = [
   // documented for the member it is for, like every other entry in this list.
   'district-map',
   'firefighter-runner',
+  'tasks-and-notes',
+  'work-orders',
+  'roster',
 ];
 const undocumentedModules = requiredMemberModules.filter((module) => !memberSlugs.includes(module));
 check('every member module has a guide', undocumentedModules, []);

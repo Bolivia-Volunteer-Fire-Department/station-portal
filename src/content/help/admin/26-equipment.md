@@ -2,10 +2,14 @@
 
 *Assets → Equipment* lets you track fire department gear, radios, and SCBA breathing air cylinders. It also watches required safety inspection cycles and retirement dates so your station stays compliant with NFPA standards and state laws.
 
+IMAGE HERE
+
 > [!IMPORTANT]
 > Managing equipment records requires the **Manage equipment** permission.
 
 ## Equipment categories
+
+IMAGE HERE
 
 The equipment manager is organized into three main categories:
 

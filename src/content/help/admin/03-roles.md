@@ -1,4 +1,6 @@
-A role is the term used for describing how a user can interact specifically with this application. A member has **one** role, and the role decides which modules appear in their sidebar and which Administration tabs they can open.
+*People → Role Setup* is where user permissions and access rights are configured for the app. A member can only have **one** role, and the role decides which modules appear in their sidebar, which Administration tabs they can open, what reports they can see... almost everything about the app's functionality depends on the role.
+
+![The list of roles](../../../../public/help/admin/03-roles-1792800431968.png)
 
 > [!IMPORTANT]
 > Configuring roles requires the **Manage roles** permission in your own role.
@@ -7,7 +9,12 @@ A role is the term used for describing how a user can interact specifically with
 
 The role list is at the top of the tab. Press **New role** in its header, or click a role in the list to edit it.
 
-Either way the editor opens **over the page** — the description and the whole permission list, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. It closes when the save lands; a save that fails keeps it open with the reason in it. The toolbar also shows how many permissions are currently granted, so the count is where the Save button is rather than at the bottom of a long list.
+![Editing a role](../../../../public/help/admin/03-roles-1792800564086.png)
+
+Once the editor is open, make changes as you see fit, and Save.
+
+> [!WARNING]
+> We **strongly** recommend against using common fire service rank titles (i.e. Chief, Captain, etc.) as role names to avoid confusion. If you decide to do that anyway, we would recommend you have a role for every rank that you have, so they match.
 
 ## Administrator access
 
@@ -19,52 +26,83 @@ Uncheck it and the boxes become editable again, so you can build up a role from 
 
 ## The permissions
 
-THE PERMISSIONS ARE GROUPED, and the headings are there because there are forty of them: **People**, **Scheduling**, **Records**, **Communication**, **Reports & forms** and **Station setup** on the administration side, and three on the member side — their own schedule and hours, the crew and its records, and **Chat**. The headings change nothing about what a permission does; they are how you find one.
+Permissions are grouped under clear section headers matching the application areas: **People**, **Scheduling**, **Records**, **Communication**, **Reports & forms**, and **Station setup** on the administration side; and on the member side, **Their own schedule and hours**, **The crew and its records**, **The district**, and **Chat**.
 
 Each permission grants its own tab, or its own member-facing ability. None of them grant Administration as a whole.
 
 **People**
 
-- **Manage users** — *People → Users*.
-- **Manage roles** — *People → Roles*. Cannot be used to grant Administrator access, or to edit or delete a role that has it; only an administrator can do that.
-- **Manage ranks** — *People → Ranks*.
+- **Manage users** — *People → Members*.
+- **Manage roles** — *People → Role Setup*. Cannot be used to grant Administrator access, or to edit or delete a role that has it; only an administrator can do that.
+- **Manage ranks** — *People → Rank Setup*.
 
 **Scheduling**
 
-- **Manage schedule templates** — the recurring weekly pattern.
-- **Manage assignments** — what a shift is (its minimum rank, color and icon).
-- **Manage the schedule** — placing templates on real dates, and custom shifts.
-- **Manage member availability** — *Scheduling → Member Availability*: seeing who has marked themselves available, and editing it on any member's behalf.
-- **Approve shift requests** — *Scheduling → Pending Approvals*, plus the *New shift requests* notification switch in User Settings.
+- **Manage schedule templates** — *Scheduling → Shift Template Setup*.
+- **Manage assignments** — *Scheduling → Assignment Setup*.
+- **Manage the schedule** — *Scheduling → Schedule Management*.
+- **Can create events** — *Scheduling → Events*.
+- **Approve shift requests** — *Scheduling → Pending Approvals*.
+- **Manage member availability** — *Scheduling → Member Availability*.
+- **Manage availability windows** — *Scheduling → Availability Window Setup*.
 
-**Timeclock**
+**Records**
 
-- **Manage the timeclock** — *Timeclock → Clock Management*: correcting entries, adding manual ones, exporting.
+- **Manage the timeclock** — *Scheduling → Clock Management*.
+- **Administer trainings** — *Content → Training*.
+- **Set up trainings** — *Content → Training Setup*.
+- **Manage certifications** — *People → Certifications*.
+- **Set up certifications** — *People → Certification Setup*.
+- **Manage documents** — *Content → Documents*.
+- **Manage equipment** — *Assets → Equipment*.
+- **Manage apparatuses** — *Assets → Apparatuses*.
+- **Manage hydrants** — *Assets → Hydrants*.
+- **Set up equipment & apparatus** — *Assets → Asset Setup*.
+- **Manage work orders** — *Assets → Work Orders*.
+- **Set up tasks** — *Reports & Logs → Task Setup*.
+- **Set up notes** — *Reports & Logs → Note Setup*.
 
-**System**
+**Communication**
 
-- **Manage system settings** — *System → System Settings*, and the drawing card on *System → Map Settings*.
-- **Maintain the district map** — *System → Map Settings* by itself, without any other administrator permission: the boundary, the county's roads and waterways, and the landmarks drawn on the member's own *District map*. Requires *View the district map*.
-- **Manage notification settings** — *System → Notifications*. Without *Manage system settings*, this role may write only the notification keys, so it cannot be used to change unrelated settings, and the Firebase credential card stays administrator-only.
-- **View the system log** — *System → System Log*. Read-only, but it names members and records failed sign-ins, so grant it deliberately rather than by default. The tab loads only when it is opened, so it costs nothing to someone who never looks.
+- **Make announcements** — *Content → Announcements*.
+- **Manage chat rooms** — *Content → Chat Setup*.
+- **Manage dashboard setup** — *Content → Dashboard Setup*.
+- **Manage widget setup** — *Content → Widget Setup*.
 
-**Content**
+**Reports & forms**
 
-- **Manage documents** — *Content → Documents*: writing documents, links and checklists, their folders, who may read each one, their items, their start and end dates, and the signature report. Cannot be stored without *View documents*.
+- **Configure reports** — *Reports & Logs → Report Setup*.
+- **Configure forms** — *Reports & Logs → Form Setup*.
+
+**Station setup**
+
+- **Manage system settings** — *System → System Settings*, *Content → Map Setup*, and *System → Navigation Setup*.
+- **Maintain the district map** — *Content → Map Setup* by itself, without full settings access. Requires *View the district map*.
+- **Manage notification settings** — *System → Notifications*.
+- **Access the debug page** — *System → Debug*.
 
 **Member abilities**
 
 These do not open Administration at all; they decide what the member can do in their own modules.
 
-- **View my schedule** — the **My Schedule** module.
+- **Access dashboard** — the **Dashboard** module and its widgets.
+- **View my schedule** — the **Schedule** module.
 - **Make offers** — offering to fill open shifts. Cannot be stored without *View my schedule*.
-- **View full schedule** — the **Show everyone** button on My Schedule. Cannot be stored without *View my schedule*.
-- **Edit own availability** — the **My Availability** module.
-- **Use the timeclock** — the **Clock In**/**Clock Out** buttons and the **Clock History** module. Without it a member still sees the Timeclock module, but only the clock and the *Currently on duty* list.
-- **Sign trainings** — the **Training** module. Without it the module is not in the sidebar at all, because signing is the whole point of it.
-- **Manage trainings** — the add/edit form in the Training module. Cannot be stored without *Sign trainings*, since a role that may change a training but cannot open the module would have nowhere to do it.
-- **View documents** — the **Documents** module. Without it the module is not in the sidebar at all, and the server refuses to send a document: reading the station's documents is a permission in its own right.
-- **Verify signatures** — the **Verify signatures** panel on the **Documents** tab in Administration, and the verification card in the member-facing **Documents** module. It lets a member confirm other members' signed checklist items, and a document whose author asked for its signature to be confirmed, without being able to edit anything. Cannot be stored without *View documents*. Nobody can verify their own work.
+- **View full schedule** — the **Show everyone** button on Schedule. Cannot be stored without *View my schedule*.
+- **Edit own availability** — the **Availability** module.
+- **Use the timeclock** — the **Clock In**/**Clock Out** buttons and the **Clock History** module.
+- **View roster** — the crew **Roster** directory.
+- **View reports** — running department reports.
+- **Sign trainings** — the **Training** module for reviewing and signing attendance.
+- **Manage trainings** — the add/edit form in the Training module. Requires *Sign trainings*.
+- **View documents** — the **Documents** module for guidelines and procedures.
+- **Verify signatures** — confirming other members' signed checklist items and acknowledged documents. Requires *View documents*.
+- **Add assessment scores** — grading practical evaluations and drills.
+- **Generate forms** — generating filled PDF forms.
+- **View work orders** — viewing and submitting maintenance requests.
+- **Tasks & notes permissions** — viewing, completing, editing, and managing daily chore checklists and shift logs.
+- **The district** — viewing and editing landmarks on the **District Map**.
+- **Chat** — accessing chat, sending messages, editing, or deleting messages.
 
 ## Dependencies
 
@@ -76,15 +114,12 @@ Five permissions require another, and the form disables them with the reason in 
 - **Manage documents** requires **View documents** — managing documents you cannot see is not a thing.
 - **Verify signatures** requires **View documents** — a verifier has to be able to see the checklist they are confirming, and the tab the panel lives on.
 
-The server enforces the same rule, so it is not only a form convenience. Availability is deliberately **not** chained this way: a role may manage other members' availability without the member-facing *Edit own availability*, since one is a scheduling job and the other is a personal one.
+> [!NOTE]
+> Availability is deliberately **not** chained this way: a role may manage other members' availability without the member-facing *Edit own availability*, since one is a scheduling job and the other is a personal one.
 
 > [!NOTE]
 > **The Documents tab is the one tab two permissions open.** *Manage documents* is the obvious one; *Verify signatures* opens it too, because that is where a verifier confirms another member's checklist items — or a document whose author asked for its signature to be confirmed — without needing to be able to edit it. A role with only the verifying permission sees just that panel — no editor, no folders, no signature report. Both permissions require *View documents*, so neither can be stored on a role that cannot see documents at all.
 
 ## Which flags to check for a shift approver
 
-Someone who approves shifts needs **Approve shift requests**, and if you want them to receive the push notification about new offers they also need that same check — the notification and the tab use one permission, not two. They do **not** need **Manage the schedule** unless they also build the roster.
-
-## Reading a role at a glance
-
-The list shows how many of the permissions each role has, so a role showing *4 of 25* is obviously partial and one showing *25 of 25* is a full role without Administrator access.
+Someone who approves shifts needs **Approve shift requests**, and if you want them to receive the push notification about new offers they also need that same check — the notification and the tab use one permission, not two. They do **not** need **Manage the schedule** unless they also build the schedule.

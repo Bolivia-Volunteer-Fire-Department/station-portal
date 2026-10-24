@@ -1166,6 +1166,10 @@ export function ProfilePictureCard({ currentUser }) {
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState(null);
 
+  useEffect(() => {
+    setUrl(String(currentUser?.avatar_url || ''));
+  }, [currentUser?.avatar_url]);
+
   const choose = async (file) => {
     if (!file) return;
     setBusy(true);

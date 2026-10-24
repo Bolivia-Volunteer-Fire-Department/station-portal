@@ -219,19 +219,25 @@ export default function TasksAndNotesModule({
   };
 
   const handleEntrySaved = (savedEntry) => {
-    setEntries((prev) => {
-      const idx = prev.findIndex((e) => e.id === savedEntry.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = normalizeTaskNoteEntry(savedEntry);
-        return next;
-      }
-      return [normalizeTaskNoteEntry(savedEntry), ...prev];
-    });
+    if (savedEntry) {
+      setEntries((prev) => {
+        const idx = prev.findIndex((e) => e.id === savedEntry.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = normalizeTaskNoteEntry(savedEntry);
+          return next;
+        }
+        return [normalizeTaskNoteEntry(savedEntry), ...prev];
+      });
+    }
+    void loadData();
   };
 
   const handleEntryDeleted = (deletedId) => {
-    setEntries((prev) => prev.filter((e) => e.id !== deletedId));
+    if (deletedId) {
+      setEntries((prev) => prev.filter((e) => e.id !== deletedId));
+    }
+    void loadData();
   };
 
   return (

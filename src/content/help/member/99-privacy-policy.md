@@ -1,6 +1,6 @@
 Last updated: October 2026
 
-StationSync ("we," "our," or "us") provides workforce management, operational logging, scheduling, and communication software to emergency services agencies, including fire departments, rescue squads, and emergency medical services organizations (each, an "Agency" or "Department"). 
+StationSync ("we," "our," or "us") provides workforce management, operational logging, scheduling, and communication software to emergency services agencies, including fire departments, rescue squads, and emergency medical services organizations (each, an "Agency" or "Department").
 
 This Privacy Policy describes how we collect, process, secure, and disclose information through the StationSync web application, mobile applications, and associated services (collectively, the "Service").
 
@@ -8,7 +8,7 @@ This Privacy Policy describes how we collect, process, secure, and disclose info
 
 ### 1. Roles and Data Governance: Controller vs. Processor
 
-StationSync operates as a **Data Processor** (or service provider) on behalf of our customer Agencies. The subscribing Agency is the **Data Controller** responsible for managing member accounts, determining record retention rules, and ensuring compliance with applicable employment and public safety regulations. 
+StationSync operates as a **Data Processor** (or service provider) on behalf of our customer Agencies. The subscribing Agency is the **Data Controller** responsible for managing member accounts, determining record retention rules, and ensuring compliance with applicable employment and public safety regulations.
 
 If you are an active member, employee, or volunteer using StationSync, your access is provisioned by your Agency. Inquiries regarding account creation, record alteration, or data deletion should be directed to your Department administrator.
 
@@ -57,9 +57,9 @@ All sub-processors are bound by strict data processing agreements requiring indu
 
 ### 5. Legal Disclosures, Public Records, and FOIA
 
-Because our customer Agencies are public sector or non-profit emergency service providers, data stored in StationSync may constitute official agency records. 
+Because our customer Agencies are public sector or non-profit emergency service providers, data stored in StationSync may constitute official agency records.
 
-* **Public Records Requests:** Your Department is solely responsible for responding to Freedom of Information Act (FOIA), state open records (e.g., Sunshine laws), or civil discovery requests. 
+* **Public Records Requests:** Your Department is solely responsible for responding to Freedom of Information Act (FOIA), state open records (e.g., Sunshine laws), or civil discovery requests.
 * **Legal Compulsion:** StationSync will not disclose Agency data to third parties or law enforcement except when strictly compelled by valid legal process (e.g., court order, warrant, or subpoena) or to protect life and safety in verified emergency situations. Where legally permitted, we will provide prompt notice to the affected Department administrator.
 
 ---
@@ -83,7 +83,7 @@ We implement administrative, technical, and physical safeguards designed to prot
 
 ### 8. User Rights and Inquiries
 
-Individual users seeking to review, update, or correct their personal profile data may do so directly through the User Profile interface within the application. 
+Individual users seeking to review, update, or correct their personal profile data may do so directly through the User Profile interface within the application.
 
 For requests involving the modification or deletion of official operational logs, training records, or timeclock histories, please contact your Department’s designated StationSync system administrator.
 

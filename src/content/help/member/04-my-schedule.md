@@ -1,10 +1,14 @@
 **My Schedule** is a month calendar of the shifts that concern you: the ones you are on, and the open ones you could take.
 
+IMAGE HERE
+
 The month in front of you is read when you open this screen, so the first look — or the first look at a month you have moved to — may show a brief **Loading …** line. That line is worth knowing about: a month with nothing scheduled at all looks the same as one that is still arriving, and the loading line is what tells them apart.
 
 ## Reading a pill
 
 Each shift is drawn as a colored pill. The color comes from the **assignment**, so you can tell at a glance which kind of shift it is.
+
+IMAGE HERE
 
 | Pill | Meaning |
 |---|---|
@@ -33,6 +37,8 @@ If you would rather see the month without them, click the button above the calen
 
 Click a shift or an event — or tap it on a touch screen — and a popup opens with everything the pill has no room for. It never changes anything: it reports, and the only buttons close it.
 
+IMAGE HERE
+
 | You clicked | The popup shows |
 |---|---|
 | **A solid shift** | The date or date range, the exact window, the assignment, and whether it is yours |
@@ -45,7 +51,9 @@ With the crew view on, a colleague's pill names them in the popup. In your own v
 
 ## On a phone: one day at a time
 
-On a narrow screen — a phone, or a window narrower than a tablet — the calendar shows **one day at a time** rather than a month, opening on **today**. Nothing is read twice for this: the day you are looking at is part of the month already loaded, so moving between days costs nothing.
+On a narrow screen — a phone, or a window narrower than a tablet — the calendar shows **one day at a time** rather than a month, opening on **today**. The day you are looking at is part of the loaded month, so moving between days is instant.
+
+IMAGE HERE
 
 | | Wide screen | Phone |
 |---|---|---|
@@ -55,13 +63,13 @@ On a narrow screen — a phone, or a window narrower than a tablet — the calen
 | **Day** (calendar button) | — | Opens a month to pick a day from |
 | A shift pill | Two clipped lines | Who is on it and its times, on two lines with room to read |
 
-**Getting to a day that is not nearby.** In the day view there is a **Day** button beside the arrows: it opens the month in a small window with nothing on it but the calendar. Tap any day and you are taken there. That is one press for *the 14th of next month*, where the arrows would be fourteen presses and a month boundary on the way — and it costs no extra reading, because a day inside the month you are already looking at was loaded with it, and a day in another month reads that month exactly as walking to it would.
+**Getting to a day that is not nearby.** In the day view there is a **Day** button beside the arrows: it opens the month in a small window with nothing on it but the calendar. Tap any day and you are taken there, which takes you directly to that date without having to tap through days one by one.
 
 The picker opens on the month you are reading, marks the day you are on, and has its own **◀ ▶** so you can page through months while you look — the calendar behind it does not move until you actually choose a day.
 
 The **Schedule Details** list below follows the view: a month of shifts under the calendar, or just the day's under a single day. The **Print** button prints a month either way — a printed sheet is a month, and the whole month is already loaded.
 
-Widening the window (or rotating a tablet) switches to the month on the spot, keeping the day you were reading, and costs no read. If you are reading the crew view on a phone, the pills still name each member and still carry their rank dot and certification icons.
+Widening the window (or rotating a tablet) switches to the month on the spot, keeping the day you were reading. If you are reading the crew view on a phone, the pills still name each member and still carry their rank dot and certification icons.
 
 ## Moving between months
 
@@ -73,6 +81,8 @@ Use the arrows either side of the month name, or the **Today** button to jump ba
 2. Click it and confirm in the dialog.
 3. The pill turns amber. Your offer is now waiting in **Pending Approvals**.
 
+IMAGE HERE
+
 An administrator approves or declines it. If it is approved, the shift becomes yours and appears as a solid pill.
 
 **If it is declined, that is final for the app.** The pill turns rose and reads *Declined*, and you cannot offer for that shift again — the button is gone, and the app refuses the offer even if you still had the page open from before. That is deliberate: it stops the same offer from going back and forth, and it keeps a decision a decision. **It does not mean you can never work that shift.** If your circumstances changed, or you think the shift was turned down by mistake, speak to an officer — they can put you on it directly, and a shift filled that way works exactly like one you were approved for.
@@ -81,9 +91,16 @@ While an offer is still waiting you cannot offer a second time on the same shift
 
 You can only offer on shifts your rank qualifies for.
 
+![enable push notifications|350](../../../../public/help/member/04-my-schedule-1792847471984.png)
+
+And this is what that looks like:
+![push notification|350](../../../../public/help/admin/12-announcements-1792849630097.png)
+
 ## Printing your schedule
 
 Use the **Print** button above the calendar to print a month of your shifts — a clean calendar sheet with the department's patch at the top, the month and your name, and every shift you are on with its times and assignment. Your browser's print dialog opens; choose your printer or **Save as PDF**.
+
+IMAGE HERE
 
 - **It prints the month you are looking at**, so use the arrows first if you need a different one.
 - **It follows the Show everyone button.** With it off you get your own shifts; with it on you get the whole crew's, each line naming the member. So if you want a printout of everyone, turn the whole crew on first.

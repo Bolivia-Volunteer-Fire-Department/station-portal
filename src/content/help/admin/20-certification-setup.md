@@ -2,12 +2,16 @@
 
 *People → Certification Setup* defines the certifications the station tracks. Nothing can be recorded against a certification until it exists here.
 
+IMAGE HERE
+
 > [!IMPORTANT]
 > Requires the **Set up certifications** permission.
 
 ## What each certification decides
 
 Press **New certification type** at the right of the table to add one, or **Edit** on a row. Either opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls. A certification type that records still use cannot be deleted — see below.
+
+IMAGE HERE
 
 | Field | What it controls |
 |---|---|

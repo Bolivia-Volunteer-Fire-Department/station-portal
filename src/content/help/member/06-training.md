@@ -1,5 +1,7 @@
 The **Training** module is the department's training record that replaces paper records. Each row is a training activity the department held, and you sign the ones you attended. Administrators can then see who has signed each one.
 
+IMAGE HERE
+
 The record is read when you open this screen, so a brief **Loading …** line the first time is normal. A list that is still arriving shows that line; a list with nothing in it shows none.
 
 > [!NOTE]
@@ -9,11 +11,13 @@ The record is read when you open this screen, so a brief **Loading …** line th
 
 Depending on your role, the record card gains an **Add training** button and each row gains an **Edit** action. Either one opens the editor **over the page**, with Save and Cancel in a bar at the top of it that stays put while the form scrolls.
 
+IMAGE HERE
+
 - The form takes a date, title, start time, duration in hours, location, instructors and a narrative, plus the classification checkboxes.
 - **A date and a title are required** — without them there is nothing to display or sign, so the form will not save.
 - Editing changes the training for everyone, since everyone signs the same activity.
 
-**A training can only be edited until the first person signs it.** After that the record is evidence, not a draft, and its **Edit** action is grayed out for everyone — corrections move to the Administration module, where the change is a deliberate step. The tooltip on a grayed-out Edit says which of the two reasons applies.
+**A training can only be edited until the first person signs it.** After that the record is evidence, not a draft, and its **Edit** action is grayed out for everyone — corrections must be made by an administrator or training officer. The tooltip on a grayed-out Edit says which of the two reasons applies.
 
 You cannot **delete** a training: that would throw away other members' signatures with it. If something needs to be fixed, let an administrator know.
 
@@ -23,11 +27,13 @@ You cannot **delete** a training: that would throw away other members' signature
 2. The button changes to **Ready to sign** so you can see what is waiting.
 3. When you have marked everything as appropriate, press **Save signatures** once.
 
+IMAGE HERE
+
 The header keeps a count of your changes, such as **3 unsaved signatures**, so you can tell at a glance whether anything is pending.
 
 ## Trainings close for signature
 
-A training can be signed for a set number of days after its date — the **signing window**, set by an administrator in System Settings. Once it has passed, the **Sign** button reads **Closed**, and the tooltip says which reason applies: the window, or the training having been filed in an external system. The line above the list states the window, so you can see how long you have before you start.
+A training can be signed for a set number of days after its date — the **signing window**, set by department policy. Once it has passed, the **Sign** button reads **Closed**, and the tooltip says which reason applies: the window, or the training having been filed in an external system. The line above the list states the window, so you can see how long you have before you start.
 
 **Sign what you attended while it is open.** A signature recorded months later is worth much less than one given at the time — which is the whole reason for the window — and a total like *3 of 40 signed* stops meaning anything if a year of signings arrives at once.
 
@@ -44,6 +50,8 @@ Once a training shows **Signed**, the button is disabled and stays that way. Tha
 ## Filtering and your training hours
 
 Above the list is a **Filter & sort** bar, and under it are totals for whatever the filters leave showing:
+
+IMAGE HERE
 
 | Control | What it narrows to |
 |---|---|

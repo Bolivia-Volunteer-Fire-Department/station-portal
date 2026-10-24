@@ -157,10 +157,10 @@ export const ROUTED_FEATURES = {
     switchReads: [],
   },
 
-  // User preferences (theme, notification toggles, FEMA student ID).
+  // User preferences (theme, notification toggles, FEMA student ID, profile picture).
   memberSettings: {
     requires: ['memberPayload'],
-    writes: ['UPDATE_USER_SETTINGS', 'SAVE_MEMBER_PRIVATE'],
+    writes: ['UPDATE_USER_SETTINGS', 'SAVE_MEMBER_PRIVATE', 'SAVE_MEMBER_AVATAR'],
     switchReads: [],
   },
 

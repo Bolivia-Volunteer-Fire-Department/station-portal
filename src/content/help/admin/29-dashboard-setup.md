@@ -1,6 +1,8 @@
 # Station Dashboard Layout Setup
 
-*Administration → Content → Dashboard Setup* lets administrators design and arrange the default dashboard layout that all members see when signing into StationSync.
+*Content → Dashboard Setup* lets administrators design and arrange the default dashboard layout that all members see when signing into StationSync.
+
+IMAGE HERE
 
 > [!IMPORTANT]
 > Configuring the station default dashboard layout requires the **Manage dashboard setup** permission.
@@ -8,6 +10,8 @@
 ## Station Default Layout
 
 The Dashboard serves as the command center for station operations and timekeeping. Administrators can organize widget cards across a flexible 3-column grid to ensure members immediately see the most relevant operational information:
+
+IMAGE HERE
 
 - **Station Time & Duty Status**: Permanently locked in the top-left position and non-resizable. This guarantees members can always quickly punch in or out and check active shift time.
 - **On Duty Personnel**: Displays members currently clocked into the station along with their active roles and ranks.

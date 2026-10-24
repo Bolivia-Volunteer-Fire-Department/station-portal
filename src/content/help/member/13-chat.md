@@ -1,5 +1,7 @@
 An optional communication tool for the station.
 
+IMAGE HERE
+
 > [!IMPORTANT]
 > Access to the **Chat** interface is controlled by role permissions. If you don't see the chat and you are expecting to, ask an administrator for help.
 
@@ -13,6 +15,8 @@ Either way it is one conversation, not two: open one, close the other, and you c
 ## The room list
 
 Every room your role, your rank or you yourself are named by, in the order the station put them in. Each row shows the last message and, if there is anything new, how many messages have arrived since you last looked.
+
+IMAGE HERE
 
 Open a room and it is marked read. **Mute this room** (the speaker button, once a room is open) stops a room counting towards your number while still showing it in the list — muted is *quiet*, not *hidden*.
 
@@ -35,11 +39,13 @@ If the panel is shut, a message brings a small notice — unless the room is mut
 
 **Message a member**, at the top of the room list, starts a conversation nobody else can see.
 
-- **Only members whose role grants Chat are offered.** If somebody is missing from the list, their role cannot use chat at all — an officer can change that in Administration → Roles. Nothing is hidden from you: the list is exactly who you can talk to.
+IMAGE HERE
+
+- **Only members whose role grants Chat are offered.** If somebody is missing from the list, their role cannot use chat at all — an officer can grant chat permissions to their role. Nothing is hidden from you: the list is exactly who you can talk to.
 - **Pick one person, or several.** A group conversation works the same way, up to 12 members including you.
 - **It has no name of its own.** It is called whatever the other members are called, from your side: to you it says "Ben", and to Ben it says you. That is also why nobody can rename it — there is nothing to rename.
 - **Starting one twice does not make two.** Press "message" on Ben again, or Ben presses it on you, and you both land in the conversation you already had.
-- A private conversation does **not** appear in Administration → Chat Rooms. It is yours, not the station's.
+- A private conversation is private to participants and does not appear in department room listings. It is yours, not the station's.
 
 ## Sounds
 
@@ -59,7 +65,7 @@ Two rules run through all of them:
 - **A muted room is silent.** Muting a room already stops it counting towards your number, and it stops its sounds too.
 - **Your own message never rings at you.** It makes the send sound once, when it goes — not again when it echoes back, and not when your own badge moves.
 
-Everything goes through the app's own sound engine, so the **sound switch in your User Profile under My Settings** applies to chat as well, and an administrator can change how loud each of the six is on the **Debug** page — alongside every other sound the app ships.
+Everything goes through the app's own sound engine, so the **sound switch in your User Profile under My Settings** applies to chat as well.
 
 ## Sending needs a connection
 
@@ -69,4 +75,4 @@ Chat is live, so messages arrive as they are sent. Sending, though, goes through
 
 ## If a room is missing
 
-Rooms are set up by an officer in *Administration → Chat Rooms*, and who can see each one is decided there. If you expect a room and cannot see it, that is the answer to give them.
+Rooms are created and managed by department officers, and who can see each one is decided there. If you expect a room and cannot see it, that is the answer to give them.

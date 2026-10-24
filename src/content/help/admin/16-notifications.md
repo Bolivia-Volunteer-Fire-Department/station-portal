@@ -1,5 +1,7 @@
 *System → Notifications* configures push notifications: telling members about their shifts, and telling approvers about new offers. Three cards, and the first one is administrator-only.
 
+IMAGE HERE
+
 > [!IMPORTANT]
 > Maintaining notifications and notification settings requires the **Manage notification settings**.
 
@@ -27,6 +29,8 @@ The switches here decide what members receive **by default**. They are defaults 
 Turning a default off does not stop a member who has explicitly opted in from receiving it.
 
 ## Device Status
+
+IMAGE HERE
 
 A per-member table showing, for each person:
 

@@ -1,20 +1,17 @@
-The station's own documents: procedures, policies and checklists, written and organized here and read by members in the **Documents** module.
+*Content → Documents* holds the station's own documents: procedures, policies and checklists, written and organized here and read by members in the **Documents** module.
+
+![The documents screen](../../../../public/help/admin/13-documents-1792850329167.png)
 
 > [!IMPORTANT]
 > Access to this area requires the **Manage documents** role permission, which itself requires **View documents**. A role with **Verify signatures** also opens this tab, but sees only the verification view at the bottom of it — never the editor.
 
-Unlike the Help guides — which are files in the app's repository, written by whoever maintains it — these are written **from this screen**, by your own administrators, and stored on the station's server. Adding one needs no code change and no new deployment.
+Unlike the Help guides — which are files written by StationSync — documents are written **from this screen** by your own administrators, and stored on the station's database.
 
 ## Writing a document
 
-Press **New document** at the top of the list — or choose a document from it — and the editor opens **over the page**, taking most of the screen. It is not a small dialog: it is the fields below, plus the markdown body, plus — on a checklist — the items and the whole signature record, and all of that needs room. The list behind it is untouched until you save.
+Press **New document** at the top of the list — or choose a document from it — and the editor opens. It is not a small dialog...
 
-**Save and Cancel live in the bar at the top**, which stays put while the rest of the editor scrolls underneath it. That matters on a 40-item checklist: the bottom of the form is a long way from the top of it, and Save should not be. **Delete** is up there too, for a document that already exists.
-
-While a save is in flight the editor is **disabled** — every field, in one go — and the bar shows a spinner saying whether it is saving or still opening. It cannot be dismissed in that moment: Escape, clicking outside and Cancel are all ignored until the write comes back, because a form that vanishes mid-save leaves you with no way to know whether it saved. When it does come back the editor closes, and only then — a save that fails keeps it open with the reason in it, and nothing you typed is lost.
-
-> [!TIP]
-> On a phone the editor is the whole screen, with the toolbar pinned above a scrolling form, so a thumb never has to find a Save button at the bottom of a long checklist.
+![new document example](../../../../public/help/admin/13-documents-1792850524367.png)
 
 | Field | What it does |
 |---|---|
@@ -55,6 +52,8 @@ The document list marks what state each one is in — **· draft**, **· schedul
 
 Write mode is a rich editor: the document appears as it will be read, and formatting is applied to whatever is selected, exactly as in a word processor.
 
+![the word processor](../../../../public/help/admin/13-documents-1792850846240.png)
+
 | Button | What it does to the selected text or the line the cursor is in |
 |---|---|
 | **B**, *I*, Highlight, `</>` | Bold, italic, a yellow highlight, or inline code |
@@ -84,7 +83,7 @@ Clicking **Table** again does not delete it; use **Delete the table**. The heade
 
 Three things worth knowing:
 
-- **Pasting brings only the text.** A paragraph copied from a web page arrives as plain text rather than dragging a font, a size and a link along with it.
+- **Pasting brings only the text.** A paragraph copied from a web page arrives as plain text rather than dragging a font, a size and a link along with it. This is an intentional headache-saver for you.
 - **Markdown mode** (the middle tab) shows the same document as plain markdown. It has the same toolbar, and it is the mode for what a toolbar cannot express — repairing a table's divider row, or pasting markdown written somewhere else. Nothing is lost by switching between the two: they are two views of one document.
 - **Preview** is the member's own renderer, not a second one, so if it looks right there it looks right for them.
 
@@ -92,7 +91,7 @@ Three things worth knowing:
 > A table needs its **divider row** (`| --- | --- |`) to be a table at all. The Table button writes one for you; in Markdown mode the second line is the one to keep intact, and a row with fewer cells than the header is padded to match rather than breaking the table.
 
 > [!NOTE]
-> A document holds about **45,000 characters**, which is a long procedure. If you run past it, the counter turns red and the save is refused with the limit named — split it into two documents rather than shortening a procedure to fit.
+> A document holds about **45,000 characters**, which is a long document. If you run past it, the counter turns red and the save is refused with the limit named — split it into two documents rather than shortening a document to fit. It will be easier for your members to consume as well.
 
 ## Formatting, in markdown mode
 
@@ -114,13 +113,19 @@ The callout boxes are the colored panels you see throughout these guides — *No
 
 ## Folders
 
+![folders](../../../../public/help/admin/13-documents-1792851003355.png)
+
 A folder is simply a name carried by the documents in it, so there is no folder to create, rename or leave empty: it appears when the first document uses the name and disappears when the last one moves out.
 
 The folder button beside a heading opens a rename box. Renaming moves **every document in that folder**, and clearing the name moves them all to *Unfiled*. Documents with no folder are shown last, under **Unfiled**.
 
 **The library is two columns** — the folders, then the documents in the folder you picked — and they use the whole width of the card. There is no third column held open for a document: opening one takes the entire card, and the back arrow in the header hands it back. So the space you are working in is never half list and half empty pane.
 
+![the library columns](../../../../public/help/admin/13-documents-1792851042862.png)
+
 ## Ordering
+
+![ordering by dragging](../../../../public/help/admin/13-documents-1792851397438.gif)
 
 Position is set by **dragging**, not by typing numbers:
 
@@ -131,31 +136,18 @@ Position is set by **dragging**, not by typing numbers:
 
 **Move as many rows as you like, then save once.** Nothing is written while you are rearranging, so you can drag one document, drag another, change your mind and drag the first one back — and the library is untouched until you commit to a finished list. An amber bar appears above the list saying how many positions are waiting, with two buttons:
 
-| Button | What it does |
-|---|---|
-| **Save order** | Writes every move in **one** go, and the bar disappears. Until you press it, the library keeps the order it had |
-| **Discard** | Puts the rows back where they are stored, without needing to reload anything — for when an arrangement does not work out |
-
-A drag that ends where it started — including dropping a document back into the gap it is already sitting in — leaves nothing to save, and the bar does not appear at all.
-
 > [!IMPORTANT]
-> **An unsaved order is kept if you switch tabs.** Move to another Administration tab and come back and the bar is still there with your arrangement — that is deliberate, because losing a list you had just spent time ordering would be worse than a save button. It is held for the browser session only: closing the window without pressing **Save order** does discard it.
+> **An unsaved order is kept if you switch tabs.** Move to another Administration tab and come back and the bar is still there with your arrangement. It is held for the browser session only: closing the window without pressing **Save order** does discard it.
 
 > [!NOTE]
-> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open — the same move, done without dragging, and the first and last rows of a folder simply have the button grayed out. Those stage a move exactly like a drag does, and because the editor covers the list the count and a **Save order** button appear right beside them — so an iPad can set a position and save it without ever leaving the editor. If your crew writes documents on an iPad, that is the way to set a position.
-
-A drag **never changes a document's folder**: the folder is a field on the document, and dragging is about position. Drop a document into another folder's gap, or onto a row from another folder, and the app says so instead of moving it silently — change the **Folder** field for that.
-
-> [!NOTE]
-> A folder only exists as a name carried by the documents in it, so there is no folder order stored anywhere: a folder sits where its first document sits. That is why dragging a folder heading rewrites the order of the documents inside it — it is the only thing there is to write.
+> **A tablet cannot drag.** Touch screens do not fire the events dragging is built on, so the editor also has **Move up** and **Move down** for the document you have open. If your crew writes documents on an iPad, that is the way to set a position.
 
 ## Publishing and deleting
 
 New documents are **visible to members straight away**, so uncheck *Visible to members* before you start writing something you would rather nobody read yet.
 
 > [!CAUTION]
-> A document that has been signed **cannot be deleted** — the app refuses and tells you how many signatures it has. Unpublish it instead. A signature is a record that somebody read a procedure, and deleting the procedure would leave that record pointing at nothing.
-> **Deleting is for mistakes; an end date is for superseding.** If a procedure is simply being replaced, give it an **End Date** rather than deleting or unpublishing it: the new one takes over the list, and the old one stays here with the record of who signed it and when.
+> A document that has been signed **cannot be deleted**. Unpublish it instead. If a procedure is simply being replaced, give it an **End Date** rather than deleting or unpublishing it: the new one takes over the list, and the old one stays here with the record of who signed it and when.
 
 ## Signatures
 
@@ -171,10 +163,6 @@ Selecting a document shows a **Signatures** panel below its fields, in the same 
 | **before the last edit** | A signature taken before the current wording. Editing a document makes existing signatures stale, which is the point: a signature that appears to approve text nobody read is the one way this feature misleads |
 | **remove signature** | The only way a signature ever disappears. It is recorded in the system log, and it puts the member back on the outstanding list |
 | **remove verification** | Removes one verifier's confirmation and leaves the signature it confirmed in place, waiting to be verified again |
-
-The panel is **paged**, ten rows at a time, and the pager only appears when there is more than one page. A checklist fills up quickly — every member times every item is a row — and this is what keeps the panel from pushing the document's own fields off the screen.
-
-On a checklist, **each item appears once per member**. A signature and a verification are two separate records, and this panel used to draw them as two lines, so every verified item looked as though it had been done twice with "Verified by…" underneath. The item and the person are now the row, with the verification shown on it. The two remain separately removable, which is why the buttons name which one they remove.
 
 > [!WARNING]
 > Editing a document does not require anyone to sign again — it marks the signatures they already gave as older than the current text. Whether that matters is a judgment for you, which is why it is reported rather than enforced.
@@ -239,8 +227,7 @@ The list shows each item's order as `#0`, `#1` and so on, so you can see what a 
 > **Every document opens as itself.** **New document** starts with an empty title, no text and **no items at all**, even straight after you have saved another checklist — the lines you just wrote belong to the checklist that was saved, and opening it again is how you get back to them. The same is true of the count beside *Checklist items*: it counts the items of the document you are looking at.
 
 > [!IMPORTANT]
-> Editing an item **keeps its signatures attached to it** — a signature points at the item's identity, not at its wording, so fixing a typo does not throw away somebody's work. Changing any item does mark signatures taken earlier as **before the last edit**, exactly as editing a document's text does.
-> An item that has been signed **cannot be removed**. The app refuses and tells you how many signatures it has. That is deliberate: a signature must never outlive the thing it was about.
+> Editing an item **keeps its signatures attached to it** — a signature points at the item's identity, not at its wording, so fixing a typo does not throw away somebody's work. Changing any item does mark signatures taken earlier as **before the last edit**, exactly as editing a document's text does. An item that has been signed **cannot be removed**. The app refuses and tells you how many signatures it has. That is deliberate: a signature must never outlive the thing it was about.
 
 Members check the items they have done and save them in one go, so a forty-line checklist is still one press. Signing the document itself is separate from signing its items — a checklist that needs both shows both.
 

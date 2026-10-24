@@ -1,5 +1,7 @@
 A small hidden game, and the one part of the app with a station-wide scoreboard.
 
+IMAGE HERE
+
 ## Finding it
 
 Click on **something** a few times. Once the game is open, clicking the logo returns you to the dashboard. The game is an easter egg, so nothing in the app points at it — nothing that matters is affected by playing it.
@@ -11,6 +13,8 @@ Jump the hydrants and the parked firetrucks (**Space** or **↑**) and duck the 
 The game has music and sound effects, with **MUSIC** and **SOUNDS** buttons at the top to switch each off.
 
 ## The leaderboard
+
+IMAGE HERE
 
 **BOARD** at the top, beside the sound buttons, opens the station's leaderboard: everyone's personal best, highest first, with your own line picked out in yellow. It shows the top 25 and says how many members have a score in total, so "top 25 of 40" means forty of you have played and there are more behind the ones on screen. Escape, the ✕ or **CLOSE** puts it away, and a run in progress pauses while the board is open — it carries on from exactly where it was when you close it.
 

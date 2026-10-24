@@ -48,8 +48,8 @@ export default function ScheduledTasksWidget({
 
   const todayKey = useMemo(() => stationTodayKey(), []);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     setError('');
     try {
       const [tplsRes, entriesRes, apparatusRes] = await Promise.all([
@@ -66,7 +66,7 @@ export default function ScheduledTasksWidget({
     } catch (err) {
       setError(err?.message || 'Failed to load scheduled tasks.');
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, [token, todayKey]);
 
@@ -88,8 +88,9 @@ export default function ScheduledTasksWidget({
         return perms.canView;
       })
       .map((tpl) => {
-        // Find if there is an entry created today for this template
-        const match = todayEntries.find((e) => e.template_id === tpl.id);
+        // Find if there is an entry created today for this template (prefer signed)
+        const matches = todayEntries.filter((e) => e.template_id === tpl.id);
+        const match = matches.find((e) => e.status === TASK_NOTE_STATUS.SIGNED) || matches[0] || null;
         const isSigned = match?.status === TASK_NOTE_STATUS.SIGNED;
         const isDraft = match?.status === TASK_NOTE_STATUS.EDITABLE;
         const apparatus = apparatusList.find((a) => a.id === tpl.apparatus_id);
@@ -124,15 +125,34 @@ export default function ScheduledTasksWidget({
   };
 
   const handleSaved = (savedEntry) => {
-    setTodayEntries((prev) => {
-      const idx = prev.findIndex((e) => e.id === savedEntry.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = normalizeTaskNoteEntry(savedEntry);
-        return next;
-      }
-      return [normalizeTaskNoteEntry(savedEntry), ...prev];
-    });
+    if (savedEntry) {
+      setTodayEntries((prev) => {
+        const entryId = savedEntry.id;
+        const idx = entryId ? prev.findIndex((e) => e.id === entryId) : -1;
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = normalizeTaskNoteEntry(savedEntry);
+          return next;
+        }
+        if (savedEntry.template_id) {
+          const tplIdx = prev.findIndex((e) => e.template_id === savedEntry.template_id);
+          if (tplIdx >= 0) {
+            const next = [...prev];
+            next[tplIdx] = normalizeTaskNoteEntry(savedEntry);
+            return next;
+          }
+        }
+        return [normalizeTaskNoteEntry(savedEntry), ...prev];
+      });
+    }
+    void loadData(true);
+  };
+
+  const handleDeleted = (deletedId) => {
+    if (deletedId) {
+      setTodayEntries((prev) => prev.filter((e) => e.id !== deletedId));
+    }
+    void loadData(true);
   };
 
   const completedCount = scheduledTasks.filter((t) => t.isCompleted).length;
@@ -317,6 +337,7 @@ export default function ScheduledTasksWidget({
               setModalTemplate(null);
             }}
             onSaved={handleSaved}
+            onDeleted={handleDeleted}
           />
         );
       })()}

@@ -887,6 +887,8 @@ const main = async () => {
   await read('and the pins', true, pinDoc);
   await write('but does not write either of them', false, boundaryDoc, BOUNDARY_FIELDS);
   await write('no, not the pins either', false, pinDoc, PIN_FIELDS);
+  const settingsDoc = doc(db, 'settings', 'test_map_settings');
+  await write('and cannot write settings without permission', false, settingsDoc, { department_name: 'Test' });
 
   await asUser('u1');
   await setDoc(doc(db, 'roles', 'r2'), { can_edit_map: true }, { merge: true });
@@ -894,6 +896,8 @@ const main = async () => {
   await write('granted the editing flag, the same member sets the boundary', true, boundaryDoc, BOUNDARY_FIELDS);
   await write('and adds a pin', true, pinDoc, PIN_FIELDS);
   await remove('and can take a pin down again', true, pinDoc);
+  await write('and can write settings with map editing permission', true, settingsDoc, { department_name: 'Test' });
+  await remove('and can clean up test settings', true, settingsDoc);
 
   // THE FIELDS AND THE POSITION. A pin whose latitude is missing, or off the planet, is refused here as well as in the
   // browser: it is the one fault that draws a pin beautifully in the wrong country. Zero is a legal latitude, so the check

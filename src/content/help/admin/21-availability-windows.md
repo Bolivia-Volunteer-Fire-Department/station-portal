@@ -1,10 +1,14 @@
 # Availability Windows
 
-*Scheduling → Availability Windows* is where you define the **weekly patterns members can mark themselves available for**. Until at least one window exists, members have nothing to choose from.
+*Scheduling → Availability Window Setup* is where you define the **weekly patterns members can mark themselves available for**. Until at least one window exists, members have nothing to choose from.
+
+IMAGE HERE
 
 > Editing this tab requires the **Manage availability windows** role permission. It is separate from *Manage member availability*, which governs the roster of members' own choices — shaping the station's week and correcting one member's claims are different jobs.
 
 The window list is read when you open this tab, so a brief **Loading …** line the first time is normal. A list still arriving shows that line; a list with nothing in it shows none.
+
+IMAGE HERE
 
 A window is a recurring weekly block of time with a name:
 

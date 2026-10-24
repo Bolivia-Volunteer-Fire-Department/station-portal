@@ -1,65 +1,59 @@
-## Definition
-
-A user is the term for someone who has a profile in this application. Sometimes users are referred to as "members", meaning a member of the fire department.
+*People → Members* is where department user accounts and personnel profiles are managed.
 
 > [!IMPORTANT]
 > Configuring users requires the **Manage users** role permission.
 
 ## The fields
 
+![The members page](../../../../public/help/admin/02-users-1792799277821.png)
+
 | Field | Notes |
 |----|----|
-| **Name** | The display name used everywhere — schedules, clock entries, availability, notifications |
-| **Username** | What they sign in with. Must be unique |
-| **Password** | On a new member, the password they start with; on an existing one, leave blank to keep the current password |
-| **Must change password at next login** | Sits under the password field. The member signs in with the password once, then has to choose their own before they can do anything else |
-| **Status** | **Active** or **Inactive** |
-| **Role** | Decides which modules and which Administration tabs they get — see **Roles** |
-| **Rank** | Decides which shifts they may be given and offered — see **Ranks** |
-| **Scheduling** | Whether the member is excluded from scheduling |
+| **Certification Icons** | A quick glance at critical certifications this member may have - see **Certifications** |
+| **Actions** | Clickable buttons for you to either **edit** or **delete** |
 
 > [!NOTE]
-> **Name matters more than you might expect.** It is what members see on the *Currently on duty* card, what appears on schedule pills and in the crew list, and what is sent in a push notification. The username is only ever a login.
-
-## Excluded from scheduling
-
-Set **Scheduling** to exclude a member and they are left out of the schedule entirely: they are not offered open shifts, and their availability calendar stays empty. On the schedule board they are grouped separately from the eligible members with the reason shown, rather than being hidden, so you can see that they exist and why they are not available.
-
-Use it for anyone who is not on the roster — new recruits in training, someone on long-term leave, retired members kept for their clock history. It is a scheduling flag only: they keep their rank, their history and their access.
+> **Name matters more than you might expect.** It is what members see on the *Currently on duty* card, what appears on schedule pills and in the crew list, and what is sent in a push notification. We recommend using just their first and last name, do not prefix their name with their rank.
 
 ## Creating and editing
 
-1. Press **New member** at the top right of the roster — the editor opens over the page, with Save and Cancel in a bar at the top of it. Fill in the form and save. For a new member the password is required, since there is nothing to keep.
-2. Allow a few seconds — an admin save reloads the whole directory, the schedule, the templates and the offers, so other tabs reflect the change immediately.
+1. Press **New member** at the top right of the roster.
+2. The editor opens over the page, with Save and Cancel in a bar at the top of it.
+3. Fill in the form and save.
+4. **Allow a few seconds** — an admin save reloads the *whole* directory, the schedule, the templates and the offers, so other tabs reflect the changes immediately.
+
+## Personal details
+
+![A user config form](../../../../public/help/admin/02-users-1792798526459.png)
+
+| Field | Notes |
+|---|---|---|
+| **Username** | What they sign in with, it must be unique. The username is only ever used for logging in. |
+| **Name** | The display name used everywhere — schedules, clock entries, availability, notifications |
+| **Password** | The string of alphanumeric characters that are used to log in. You may require a certain password strength in **System Settings**. |
+| **Must change password at next login** | (See below) |
+| **Status** | **Active** or **Inactive** - inactive members are not shown in the crew list, and cannot be assigned to shifts. |
+| **Role** | Decides what the user can do in the system — see **Roles** |
+| **Rank** | Decides which shifts they may be given and offered, as well how to style their name and icon across the app — see **Ranks** |
+| **Member ID** | The station's own number for the member, we recommend using an assigned radio callsign, if the member has one. This number may be reused once somebody goes inactive. |
+| **FEMA Student ID** | The *Student Identification* number from FEMA's training system. At least in North Carolina where this software originates, this number has become increasingly more important. |
+| **Email Address** | For the station's records, this has no impact on the app's functionality. |
+| **Phone Number** | For the station's records, this has no impact on the app's functionality. |
+| **Runner Sound Profile | For the mini game "Firefighter Runner", which has it's own guide. For amusement purposes, you can set special sound sets to a user's profile. Contact StationSync if you are interested in this. |
 
 > [!NOTE]
 > **Leaving the password blank on an edit keeps the existing one.** Passwords are stored as a salted hash, so the form cannot show you the current one; blank is how you say "do not change it". Typing a new password replaces it and **signs that member out of their other sessions** — worth warning them about.
 
 ## Handing over a password the member has to replace
 
-Check **Must change password at next login** when you set someone's password for them — a new member, or anyone who has forgotten theirs. They sign in with that password once and land straight on a *Choose a new password* popup; until they save a new one they cannot open any other part of the portal. They can sign out instead, but signing back in brings the same popup until a new password is saved.
-
-The flag clears itself the moment they set their own password, so nothing has to be unchecked afterwards. Until they do, the member stands out on the Users list with a **Password change due** badge — worth checking there before you phone somebody about a problem signing in.
+You should always check **Must change password at next login** when you set someone's password for them — a new member, or anyone who has forgotten theirs. They sign in with that password once are brought straight to a *Choose a new password* popup. They cannot open any other part of the app until they save a new one, or, they can sign out instead.
 
 > [!NOTE]
-> **The check and the password belong together.** Unchecking the box does not change anybody's password; it only says the current one may be kept. If you set a password, type it, and leave the box unchecked, the member keeps that password for as long as they like.
+> **The check and the password belong together.** Unchecking the box does not change anybody's password; it only says whether or not the current one may be kept.
 
 ## Deactivating rather than deleting
 
-Setting **Status** to *Inactive* is usually better than deleting. An inactive member cannot sign in, but their clock history, past shifts and availability stay intact, and reactivating them later restores everything. Deleting removes the row, and their records are left pointing at a member who no longer exists, which can cause errors.
+Setting **Status** to *Inactive* is usually better than deleting. An inactive member cannot sign in, but their clock history, past shifts and availability stay intact, and reactivating them later restores everything. Deleting removes the row, and their records are left pointing at a member who no longer exists, **which can cause errors**.
 
 > [!CAUTION]
 > Only delete users that have no information related to them, or are duplicated.
-
-## Personal details
-
-Each member's editor carries four fields that are **not** on the station roster, because a roster is readable by every member and these are personal:
-
-| Field | Who may change it | Notes |
-|---|---|---|
-| **Member ID** | Officers only | The station's own number for the member. **Members never see it** — it is not carried into their account at all — so it can be an internal reference without being something they can quote wrongly. It may be reused once somebody goes inactive. |
-| **FEMA Student ID** | The member, or an officer | The *Student Identification* number from FEMA's training system. |
-| **Email Address** | The member, or an officer | For the station's records. Sign-in still uses the username, so this never changes how somebody logs in. |
-| **Phone Number** | The member, or an officer | For the station's records. |
-
-All four sit on the member's **private record** rather than the roster, and they are offered when adding a member too, so they can be recorded as they join. Members keep their own three up to date from their **User Profile → Personal Information**; only an officer can set the member ID.

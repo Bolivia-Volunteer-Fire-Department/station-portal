@@ -2,10 +2,14 @@
 
 *Assets → Apparatuses* lets officers track all fire department vehicles, response trucks, pump ratings, and service schedules in one organized place.
 
+IMAGE HERE
+
 > [!IMPORTANT]
 > Managing the apparatus bay requires the **Manage apparatuses** permission.
 
 ## Apparatus categories and types
+
+IMAGE HERE
 
 Every vehicle in your station fleet can be recorded with its specific type and mission:
 

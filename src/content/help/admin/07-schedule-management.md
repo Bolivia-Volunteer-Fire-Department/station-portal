@@ -1,11 +1,15 @@
 *Scheduling → Schedule Management* places the weekly templates on **real dates** and is where you build and repair the roster. Everything else on this page assumes the templates and assignments are already correct.
 
+![schedule management](../../../../public/help/admin/07-schedule-management-1792811959464.png)
+
 > [!IMPORTANT]
 > Managing the schedule requires the **Manage the schedule** role permission.
 
 ## Reading the board
 
 Each month is read when you open it or move to it, so a brief **Loading …** line is normal while you move around the calendar. When it is gone, what you see is the month in full.
+
+![A day of shifts|250](../../../../public/help/admin/07-schedule-management-1792812047119.png)
 
 Each day shows its shifts, ordered by start time. A shift is one of:
 
@@ -21,7 +25,7 @@ Vacant shifts also carry a warning icon, and an orange count appears in the head
 
 ## On a phone: one day at a time
 
-The board reads the **month today falls in** and shows you **today**, one day to a card, rather than the whole month on a screen too narrow to read it. Nothing is read twice for this: the day you are looking at is part of the month already loaded, so moving between days costs nothing.
+The board reads the **month today falls in** and shows you **today**, one day to a card, rather than the whole month on a screen too narrow to read it. The day you are looking at is part of the loaded month, so moving between days is instant.
 
 | | Wide screen | Phone |
 |---|---|---|
@@ -31,7 +35,7 @@ The board reads the **month today falls in** and shows you **today**, one day to
 | **Day** (calendar button) | — | Opens a month to pick a day from |
 | Member picker | A panel anchored to the pill or slot you clicked | A dialog, with the day's pills left uncovered |
 
-**Getting to a day that is not nearby.** The **Day** button beside the arrows opens the month in a small window that holds nothing but the calendar. Press a day and the board goes there — one press for *the 14th of next month*, where the arrows would be fourteen presses and a month boundary on the way. It reads no more than the walk would: a day inside the month on screen is already in hand, and a day in another month reads that month.
+**Getting to a day that is not nearby.** The **Day** button beside the arrows opens the month in a small window that holds nothing but the calendar. Press a day and the board goes there — one press for *the 14th of next month*, which takes you directly to that date without stepping through days one by one.
 
 The picker has its own **◀ ▶** for paging through months while you look, and the board behind it does not move until you choose a day. It opens on the month you are reading, with the day you are on marked.
 
@@ -39,7 +43,7 @@ Because a day has the whole card to itself, its pills are **not clipped**: a shi
 
 **On a phone the member picker is a dialog.** Clicking a pill or an empty slot opens the same picker in the middle of the screen rather than as a panel hanging off what you clicked: a 300px panel anchored to a pill covers the very shifts you are choosing between, on a screen that is barely wider than the panel. The list and the actions are identical — Escape, the backdrop and the ✕ all close it — and on a wide screen it goes back to hanging off the pill, where there is room for it.
 
-Walking past the last day of a month moves into the next one and reads it, exactly as the calendar does — one month of shifts at a time, whichever view you are in. Resizing the window (or rotating a tablet) switches between the two views on the spot, keeping the day you were reading, and costs no read.
+Walking past the last day of a month moves into the next one and reads it, exactly as the calendar does — one month of shifts at a time, whichever view you are in. Resizing the window (or rotating a tablet) switches between the two views on the spot, keeping the day you were reading, smoothly.
 
 > [!NOTE]
 > The switch happens at the same width the sidebar changes shape at, so the board and the layout around it always agree about whether this is a phone-shaped window or a wide one.
@@ -48,6 +52,8 @@ Walking past the last day of a month moves into the next one and reads it, exact
 
 **Click an empty slot or a vacant pill** to open the assignment dialog. Members are listed with only the people who can actually take the shift:
 
+![fill a shift](../../../../public/help/admin/07-schedule-management-1792812204502.png)
+
 - Members whose **rank qualifies** for the assignment.
 - Anyone **excluded from scheduling** is grouped separately with the reason, rather than being hidden, so you can see they exist and why they are not offered.
 
@@ -55,6 +61,7 @@ An empty slot always belongs to a template, so filling it does not create a row 
 
 ## Editing a filled shift
 
+![click a filled pill](../../../../public/help/admin/07-schedule-management-1792812240159.png)
 **Click a filled pill** and choose:
 
 - **Change the member** — assign somebody else.
@@ -65,10 +72,14 @@ An empty slot always belongs to a template, so filling it does not create a row 
 
 **Add Shift** creates a one-off shift on any date, for anything the weekly pattern does not cover.
 
+![adding a custom shift](../../../../public/help/admin/07-schedule-management-1792812299546.png)
+
 - **The member is optional.** Leave it blank and the shift is created as a **vacancy**, which members can then offer to fill — the same state as removing somebody from an existing shift. This is the quickest way to advertise a hole.
 - The **assignment is required**, since it supplies the shift's color, its icon and its minimum rank.
 
 ## Moving a shift
+
+![moving a shift animation](../../../../public/help/admin/07-schedule-management-1792812845735.gif)
 
 **Drag a pill onto another day** to move it. The drop position sets the new day, and the time is kept.
 

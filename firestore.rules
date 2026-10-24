@@ -205,10 +205,12 @@ service cloud.firestore {
       // `http://localhost` URL can do in production is fail to load, which the chat already handles by hiding the
       // picture.
       allow update: if uid() == userId
+        && 'avatar_url' in request.resource.data
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avatar_url'])
         && privateText('avatar_url', 512)
-        && (request.resource.data.get('avatar_url', '').matches('https://.*')
-          || request.resource.data.get('avatar_url', '').matches('http://(localhost|127\\.0\\.0\\.1).*'));
+        && (request.resource.data.avatar_url == ''
+          || request.resource.data.avatar_url.matches('https://.*')
+          || request.resource.data.avatar_url.matches('http://(localhost|127\\.0\\.0\\.1).*'));
     }
 
     // The private half: the username, the account status, the officer notes. Read by the member (it is their own
@@ -323,7 +325,8 @@ service cloud.firestore {
         || permission('can_manage_dashboard_setup')
         || permission('can_manage_widget_setup')
         || permission('can_manage_training_setup')
-        || permission('can_administer_trainings');
+        || permission('can_administer_trainings')
+        || permission('can_edit_map');
     }
 
     match /shifts/{shiftId} {
